@@ -1,0 +1,14 @@
+version: "3.8"
+services:
+  backend:
+    build: .
+    container_name: project-a
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./chroma_db:/app/chroma_db
+      - ./:/app
+    env_file:
+      - ./.env
