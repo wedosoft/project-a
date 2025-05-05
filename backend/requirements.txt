@@ -1,6 +1,12 @@
 fastapi
 uvicorn
 chromadb
-pydantic
 anthropic
-openai 
+httpx
+pydantic
+openai
+python-dotenv
+Pillow==10.1.0
+pytesseract==0.3.10
+PyPDF2==3.0.1
+python-docx==1.0.1

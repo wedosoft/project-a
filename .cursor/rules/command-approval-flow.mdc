@@ -1,0 +1,20 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Command Approval Flow Rule
+
+- AI는 모든 터미널 명령어 실행이 필요한 상황에서, 먼저 명령어를 제안한다.
+- 명령어는 코드 블록(```bash ... ```)으로 명확히 표시한다.
+- 사용자가 "accept", "승인" 등으로 답하면, AI는 해당 명령어를 즉시 실행한다.
+- 실행 결과를 분석하여, 추가 조치가 필요하면 다음 명령어를 자동으로 제안한다.
+- 불필요한 추가 질문 없이, 명령어 제안 → 승인 → 실행 → 결과 분석 → 후속 명령어 제안의 순서로만 진행한다.
+- 사용자가 명령어 실행을 거부하거나 수정 요청 시, 즉시 피드백을 반영한다.
+- 명령어 제안 시, 목적과 효과를 간단히 한글로 설명한다.
+- 반복적으로 동일한 안내를 하지 않는다.
+
+- Do not make decisions on your own.
+- Always wait for my command to execute.
+- Only proceed after I say "Go", "Execute", or "Run".
+- Do NOT propose better alternatives unless I ask.

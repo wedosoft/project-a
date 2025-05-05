@@ -1,0 +1,46 @@
+{
+    "editor.formatOnSave": true,
+    "editor.rulers": [
+        100
+    ],
+    "python.linting.enabled": true,
+    "python.linting.pylintEnabled": true,
+    "python.linting.flake8Enabled": true,
+    "python.formatting.provider": "black",
+    "python.formatting.blackArgs": [
+        "--line-length",
+        "100"
+    ],
+    "workbench.startupEditor": "welcomePage",
+    "explorer.fileNesting.enabled": true,
+    "explorer.fileNesting.patterns": {
+        "*.py": "${capture}.cpython-*.pyc"
+    },
+    "workbench.colorTheme": "Tomorrow Night Blue",
+    // 프로젝트 규칙 파일을 쉽게 열기 위한 설정
+    "workbench.editorAssociations": {
+        "PROJECT_RULES.md": "vscode.markdown.preview.editor"
+    },
+    "python.defaultInterpreterPath": "${workspaceFolder}/backend/venv/bin/python",
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}/backend"
+    ],
+    "python.terminal.activateEnvironment": true,
+    "files.exclude": {
+        "**/__pycache__": true,
+        "**/*.pyc": true
+    },
+    
+    // 한글 입력 시 파란색 블록 제거를 위한 설정 (기본 유지)
+    "editor.accessibilitySupport": "off",
+    "editor.renderControlCharacters": false,
+    "editor.unicodeHighlight.invisibleCharacters": false,
+    "editor.unicodeHighlight.nonBasicASCII": false,
+    
+    // 코드 완성 및 인라인 제안 블록 제거 설정 (기본 유지)
+    "editor.inlineSuggest.enabled": false,
+    "editor.suggest.showInlineDetails": false,
+    "github.copilot.enableAutoSuggestions": false,
+    "editor.suggest.preview": false,
+    "editor.acceptSuggestionOnEnter": "off"
+}

@@ -1,1 +1,10 @@
 backend/.env
+backend/venv/
+**/__pycache__/
+**/*.pyc
+backend/chroma_db/
+.DS_Store
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+attachment_cache/

@@ -1,0 +1,12 @@
+{
+    "recommendations": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-python.black-formatter",
+        "ms-azuretools.vscode-docker",
+        "njpwerner.autodocstring",
+        "charliermarsh.ruff",
+        "tamasfe.even-better-toml",
+        "yzhang.markdown-all-in-one"
+    ]
+}
