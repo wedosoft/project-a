@@ -33,7 +33,8 @@ tokenizer = tiktoken.encoding_for_model(MODEL_NAME)
 
 # OpenAI API 제한 설정
 MAX_TOKENS_PER_CHUNK = 8000  # API 제한 8192에서 약간의 여유를 둠
-MAX_BATCH_SIZE = 50  # 한 번에 처리할 최대 문서 수
+MAX_BATCH_SIZE = 20  # 한 번에 처리할 최대 문서 수 (50에서 20으로 감소)
+MAX_TOKENS_PER_REQUEST = 250000  # OpenAI API 제한 300,000에서 여유를 둠
 CHUNK_OVERLAP = 200  # 청크 간 중복 토큰 수
 
 def count_tokens(text: str) -> int:
@@ -91,19 +92,69 @@ def process_documents(docs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             chunks = split_into_chunks(doc_text, MAX_TOKENS_PER_CHUNK, CHUNK_OVERLAP)
             
             for chunk_idx, chunk_text in enumerate(chunks):
+                # 필수 메타데이터 필드가 모든 청크에 유지되도록 함
+                chunk_metadata = doc_metadata.copy()  # 원본 메타데이터 복사
+                
+                # 청크 관련 메타데이터 추가
+                chunk_metadata.update({
+                    'chunk_index': chunk_idx,
+                    'total_chunks': len(chunks),
+                    'original_id': doc_id,
+                    'is_chunk': True  # 이 문서가 청크임을 표시
+                })
+                
+                # source_id, type, updated_at 등 필수 필드가 있는지 확인
+                required_fields = ['type', 'source_id', 'updated_at', 'status', 'priority']
+                for field in required_fields:
+                    if field not in chunk_metadata and field in doc_metadata:
+                        chunk_metadata[field] = doc_metadata[field]
+                
                 chunk_doc = {
                     'id': f"{doc_id}_chunk_{chunk_idx}",
                     'text': chunk_text,
-                    'metadata': {
-                        **doc_metadata,
-                        'chunk_index': chunk_idx,
-                        'total_chunks': len(chunks),
-                        'original_id': doc_id
-                    }
+                    'metadata': chunk_metadata
                 }
                 processed_docs.append(chunk_doc)
     
     return processed_docs
+
+def create_optimal_batches(docs: List[str]) -> List[List[str]]:
+    """
+    문서 리스트를 토큰 제한을 고려한 최적의 배치로 분할합니다.
+    각 배치의 총 토큰 수가 MAX_TOKENS_PER_REQUEST를 초과하지 않도록 합니다.
+    """
+    batches = []
+    current_batch = []
+    current_tokens = 0
+    
+    for doc in docs:
+        doc_tokens = count_tokens(doc)
+        
+        # 한 문서가 개별적으로 제한을 초과하는 경우를 확인
+        if doc_tokens > MAX_TOKENS_PER_REQUEST:
+            logger.warning(f"단일 문서가 토큰 제한을 초과합니다: {doc_tokens} 토큰. 이 문서는 건너뜁니다.")
+            continue
+            
+        # 현재 배치에 문서를 추가했을 때 토큰 제한을 초과하는 경우 새 배치 시작
+        if current_tokens + doc_tokens > MAX_TOKENS_PER_REQUEST or len(current_batch) >= MAX_BATCH_SIZE:
+            if current_batch:  # 현재 배치가 비어있지 않은 경우에만 추가
+                batches.append(current_batch)
+            current_batch = [doc]
+            current_tokens = doc_tokens
+        else:
+            current_batch.append(doc)
+            current_tokens += doc_tokens
+    
+    # 마지막 배치 추가
+    if current_batch:
+        batches.append(current_batch)
+    
+    logger.info(f"총 {len(docs)}개 문서를 {len(batches)}개 배치로 처리합니다.")
+    for i, batch in enumerate(batches):
+        batch_tokens = sum(count_tokens(doc) for doc in batch)
+        logger.debug(f"배치 {i+1}/{len(batches)} 처리 중... ({batch[0][:30]}...)")
+    
+    return batches
 
 def embed_documents(docs: List[str]) -> List[List[float]]:
     """
@@ -115,27 +166,24 @@ def embed_documents(docs: List[str]) -> List[List[float]]:
     if not docs:
         return []
     
-    # 문서 수에 따라 배치 처리
-    total_docs = len(docs)
-    num_batches = math.ceil(total_docs / MAX_BATCH_SIZE)
+    # 토큰 제한을 고려하여 최적의 배치로 분할
+    batches = create_optimal_batches(docs)
     all_embeddings = []
     
-    logger.info(f"총 {total_docs}개 문서를 {num_batches}개 배치로 처리합니다.")
-    
-    for i in range(num_batches):
-        start_idx = i * MAX_BATCH_SIZE
-        end_idx = min((i + 1) * MAX_BATCH_SIZE, total_docs)
-        batch = docs[start_idx:end_idx]
-        
-        logger.info(f"배치 {i+1}/{num_batches} 처리 중... ({start_idx}~{end_idx-1})")
+    for i, batch in enumerate(batches):
+        logger.info(f"배치 {i+1}/{len(batches)} 처리 중... ({i*MAX_BATCH_SIZE}~{i*MAX_BATCH_SIZE+len(batch)-1})")
         try:
             batch_embeddings = embed_fn(batch)
             all_embeddings.extend(batch_embeddings)
         except Exception as e:
             logger.error(f"임베딩 생성 중 오류 발생: {e}")
             # 문제 문서 식별을 위한 진단 정보 출력
+            total_tokens = sum(count_tokens(doc) for doc in batch)
+            logger.error(f"배치 {i+1} 문서 수: {len(batch)}, 총 토큰 수: {total_tokens}")
             for j, doc in enumerate(batch):
-                logger.debug(f"문서 {start_idx + j} 토큰 수: {count_tokens(doc)}")
+                doc_tokens = count_tokens(doc)
+                if doc_tokens > 5000:  # 대용량 문서만 상세 로깅
+                    logger.error(f"문서 {j} 토큰 수: {doc_tokens}")
             raise
         
     return all_embeddings
