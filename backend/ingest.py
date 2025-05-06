@@ -443,14 +443,62 @@ async def ingest(
 
             # 첨부파일 정보 및 추출된 텍스트 추가
             processed_attachments = t.get("processed_attachments", [])
+            image_urls = []  # 이미지 URL 목록을 저장할 변수 추가
+
+            # 메타데이터 구성 - API 응답 구조에 맞게 수정
+            source_id = str(ticket_id)
+
             if processed_attachments:
                 ticket_content.append("\n===== 첨부파일 내용 =====")
                 for att in processed_attachments:
-                    if att.get("processed", False) and att.get("extracted_text"):
+                    if att.get("processed", False):
                         ticket_content.append(f"파일: {att.get('name', '')}")
-                        ticket_content.append(
-                            f"추출된 텍스트: {att.get('extracted_text', '')}"
-                        )
+                        extracted_text = att.get("extracted_text", "")
+                        if (
+                            isinstance(extracted_text, dict)
+                            and "text" in extracted_text
+                        ):
+                            # 새로운 형식으로 저장된 경우 text 필드 사용
+                            ticket_content.append(
+                                f"추출된 텍스트: {extracted_text['text']}"
+                            )
+                        else:
+                            # 기존 형식 그대로 사용
+                            ticket_content.append(f"추출된 텍스트: {extracted_text}")
+
+                        # 이미지인 경우 URL 저장
+                        if att.get("content_type", "").startswith("image/") and att.get(
+                            "attachment_url"
+                        ):
+                            image_urls.append(
+                                {
+                                    "name": att.get("name", ""),
+                                    "url": att.get("attachment_url"),
+                                    "content_type": att.get("content_type", ""),
+                                    "source_type": "ticket",
+                                    "source_id": source_id,
+                                }
+                            )
+
+            # 대화 내역의 첨부파일도 이미지 URL 수집
+            conversations = t.get("conversations", [])
+            if conversations:
+                for conv in conversations:
+                    attachments = conv.get("attachments", [])
+                    for att in attachments:
+                        if att.get("content_type", "").startswith("image/") and att.get(
+                            "attachment_url"
+                        ):
+                            image_urls.append(
+                                {
+                                    "name": att.get("name", ""),
+                                    "url": att.get("attachment_url"),
+                                    "content_type": att.get("content_type", ""),
+                                    "source_type": "conversation",
+                                    "source_id": source_id,
+                                    "conversation_id": conv.get("id", ""),
+                                }
+                            )
 
             doc_text = "\n".join(ticket_content)
 
@@ -512,6 +560,9 @@ async def ingest(
                     "has_attachments": len(all_attachments) > 0,
                     "has_conversations": len(conversations) > 0,
                     "processed_attachments": len(processed_attachments) > 0,
+                    "image_attachments": (
+                        image_urls if image_urls else []
+                    ),  # 이미지 URL 정보 추가
                 }
 
                 # 메타데이터 값을 ChromaDB 호환 형식으로 변환
