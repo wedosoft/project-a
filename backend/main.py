@@ -379,7 +379,10 @@ async def query_endpoint(req: QueryRequest, company_id: str = Depends(get_compan
     faq_distances = [] # FAQ 점수를 거리로 변환하여 저장
 
     for faq in faq_items:
-        doc_content = f"FAQ 질문: {faq.get('question', '')\\nFAQ 답변: {faq.get('answer', '')}"
+        # doc_content = f"FAQ 질문: {faq.get('question', '')}\\\nFAQ 답변: {faq.get('answer', '')}"
+        faq_question = faq.get('question', '')
+        faq_answer = faq.get('answer', '')
+        doc_content = f"FAQ 질문: {faq_question}\\nFAQ 답변: {faq_answer}"
         meta = {
             "source_type": "faq", 
             "id": faq.get("id"), 
@@ -607,13 +610,16 @@ async def query_blocks_endpoint(req: QueryRequest, company_id: str = Depends(get
     faq_distances = []
 
     for faq in faq_items:
-        doc_content = f"FAQ 질문: {faq.get('question', '')\\nFAQ 답변: {faq.get('answer', '')}"
+        # doc_content = f"FAQ 질문: {faq.get('question', '')}\\\nFAQ 답변: {faq.get('answer', '')}"
+        faq_question = faq.get('question', '')
+        faq_answer = faq.get('answer', '')
+        doc_content = f"FAQ 질문: {faq_question}\\nFAQ 답변: {faq_answer}"
         meta = {
             "source_type": "faq", 
             "id": faq.get("id"), 
             "category": faq.get("category"), 
             "original_score": faq.get("score", 0.0),
-            "title": f"FAQ: {faq.get('question', '')[:50]}..."
+            "title": f"FAQ: {faq.get('question', '')[:50]}..." # DocumentInfo용 임시 제목
         }
         faq_docs_content.append(doc_content)
         faq_metadatas_list.append(meta)
@@ -775,7 +781,10 @@ from pydantic import BaseModel, Field # Ensure these are present
 
 # --- 모듈 임포트 ---
 from cachetools import TTLCache
-from . import fetcher, llm_router, context_builder, retriever # 가정: 현재 디렉토리에 모듈들이 존재
+import fetcher
+import llm_router
+import context_builder
+import retriever
 from fastapi import HTTPException # 오류 처리를 위해 추가
 
 # --- Pydantic Models for New Endpoints ---

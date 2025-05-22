@@ -84,6 +84,10 @@ class LLMResponse(BaseModel):
     is_fallback: bool = False
     previous_provider_error: Optional[str] = None
 
+    model_config = {
+        "protected_namespaces": ()
+    }
+
 
 class LLMProviderStats(BaseModel):
     """LLM 제공자별 통계 데이터 모델"""
@@ -91,42 +95,37 @@ class LLMProviderStats(BaseModel):
     total_requests: int = 0
     successful_requests: int = 0
     failed_requests: int = 0
-    total_duration_ms: float = 0.0
-    # 마지막 오류 시간, 연속 실패 횟수 등 추가 가능
-    last_error_timestamp: Optional[float] = None
-    consecutive_failures: int = 0
+    total_tokens_used: int = 0
+    total_latency_ms: float = 0.0  # 평균 계산을 위한 총 지연 시간
+    error_details: List[Dict[str, Any]] = Field(default_factory=list)
 
-    def record_success(self, duration_ms: float):
-        self.total_requests += 1
-        self.successful_requests += 1
-        self.total_duration_ms += duration_ms
-        self.consecutive_failures = 0
-        # Prometheus 메트릭 업데이트
-        llm_provider_consecutive_failures.labels(provider=self.provider_name).set(self.consecutive_failures)
-        llm_provider_success_rate.labels(provider=self.provider_name).set(self.success_rate)
+    @property
+    def average_latency_ms(self) -> float:
+        """요청당 평균 지연 시간 (밀리초)"""
+        if self.total_requests == 0:
+            return 0.0
+        return self.total_latency_ms / self.total_requests
 
-    def record_failure(self, duration_ms: Optional[float] = None):
+    def add_request_stats(self, duration_ms: float, tokens_used: Optional[int], success: bool, error_info: Optional[Dict[str, Any]] = None):
+        """개별 요청 통계를 집계합니다."""
         self.total_requests += 1
-        self.failed_requests += 1
-        if duration_ms: # 실패 시에도 시간이 측정된 경우
-            self.total_duration_ms += duration_ms
-        self.last_error_timestamp = time.time()
-        self.consecutive_failures += 1
-        # Prometheus 메트릭 업데이트
-        llm_provider_consecutive_failures.labels(provider=self.provider_name).set(self.consecutive_failures)
-        llm_provider_success_rate.labels(provider=self.provider_name).set(self.success_rate)
-    
+        self.total_latency_ms += duration_ms
+        if tokens_used is not None:
+            self.total_tokens_used += tokens_used
+
+        if success:
+            self.successful_requests += 1
+        else:
+            self.failed_requests += 1
+            if error_info:
+                self.error_details.append(error_info)
+
     @property
     def success_rate(self) -> float:
+        """성공률을 계산합니다."""
         if self.total_requests == 0:
-            return 1.0 # 아직 요청이 없으면 100% 성공으로 간주 (패널티 없음)
+            return 1.0  # 요청이 없으면 100% 성공으로 간주 (또는 0.0으로 할 수도 있음)
         return self.successful_requests / self.total_requests
-
-    @property
-    def average_duration_ms(self) -> float:
-        if self.successful_requests == 0:
-            return float('inf') # 성공한 요청이 없으면 평균 시간 무한대로 간주
-        return self.total_duration_ms / self.successful_requests
 
 
 class LLMProvider:
