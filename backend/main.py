@@ -5,27 +5,53 @@ Freshdesk Custom App 백엔드 서비스
 RAG(Retrieval-Augmented Generation) 기술을 활용하여 Freshdesk 티켓과 지식베이스를 기반으로
 AI 기반 응답 생성 기능을 제공합니다.
 
-프로젝트 규칙 및 가이드라인: /PROJECT_RULES.md 참조
+프로젝트 규칙 및 가이드라인: /PROJECT_@app.post("/query", response_model=QueryResponse)
+async def query_endpoint(req: QueryRequest, company_id: str = Depends(get_company_id)):
+    # 성능 측정 시작
+    start_time = time.time()
+    search_start = time.time()
+    
+    # 1. 검색 단계
+    query_embedding = embed_documents([req.query])[0]
+    results = retrieve_top_k_docs(query_embedding, req.top_k, company_id)
+    search_time = time.time() - search_start조
 """
 
 import os
 import uuid
-from fastapi import FastAPI, HTTPException, Query
+import time
+from fastapi import FastAPI, HTTPException, Query, Depends
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional, Union
-import anthropic
+import re
 from fetcher import fetch_tickets, fetch_kb_articles
 from embedder import embed_documents
 from retriever import retrieve_top_k_docs
-import re
-
-# 환경 변수에서 Claude(Anthropic) API 키를 불러옵니다.
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-if not ANTHROPIC_API_KEY:
-    raise RuntimeError("ANTHROPIC_API_KEY 환경 변수가 필요합니다.")
+from llm_router import generate_text, LLMResponse
+from context_builder import build_optimized_context
+from vectordb import vector_db
 
 # FastAPI 앱 생성
 app = FastAPI()
+
+# 성능 로깅을 위한 설정
+import logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
+
+# 회사 ID 의존성 함수
+def get_company_id(
+    company_id: str = Query(None, description="회사 ID")
+) -> str:
+    """
+    현재 사용자의 회사 ID를 반환합니다.
+    실제 환경에서는 인증 토큰에서 추출하는 방식으로 변경해야 합니다.
+    """
+    # 회사 ID가 지정되지 않은 경우 기본값 사용
+    if not company_id:
+        return "default"
+    return company_id
 
 
 # 요청/응답 모델
@@ -82,12 +108,14 @@ class BlockBasedResponse(BaseModel):
 
     blocks: List[Union[TextBlock, ImageBlock]]
     context_docs: List[DocumentInfo]
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class QueryResponse(BaseModel):
     answer: str
     context_docs: List[DocumentInfo]
     context_images: List[dict] = []
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 def build_prompt(context: str, query: str, use_blocks: bool = False) -> str:
@@ -123,19 +151,20 @@ def build_prompt(context: str, query: str, use_blocks: bool = False) -> str:
     return base_prompt
 
 
-async def call_claude_llm(prompt: str) -> str:
+async def call_llm(prompt: str, system_prompt: str = None) -> LLMResponse:
     """
-    Claude LLM을 호출하여 답변을 생성합니다.
+    LLM Router를 사용하여 답변을 생성합니다.
+    여러 LLM 모델 간 자동 선택 및 fallback 기능을 제공합니다.
     """
-    client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
-    response = await client.messages.create(
-        model="claude-3-haiku-20240307",
-        max_tokens=1024,  # 512에서 1024로 증가
-        temperature=0.2,
-        system="당신은 친절한 고객 지원 AI입니다.",
-        messages=[{"role": "user", "content": prompt}],
+    default_system = "당신은 친절한 고객 지원 AI입니다."
+    system = default_system if system_prompt is None else system_prompt
+    
+    return await generate_text(
+        prompt=prompt,
+        system_prompt=system,
+        max_tokens=1024,  
+        temperature=0.2
     )
-    return response.content[0].text.strip()
 
 
 def parse_llm_response_to_blocks(
@@ -194,22 +223,33 @@ def convert_image_info_to_blocks(context_images: List[dict]) -> List[ImageBlock]
 
 
 @app.post("/query", response_model=QueryResponse)
-async def query_endpoint(req: QueryRequest):
+async def query_endpoint(req: QueryRequest, company_id: str = Depends(get_company_id)):
+    # 성능 측정 시작
+    start_time = time.time()
+    search_start = time.time()
+    
+    # 1. 검색 단계
     query_embedding = embed_documents([req.query])[0]
-    results = retrieve_top_k_docs(query_embedding, req.top_k)
-
+    results = retrieve_top_k_docs(query_embedding, req.top_k, company_id)
+    search_time = time.time() - search_start
+    
     # 검색된 문서와 메타데이터 추출
     docs = results["documents"]
     metadatas = results["metadatas"]
     distances = results["distances"]  # 유사도 점수 (낮을수록 관련성 높음)
-
-    # 컨텍스트 생성
-    context = "\n".join(docs)
+    
+    # 2. 컨텍스트 최적화 단계
+    context_start = time.time()
+    
+    # 최적화된 컨텍스트 구성
+    context, optimized_metadatas, context_meta = build_optimized_context(docs, metadatas)
     prompt = build_prompt(context, req.query)
-
+    
     # 구조화된 문서 정보 생성
     structured_docs = []
-    for i, (doc, metadata, distance) in enumerate(zip(docs, metadatas, distances)):
+    for i, (doc, metadata, distance) in enumerate(zip(docs[:len(optimized_metadatas)], 
+                                                    optimized_metadatas, 
+                                                    distances[:len(optimized_metadatas)])):
         # 문서에서 제목과 내용 추출
         lines = doc.split("\n", 2)  # 최대 2개의 줄바꿈으로 분리
         title = ""
@@ -238,10 +278,12 @@ async def query_endpoint(req: QueryRequest):
             relevance_score=relevance_score,
         )
         structured_docs.append(doc_info)
+    
+    context_time = time.time() - context_start
 
     # 이미지 정보 추출
     context_images = []
-    for i, metadata in enumerate(metadatas):
+    for i, metadata in enumerate(optimized_metadatas):
         # 메타데이터에 이미지 첨부파일 정보가 있으면 추가
         image_attachments = metadata.get("image_attachments", "")
         if image_attachments:
@@ -271,40 +313,75 @@ async def query_endpoint(req: QueryRequest):
                             }
                         )
             except Exception as e:
-                print(f"이미지 정보 파싱 오류: {e}")
+                logger.error(f"이미지 정보 파싱 오류: {e}")
 
-    # LLM 호출
+    # 3. LLM 호출 단계
+    llm_start = time.time()
     try:
-        answer = await call_claude_llm(prompt)
+        response = await call_llm(prompt)
+        answer = response.text
     except Exception as e:
+        logger.error(f"LLM 호출 오류: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+    llm_time = time.time() - llm_start
+    
+    # 총 처리 시간 계산
+    total_time = time.time() - start_time
+    
+    # 성능 로깅
+    logger.info(f"성능: 검색={search_time:.2f}초, 컨텍스트={context_time:.2f}초, LLM={llm_time:.2f}초, 총={total_time:.2f}초")
+    
+    # 메타데이터 구성
+    metadata = {
+        "duration_ms": int(total_time * 1000),
+        "search_time_ms": int(search_time * 1000),
+        "context_time_ms": int(context_time * 1000),
+        "llm_time_ms": int(llm_time * 1000),
+        "model_used": response.model_used,
+        "token_count": context_meta.get("token_count", 0),
+        "context_docs_count": len(structured_docs)
+    }
 
     return QueryResponse(
-        answer=answer, context_docs=structured_docs, context_images=context_images
+        answer=answer, 
+        context_docs=structured_docs, 
+        context_images=context_images,
+        metadata=metadata
     )
 
 
 @app.post("/query/blocks", response_model=BlockBasedResponse)
-async def query_blocks_endpoint(req: QueryRequest):
+async def query_blocks_endpoint(req: QueryRequest, company_id: str = Depends(get_company_id)):
     """
     블록 기반 응답 형식으로 쿼리 결과를 반환합니다.
     """
+    # 성능 측정 시작
+    start_time = time.time()
+    search_start = time.time()
+    
+    # 1. 검색 단계
     query_embedding = embed_documents([req.query])[0]
-    results = retrieve_top_k_docs(query_embedding, req.top_k)
-
+    results = retrieve_top_k_docs(query_embedding, req.top_k, company_id)
+    search_time = time.time() - search_start
+    
     # 검색된 문서와 메타데이터 추출
     docs = results["documents"]
     metadatas = results["metadatas"]
     distances = results["distances"]
-
-    # 컨텍스트 생성
-    context = "\n".join(docs)
+    
+    # 2. 컨텍스트 최적화 단계
+    context_start = time.time()
+    
+    # 최적화된 컨텍스트 구성
+    context, optimized_metadatas, context_meta = build_optimized_context(docs, metadatas)
     # 블록 기반 응답을 위한 프롬프트 생성
     prompt = build_prompt(context, req.query, use_blocks=True)
-
-    # 구조화된 문서 정보 생성 (기존 함수와 동일)
+    
+    # 구조화된 문서 정보 생성
     structured_docs = []
-    for i, (doc, metadata, distance) in enumerate(zip(docs, metadatas, distances)):
+    for i, (doc, metadata, distance) in enumerate(zip(docs[:len(optimized_metadatas)], 
+                                                    optimized_metadatas, 
+                                                    distances[:len(optimized_metadatas)])):
         lines = doc.split("\n", 2)
         title = ""
         content = doc
@@ -356,13 +433,19 @@ async def query_blocks_endpoint(req: QueryRequest):
                             }
                         )
             except Exception as e:
-                print(f"이미지 정보 파싱 오류: {e}")
+                logger.error(f"이미지 정보 파싱 오류: {e}")
+    
+    context_time = time.time() - context_start
 
-    # LLM 호출
+    # 3. LLM 호출 단계
+    llm_start = time.time()
     try:
-        answer = await call_claude_llm(prompt)
+        response = await call_llm(prompt)
+        answer = response.text
     except Exception as e:
+        logger.error(f"LLM 호출 오류: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+    llm_time = time.time() - llm_start
 
     # 텍스트 응답을 블록으로 변환
     text_blocks = parse_llm_response_to_blocks(answer, structured_docs)
@@ -372,5 +455,23 @@ async def query_blocks_endpoint(req: QueryRequest):
 
     # 모든 블록을 하나의 리스트로 합치기
     all_blocks = text_blocks + image_blocks
+    
+    # 총 처리 시간 계산
+    total_time = time.time() - start_time
+    
+    # 성능 로깅
+    logger.info(f"성능(블록): 검색={search_time:.2f}초, 컨텍스트={context_time:.2f}초, LLM={llm_time:.2f}초, 총={total_time:.2f}초")
+    
+    # 메타데이터 구성
+    metadata = {
+        "duration_ms": int(total_time * 1000),
+        "search_time_ms": int(search_time * 1000),
+        "context_time_ms": int(context_time * 1000),
+        "llm_time_ms": int(llm_time * 1000),
+        "model_used": response.model_used,
+        "token_count": context_meta.get("token_count", 0),
+        "blocks_count": len(all_blocks),
+        "context_docs_count": len(structured_docs)
+    }
 
-    return BlockBasedResponse(blocks=all_blocks, context_docs=structured_docs)
+    return BlockBasedResponse(blocks=all_blocks, context_docs=structured_docs, metadata=metadata)

@@ -9,10 +9,10 @@ OpenAI API를 사용하여 텍스트 임베딩을 생성합니다.
 import os
 import logging
 from typing import List, Any, Dict, Tuple
-from chromadb.utils import embedding_functions
 import math
 import tiktoken
 import re
+import numpy as np
 
 # 로깅 설정
 logger = logging.getLogger(__name__)
@@ -21,15 +21,18 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     raise RuntimeError("OPENAI_API_KEY 환경 변수가 필요합니다. (임베딩용)")
 
-# OpenAI 임베딩 함수 설정
-MODEL_NAME = "text-embedding-ada-002"
-embed_fn = embedding_functions.OpenAIEmbeddingFunction(
-    api_key=OPENAI_API_KEY,
-    model_name=MODEL_NAME
-)
+# OpenAI 임베딩 함수 설정 - 최신 임베딩 모델 사용
+MODEL_NAME = "text-embedding-3-small"
+import openai
+
+# OpenAI 클라이언트 설정
+client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
 # 토큰 인코더 초기화
-tokenizer = tiktoken.encoding_for_model(MODEL_NAME)
+try:
+    tokenizer = tiktoken.encoding_for_model(MODEL_NAME)
+except:
+    tokenizer = tiktoken.get_encoding("cl100k_base")  # 최신 모델용 fallback
 
 # OpenAI API 제한 설정
 MAX_TOKENS_PER_CHUNK = 8000  # API 제한 8192에서 약간의 여유를 둠
@@ -173,7 +176,14 @@ def embed_documents(docs: List[str]) -> List[List[float]]:
     for i, batch in enumerate(batches):
         logger.info(f"배치 {i+1}/{len(batches)} 처리 중... ({i*MAX_BATCH_SIZE}~{i*MAX_BATCH_SIZE+len(batch)-1})")
         try:
-            batch_embeddings = embed_fn(batch)
+            batch_embeddings = []
+            for text in batch:
+                response = client.embeddings.create(
+                    model=MODEL_NAME,
+                    input=text
+                )
+                embedding = response.data[0].embedding
+                batch_embeddings.append(embedding)
             all_embeddings.extend(batch_embeddings)
         except Exception as e:
             logger.error(f"임베딩 생성 중 오류 발생: {e}")
