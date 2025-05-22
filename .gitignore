@@ -155,7 +155,5 @@ Thumbs.db
 # Project specific
 backend/.env
 backend/venv/
-backend/chroma_db/
-attachment_cache/
-qdrant_data/
-qdrant_storage/
+backend/qdrant_data/
+backend/qdrant_storage/
