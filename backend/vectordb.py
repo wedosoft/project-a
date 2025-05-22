@@ -13,6 +13,7 @@ import uuid
 from typing import List, Dict, Any, Optional, Union
 from abc import ABC, abstractmethod
 import time
+from datetime import datetime
 
 # Qdrant 클라이언트
 from qdrant_client import QdrantClient
@@ -33,6 +34,7 @@ QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
 VECTOR_SIZE = 1536  # OpenAI/Anthropic 임베딩 차원 수, 모델에 따라 조정 필요
 COLLECTION_NAME = "documents"  # 기본 컬렉션명
+FAQ_COLLECTION_NAME = "faqs" # FAQ 컬렉션명 추가
 
 
 class VectorDBInterface(ABC):
@@ -73,7 +75,8 @@ class QdrantAdapter(VectorDBInterface):
         """Qdrant 클라이언트 초기화"""
         self.collection_name = collection_name
         self.client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
-        self._ensure_collection_exists()
+        self._ensure_collection_exists() # 기본 문서 컬렉션 확인
+        self._ensure_faq_collection_exists() # FAQ 컬렉션 확인
 
     def _ensure_collection_exists(self) -> None:
         """컬렉션이 없으면 생성"""
@@ -87,6 +90,163 @@ class QdrantAdapter(VectorDBInterface):
                 vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
             )
             logger.info(f"컬렉션 '{self.collection_name}' 생성 완료")
+
+    def _ensure_faq_collection_exists(self) -> None:
+        """FAQ 컬렉션이 없으면 생성"""
+        collections = self.client.get_collections()
+        collection_names = [collection.name for collection in collections.collections]
+        
+        if FAQ_COLLECTION_NAME not in collection_names:
+            logger.info(f"FAQ 컬렉션 '{FAQ_COLLECTION_NAME}' 생성 시작")
+            self.client.create_collection(
+                collection_name=FAQ_COLLECTION_NAME,
+                vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
+            )
+            # 페이로드 인덱스 생성 (검색 성능 향상)
+            self.client.create_payload_index(collection_name=FAQ_COLLECTION_NAME, field_name="company_id", field_schema="keyword")
+            self.client.create_payload_index(collection_name=FAQ_COLLECTION_NAME, field_name="category", field_schema="keyword")
+            logger.info(f"FAQ 컬렉션 '{FAQ_COLLECTION_NAME}' 생성 완료 및 페이로드 인덱스 설정")
+
+
+    def add_faq_entry(self, faq_entry: Dict[str, Any]) -> bool:
+        """
+        단일 FAQ 항목을 FAQ 컬렉션에 추가/업데이트합니다.
+        faq_entry 딕셔너리는 FAQEntry Pydantic 모델의 필드를 따라야 합니다.
+        특히 'embedding' 필드가 포함되어야 합니다.
+        """
+        if "embedding" not in faq_entry or not faq_entry["embedding"]:
+            logger.error("FAQ 항목 추가 실패: 임베딩이 없습니다.")
+            return False
+        if "company_id" not in faq_entry:
+            logger.error("FAQ 항목 추가 실패: company_id가 없습니다.")
+            return False
+
+        try:
+            # FAQ ID가 제공되지 않으면 UUID 생성
+            faq_id = faq_entry.get("id") or str(uuid.uuid4())
+            
+            payload = {
+                "question": faq_entry["question"],
+                "answer": faq_entry["answer"],
+                "category": faq_entry.get("category"),
+                "source_doc_id": faq_entry.get("source_doc_id"),
+                "company_id": faq_entry["company_id"],
+                "last_updated": faq_entry.get("last_updated", datetime.utcnow().isoformat())
+            }
+            # None 값은 payload에서 제외
+            payload = {k: v for k, v in payload.items() if v is not None}
+
+            point = PointStruct(
+                id=faq_id,
+                vector=faq_entry["embedding"],
+                payload=payload
+            )
+            
+            self.client.upsert(
+                collection_name=FAQ_COLLECTION_NAME,
+                points=[point]
+            )
+            logger.info(f"FAQ 항목 ID '{faq_id}' 추가/업데이트 완료.")
+            return True
+        except Exception as e:
+            logger.error(f"FAQ 항목 ID '{faq_entry.get('id', 'N/A')}' 추가/업데이트 실패: {e}")
+            return False
+
+    def add_faq_entries(self, faq_entries: List[Dict[str, Any]]) -> bool:
+        """
+        여러 FAQ 항목을 FAQ 컬렉션에 배치로 추가/업데이트합니다.
+        각 faq_entry 딕셔너리는 FAQEntry Pydantic 모델의 필드를 따라야 합니다.
+        """
+        points_to_upsert = []
+        for entry in faq_entries:
+            if "embedding" not in entry or not entry["embedding"]:
+                logger.warning(f"FAQ 항목 건너뜀 (ID: {entry.get('id', 'N/A')}): 임베딩 없음.")
+                continue
+            if "company_id" not in entry:
+                logger.warning(f"FAQ 항목 건너뜀 (ID: {entry.get('id', 'N/A')}): company_id 없음.")
+                continue
+
+            faq_id = entry.get("id") or str(uuid.uuid4())
+            payload = {
+                "question": entry["question"],
+                "answer": entry["answer"],
+                "category": entry.get("category"),
+                "source_doc_id": entry.get("source_doc_id"),
+                "company_id": entry["company_id"],
+                "last_updated": entry.get("last_updated", datetime.utcnow().isoformat())
+            }
+            payload = {k: v for k, v in payload.items() if v is not None}
+
+            points_to_upsert.append(PointStruct(
+                id=faq_id,
+                vector=entry["embedding"],
+                payload=payload
+            ))
+
+        if not points_to_upsert:
+            logger.info("추가/업데이트할 유효한 FAQ 항목이 없습니다.")
+            return False
+
+        try:
+            self.client.upsert(
+                collection_name=FAQ_COLLECTION_NAME,
+                points=points_to_upsert
+            )
+            logger.info(f"{len(points_to_upsert)}개의 FAQ 항목 배치 추가/업데이트 완료.")
+            return True
+        except Exception as e:
+            logger.error(f"FAQ 항목 배치 추가/업데이트 실패: {e}")
+            return False
+
+    def search_faqs(
+        self,
+        query_embedding: List[float],
+        top_k: int,
+        company_id: str,
+        category: Optional[str] = None,
+        min_score: Optional[float] = None, # 최소 유사도 점수 필터
+    ) -> List[Dict[str, Any]]:
+        """
+        FAQ 컬렉션에서 쿼리 임베딩과 유사한 FAQ를 검색합니다.
+        company_id로 필터링하고, 선택적으로 category로 추가 필터링합니다.
+        """
+        if not company_id:
+            raise ValueError("FAQ 검색 시 company_id는 필수입니다.")
+
+        filter_conditions = [
+            FieldCondition(key="company_id", match=MatchValue(value=company_id))
+        ]
+        if category:
+            filter_conditions.append(
+                FieldCondition(key="category", match=MatchValue(value=category))
+            )
+        
+        faq_filter = Filter(must=filter_conditions)
+
+        try:
+            search_results = self.client.search(
+                collection_name=FAQ_COLLECTION_NAME,
+                query_vector=query_embedding,
+                query_filter=faq_filter, # query_filter 사용
+                limit=top_k,
+                with_payload=True,
+                score_threshold=min_score # 최소 점수 임계값 설정
+            )
+            
+            faqs = []
+            for hit in search_results:
+                faq_data = {
+                    "id": hit.id,
+                    "score": hit.score,
+                    **hit.payload, # payload 내용을 faq_data에 직접 추가
+                }
+                faqs.append(faq_data)
+            
+            logger.info(f"FAQ 검색 완료: {len(faqs)}개 결과 (company_id: {company_id}, category: {category})")
+            return faqs
+        except Exception as e:
+            logger.error(f"FAQ 검색 실패: {e}")
+            return []
 
     def add_documents(
         self, 
@@ -230,7 +390,8 @@ class QdrantAdapter(VectorDBInterface):
         self, 
         query_embedding: List[float], 
         top_k: int, 
-        company_id: str
+        company_id: str,
+        doc_type: str = None  # 새로운 매개변수 추가 - 문서 타입 필터링 (ticket, kb)
     ) -> Dict[str, Any]:
         """
         벡터 검색
@@ -239,6 +400,7 @@ class QdrantAdapter(VectorDBInterface):
             query_embedding: 쿼리 임베딩
             top_k: 반환할 최대 문서 수
             company_id: 회사 ID (필수)
+            doc_type: 문서 타입 필터 (선택사항, "ticket" 또는 "kb")
             
         Returns:
             검색 결과 딕셔너리
@@ -248,15 +410,24 @@ class QdrantAdapter(VectorDBInterface):
         
         start_time = time.time()
         
-        # 회사 ID 필터
-        company_filter = Filter(
-            must=[
+        # 회사 ID 필터 기본 설정
+        filter_conditions = [
+            FieldCondition(
+                key="company_id",
+                match=MatchValue(value=company_id)
+            )
+        ]
+        
+        # 문서 타입 필터 추가 (있는 경우)
+        if doc_type:
+            filter_conditions.append(
                 FieldCondition(
-                    key="company_id",
-                    match=MatchValue(value=company_id)
+                    key="type",
+                    match=MatchValue(value=doc_type)
                 )
-            ]
-        )
+            )
+        
+        company_filter = Filter(must=filter_conditions)
         
         # 검색 실행
         try:
@@ -280,11 +451,21 @@ class QdrantAdapter(VectorDBInterface):
                 with_payload=True
             )
             
-            # company_id로 메모리 내 필터링
-            search_results = [
-                result for result in search_results 
-                if result.payload.get("company_id") == company_id
-            ][:top_k]  # top_k 개수만큼 자름
+            # 메모리 내 필터링 (company_id 및 선택적 doc_type)
+            filtered_results = []
+            for result in search_results:
+                # company_id 필터링
+                if result.payload.get("company_id") != company_id:
+                    continue
+                    
+                # 문서 타입 필터링 (필요한 경우)
+                if doc_type and result.payload.get("type") != doc_type:
+                    continue
+                    
+                filtered_results.append(result)
+            
+            # 필터링된 결과 잘라내기
+            search_results = filtered_results[:top_k]
         
         # ChromaDB 형식과 호환되는 결과 포맷으로 변환
         documents = []

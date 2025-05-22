@@ -1,7 +1,6 @@
 fastapi==0.104.1
 uvicorn==0.24.0
 numpy<2.0.0  # NumPy 2.0 이하 버전 사용
-# chromadb==0.4.18  # ChromaDB 대신 Qdrant 사용
 qdrant-client>=1.5.0  # Qdrant Vector DB
 anthropic>=0.51.0
 httpx==0.25.2
@@ -14,5 +13,8 @@ PyPDF2==3.0.1
 python-docx==1.0.1
 tiktoken==0.5.1
 tenacity==8.2.3
+google-generativeai>=0.3.0 # Gemini API
+cachetools>=4.2.0 # For in-memory caching
+prometheus-client>=0.14.1 # Prometheus metrics client
 # 성능 모니터링을 위한 추가 패키지
 # logging==0.4.9.6 - 제거됨, Python 내장 모듈과 충돌

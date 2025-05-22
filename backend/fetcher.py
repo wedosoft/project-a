@@ -332,3 +332,35 @@ async def fetch_kb_articles() -> List[Dict[str, Any]]:
             
     logger.info(f"지식베이스 문서 가져오기 완료. 총 {len(articles)}개 문서")
     return articles
+
+async def fetch_ticket_details(ticket_id: int) -> Dict[str, Any]:
+    """
+    Freshdesk에서 특정 티켓의 상세 정보를 비동기로 가져옵니다.
+    대화 내역과 첨부파일도 함께 가져옵니다.
+    """
+    logger.info(f"티켓 {ticket_id} 상세 정보 가져오기 시작")
+    async with httpx.AsyncClient() as client:
+        try:
+            # 티켓 기본 정보 가져오기
+            ticket_url = f"{BASE_URL}/tickets/{ticket_id}"
+            logger.info(f"티켓 {ticket_id} 기본 정보 요청 중: {ticket_url}")
+            ticket_data = await fetch_with_retry(client, ticket_url)
+            logger.info(f"티켓 {ticket_id} 기본 정보 수신 완료")
+
+            # 대화 내역 포함 (기존 함수 활용)
+            ticket_data["conversations"] = await fetch_ticket_conversations(client, ticket_id)
+            
+            # 첨부파일 포함 (기존 함수 활용)
+            ticket_data["all_attachments"] = await fetch_ticket_attachments(client, ticket_id)
+            
+            logger.info(f"티켓 {ticket_id} 상세 정보 (대화, 첨부파일 포함) 가져오기 완료")
+            return ticket_data
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.warning(f"티켓 {ticket_id}를 찾을 수 없습니다 (404).")
+                return None
+            logger.error(f"티켓 {ticket_id} 상세 정보 가져오기 HTTP 오류: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"티켓 {ticket_id} 상세 정보 가져오기 중 예외 발생: {e}")
+            raise
