@@ -477,7 +477,8 @@ async def query_endpoint(req: QueryRequest, company_id: str = Depends(get_compan
 
     context_images = []
     for i, metadata in enumerate(optimized_metadatas): # optimized_metadatas 사용
-        image_attachments = metadata.get("image_attachments", "")
+        # 'image_attachments' 또는 'attachments' 키에서 이미지 정보 가져오기
+        image_attachments = metadata.get("image_attachments", metadata.get("attachments", ""))
         if image_attachments:
             try:
                 if isinstance(image_attachments, str):
@@ -697,7 +698,8 @@ async def query_blocks_endpoint(req: QueryRequest, company_id: str = Depends(get
 
     context_images = []
     for i, metadata in enumerate(optimized_metadatas): # optimized_metadatas 사용
-        image_attachments = metadata.get("image_attachments", "")
+        # 'image_attachments' 또는 'attachments' 키에서 이미지 정보 가져오기
+        image_attachments = metadata.get("image_attachments", metadata.get("attachments", ""))
         if image_attachments:
             try:
                 if isinstance(image_attachments, str):
