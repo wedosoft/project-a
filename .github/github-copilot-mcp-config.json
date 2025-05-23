@@ -1,0 +1,39 @@
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_TOKEN": "${env:GITHUB_TOKEN}"
+      }
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-filesystem", "${workspaceFolder}"],
+      "env": {}
+    },
+    "project-backend": {
+      "command": "npx",
+      "args": [
+        "@modelcontextprotocol/server-filesystem",
+        "${workspaceFolder}/backend"
+      ],
+      "env": {}
+    },
+    "project-docs": {
+      "command": "npx",
+      "args": [
+        "@modelcontextprotocol/server-filesystem",
+        "${workspaceFolder}/.github"
+      ],
+      "env": {}
+    },
+    "docker": {
+      "command": "python3",
+      "args": ["-m", "mcp_server_docker"],
+      "env": {
+        "DOCKER_COMPOSE_FILE": "${workspaceFolder}/backend/docker-compose.yml"
+      }
+    }
+  }
+}
