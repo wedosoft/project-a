@@ -144,7 +144,9 @@ class OptimizedFreshdeskFetcher:
         start_date: str, 
         end_date: str,
         include_conversations: bool = False,
-        include_attachments: bool = False
+        include_attachments: bool = False,
+        max_tickets: int = None,
+        current_total: int = 0
     ) -> List[Dict]:
         """특정 날짜 범위의 티켓 수집"""
         tickets = []
@@ -152,7 +154,21 @@ class OptimizedFreshdeskFetcher:
         
         logger.info(f"날짜 범위 {start_date} ~ {end_date} 수집 시작")
         
+        # 현재까지 수집한 전체 티켓 수 계산
+        remaining_tickets = None
+        if max_tickets is not None:
+            remaining_tickets = max_tickets - current_total
+            if remaining_tickets <= 0:
+                logger.info(f"이미 최대 티켓 수({max_tickets})에 도달하여 수집 중단")
+                return []
+            logger.info(f"이 범위에서 수집 가능한 최대 티켓 수: {remaining_tickets}개")
+        
         while True:
+            # 최대 티켓 수에 도달했는지 확인
+            if remaining_tickets is not None and len(tickets) >= remaining_tickets:
+                logger.info(f"최대 티켓 수({max_tickets})에 도달하여 더 이상 수집하지 않음")
+                break
+            
             params = {
                 "page": page,
                 "per_page": PER_PAGE,
@@ -175,6 +191,11 @@ class OptimizedFreshdeskFetcher:
                     if t.get('updated_at', '') <= end_date
                 ]
                 
+                # 최대 티켓 수 제한 적용
+                if remaining_tickets is not None and len(tickets) + len(filtered_tickets) > remaining_tickets:
+                    filtered_tickets = filtered_tickets[:remaining_tickets - len(tickets)]
+                    logger.info(f"남은 개수 제한으로 {len(filtered_tickets)}개만 사용 (원래는 {len(batch_tickets)}개)")
+                
                 # 추가 정보 수집
                 if include_conversations or include_attachments:
                     filtered_tickets = await self.enrich_tickets(
@@ -188,13 +209,13 @@ class OptimizedFreshdeskFetcher:
                     logger.info(f"날짜 범위 종료점 도달 (페이지 {page})")
                     break
                     
-                if len(batch_tickets) < PER_PAGE:
+                if len(batch_tickets) < PER_PAGE or (remaining_tickets is not None and len(tickets) >= remaining_tickets):
                     break
                     
                 page += 1
                 await asyncio.sleep(REQUEST_DELAY)
                 
-                logger.info(f"페이지 {page-1} 완료: {len(filtered_tickets)}개 티켓")
+                logger.info(f"페이지 {page-1} 완료: {len(filtered_tickets)}개 티켓 (현재까지 총 {len(tickets)}개)")
                 
             except Exception as e:
                 logger.error(f"페이지 {page} 수집 오류: {e}")
@@ -229,11 +250,14 @@ class OptimizedFreshdeskFetcher:
                         conversations = await fetch_ticket_conversations(None, ticket_id)
                         ticket["conversations"] = conversations
                 if include_attachments:
-                    attachments = ticket.get("attachments")
+                    # 안전하게 attachments 접근 (None이거나 존재하지 않는 경우 방지)
+                    attachments = ticket.get("attachments", []) or ticket.get("all_attachments", [])
                     if not attachments:
                         from .fetcher import fetch_ticket_attachments
                         attachments = await fetch_ticket_attachments(None, ticket_id)
-                        ticket["attachments"] = attachments
+                        # None이 아닌 경우에만 할당 (빈 리스트도 유효한 값으로 간주)
+                        if attachments is not None:
+                            ticket["attachments"] = attachments
                 enriched_tickets.append(ticket)
             except Exception as e:
                 logger.error(f"티켓 {ticket_id} 추가 정보 수집 오류: {e}")
@@ -272,10 +296,13 @@ class OptimizedFreshdeskFetcher:
         
         logger.info(f"총 {len(date_ranges)}개 날짜 범위로 분할하여 수집 시작")
         
+        if max_tickets is not None:
+            logger.info(f"최대 {max_tickets}개 티켓만 수집합니다")
+        
         for i, (range_start, range_end) in enumerate(date_ranges):
             # 최대 티켓 수 제한이 있을 경우만 체크
             if max_tickets is not None and total_tickets >= max_tickets:
-                logger.info(f"최대 티켓 수({max_tickets})에 도달")
+                logger.info(f"최대 티켓 수({max_tickets})에 도달, 수집 중단")
                 break
                 
             # 시스템 리소스 체크
@@ -291,12 +318,27 @@ class OptimizedFreshdeskFetcher:
                 continue
             
             try:
+                # 현재까지 수집된 티켓 수를 전달하여 페이지별로 제한 적용
                 tickets = await self.fetch_tickets_by_date_range(
-                    range_start, range_end, include_conversations, include_attachments
+                    range_start, range_end, 
+                    include_conversations, include_attachments,
+                    max_tickets=max_tickets,  # 최대 티켓 수 전달
+                    current_total=total_tickets  # 현재까지 수집된 티켓 수 전달
                 )
                 
                 current_chunk.extend(tickets)
                 total_tickets += len(tickets)
+                
+                # max_tickets에 도달했으면 더 이상 수집하지 않음
+                if max_tickets is not None and total_tickets >= max_tickets:
+                    logger.info(f"최대 티켓 수({max_tickets})에 정확히 도달, 수집 완료")
+                    # 진행 상황 업데이트 후 종료
+                    if range_id not in progress.get("completed_ranges", []):
+                        progress.setdefault("completed_ranges", []).append(range_id)
+                    progress["total_collected"] = total_tickets
+                    progress["last_updated"] = datetime.now().isoformat()
+                    self.save_progress(progress)
+                    break
                 
                 # 청크 크기에 도달하면 저장
                 if len(current_chunk) >= CHUNK_SIZE:
@@ -343,13 +385,41 @@ async def main():
         stats = await fetcher.collect_all_tickets(
             start_date="2015-01-01",  # 가능한 가장 오래된 날짜부터
             end_date=None,  # 현재까지
-            include_conversations=True,  # 대화내역 포함 여부
-            include_attachments=False,  # 첨부파일 정보 포함 여부
+            include_conversations=True,  # 대화내역 항상 포함
+            include_attachments=True,   # 첨부파일 정보 항상 포함
             max_tickets=None  # 무제한 수집
         )
         
         print(f"수집 통계: {stats}")
 
 
+async def test_collection_limit():
+    """100개 티켓 제한 테스트"""
+    logging.info("======= 100개 티켓 제한 테스트 시작 =======")
+    output_dir = "freshdesk_test_data"
+    max_tickets = 100
+    
+    # 테스트 디렉토리 생성
+    Path(output_dir).mkdir(exist_ok=True)
+    
+    start_time = datetime.now()
+    async with OptimizedFreshdeskFetcher(output_dir) as fetcher:
+        stats = await fetcher.collect_all_tickets(
+            start_date="2015-01-01",
+            end_date=None,
+            include_conversations=True,
+            include_attachments=True,  # 첨부파일도 항상 포함
+            max_tickets=max_tickets  # 100개로 제한
+        )
+    
+    elapsed = datetime.now() - start_time
+    logging.info(f"테스트 완료: {stats}")
+    logging.info(f"소요 시간: {elapsed}")
+    logging.info(f"수집된 티켓 수: {stats['total_tickets_collected']}")
+    logging.info("============================================")
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    # 기본 호출은 main()이지만, 테스트를 원할 경우 test_collection_limit() 호출
+    # asyncio.run(main())
+    asyncio.run(test_collection_limit())

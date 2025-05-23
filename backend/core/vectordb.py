@@ -639,15 +639,34 @@ class QdrantAdapter(VectorDBInterface):
         """
         try:
             collection_info = self.client.get_collection(collection_name=self.collection_name)
+            
+            # CollectionInfo 객체의 실제 구조에 맞게 접근
             return {
-                "name": collection_info.name,
-                "status": collection_info.status,
-                "vector_size": collection_info.config.params.vectors.size,
-                "points_count": collection_info.vectors_count
+                "name": self.collection_name,  # 컬렉션명 직접 사용
+                "status": getattr(collection_info, 'status', 'unknown'),
+                "vector_size": getattr(collection_info.config.params.vectors, 'size', VECTOR_SIZE),
+                "points_count": getattr(collection_info, 'points_count', getattr(collection_info, 'vectors_count', 0))
             }
         except Exception as e:
             logger.error(f"컬렉션 정보 조회 중 오류 발생: {e}")
             return {"error": str(e)}
+
+    def drop_collection(self, collection_name: str = None) -> bool:
+        """
+        지정한 Qdrant 컬렉션을 완전히 삭제(drop)합니다.
+        Args:
+            collection_name: 삭제할 컬렉션 이름 (None이면 기본 컬렉션)
+        Returns:
+            성공 여부 (bool)
+        """
+        name = collection_name or self.collection_name
+        try:
+            self.client.delete_collection(collection_name=name)
+            logger.info(f"Qdrant 컬렉션 삭제 완료: {name}")
+            return True
+        except Exception as e:
+            logger.error(f"Qdrant 컬렉션 삭제 실패: {name}, 오류: {e}")
+            return False
 
 
 # 벡터 데이터베이스 팩토리

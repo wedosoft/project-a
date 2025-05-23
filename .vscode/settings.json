@@ -30,13 +30,11 @@
         "**/__pycache__": true,
         "**/*.pyc": true
     },
-    
     // 한글 입력 시 파란색 블록 제거를 위한 설정 (기본 유지)
     "editor.accessibilitySupport": "off",
     "editor.renderControlCharacters": false,
     "editor.unicodeHighlight.invisibleCharacters": false,
     "editor.unicodeHighlight.nonBasicASCII": false,
-    
     // 코드 완성 및 인라인 제안 블록 제거 설정 (기본 유지)
     "editor.inlineSuggest.enabled": false,
     "editor.suggest.showInlineDetails": false,

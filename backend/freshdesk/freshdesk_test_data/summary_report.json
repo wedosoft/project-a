@@ -1,39 +1,35 @@
 {
-  "total_tickets": 1146,
+  "total_tickets": 100,
   "status_distribution": {
-    "5": 903,
-    "3": 230,
-    "8": 5,
-    "2": 8
+    "5": 78,
+    "2": 3,
+    "3": 19
   },
   "priority_distribution": {
-    "1": 1122,
-    "4": 8,
-    "3": 10,
-    "2": 6
+    "1": 93,
+    "4": 2,
+    "2": 3,
+    "3": 2
   },
   "type_distribution": {
-    "Problem": 385,
-    "Question": 275,
-    "Request": 206,
-    "null": 271,
-    "Task": 7,
-    "Service Task": 1,
-    "AE_Request": 1
+    "Problem": 36,
+    "Request": 17,
+    "null": 26,
+    "Question": 21
   },
   "source_distribution": {
-    "1": 821,
-    "3": 22,
-    "2": 303
+    "2": 38,
+    "1": 55,
+    "3": 7
   },
   "conversation_stats": {
-    "avg_conversations_per_ticket": 6.469458987783595,
+    "avg_conversations_per_ticket": 5.86,
     "max_conversations": 30,
-    "total_conversations": 7414
+    "total_conversations": 586
   },
   "attachment_stats": {
-    "avg_attachments_per_ticket": 0.4973821989528796,
-    "max_attachments": 25,
-    "total_attachments": 570
+    "avg_attachments_per_ticket": 0.5,
+    "max_attachments": 6,
+    "total_attachments": 50
   }
 }
