@@ -125,11 +125,56 @@ def sanitize_metadata(
     return sanitized
 
 
+def load_local_data(data_dir: str):
+    """
+    로컬 디렉토리에서 이미 수집된 데이터를 로드합니다.
+    
+    Args:
+        data_dir: 데이터가 저장된 디렉토리 경로
+        
+    Returns:
+        tuple: (tickets, articles) - 티켓 리스트와 문서 리스트
+    """
+    import json
+    from pathlib import Path
+    
+    data_path = Path(data_dir)
+    tickets = []
+    articles = []
+    
+    # all_tickets.json 파일 확인
+    all_tickets_file = data_path / "all_tickets.json"
+    if all_tickets_file.exists():
+        logger.info(f"통합 티켓 파일에서 로드 중: {all_tickets_file}")
+        with open(all_tickets_file, 'r', encoding='utf-8') as f:
+            tickets = json.load(f)
+        logger.info(f"로컬에서 {len(tickets)}개 티켓 로드 완료")
+    else:
+        # 청크 파일들 확인
+        chunk_files = sorted(data_path.glob("tickets_chunk_*.json"))
+        if chunk_files:
+            logger.info(f"{len(chunk_files)}개 청크 파일에서 로드 중...")
+            for chunk_file in chunk_files:
+                with open(chunk_file, 'r', encoding='utf-8') as f:
+                    chunk_tickets = json.load(f)
+                    tickets.extend(chunk_tickets)
+                    logger.info(f"{chunk_file.name}: {len(chunk_tickets)}개 티켓 로드")
+            logger.info(f"청크 파일에서 총 {len(tickets)}개 티켓 로드 완료")
+        else:
+            logger.warning(f"로컬 데이터 디렉토리에서 티켓 파일을 찾을 수 없습니다: {data_dir}")
+    
+    # 지식베이스 문서는 현재 OptimizedFreshdeskFetcher에서 수집하지 않으므로 빈 리스트 반환
+    logger.info("지식베이스 문서는 로컬 데이터에 없으므로 빈 리스트 반환")
+    
+    return tickets, articles
+
+
 async def ingest(
     incremental: bool = True,
     purge: bool = False,
     process_attachments: bool = PROCESS_ATTACHMENTS,
     force_rebuild: bool = False,
+    local_data_dir: str = None,
 ) -> None:
     """
     Freshdesk 티켓과 지식베이스 문서를 임베딩 후 Qdrant에 저장합니다.
@@ -138,6 +183,7 @@ async def ingest(
         purge: 기존 데이터 삭제 여부 (기본값: False)
         process_attachments: 첨부파일 처리 여부 (기본값: True)
         force_rebuild: 데이터베이스 강제 재구축 여부 (기본값: False)
+        local_data_dir: 로컬 데이터 디렉토리 경로 (None이면 Freshdesk API에서 직접 수집)
     """
     start_time = time.time()
     logger.info("데이터 수집 프로세스 시작")
@@ -161,10 +207,16 @@ async def ingest(
             incremental = False
             purge = False
 
-        logger.info("Freshdesk 데이터 수집 중...")
-        tickets_task = asyncio.create_task(fetch_tickets())
-        articles_task = asyncio.create_task(fetch_kb_articles())
-        tickets, articles = await asyncio.gather(tickets_task, articles_task)
+        if local_data_dir:
+            # 로컬에서 이미 수집된 데이터 읽기
+            logger.info(f"로컬 데이터 디렉토리에서 데이터 로드 중: {local_data_dir}")
+            tickets, articles = load_local_data(local_data_dir)
+        else:
+            # 기존 방식: Freshdesk API에서 직접 수집
+            logger.info("Freshdesk 데이터 수집 중...")
+            tickets_task = asyncio.create_task(fetch_tickets())
+            articles_task = asyncio.create_task(fetch_kb_articles())
+            tickets, articles = await asyncio.gather(tickets_task, articles_task)
 
         if not tickets and not articles:
             logger.warning("Freshdesk에서 가져온 데이터가 없습니다.")
@@ -368,6 +420,25 @@ async def ingest(
             f"데이터 수집 완료. 총 {len(docs)}개 문서 임베딩 및 저장, {deleted_count}개 문서 삭제 (소요 시간: {elapsed_time:.2f}초)"
         )
 
+        # Qdrant 저장 성공 여부 자동 검증
+        logger.info("Qdrant 저장 성공 여부 검증 중...")
+        try:
+            collection_info = vector_db.get_collection_info()
+            if "error" not in collection_info:
+                points_count = collection_info.get("points_count", 0)
+                logger.info(f"✅ Qdrant 컬렉션 '{collection_info['name']}'에 총 {points_count:,}개 포인트 저장 확인")
+                logger.info(f"   벡터 크기: {collection_info['vector_size']}, 상태: {collection_info['status']}")
+                
+                # 저장된 데이터 수와 처리된 문서 수 비교 안내
+                if points_count >= len(docs):
+                    logger.info("✅ 저장 검증 성공: 모든 문서가 Qdrant에 정상 저장되었습니다.")
+                else:
+                    logger.warning(f"⚠️  저장 검증 주의: 처리된 문서 수({len(docs)})와 저장된 포인트 수({points_count})에 차이가 있습니다.")
+            else:
+                logger.error(f"❌ Qdrant 저장 검증 실패: {collection_info['error']}")
+        except Exception as e:
+            logger.error(f"❌ Qdrant 저장 검증 중 오류 발생: {e}")
+
     except Exception as e:
         logger.error(f"데이터 수집 중 오류 발생: {e}", exc_info=True)
         raise
@@ -481,6 +552,16 @@ if __name__ == "__main__":
         )
         parser.add_argument(
             "--edit-status-map", action="store_true", help="상태 매핑 설정 편집"
+        )
+        parser.add_argument(
+            "--local-data", type=str, help="로컬 데이터 디렉토리 경로 (이미 수집된 데이터 사용)"
+        )
+        parser.add_argument(
+            "--drop-only",
+            type=str,
+            nargs="?",
+            const="documents",
+            help="Qdrant 컬렉션만 삭제하고 종료 (여러 컬렉션은 콤마로 구분, 예: documents,faqs)"
         )
         args = parser.parse_args()
 
@@ -598,6 +679,19 @@ if __name__ == "__main__":
                 logger.error("데이터베이스 무결성 검증 실패")
                 sys.exit(1)
 
+        # --drop-only 옵션 처리
+        if args.drop_only:
+            collections = [c.strip() for c in args.drop_only.split(",") if c.strip()]
+            for col in collections:
+                logger.info(f"Qdrant 컬렉션 삭제 시도: {col}")
+                success = vector_db.drop_collection(collection_name=col)
+                if success:
+                    logger.info(f"Qdrant 컬렉션 삭제 완료: {col}")
+                else:
+                    logger.error(f"Qdrant 컬렉션 삭제 실패: {col}")
+            logger.info("컬렉션 삭제만 수행하고 종료합니다.")
+            sys.exit(0)
+
         # 명령줄 인자에 따라 실행 모드 결정
         incremental_mode = not (args.full or args.purge or args.rebuild)
         purge_mode = args.purge
@@ -618,12 +712,16 @@ if __name__ == "__main__":
         else:
             logger.info("첨부파일 처리 비활성화됨")
 
+        if args.local_data:
+            logger.info(f"로컬 데이터 모드: {args.local_data}")
+        
         asyncio.run(
             ingest(
                 incremental=incremental_mode,
                 purge=purge_mode,
                 process_attachments=process_attachments,
                 force_rebuild=rebuild_mode,
+                local_data_dir=args.local_data,
             )
         )
     except KeyboardInterrupt:

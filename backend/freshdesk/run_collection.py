@@ -20,6 +20,7 @@ sys.path.append(str(Path(__file__).parent))
 
 from freshdesk.optimized_fetcher import OptimizedFreshdeskFetcher
 from data.data_processor import process_collected_data
+from api.ingest import ingest as ingest_main
 
 # 로깅 설정
 logging.basicConfig(
@@ -42,7 +43,7 @@ async def full_collection_workflow():
     START_DATE = "2015-01-01"  # 가능한 가장 오래된 날짜부터 시작
     MAX_TICKETS = None  # 무제한 수집 (None = 제한 없음)
     INCLUDE_CONVERSATIONS = True  # 대화내역 포함 여부 (시간 2배 증가)
-    INCLUDE_ATTACHMENTS = False   # 첨부파일 정보 포함 여부
+    INCLUDE_ATTACHMENTS = True    # 첨부파일 정보 포함 여부 (메타데이터만, 실제 파일 다운로드 X)
     
     # large_scale_config.py에서 대용량 설정 가져오기
     try:
@@ -100,21 +101,46 @@ async def full_collection_workflow():
         await process_collected_data(OUTPUT_DIR)
 
         # 3단계: 임베딩 및 Qdrant 저장
-        logger.info("\n3단계: 임베딩 및 Qdrant 저장 시작 (ingest.py main 함수 호출)")
+        logger.info("\n3단계: 임베딩 및 Qdrant 저장 시작")
         try:
-            # ingest.py의 main 함수 동기/비동기 모두 지원
-            from api import ingest
-            if hasattr(ingest, 'main'):
-                main_func = ingest.main
-                if asyncio.iscoroutinefunction(main_func):
-                    await main_func(OUTPUT_DIR)
+            # 이미 import된 ingest_main 함수 사용
+            logger.info(f"수집된 데이터를 Qdrant에 저장 중... (디렉토리: {OUTPUT_DIR})")
+            
+            # ingest 함수 호출 (기본값으로 incremental=True, purge=False 사용)
+            await ingest_main(
+                incremental=True, 
+                purge=False, 
+                process_attachments=True, 
+                force_rebuild=False
+            )
+            
+            logger.info("임베딩 및 Qdrant 저장 완료")
+            
+            # Qdrant 저장 성공 여부 검증
+            logger.info("\n📊 Qdrant 저장 검증 중...")
+            try:
+                from core.vectordb import QdrantAdapter
+                
+                # documents 컬렉션 확인
+                vector_db = QdrantAdapter(collection_name="documents")
+                info = vector_db.get_collection_info()
+                
+                if "error" not in info:
+                    points_count = info.get("points_count", 0)
+                    logger.info(f"✅ 'documents' 컬렉션에 {points_count:,}개 포인트 저장 확인")
+                    
+                    if points_count > 0:
+                        logger.info("🎉 전체 워크플로우 성공: 데이터 수집 → 임베딩 → Qdrant 저장까지 완료!")
+                    else:
+                        logger.warning("⚠️ 데이터가 Qdrant에 저장되지 않았습니다. 로그를 확인하세요.")
                 else:
-                    main_func(OUTPUT_DIR)
-                logger.info("임베딩 및 Qdrant 저장 완료")
-            else:
-                logger.error("ingest.py에 main 함수가 없습니다. 수동으로 확인하세요.")
+                    logger.error(f"❌ Qdrant 컬렉션 확인 실패: {info['error']}")
+                    
+            except Exception as ve:
+                logger.error(f"❌ Qdrant 저장 검증 중 오류: {ve}")
+                
         except Exception as e:
-            logger.error(f"ingest.py 실행 중 오류 발생: {e}")
+            logger.error(f"임베딩 및 Qdrant 저장 중 오류 발생: {e}")
             logger.error("임베딩 및 Qdrant 저장 단계에서 문제가 발생했습니다. 로그를 확인하세요.")
 
         # 4단계: 완료 리포트
@@ -151,8 +177,8 @@ async def quick_test():
             stats = await fetcher.collect_all_tickets(
                 start_date="2024-01-01",
                 max_tickets=100,
-                include_conversations=False,
-                include_attachments=True
+                include_conversations=True,  # 모든 경우 대화 내역 포함
+                include_attachments=True     # 모든 경우 첨부파일 포함
             )
         logger.info(f"수집 완료: {stats}")
 
@@ -161,18 +187,21 @@ async def quick_test():
         await process_collected_data(OUTPUT_DIR)
 
         # 3단계: 임베딩 및 Qdrant 저장
-        logger.info("\n3단계: 임베딩 및 Qdrant 저장 시작 (ingest.py main 함수 호출, 테스트)")
+        logger.info("\n3단계: 임베딩 및 Qdrant 저장 시작 (테스트)")
         try:
-            from api import ingest
-            if hasattr(ingest, 'main'):
-                main_func = ingest.main
-                if asyncio.iscoroutinefunction(main_func):
-                    await main_func(OUTPUT_DIR)
-                else:
-                    main_func(OUTPUT_DIR)
-                logger.info("임베딩 및 Qdrant 저장 완료 (테스트)")
-            else:
-                logger.error("ingest.py에 main 함수가 없습니다. 수동으로 확인하세요.")
+            # 이미 import된 ingest_main 함수 사용
+            logger.info(f"수집된 데이터를 Qdrant에 저장 중... (테스트, 디렉토리: {OUTPUT_DIR})")
+            
+            # ingest 함수 호출 (테스트 모드에서는 로컬 데이터 사용 및 purge=True로 설정)
+            await ingest_main(
+                incremental=False, 
+                purge=True, 
+                process_attachments=True, 
+                force_rebuild=False,
+                local_data_dir=OUTPUT_DIR  # 🆕 로컬 데이터 디렉토리 전달
+            )
+            
+            logger.info("임베딩 및 Qdrant 저장 완료 (테스트)")
         except Exception as e:
             logger.error(f"ingest.py 실행 중 오류 발생: {e}")
             logger.error("임베딩 및 Qdrant 저장 단계에서 문제가 발생했습니다. 로그를 확인하세요.")
