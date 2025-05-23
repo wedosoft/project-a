@@ -1,0 +1,39 @@
+{
+  "total_tickets": 1146,
+  "status_distribution": {
+    "5": 903,
+    "3": 230,
+    "8": 5,
+    "2": 8
+  },
+  "priority_distribution": {
+    "1": 1122,
+    "4": 8,
+    "3": 10,
+    "2": 6
+  },
+  "type_distribution": {
+    "Problem": 385,
+    "Question": 275,
+    "Request": 206,
+    "null": 271,
+    "Task": 7,
+    "Service Task": 1,
+    "AE_Request": 1
+  },
+  "source_distribution": {
+    "1": 821,
+    "3": 22,
+    "2": 303
+  },
+  "conversation_stats": {
+    "avg_conversations_per_ticket": 6.469458987783595,
+    "max_conversations": 30,
+    "total_conversations": 7414
+  },
+  "attachment_stats": {
+    "avg_attachments_per_ticket": 0.4973821989528796,
+    "max_attachments": 25,
+    "total_attachments": 570
+  }
+}
