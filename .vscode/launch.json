@@ -2,18 +2,59 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "FastAPI Backend Server",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/backend/main.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "cwd": "${workspaceFolder}/backend",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/backend"
+            },
+            "envFile": "${workspaceFolder}/backend/.env"
+        },
+        {
             "name": "Python: ingest.py",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/backend/ingest.py",
+            "program": "${workspaceFolder}/backend/api/ingest.py",
             "args": [
                 "--rebuild"
             ],
             "console": "integratedTerminal",
             "justMyCode": false,
+            "cwd": "${workspaceFolder}/backend",
             "env": {
                 "PYTHONPATH": "${workspaceFolder}/backend"
-            }
+            },
+            "envFile": "${workspaceFolder}/backend/.env"
+        },
+        {
+            "name": "Freshdesk Collection Script",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/backend/freshdesk/run_collection.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "cwd": "${workspaceFolder}/backend",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/backend"
+            },
+            "envFile": "${workspaceFolder}/backend/.env"
+        },
+        {
+            "name": "Test LLM Router",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/backend/core/llm_router.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "cwd": "${workspaceFolder}/backend",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/backend"
+            },
+            "envFile": "${workspaceFolder}/backend/.env"
         },
         {
             "name": "Python: Current File",

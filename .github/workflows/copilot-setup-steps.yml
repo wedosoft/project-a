@@ -1,0 +1,225 @@
+name: "Copilot Setup Steps"
+
+# Allow testing of the setup steps from your repository's "Actions" tab.
+on: workflow_dispatch
+
+jobs:
+  # The job MUST be called `copilot-setup-steps` or it will not be picked up by Copilot.
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+
+    # Set the permissions to the lowest permissions possible needed for your steps.
+    # Copilot will be given its own token for its operations.
+    permissions:
+      # If you want to clone the repository as part of your setup steps, for example to install dependencies, you'll need the `contents: read` permission. If you don't clone the repository in your setup steps, Copilot will do this for you automatically after the steps complete.
+      contents: read
+
+    # You can define any steps you want, and they will run before the agent starts.
+    # If you do not check out your code, Copilot will do this for you.
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Python 3.10 설정 (백엔드 개발 환경)
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
+          cache: "pip"
+          cache-dependency-path: "backend/requirements.txt"
+
+      # Node.js 20 설정 (프론트엔드 및 도구용)
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      # Python 의존성 설치
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          if [ -f "backend/requirements.txt" ]; then
+            pip install -r backend/requirements.txt
+          else
+            echo "requirements.txt not found, installing basic dependencies"
+            pip install fastapi uvicorn pydantic httpx asyncio
+          fi
+        working-directory: ./
+
+      # 개발 도구 설치 (포맷팅, 린팅)
+      - name: Install development tools
+        run: |
+          pip install black flake8 pytest pytest-asyncio mypy
+          # MCP 서버 설치 (선택적)
+          npm install -g @modelcontextprotocol/server-github || echo "MCP GitHub server install failed"
+          npm install -g @modelcontextprotocol/server-filesystem || echo "MCP filesystem server install failed"
+
+      # 프로젝트 디렉토리 구조 생성
+      - name: Create project directories
+        run: |
+          mkdir -p backend/{data,logs,attachment_cache}
+          mkdir -p .vscode
+          mkdir -p .github/{workflows,ISSUE_TEMPLATE}
+
+            # 환경 설정 파일 생성
+      - name: Set up environment configuration
+        run: |
+          echo "Setting up environment configuration..."
+
+          # .env 템플릿 생성 (실제 키는 포함하지 않음)
+          cat > .env.example << 'EOF'
+          # Freshdesk Configuration
+          FRESHDESK_DOMAIN=your-domain.freshdesk.com
+          FRESHDESK_API_KEY=your-freshdesk-api-key
+
+          # Qdrant Cloud Configuration
+          QDRANT_URL=https://your-cluster.cloud.qdrant.io
+          QDRANT_API_KEY=your-qdrant-api-key
+
+          # LLM API Keys
+          ANTHROPIC_API_KEY=your-anthropic-api-key
+          OPENAI_API_KEY=your-openai-api-key
+          GOOGLE_API_KEY=your-google-api-key
+
+          # Application Settings
+          COMPANY_ID=kyexpert
+          PROCESS_ATTACHMENTS=true
+          EMBEDDING_MODEL=text-embedding-3-small
+          LOG_LEVEL=INFO
+          MAX_TOKENS=4096
+          EOF
+
+          # 개발용 .env 파일 생성 (빈 값들)
+          cp .env.example .env
+
+      # Docker 환경 확인
+      - name: Verify Docker environment
+        run: |
+          echo "Checking Docker availability..."
+          docker --version || echo "Docker not available"
+          docker-compose --version || echo "Docker Compose not available"
+
+          # docker-compose.yml 존재 확인
+          if [ -f "docker-compose.yml" ]; then
+            echo "✓ docker-compose.yml found"
+            docker-compose config || echo "Docker compose configuration validation failed"
+          else
+            echo "✗ docker-compose.yml not found"
+          fi
+
+      # 프로젝트 구조 검증
+      - name: Validate project structure
+        run: |
+          echo "=== Validating Project Structure ==="
+
+          # 필수 파일 목록
+          required_files=(
+            "backend/api/main.py"
+            "backend/core/llm_router.py" 
+            "backend/core/vectordb.py"
+            "backend/freshdesk/fetcher.py"
+            "backend/requirements.txt"
+          )
+
+          optional_files=(
+            "docker-compose.yml"
+            "PROJECT_RULES.md"
+            ".github/copilot-instructions.md"
+            ".vscode/settings.json"
+          )
+
+          echo "Checking required files..."
+          for file in "${required_files[@]}"; do
+            if [ -f "$file" ]; then
+              echo "✓ $file exists"
+            else
+              echo "✗ $file missing (REQUIRED)"
+              missing_required=true
+            fi
+          done
+
+          echo "Checking optional files..."
+          for file in "${optional_files[@]}"; do
+            if [ -f "$file" ]; then
+              echo "✓ $file exists"
+            else
+              echo "○ $file missing (optional)"
+            fi
+          done
+
+          # 디렉토리 구조 확인
+          echo "Project directory structure:"
+          find . -type d -name ".*" -prune -o -type d -print | head -20
+
+      # Python 모듈 임포트 테스트
+      - name: Test Python imports and syntax
+        run: |
+          echo "=== Testing Python Environment ==="
+
+          cd backend
+
+          # 기본 의존성 테스트
+          python -c "
+          import sys
+          print(f'Python version: {sys.version}')
+
+          try:
+              import fastapi
+              print('✓ FastAPI imported successfully')
+          except ImportError as e:
+              print(f'✗ FastAPI import failed: {e}')
+
+          try:
+              import pydantic
+              print('✓ Pydantic imported successfully')  
+          except ImportError as e:
+              print(f'✗ Pydantic import failed: {e}')
+              
+          try:
+              import httpx
+              print('✓ HTTPX imported successfully')
+          except ImportError as e:
+              print(f'✗ HTTPX import failed: {e}')
+          "
+
+          # 프로젝트 모듈 구문 검사
+          echo "Checking Python syntax for project files..."
+          find . -name "*.py" -exec python -m py_compile {} \; || echo "Some Python files have syntax errors"
+
+      # 환경 정보 및 컨텍스트 출력
+      - name: Display environment info and project context
+        run: |
+          echo "=== Environment Information ==="
+          echo "Python version: $(python --version)"
+          echo "Node.js version: $(node --version 2>/dev/null || echo 'Not available')"
+          echo "Docker version: $(docker --version 2>/dev/null || echo 'Not available')"
+          echo "Working directory: $(pwd)"
+          echo "Python executable: $(which python)"
+
+          echo "=== Installed Python Packages ==="
+          pip list | head -30
+
+          echo "=== Project Context ==="
+          echo "Project Name: Freshdesk Custom App Backend"
+          echo "Architecture: RAG-based AI Assistant"
+          echo "Tech Stack: Python 3.10 + FastAPI + Qdrant + Multi-LLM"
+          echo "Key Components:"
+          echo "  - FastAPI async web server"
+          echo "  - Qdrant vector database integration"
+          echo "  - Multi-LLM router (Claude, GPT, Gemini)"
+          echo "  - Freshdesk API connector"
+          echo "  - BlockNote editor integration"
+
+          echo "=== Copilot Agent Context ==="
+          echo "This environment is configured for GitHub Copilot coding agent"
+          echo "Copilot instructions available at: .github/copilot-instructions.md"
+          echo "Project coding guidelines configured for:"
+          echo "  - Async/await patterns"
+          echo "  - Type hints and Pydantic models" 
+          echo "  - Structured logging and error handling"
+          echo "  - Multi-tenant data isolation"
+          echo "  - Performance-optimized vector operations"
+
+          echo "=== Setup Complete ==="
+          echo "Environment is ready for Copilot coding agent operations"

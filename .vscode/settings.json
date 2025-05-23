@@ -35,10 +35,52 @@
     "editor.renderControlCharacters": false,
     "editor.unicodeHighlight.invisibleCharacters": false,
     "editor.unicodeHighlight.nonBasicASCII": false,
-    // 코드 완성 및 인라인 제안 블록 제거 설정 (기본 유지)
-    "editor.inlineSuggest.enabled": false,
-    "editor.suggest.showInlineDetails": false,
-    "github.copilot.enableAutoSuggestions": false,
-    "editor.suggest.preview": false,
-    "editor.acceptSuggestionOnEnter": "off"
+    // GitHub Copilot 설정 (프로젝트 특화)
+    "github.copilot.enable": {
+        "*": true,
+        "yaml": true,
+        "plaintext": true,
+        "markdown": true,
+        "python": true,
+        "json": true,
+        "dockerfile": true
+    },
+    "github.copilot.chat.welcomeMessage": "never",
+    "github.copilot.editor.enableAutoCompletions": true,
+    // 파일 연관성 (Docker, ENV 파일)
+    "files.associations": {
+        "*.py": "python",
+        "docker-compose*.yml": "dockercompose",
+        "Dockerfile*": "dockerfile",
+        ".env*": "properties"
+    },
+    // 검색 및 감시 제외 (성능 최적화)
+    "search.exclude": {
+        "**/node_modules": true,
+        "**/.git": true,
+        "**/venv": true,
+        "**/backend/data/chunks": true,
+        "**/backend/logs": true
+    },
+    "files.watcherExclude": {
+        "**/venv/**": true,
+        "**/backend/data/chunks/**": true,
+        "**/backend/logs/**": true
+    },
+    // FastAPI 개발 지원
+    "python.analysis.typeCheckingMode": "basic",
+    "python.analysis.autoImportCompletions": true,
+    "editor.codeActionsOnSave": {
+        "source.organizeImports": true
+    },
+    // 확장 기능 추천
+    "extensions.recommendations": [
+        "ms-python.python",
+        "ms-python.flake8",
+        "ms-python.black-formatter",
+        "github.copilot",
+        "github.copilot-chat",
+        "ms-azuretools.vscode-docker",
+        "redhat.vscode-yaml"
+    ]
 }
