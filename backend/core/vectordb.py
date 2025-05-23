@@ -668,6 +668,39 @@ class QdrantAdapter(VectorDBInterface):
             logger.error(f"Qdrant 컬렉션 삭제 실패: {name}, 오류: {e}")
             return False
 
+    def list_all_ids(self) -> List[str]:
+        """
+        Qdrant 컬렉션의 모든 original_id(또는 id) 목록 반환
+        Returns:
+            original_id(문서 원본 ID) 리스트
+        """
+        try:
+            # Qdrant points 전체 조회 (batch로 나눠서 처리)
+            all_ids = []
+            offset = 0
+            limit = 1000
+            while True:
+                points = self.client.scroll(
+                    collection_name=self.collection_name,
+                    offset=offset,
+                    limit=limit,
+                    with_payload=True,
+                    with_vectors=False
+                )
+                if not points or len(points) == 0:
+                    break
+                for p in points:
+                    # original_id가 있으면 사용, 없으면 id 사용
+                    oid = p.payload.get("original_id") if p.payload else None
+                    all_ids.append(oid or p.id)
+                if len(points) < limit:
+                    break
+                offset += limit
+            return all_ids
+        except Exception as e:
+            logger.error(f"Qdrant 전체 ID 목록 조회 실패: {e}")
+            return []
+
 
 # 벡터 데이터베이스 팩토리
 class VectorDBFactory:
