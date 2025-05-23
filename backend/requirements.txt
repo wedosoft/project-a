@@ -16,5 +16,6 @@ tenacity==8.2.3
 google-generativeai>=0.3.0 # Gemini API
 cachetools>=4.2.0 # For in-memory caching
 prometheus-client>=0.14.1 # Prometheus metrics client
+pandas>=1.5.0
 # 성능 모니터링을 위한 추가 패키지
 # logging==0.4.9.6 - 제거됨, Python 내장 모듈과 충돌
