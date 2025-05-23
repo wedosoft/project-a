@@ -4,20 +4,17 @@
 이 모듈은 Freshdesk에서 티켓과 지식베이스 문서를 가져와 임베딩한 후,
 Qdrant 벡터 데이터베이스에 저장하는 기능을 제공합니다.
 
-프로젝트 규칙 및 가이드라인: /PROJECT_RULES.md 참조
+프로젝트 규칙 및 가이드라인: /PROJECT_RULES.md 참고
 """
 
 import asyncio
 import logging
 import time
 import sys
-import shutil
 import os
 import json
-from datetime import datetime
-from freshdesk.fetcher import fetch_tickets, fetch_kb_articles, FRESHDESK_DOMAIN
+from freshdesk.fetcher import fetch_tickets, fetch_kb_articles
 from core.embedder import embed_documents, process_documents
-from data.attachment_processor import process_attachments as process_attachment_files
 from core.vectordb import vector_db
 from typing import Dict, Any, Union
 
@@ -29,10 +26,8 @@ logger = logging.getLogger(__name__)
 
 COLLECTION_NAME = "documents"  # Qdrant 컬렉션 이름
 PROCESS_ATTACHMENTS = True  # 첨부파일 처리 여부 설정
-DB_PATH = "./qdrant_data"  # 데이터베이스 경로
 STATUS_MAPPINGS_FILE = "status_mappings.json"  # 상태 매핑 정보 파일
 
-# 상태 매핑 정보 (기본값)
 # 티켓 상태 매핑
 TICKET_STATUS_MAP = {
     2: "open",
@@ -48,7 +43,9 @@ KB_STATUS_MAP = {1: "draft", 2: "published"}
 
 
 def load_status_mappings():
-    """상태 매핑 정보를 파일에서 로드합니다. 파일이 없으면 기본값을 사용합니다."""
+    """
+    상태 매핑 정보를 파일에서 로드합니다. 파일이 없으면 기본값을 사용합니다.
+    """
     try:
         if os.path.exists(STATUS_MAPPINGS_FILE):
             with open(STATUS_MAPPINGS_FILE, "r") as f:
@@ -57,13 +54,13 @@ def load_status_mappings():
                 return mappings
     except Exception as e:
         logger.warning(f"상태 매핑 파일 로드 실패: {e}. 기본 매핑을 사용합니다.")
-
-    # 기본 매핑 반환
     return {"ticket": TICKET_STATUS_MAP, "kb": KB_STATUS_MAP}
 
 
 def save_status_mappings(mappings):
-    """상태 매핑 정보를 파일에 저장합니다."""
+    """
+    상태 매핑 정보를 파일에 저장합니다.
+    """
     try:
         with open(STATUS_MAPPINGS_FILE, "w") as f:
             json.dump(mappings, f, indent=2)
@@ -76,114 +73,47 @@ def save_status_mappings(mappings):
 STATUS_MAPPINGS = load_status_mappings()
 
 
-def backup_database():
-    """Qdrant 데이터베이스를 백업합니다."""
-    if os.path.exists(DB_PATH) and os.path.isdir(DB_PATH):
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_path = f"{DB_PATH}_backup_{timestamp}"
-        try:
-            shutil.copytree(DB_PATH, backup_path)
-            logger.info(f"데이터베이스 백업 완료: {backup_path}")
-            return True
-        except Exception as e:
-            logger.error(f"데이터베이스 백업 실패: {e}")
-            return False
-    return False
-
-
-def verify_database_integrity():
-    """Qdrant 데이터베이스의 무결성을 검증합니다."""
-    try:
-        # 기본 company_id로 문서 수 확인
-        DEFAULT_COMPANY_ID = "default"
-        count = vector_db.count(company_id=DEFAULT_COMPANY_ID)
-        logger.info(f"컬렉션 '{COLLECTION_NAME}' (company_id={DEFAULT_COMPANY_ID}): {count}개 문서")
-
-        # 전체 문서 수 확인
-        total_count = vector_db.count()
-        logger.info(f"컬렉션 '{COLLECTION_NAME}' 전체: {total_count}개 문서")
-
-        # 샘플 쿼리 실행
-        try:
-            if total_count > 0:
-                # 테스트 임베딩
-                test_embedding = embed_documents(["test"])[0]
-                # 특정 회사 ID로 문서 검색
-                result = vector_db.search(query_embedding=test_embedding, top_k=1, company_id=DEFAULT_COMPANY_ID)
-                if not result or "ids" not in result or not result["ids"]:
-                    if count > 0:  # 문서가 있는데 결과가 없으면 경고
-                        logger.warning(f"컬렉션 '{COLLECTION_NAME}'에 쿼리 결과 없음 (company_id={DEFAULT_COMPANY_ID})")
-        except Exception as e:
-            logger.error(f"쿼리 테스트 실패: {e}")
-            return False
-
-        return True
-    except Exception as e:
-        logger.error(f"데이터베이스 무결성 검증 실패: {e}")
-        return False
-
-
 def sanitize_metadata(
     metadata: Dict[str, Any],
 ) -> Dict[str, Union[str, int, float, bool]]:
     """
     메타데이터 값을 Qdrant 호환 형식으로 변환합니다.
-
     Qdrant는 메타데이터 값으로 문자열, 정수, 소수점, 불리언만 허용합니다.
-    이 함수는 다른 형식의 값을 적절하게 변환합니다:
+    이 함수는 다양한 타입의 값을 적절하게 변환합니다:
     - 리스트: JSON 문자열로 변환
-    - None: 빈 문자열이나 0, False 등 적절한 기본값으로 대체
+    - None: 빈 문자열이나 0, False 등 기본값으로 대체
     - 객체: JSON 문자열로 변환
-
-    Args:
-        metadata: 원본 메타데이터 딕셔너리
-
-    Returns:
-        Qdrant 호환 형식으로 변환된 메타데이터 딕셔너리
     """
     sanitized = {}
-
     for key, value in metadata.items():
-        # None 값 처리
         if value is None:
-            # 필드 타입에 따라 적절한 기본값 설정
             if key in ["tags", "processed_attachments"]:
-                sanitized[key] = "[]"  # 빈 리스트는 빈 JSON 배열 문자열로
+                sanitized[key] = "[]"
             elif key in ["priority", "hits", "thumbs_up", "thumbs_down"]:
-                sanitized[key] = 0  # 숫자 필드는 0으로
+                sanitized[key] = 0
             elif key in [
                 "has_attachments",
                 "has_conversations",
                 "is_escalated",
                 "fr_escalated",
             ]:
-                sanitized[key] = False  # 불리언 필드는 False로
+                sanitized[key] = False
             else:
-                sanitized[key] = ""  # 나머지는 빈 문자열로
-
-        # 리스트 값 처리
+                sanitized[key] = ""
         elif isinstance(value, list):
-            # 태그 및 리스트 필드는 JSON 문자열로 변환
             try:
                 sanitized[key] = json.dumps(value, ensure_ascii=False)
             except TypeError:
-                # 변환 실패 시 안전한 대체값 사용
                 logger.warning(f"리스트 값 JSON 변환 실패: {key}={value}")
                 sanitized[key] = "[]"
-
-        # 딕셔너리 값 처리
         elif isinstance(value, dict):
             try:
                 sanitized[key] = json.dumps(value, ensure_ascii=False)
             except TypeError:
                 logger.warning(f"딕셔너리 값 JSON 변환 실패: {key}={value}")
                 sanitized[key] = "{}"
-
-        # 기본 타입(문자열, 정수, 소수점, 불리언) 유지
         elif isinstance(value, (str, int, float, bool)):
             sanitized[key] = value
-
-        # 그 외 타입은 문자열로 변환
         else:
             try:
                 sanitized[key] = str(value)
@@ -192,7 +122,6 @@ def sanitize_metadata(
                     f"알 수 없는 타입 변환 실패: {key}={value}, 타입: {type(value)}"
                 )
                 sanitized[key] = ""
-
     return sanitized
 
 
@@ -204,88 +133,37 @@ async def ingest(
 ) -> None:
     """
     Freshdesk 티켓과 지식베이스 문서를 임베딩 후 Qdrant에 저장합니다.
-
     Args:
         incremental: 증분 업데이트 모드 여부 (기본값: True)
-                    True일 경우 기존 문서는 유지하고 새 문서만 추가합니다.
         purge: 기존 데이터 삭제 여부 (기본값: False)
-               True일 경우 기존 데이터를 모두 삭제하고 새로 저장합니다.
-        process_attachments: 첨부파일 처리 여부 (기본값: PROCESS_ATTACHMENTS)
-                          True일 경우 첨부파일을 다운로드하여 텍스트 추출
+        process_attachments: 첨부파일 처리 여부 (기본값: True)
         force_rebuild: 데이터베이스 강제 재구축 여부 (기본값: False)
-                      True일 경우 기존 데이터베이스를 백업하고 새로 구축합니다.
     """
     start_time = time.time()
     logger.info("데이터 수집 프로세스 시작")
 
     try:
-        # 데이터베이스 강제 재구축 옵션 처리
+        # Qdrant 클라우드만 사용하므로, 로컬 DB 백업/무결성 검사 등은 제거됨
         if force_rebuild:
-            logger.warning("데이터베이스 강제 재구축 모드")
-            backup_database()
-            # Qdrant는 API를 통해 컬렉션을 재생성합니다
-            # DB_PATH는 로컬 Qdrant 인스턴스일 때만 관련이 있습니다
+            logger.warning("데이터베이스 강제 재구축 모드 (Qdrant 클라우드 환경)")
             incremental = False
-            purge = True  # 컬렉션 재생성을 위해 purge 플래그 설정
+            purge = True
         
-        # 기존 컬렉션 정보 로깅 (기본 company_id로 검색)
         DEFAULT_COMPANY_ID = "kyexpert"
         existing_count = vector_db.count(company_id=DEFAULT_COMPANY_ID)
         logger.info(f"기존 컬렉션에 {existing_count}개 문서가 있습니다 (company_id={DEFAULT_COMPANY_ID})")
 
-        # 전체 문서 수 확인
         total_count = vector_db.count()
         logger.info(f"컬렉션 전체 문서 수: {total_count}")
         
-        # 무결성 검증
         if total_count == 0 and purge is False:
             logger.warning("컬렉션에 문서가 없습니다. 데이터베이스가 비어있거나 접근에 문제가 있을 수 있습니다.")
-            
-            # 백업 후 처리 (Qdrant 컬렉션은 재생성하지 않고 데이터만 정리)
-            backup_success = backup_database()
-            if backup_success:
-                logger.info("기존 데이터베이스 초기화 중...")
-                incremental = False
-                purge = False
-
-            # purge 옵션이 True인 경우 기존 데이터 삭제
-            if purge:
-                logger.info("기존 데이터 삭제 중...")
-                # 회사별 데이터 삭제를 위한 준비
-                # 참고: 실제 환경에서는 현재 사용자의 company_id를 사용해야 함
-                DEFAULT_COMPANY_ID = "kyexpert"
-                
-                # 기존 Qdrant 검색으로 문서 ID 가져오기
-                # 기본 검색 쿼리로 최대한 많은 문서 ID 획득
-                dummy_embedding = embed_documents(["dummy query for retrieval"])[0]
-                # 해당 회사의 모든 문서 검색 (최대 1000개)
-                search_results = vector_db.search(
-                    query_embedding=dummy_embedding,
-                    top_k=1000,  # 1000개까지만 검색
-                    company_id=DEFAULT_COMPANY_ID
-                )
-                
-                all_ids = search_results.get("ids", [])
-                if all_ids:
-                    logger.info(f"{len(all_ids)}개 문서 삭제 중...")
-                    # 배치로 처리
-                    batch_size = 100
-                    for i in range(0, len(all_ids), batch_size):
-                        batch = all_ids[i : i + batch_size]
-                        logger.info(
-                            f"문서 일괄 삭제 중... ({i+1}~{i+len(batch)}/{len(all_ids)})"
-                        )
-                        # 회사 ID 필터 적용하여 삭제
-                        vector_db.delete_documents(ids=batch, company_id=DEFAULT_COMPANY_ID)
-                incremental = False  # 데이터를 삭제했으므로 증분 업데이트가 아님
+            incremental = False
+            purge = False
 
         logger.info("Freshdesk 데이터 수집 중...")
-
-        # 티켓과 지식베이스 문서 동시에 가져오기
         tickets_task = asyncio.create_task(fetch_tickets())
         articles_task = asyncio.create_task(fetch_kb_articles())
-
-        # 두 작업 완료 대기
         tickets, articles = await asyncio.gather(tickets_task, articles_task)
 
         if not tickets and not articles:
@@ -375,385 +253,62 @@ async def ingest(
         for t in tickets:
             doc_id = f"ticket-{t.get('id')}"
             ticket_id = t.get("id")
-
-            # 증분 업데이트 모드에서 처리 로직
-            # 티켓의 updated_at 값이 변경된 경우 또는 기존에 없는 티켓인 경우 처리
             updated_at = t.get("updated_at")
+            # 증분 업데이트 모드에서 기존 문서가 있으면 건너뜀
             if incremental:
-                # 기존 문서가 존재하는지 확인
                 if doc_id in existing_ids:
-                    # 기존 문서의 메타데이터 조회
-                    existing_meta = None
-                    try:
-                        # Qdrant는 get 메서드가 다르게 동작합니다
-                        # 회사 ID 필터링과 함께 검색으로 대체
-                        result = vector_db.get_by_id(id=doc_id, company_id=DEFAULT_COMPANY_ID)
-                        if result and "metadata" in result:
-                            existing_meta = result["metadata"]
-                    except Exception as e:
-                        logger.warning(f"기존 메타데이터 조회 실패: {e}")
-
-                    # 기존 메타데이터의 updated_at과 비교
-                    if existing_meta and "updated_at" in existing_meta:
-                        if existing_meta["updated_at"] == updated_at:
-                            logger.debug(
-                                f"티켓 {ticket_id}는 변경되지 않았습니다. 건너뜁니다."
-                            )
-                            continue
-                        else:
-                            logger.info(
-                                f"티켓 {ticket_id}의 updated_at이 변경되었습니다. 업데이트합니다."
-                            )
-                    else:
-                        logger.info(
-                            f"티켓 {ticket_id}의 메타데이터에 updated_at이 없습니다. 업데이트합니다."
-                        )
-
-            # 첨부파일 처리
-            all_attachments = t.get("all_attachments", [])
-            if process_attachments and all_attachments:
-                logger.info(
-                    f"티켓 {ticket_id}의 첨부파일 {len(all_attachments)}개 처리 중..."
-                )
-                processed_attachments = await process_attachment_files(all_attachments)
-                t["processed_attachments"] = processed_attachments
-            else:
-                t["processed_attachments"] = []
-
-            # 기본 티켓 정보 처리
-            ticket_content = []
-            ticket_content.append(f"제목: {t.get('subject', '')}")
-
-            # 설명 처리 - API 응답에서는 'description'과 'description_text' 모두 존재
-            # description_text는 HTML 태그가 제거된 일반 텍스트
-            description = t.get("description_text", t.get("description", ""))
-            ticket_content.append(f"설명: {description}")
-
-            # 대화 내역 추가
-            conversations = t.get("conversations", [])
-            if conversations:
-                ticket_content.append("\n===== 대화 내역 =====")
-                for i, conv in enumerate(conversations):
-                    ticket_content.append(
-                        f"[대화 {i+1}] - {conv.get('created_at', '')}"
-                    )
-                    # user_id 대신 실제 API 응답 구조 사용
-                    user_info = f"사용자 ID: {conv.get('user_id', '')}"
-                    if conv.get("from_email"):
-                        user_info += f" ({conv.get('from_email')})"
-                    ticket_content.append(user_info)
-
-                    # API 응답에서는 body와 body_text 모두 존재
-                    # body_text는 HTML 태그가 제거된 일반 텍스트
-                    body = conv.get("body_text", conv.get("body", ""))
-                    ticket_content.append(f"내용: {body}")
-
-                    # 대화의 첨부파일 정보
-                    attachments = conv.get("attachments", [])
-                    if attachments:
-                        ticket_content.append("첨부파일:")
-                        for att in attachments:
-                            ticket_content.append(
-                                f"  - {att.get('name', '')} ({att.get('content_type', '')})"
-                            )
-
-            # 첨부파일 정보 및 추출된 텍스트 추가
-            processed_attachments = t.get("processed_attachments", [])
-            image_infos = []  # 이미지 메타데이터만 저장
-            source_id = str(ticket_id)
-
-            if processed_attachments:
-                ticket_content.append("\n===== 첨부파일 내용 =====")
-                for att in processed_attachments:
-                    if att.get("processed", False):
-                        ticket_content.append(f"파일: {att.get('name', '')}")
-                        extracted_text = att.get("extracted_text", "")
-                        if (
-                            isinstance(extracted_text, dict)
-                            and "text" in extracted_text
-                        ):
-                            ticket_content.append(
-                                f"추출된 텍스트: {extracted_text['text']}"
-                            )
-                        else:
-                            ticket_content.append(f"추출된 텍스트: {extracted_text}")
-
-                        # 이미지인 경우 pre-signed URL이 아닌 메타데이터만 저장
-                        if att.get("content_type", "").startswith("image/"):
-                            image_infos.append({
-                                "id": att.get("id"),
-                                "name": att.get("name"),
-                                "content_type": att.get("content_type"),
-                                "size": att.get("size"),
-                                "updated_at": att.get("updated_at"),
-                                "source_type": "ticket",
-                                "source_id": source_id,
-                                # URL은 저장하지 않음. 프론트엔드는 표시 시점에 Freshdesk API로 최신 pre-signed URL을 발급받아야 함.
-                            })
-
-            # 대화 내역의 첨부파일도 이미지 메타데이터만 수집
-            conversations = t.get("conversations", [])
-            if conversations:
-                for conv in conversations:
-                    attachments = conv.get("attachments", [])
-                    for att in attachments:
-                        if att.get("content_type", "").startswith("image/"):
-                            image_infos.append({
-                                "id": att.get("id"),
-                                "name": att.get("name"),
-                                "content_type": att.get("content_type"),
-                                "size": att.get("size"),
-                                "updated_at": att.get("updated_at"),
-                                "source_type": "conversation",
-                                "source_id": source_id,
-                                "conversation_id": conv.get("id", ""),
-                                # URL은 저장하지 않음. 프론트엔드는 표시 시점에 Freshdesk API로 최신 pre-signed URL을 발급받아야 함.
-                            })
-
-            doc_text = "\n".join(ticket_content)
-
-            if doc_text.strip():  # 빈 문서 제외
-                # 메타데이터 구성 - API 응답 구조에 맞게 수정
-                source_id = str(ticket_id)
-
-                # source_url 생성
-                source_url = (
-                    f"https://{FRESHDESK_DOMAIN}.freshdesk.com/a/tickets/{source_id}"
-                )
-
-                # 티켓 태그 처리
-                tags = t.get("tags", [])
-
-                # 상태 코드 매핑 (API 응답이 숫자 코드인 경우를 대비)
-                # Freshdesk API 상태 코드: 2 = open, 3 = pending, 4 = resolved, 5 = closed, 6 = waiting on customer, 7 = waiting on third party
-                status_map = STATUS_MAPPINGS.get("ticket", TICKET_STATUS_MAP)
-                status = t.get("status")
-                if isinstance(status, int) and status in status_map:
-                    status = status_map[status]
-
-                # 사용자 정의 필드 처리
-                custom_fields = t.get("custom_fields", {})
-                # 사용자 정의 필드 중 category가 있으면 태그에 추가
-                if (
-                    "category" in custom_fields
-                    and custom_fields["category"] not in tags
-                ):
-                    tags.append(custom_fields["category"])
-
-                # 티켓 메타데이터 구성 (기본 필드 + 커스텀 필드 전체 포함)
-                metadata = {
-                    "type": "ticket",
-                    "source_id": source_id,
-                    "id": t.get("id"),
-                    "subject": t.get("subject"),
-                    "description": t.get("description"),
-                    "description_text": t.get("description_text"),
-                    "status": t.get("status"),
-                    "priority": t.get("priority", 1),
-                    "tags": tags,
-                    "product": t.get("product_id", ""),
-                    "language": t.get("language", "ko"),
-                    "source_url": source_url,
-                    "created_at": t.get("created_at"),
-                    "updated_at": updated_at,
-                    "due_by": t.get("due_by"),
-                    "fr_due_by": t.get("fr_due_by"),
-                    "is_escalated": t.get("is_escalated", False),
-                    "fr_escalated": t.get("fr_escalated", False),
-                    "company_id": t.get("company_id"),
-                    "requester_id": t.get("requester_id"),
-                    "responder_id": t.get("responder_id"),
-                    "group_id": t.get("group_id"),
-                    "source": t.get("source"),
-                    "has_attachments": len(all_attachments) > 0,
-                    "has_conversations": len(conversations) > 0,
-                    "processed_attachments": len(processed_attachments) > 0,
-                    "image_attachments": (image_infos if image_infos else []),
-                    # 커스텀 필드는 JSON 문자열로 저장 (Qdrant 호환)
-                    "custom_fields": json.dumps(t.get("custom_fields", {}), ensure_ascii=False),
-                    # description(HTML) 내 인라인 이미지 id 등도 필요시 별도 필드로 저장 가능
-                }
-
-                # 메타데이터 값을 벡터 DB 호환 형식으로 변환
-                sanitized_metadata = sanitize_metadata(metadata)
-
-                # 메타데이터 크기가 너무 크면 벡터 DB에서 오류가 발생할 수 있으므로
-                # 기본 필드만 유지하고 나머지는 제외
-                # 사용자 정의 필드가 많은 경우 주의해야 함
-
-                all_documents.append(
-                    {"id": doc_id, "text": doc_text, "metadata": sanitized_metadata}
-                )
-
-        logger.info("지식베이스 문서 처리 중...")
-        for a in articles:
-            doc_id = f"kb-{a.get('id')}"
-            article_id = a.get("id")
-
-            # 증분 업데이트 모드에서 처리 로직
-            # 지식베이스 문서의 updated_at 값이 변경된 경우 또는 기존에 없는 문서인 경우 처리
-            updated_at = a.get("updated_at")
-            if incremental:
-                # 기존 문서가 존재하는지 확인
-                if doc_id in existing_ids:
-                    # 기존 문서의 메타데이터 조회
-                    existing_meta = None
-                    try:
-                        # Qdrant는 get 메서드가 다르게 동작합니다
-                        # 회사 ID 필터링과 함께 검색으로 대체
-                        result = vector_db.get_by_id(id=doc_id, company_id=DEFAULT_COMPANY_ID)
-                        if result and "metadata" in result:
-                            existing_meta = result["metadata"]
-                    except Exception as e:
-                        logger.warning(f"기존 메타데이터 조회 실패: {e}")
-
-                    # 기존 메타데이터의 updated_at과 비교
-                    if existing_meta and "updated_at" in existing_meta:
-                        if existing_meta["updated_at"] == updated_at:
-                            logger.debug(
-                                f"지식베이스 문서 {article_id}는 변경되지 않았습니다. 건너뜁니다."
-                            )
-                            continue
-                        else:
-                            logger.info(
-                                f"지식베이스 문서 {article_id}의 updated_at이 변경되었습니다. 업데이트합니다."
-                            )
-                    else:
-                        logger.info(
-                            f"지식베이스 문서 {article_id}의 메타데이터에 updated_at이 없습니다. 업데이트합니다."
-                        )
-
-            # 첨부파일 처리
-            attachments = a.get("attachments", [])
-            if process_attachments and attachments:
-                logger.info(
-                    f"지식베이스 문서 {article_id}의 첨부파일 {len(attachments)}개 처리 중..."
-                )
-                processed_attachments = await process_attachment_files(attachments)
-                a["processed_attachments"] = processed_attachments
-            else:
-                a["processed_attachments"] = []
-
-            # 이미지 첨부파일 메타데이터만 저장 (FAQ도 동일 정책)
-            image_infos = []
-            for att in a["processed_attachments"]:
-                if att.get("content_type", "").startswith("image/"):
-                    image_infos.append({
+                    continue
+            # description, description_text 등 주요 필드 보완
+            if not t.get("description") or not t.get("description_text"):
+                from freshdesk.fetcher import fetch_ticket_details
+                detail = await fetch_ticket_details(ticket_id)
+                if detail:
+                    t.update({k: v for k, v in detail.items() if k not in t or not t[k]})
+            # 첨부파일(이미지 등) 메타데이터만 저장
+            attachments = t.get("attachments") or t.get("all_attachments")
+            attachment_meta = []
+            if attachments:
+                for att in attachments:
+                    if not att or not isinstance(att, dict):
+                        continue
+                    meta = {
                         "id": att.get("id"),
                         "name": att.get("name"),
                         "content_type": att.get("content_type"),
                         "size": att.get("size"),
+                        "created_at": att.get("created_at"),
                         "updated_at": att.get("updated_at"),
-                        "source_type": "kb",
-                        "source_id": article_id,
-                        # URL은 저장하지 않음. 프론트엔드는 표시 시점에 Freshdesk API로 최신 pre-signed URL을 발급받아야 함.
-                    })
-
-            # 문서 내용 준비
-            article_content = []
-            article_content.append(f"제목: {a.get('title', '')}")
-            article_content.append(f"설명: {a.get('description_text', '')}")
-
-            # 추출된 첨부파일 내용 추가
-            processed_attachments = a.get("processed_attachments", [])
-            if processed_attachments:
-                article_content.append("\n===== 첨부파일 내용 =====")
-                for att in processed_attachments:
-                    if att.get("processed", False) and att.get("extracted_text"):
-                        article_content.append(f"파일: {att.get('name', '')}")
-                        article_content.append(
-                            f"추출된 텍스트: {att.get('extracted_text', '')}"
-                        )
-
-            doc_text = "\n".join(article_content)
-
-            if doc_text.strip():  # 빈 문서 제외
-                # 메타데이터 구성 - API 응답 구조에 맞게 수정
-                source_id = str(article_id)
-
-                # source_url 생성
-                source_url = f"https://{FRESHDESK_DOMAIN}.freshdesk.com/solution/articles/{source_id}"
-
-                # 문서 태그 처리
-                tags = a.get("tags", [])
-
-                # 계층 정보(hierarchy) 처리
-                category_name = None
-                folder_name = None
-                if "hierarchy" in a and a["hierarchy"]:
-                    for item in a["hierarchy"]:
-                        if item.get("type") == "category" and "data" in item:
-                            category_name = item["data"].get("name")
-                        elif item.get("type") == "folder" and "data" in item:
-                            # 마지막 폴더 이름 저장
-                            folder_name = item["data"].get("name")
-
-                # 폴더와 카테고리 정보를 태그로 추가
-                if folder_name and folder_name not in tags:
-                    tags.append(folder_name)
-                if category_name and category_name not in tags:
-                    tags.append(category_name)
-
-                # 조회수(hits) 처리
-                hits = a.get("hits", 0)
-
-                # 상태 코드 변환 (2 = published, 1 = draft 등)
-                # API 상태 코드: 1 = draft, 2 = published
-                status_map = STATUS_MAPPINGS.get("kb", KB_STATUS_MAP)
-                status = status_map.get(a.get("status"), "unknown")
-
-                # 언어 처리
-                language = a.get("language", "ko")
-                if "hierarchy" in a and a["hierarchy"] and len(a["hierarchy"]) > 0:
-                    if (
-                        "data" in a["hierarchy"][0]
-                        and "language" in a["hierarchy"][0]["data"]
-                    ):
-                        language = a["hierarchy"][0]["data"]["language"]
-
-                # 지식베이스 메타데이터 구성
-                metadata = {
-                    "type": "kb",
-                    "source_id": source_id,
-                    "id": a.get("id"),
-                    "title": a.get("title"),
-                    "description": a.get("description"),
-                    "description_text": a.get("description_text"),
-                    "status": a.get("status"),
-                    "tags": tags,
-                    "hits": hits,
-                    "thumbs_up": a.get("thumbs_up", 0),
-                    "thumbs_down": a.get("thumbs_down", 0),
-                    "language": language,
-                    "source_url": source_url,
-                    "created_at": a.get("created_at"),
-                    "updated_at": updated_at,
-                    "folder_id": a.get("folder_id"),
-                    "category_id": a.get("category_id"),
-                    "agent_id": a.get("agent_id"),
-                    "has_attachments": len(attachments) > 0,
-                    "processed_attachments": len(processed_attachments) > 0,
-                    "image_attachments": (image_infos if image_infos else []),
-                    # 커스텀 필드는 JSON 문자열로 저장 (Qdrant 호환)
-                    "custom_fields": json.dumps(a.get("custom_fields", {}), ensure_ascii=False),
+                        "ticket_id": att.get("ticket_id"),
+                        "conversation_id": att.get("conversation_id")
+                    }
+                    attachment_meta.append(meta)  # 실제로 리스트에 추가
+            # Qdrant에 저장할 문서 구조 생성
+            doc = {
+                "id": doc_id,
+                "text": t.get("description_text") or t.get("description") or "",
+                "metadata": {
+                    **t,
+                    "attachments": attachment_meta
                 }
+            }
+            all_documents.append(doc)
 
-                # 메타데이터 값을 벡터 DB 호환 형식으로 변환
-                sanitized_metadata = sanitize_metadata(metadata)
+        logger.info("지식베이스 문서 처리 중...")
+        for a in articles:
+            doc_id = f"kb-{a.get('id')}"
+            doc = {
+                "id": doc_id,
+                "text": a.get("description_text") or a.get("description") or "",
+                "metadata": {**a}
+            }
+            all_documents.append(doc)
 
-                all_documents.append(
-                    {"id": doc_id, "text": doc_text, "metadata": sanitized_metadata}
-                )
-
+        # deleted_ids, all_documents 예외 처리 보완
         if not all_documents and deleted_ids:
-            logger.info("새 문서 추가 없이 삭제된 문서만 처리됨")
-            elapsed_time = time.time() - start_time
-            logger.info(
-                f"데이터 수집 완료. {len(deleted_ids)}개 문서 삭제됨 (소요 시간: {elapsed_time:.2f}초)"
-            )
-            return
+            logger.info("신규 문서는 없으나 삭제된 문서가 존재합니다. 삭제만 진행합니다.")
+            # 삭제 처리 로직이 있다면 여기에 추가
         elif not all_documents:
-            logger.info("처리할 새 문서가 없습니다.")
+            logger.info("신규 문서가 없습니다. 작업을 종료합니다.")
             return
 
         logger.info(f"총 {len(all_documents)}개 신규 문서 처리 중...")
@@ -846,6 +401,53 @@ async def update_status_mappings(collection_name: str = COLLECTION_NAME) -> None
     except Exception as e:
         logger.error(f"상태 매핑 정보 확인 중 오류 발생: {e}", exc_info=True)
         raise
+
+
+def verify_database_integrity() -> bool:
+    """
+    데이터베이스 무결성을 검증합니다.
+    이 함수는 Qdrant 벡터 데이터베이스의 상태를 확인하고
+    기본적인 무결성 검사를 수행합니다.
+    
+    Returns:
+        bool: 검증 성공 여부 (True: 정상, False: 오류 발견)
+    """
+    try:
+        logger.info("데이터베이스 무결성 검증 시작...")
+        
+        # 1. 컬렉션 존재 확인
+        if not vector_db.collection_exists():
+            logger.error("데이터베이스 컬렉션이 존재하지 않습니다.")
+            return False
+        
+        # 2. 문서 수 확인
+        total_count = vector_db.count()
+        logger.info(f"데이터베이스에 총 {total_count}개 문서가 있습니다.")
+        
+        if total_count == 0:
+            logger.warning("데이터베이스에 문서가 없습니다. 초기 상태이거나 문제가 있을 수 있습니다.")
+            # 빈 데이터베이스도 유효한 상태로 간주
+            return True
+        
+        # 3. 검색 테스트 (간단한 쿼리로 응답 확인)
+        DEFAULT_COMPANY_ID = "default"
+        dummy_embedding = embed_documents(["database verification test"])[0]
+        result = vector_db.search(
+            query_embedding=dummy_embedding,
+            top_k=1,
+            company_id=DEFAULT_COMPANY_ID
+        )
+        
+        if not result or "ids" not in result or len(result["ids"]) == 0:
+            logger.error("데이터베이스 검색 테스트 실패: 결과를 반환하지 않습니다.")
+            return False
+        
+        logger.info("데이터베이스 무결성 검증 완료: 정상 작동 중")
+        return True
+        
+    except Exception as e:
+        logger.error(f"데이터베이스 무결성 검증 중 오류 발생: {e}", exc_info=True)
+        return False
 
 
 if __name__ == "__main__":
