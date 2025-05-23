@@ -62,7 +62,7 @@ async def full_collection_workflow():
     
     try:
         # 시스템 리소스 체크 기능이 있다면 주기적으로 체크
-        resource_check_interval = 1000  # 1000개 티켓마다 체크
+        resource_check_interval = 100  # 100개 티켓마다 체크
         resource_check_func = check_system_resources if 'check_system_resources' in locals() else None
         
         # 1단계: 티켓 데이터 수집
@@ -141,7 +141,7 @@ async def full_collection_workflow():
 
 
 async def quick_test():
-    """빠른 테스트 (1000개 티켓만 수집, 후처리 및 Qdrant 저장까지 전체 워크플로우 실행)"""
+    """빠른 테스트 (100개 티켓만 수집, 후처리 및 Qdrant 저장까지 전체 워크플로우 실행)"""
     logger.info("=== 빠른 테스트 모드 ===")
     OUTPUT_DIR = str(Path(__file__).parent / "freshdesk_test_data")  # backend/freshdesk/freshdesk_test_data
     try:
@@ -150,7 +150,7 @@ async def quick_test():
         async with OptimizedFreshdeskFetcher(OUTPUT_DIR) as fetcher:
             stats = await fetcher.collect_all_tickets(
                 start_date="2024-01-01",
-                max_tickets=1000,
+                max_tickets=100,
                 include_conversations=False,
                 include_attachments=True
             )
@@ -215,7 +215,7 @@ if __name__ == "__main__":
     print("Freshdesk 대용량 티켓 수집기")
     print("=============================")
     print("1. 전체 수집 (무제한)")
-    print("2. 빠른 테스트 (1000건)")
+    print("2. 빠른 테스트 (100건)")
     print("3. 중단된 수집 재개")
     print("4. 종료")
     
