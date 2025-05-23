@@ -114,18 +114,21 @@ def get_cached_result(cache_key: str) -> Optional[Dict[str, Any]]:
 def save_to_cache(cache_key: str, result: Dict[str, Any]) -> None:
     """
     처리 결과를 캐시에 저장합니다.
+    (pre-signed URL은 저장하지 않고, id/메타데이터만 저장)
 
     Args:
         cache_key: 캐시 키
-        result: 저장할 결과
+        result: 저장할 결과 (id, name, content_type, size, updated_at 등 메타데이터 + 추출 텍스트)
     """
     try:
         cache_file = os.path.join(CACHE_DIR, f"{cache_key}.json")
-        # 추출된 텍스트와 메타데이터만 저장 (파일 콘텐츠 제외)
+        # 메타데이터만 저장 (URL 저장 금지)
         cache_data = {
             "id": result.get("id"),
             "name": result.get("name"),
             "content_type": result.get("content_type"),
+            "size": result.get("size"),
+            "updated_at": result.get("updated_at"),
             "extracted_text": result.get("extracted_text", ""),
             "processed": result.get("processed", False),
             "cached_at": datetime.now().isoformat(),
@@ -354,17 +357,27 @@ async def process_attachment_stream(
 ) -> Dict[str, Any]:
     """
     첨부파일을 스트리밍 방식으로 처리하여 콘텐츠를 추출합니다.
-
+    (pre-signed URL은 저장하지 않고, id/메타데이터만 반환)
+    
     Args:
         client: HTTP 클라이언트
         attachment: 첨부파일 정보
 
     Returns:
-        처리된 첨부파일 정보 (원본 메타데이터 + 추출된 텍스트)
+        처리된 첨부파일 정보 (id, name, content_type, size, updated_at 등 메타데이터 + 추출된 텍스트)
+        ※ pre-signed URL(attachment_url)은 저장하지 않음. 이미지는 표시 시점에 API로 최신 URL을 발급받아야 함.
     """
-    result = attachment.copy()
+    # 메타데이터만 추출
+    result = {
+        "id": attachment.get("id"),
+        "name": attachment.get("name"),
+        "content_type": attachment.get("content_type"),
+        "size": attachment.get("size"),
+        "updated_at": attachment.get("updated_at"),
+        # URL은 저장하지 않음
+    }
 
-    # 캐시 확인
+    # 캐시 확인 (캐시도 메타데이터만 저장)
     cache_key = get_cache_key(attachment)
     cached_result = get_cached_result(cache_key)
     if cached_result:
@@ -392,7 +405,7 @@ async def process_attachment_stream(
         result["processed"] = False
         return result
 
-    # URL 확인
+    # URL 확인 (실제 다운로드/처리에는 사용하지만, 저장은 하지 않음)
     url = attachment.get("attachment_url")
     if not url:
         logger.warning(f"첨부파일 URL이 없습니다: {attachment.get('name')}")
@@ -418,7 +431,7 @@ async def process_attachment_stream(
         result["extracted_text"] = extracted_text
         result["processed"] = True
 
-        # 결과 캐싱
+        # 결과 캐싱 (메타데이터만 저장)
         save_to_cache(cache_key, result)
 
         return result

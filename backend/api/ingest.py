@@ -459,9 +459,7 @@ async def ingest(
 
             # 첨부파일 정보 및 추출된 텍스트 추가
             processed_attachments = t.get("processed_attachments", [])
-            image_urls = []  # 이미지 URL 목록을 저장할 변수 추가
-
-            # 메타데이터 구성 - API 응답 구조에 맞게 수정
+            image_infos = []  # 이미지 메타데이터만 저장
             source_id = str(ticket_id)
 
             if processed_attachments:
@@ -474,47 +472,43 @@ async def ingest(
                             isinstance(extracted_text, dict)
                             and "text" in extracted_text
                         ):
-                            # 새로운 형식으로 저장된 경우 text 필드 사용
                             ticket_content.append(
                                 f"추출된 텍스트: {extracted_text['text']}"
                             )
                         else:
-                            # 기존 형식 그대로 사용
                             ticket_content.append(f"추출된 텍스트: {extracted_text}")
 
-                        # 이미지인 경우 URL 저장
-                        if att.get("content_type", "").startswith("image/") and att.get(
-                            "attachment_url"
-                        ):
-                            image_urls.append(
-                                {
-                                    "name": att.get("name", ""),
-                                    "url": att.get("attachment_url"),
-                                    "content_type": att.get("content_type", ""),
-                                    "source_type": "ticket",
-                                    "source_id": source_id,
-                                }
-                            )
+                        # 이미지인 경우 pre-signed URL이 아닌 메타데이터만 저장
+                        if att.get("content_type", "").startswith("image/"):
+                            image_infos.append({
+                                "id": att.get("id"),
+                                "name": att.get("name"),
+                                "content_type": att.get("content_type"),
+                                "size": att.get("size"),
+                                "updated_at": att.get("updated_at"),
+                                "source_type": "ticket",
+                                "source_id": source_id,
+                                # URL은 저장하지 않음. 프론트엔드는 표시 시점에 Freshdesk API로 최신 pre-signed URL을 발급받아야 함.
+                            })
 
-            # 대화 내역의 첨부파일도 이미지 URL 수집
+            # 대화 내역의 첨부파일도 이미지 메타데이터만 수집
             conversations = t.get("conversations", [])
             if conversations:
                 for conv in conversations:
                     attachments = conv.get("attachments", [])
                     for att in attachments:
-                        if att.get("content_type", "").startswith("image/") and att.get(
-                            "attachment_url"
-                        ):
-                            image_urls.append(
-                                {
-                                    "name": att.get("name", ""),
-                                    "url": att.get("attachment_url"),
-                                    "content_type": att.get("content_type", ""),
-                                    "source_type": "conversation",
-                                    "source_id": source_id,
-                                    "conversation_id": conv.get("id", ""),
-                                }
-                            )
+                        if att.get("content_type", "").startswith("image/"):
+                            image_infos.append({
+                                "id": att.get("id"),
+                                "name": att.get("name"),
+                                "content_type": att.get("content_type"),
+                                "size": att.get("size"),
+                                "updated_at": att.get("updated_at"),
+                                "source_type": "conversation",
+                                "source_id": source_id,
+                                "conversation_id": conv.get("id", ""),
+                                # URL은 저장하지 않음. 프론트엔드는 표시 시점에 Freshdesk API로 최신 pre-signed URL을 발급받아야 함.
+                            })
 
             doc_text = "\n".join(ticket_content)
 
@@ -546,24 +540,22 @@ async def ingest(
                 ):
                     tags.append(custom_fields["category"])
 
-                # 티켓 메타데이터 구성
+                # 티켓 메타데이터 구성 (기본 필드 + 커스텀 필드 전체 포함)
                 metadata = {
                     "type": "ticket",
                     "source_id": source_id,
-                    "updated_at": updated_at,
-                    "status": t.get("status"),  # 상태 값을 원본 숫자 코드로 저장
-                    "priority": t.get(
-                        "priority", 1
-                    ),  # 우선순위 (1-4, 낮을수록 높은 우선순위)
+                    "id": t.get("id"),
+                    "subject": t.get("subject"),
+                    "description": t.get("description"),
+                    "description_text": t.get("description_text"),
+                    "status": t.get("status"),
+                    "priority": t.get("priority", 1),
                     "tags": tags,
-                    "product": t.get(
-                        "product_id", ""
-                    ),  # API 응답에 product_id가 있을 수 있음
-                    "language": t.get(
-                        "language", "ko"
-                    ),  # API 응답에 language가 없을 수 있음
+                    "product": t.get("product_id", ""),
+                    "language": t.get("language", "ko"),
                     "source_url": source_url,
                     "created_at": t.get("created_at"),
+                    "updated_at": updated_at,
                     "due_by": t.get("due_by"),
                     "fr_due_by": t.get("fr_due_by"),
                     "is_escalated": t.get("is_escalated", False),
@@ -572,13 +564,14 @@ async def ingest(
                     "requester_id": t.get("requester_id"),
                     "responder_id": t.get("responder_id"),
                     "group_id": t.get("group_id"),
-                    "source": t.get("source"),  # 티켓 출처 (이메일, 포털, 전화 등)
+                    "source": t.get("source"),
                     "has_attachments": len(all_attachments) > 0,
                     "has_conversations": len(conversations) > 0,
                     "processed_attachments": len(processed_attachments) > 0,
-                    "image_attachments": (
-                        image_urls if image_urls else []
-                    ),  # 이미지 URL 정보 추가
+                    "image_attachments": (image_infos if image_infos else []),
+                    # 커스텀 필드는 JSON 문자열로 저장 (Qdrant 호환)
+                    "custom_fields": json.dumps(t.get("custom_fields", {}), ensure_ascii=False),
+                    # description(HTML) 내 인라인 이미지 id 등도 필요시 별도 필드로 저장 가능
                 }
 
                 # 메타데이터 값을 벡터 DB 호환 형식으로 변환
@@ -640,6 +633,21 @@ async def ingest(
                 a["processed_attachments"] = processed_attachments
             else:
                 a["processed_attachments"] = []
+
+            # 이미지 첨부파일 메타데이터만 저장 (FAQ도 동일 정책)
+            image_infos = []
+            for att in a["processed_attachments"]:
+                if att.get("content_type", "").startswith("image/"):
+                    image_infos.append({
+                        "id": att.get("id"),
+                        "name": att.get("name"),
+                        "content_type": att.get("content_type"),
+                        "size": att.get("size"),
+                        "updated_at": att.get("updated_at"),
+                        "source_type": "kb",
+                        "source_id": article_id,
+                        # URL은 저장하지 않음. 프론트엔드는 표시 시점에 Freshdesk API로 최신 pre-signed URL을 발급받아야 함.
+                    })
 
             # 문서 내용 준비
             article_content = []
@@ -707,8 +715,11 @@ async def ingest(
                 metadata = {
                     "type": "kb",
                     "source_id": source_id,
-                    "updated_at": updated_at,
-                    "status": a.get("status"),  # 상태 값을 원본 숫자 코드로 저장
+                    "id": a.get("id"),
+                    "title": a.get("title"),
+                    "description": a.get("description"),
+                    "description_text": a.get("description_text"),
+                    "status": a.get("status"),
                     "tags": tags,
                     "hits": hits,
                     "thumbs_up": a.get("thumbs_up", 0),
@@ -716,11 +727,15 @@ async def ingest(
                     "language": language,
                     "source_url": source_url,
                     "created_at": a.get("created_at"),
+                    "updated_at": updated_at,
                     "folder_id": a.get("folder_id"),
                     "category_id": a.get("category_id"),
                     "agent_id": a.get("agent_id"),
                     "has_attachments": len(attachments) > 0,
                     "processed_attachments": len(processed_attachments) > 0,
+                    "image_attachments": (image_infos if image_infos else []),
+                    # 커스텀 필드는 JSON 문자열로 저장 (Qdrant 호환)
+                    "custom_fields": json.dumps(a.get("custom_fields", {}), ensure_ascii=False),
                 }
 
                 # 메타데이터 값을 벡터 DB 호환 형식으로 변환
