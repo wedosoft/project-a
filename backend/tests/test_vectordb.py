@@ -17,11 +17,11 @@ import random
 from hashlib import md5
 
 # 현재 디렉토리를 모듈 검색 경로에 추가
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # 벡터 DB 모듈 임포트
-import vectordb
-from vectordb import QdrantAdapter
+from core import vectordb
+from core.vectordb import QdrantAdapter
 
 # 벡터 DB 초기화
 vector_db = vectordb.vector_db

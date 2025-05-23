@@ -30,8 +30,8 @@ from qdrant_client.models import VectorParams, Distance
 logger = logging.getLogger(__name__)
 
 # 환경 변수
-QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
-QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
+QDRANT_URL = os.getenv("QDRANT_URL")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 VECTOR_SIZE = 1536  # OpenAI/Anthropic 임베딩 차원 수, 모델에 따라 조정 필요
 COLLECTION_NAME = "documents"  # 기본 컬렉션명
 FAQ_COLLECTION_NAME = "faqs" # FAQ 컬렉션명 추가
@@ -74,7 +74,7 @@ class QdrantAdapter(VectorDBInterface):
     def __init__(self, collection_name: str = COLLECTION_NAME):
         """Qdrant 클라이언트 초기화"""
         self.collection_name = collection_name
-        self.client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+        self.client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
         self._ensure_collection_exists() # 기본 문서 컬렉션 확인
         self._ensure_faq_collection_exists() # FAQ 컬렉션 확인
 

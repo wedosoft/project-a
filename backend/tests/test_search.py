@@ -11,8 +11,8 @@ import logging
 logging.basicConfig(level=logging.INFO)
 
 # 현재 디렉토리를 모듈 검색 경로에 추가
-sys.path.insert(0, '.')
-from vectordb import vector_db
+sys.path.insert(0, '..')
+from core.vectordb import vector_db
 
 # 랜덤 임베딩 생성
 dummy_embedding = [random.random() for _ in range(1536)]

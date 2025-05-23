@@ -28,15 +28,17 @@ from cachetools.keys import hashkey
 from functools import partial
 import logging
 import prometheus_client
-from prometheus_client import Counter, Histogram # Gauge, start_http_server 제거
-from datetime import datetime # 추가
-import json # json 모듈을 최상단으로 이동
+from prometheus_client import Counter, Histogram
+from datetime import datetime
+import json
 
-from embedder import embed_documents
-from retriever import retrieve_top_k_docs, retrieve_faqs # retrieve_faqs 추가
-from llm_router import generate_text, LLMResponse
-from context_builder import build_optimized_context
-from vectordb import vector_db # vector_db 임포트 추가
+from core.embedder import embed_documents
+from core.retriever import retrieve_top_k_docs, retrieve_faqs
+from core.llm_router import generate_text, LLMResponse
+from core.context_builder import build_optimized_context
+from core.vectordb import vector_db
+from freshdesk import fetcher
+from core import llm_router, context_builder, retriever
 
 # Prometheus 메트릭 정의
 # LLM 라우터에서 정의된 메트릭을 여기서도 사용할 수 있도록 공유하거나,
@@ -768,30 +770,9 @@ async def query_blocks_endpoint(req: QueryRequest, company_id: str = Depends(get
     return BlockBasedResponse(blocks=all_blocks, context_docs=structured_docs, metadata=metadata)
 
 
-# if __name__ == "__main__":
-#     # 개발 환경에서 Prometheus 클라이언트 서버 시작 (선택 사항)
-#     # start_http_server(8001) # Prometheus가 메트릭을 수집할 포트
-#     # logger.info("Prometheus 메트릭 서버가 8001 포트에서 시작되었습니다.")
-#     import uvicorn
-#     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
-
-from typing import List, Optional, Dict, Any # Ensure these are present
-from pydantic import BaseModel, Field # Ensure these are present
-# from fastapi import Depends # Depends is used in endpoints, so FastAPI related imports should already be there.
-
-# --- 모듈 임포트 ---
-from cachetools import TTLCache
-import fetcher
-import llm_router
-import context_builder
-import retriever
-from fastapi import HTTPException # 오류 처리를 위해 추가
-
-# --- Pydantic Models for New Endpoints ---
-
+# --- 추가: 티켓 요약, 유사 티켓, 관련 문서용 모델 및 엔드포인트 복구 ---
+# Pydantic Models for New Endpoints
 class TicketSummaryContent(BaseModel):
-    # 프론트엔드 가이드라인에 따른 필드: 고객 요약, 요청사항, 긴급도
-    # 프로그램 내부의 텍스트와 주석은 항상 한글로 작성합니다.
     customer_summary: Optional[str] = Field(default=None, description="고객 관련 주요 내용 요약")
     request_summary: Optional[str] = Field(default=None, description="고객의 주요 요청 사항 요약")
     urgency_level: Optional[str] = Field(default=None, description="티켓의 긴급도 (예: 높음, 보통, 낮음)")
@@ -799,14 +780,11 @@ class TicketSummaryContent(BaseModel):
 class InitResponse(BaseModel):
     ticket_id: str = Field(description="처리 대상 티켓의 ID")
     ticket_summary: TicketSummaryContent = Field(description="티켓 내용에 대한 AI 생성 요약")
-    # 필요시 여기에 다른 초기 컨텍스트 데이터를 추가할 수 있습니다. (예: 몇 가지 주요 관련 항목)
 
 class SimilarTicketItem(BaseModel):
     id: str = Field(description="유사 티켓의 ID")
     title: Optional[str] = Field(default=None, description="유사 티켓의 제목")
     summary: Optional[str] = Field(default=None, description="유사 티켓의 내용 요약")
-    # score: Optional[float] = Field(default=None, description="유사도 점수") # 추후 필요시 추가 고려
-    # source_type: str = Field(default="ticket", description="정보 출처 유형 (항상 'ticket')")
 
 class SimilarTicketsResponse(BaseModel):
     ticket_id: str = Field(description="원본 티켓의 ID")
@@ -818,249 +796,93 @@ class RelatedDocumentItem(BaseModel):
     summary: Optional[str] = Field(default=None, description="관련 문서의 내용 요약")
     url: Optional[str] = Field(default=None, description="관련 문서의 URL (해당하는 경우)")
     source_type: Optional[str] = Field(default=None, description="문서 출처 유형 (예: 'kb', 'faq')")
-    # score: Optional[float] = Field(default=None, description="관련도 점수") # 추후 필요시 추가 고려
 
 class RelatedDocsResponse(BaseModel):
     ticket_id: str = Field(description="원본 티켓의 ID")
     related_documents: List[RelatedDocumentItem] = Field(description="검색된 관련 문서 목록")
 
-# --- API 엔드포인트 구현 ---
-
-# 캐시 설정: 최대 100개 아이템, 1시간 TTL
-# 백엔드 가이드라인: "에이전트용 요약 (1회만 생성)" -> 캐싱 중요
+# 캐시 설정: 티켓 요약 캐시 (최대 100개, 1시간 TTL)
 ticket_summary_cache = TTLCache(maxsize=100, ttl=3600)
 
 @app.get("/init/{ticket_id}", response_model=InitResponse)
 async def get_initial_context(ticket_id: str):
-    """
-    티켓 ID를 기반으로 초기 컨텍스트(티켓 요약 등)를 제공합니다.
-    요약 정보는 캐시되며, 캐시에 없는 경우 LLM을 통해 생성합니다.
-    """
     cached_summary_content = ticket_summary_cache.get(ticket_id)
     if cached_summary_content:
         logger.info(f"캐시에서 티켓 {ticket_id}의 요약 정보를 반환합니다.")
         return InitResponse(ticket_id=ticket_id, ticket_summary=cached_summary_content)
-
     logger.info(f"티켓 {ticket_id}의 요약 정보를 생성합니다.")
     try:
-        # 1. fetcher를 사용하여 티켓 상세 정보 가져오기
-        # fetch_ticket_details 함수가 ticket_id 외 다른 파라미터(예: Freshdesk 클라이언트)를 요구할 수 있음
-        # 현재는 ticket_id만 넘기는 것으로 가정. 실제 fetcher.py 구현에 따라 수정 필요.
-        ticket_data = await fetcher.fetch_ticket_details(ticket_id) # fetcher가 async일 경우 await 사용
+        ticket_data = await fetcher.fetch_ticket_details(ticket_id)
         if not ticket_data:
             raise HTTPException(status_code=404, detail=f"티켓 {ticket_id}를 찾을 수 없습니다.")
-
-        # 2. context_builder를 사용하여 LLM 요약을 위한 컨텍스트 준비 (선택적)
-        #    여기서는 티켓 전체 내용을 요약한다고 가정하고, 별도 컨텍스트 빌더 호출은 생략하거나,
-        #    llm_router 내부에서 처리한다고 가정합니다.
-        #    필요시: context_for_summary = context_builder.build_summary_context(ticket_data)
-
-        # 3. llm_router를 사용하여 티켓 내용 요약
-        #    llm_router.generate_ticket_summary가 ticket_data 객체 또는 특정 필드를 받을 것으로 예상
-        #    반환 값은 TicketSummaryContent 모델의 필드와 유사한 딕셔너리 또는 객체로 가정
-        summary_dict = await llm_router.generate_ticket_summary(ticket_data) # llm_router가 async일 경우 await 사용
-
-        # 4. 요약 결과를 TicketSummaryContent 모델에 맞게 가공
-        #    summary_dict가 이미 TicketSummaryContent와 유사한 구조를 가진다고 가정
-        #    예시: summary_dict = {"customer_summary": "...", "request_summary": "...", "urgency_level": "..."}
+        summary_dict = await llm_router.generate_ticket_summary(ticket_data)
         ticket_summary = TicketSummaryContent(**summary_dict)
-
-        # 5. 결과를 캐시에 저장
         ticket_summary_cache[ticket_id] = ticket_summary
         logger.info(f"티켓 {ticket_id}의 요약 정보를 생성하고 캐시에 저장했습니다.")
-
         return InitResponse(ticket_id=ticket_id, ticket_summary=ticket_summary)
-
     except HTTPException as http_exc:
-        # HTTPException은 그대로 전달
         raise http_exc
     except Exception as e:
         logger.error(f"티켓 {ticket_id} 초기 컨텍스트 생성 중 오류 발생: {e}", exc_info=True)
-        # 실제 프로덕션에서는 에러 응답을 더 상세히 정의해야 할 수 있습니다.
         raise HTTPException(status_code=500, detail=f"티켓 {ticket_id} 처리 중 내부 서버 오류 발생")
-
 
 @app.get("/similar_tickets/{ticket_id}", response_model=SimilarTicketsResponse)
 async def get_similar_tickets(ticket_id: str):
-    """
-    주어진 티켓 ID와 유사한 티켓 목록을 반환합니다.
-    """
     try:
-        # 1. 현재 티켓 상세 정보 가져오기
-        current_ticket_data = await fetcher.fetch_ticket_details(int(ticket_id))
+        current_ticket_data = await fetcher.fetch_ticket_details(ticket_id)
         if not current_ticket_data:
             raise HTTPException(status_code=404, detail=f"티켓 ID {ticket_id}를 찾을 수 없습니다.")
-
-        # 2. 검색 쿼리 생성 (예: 제목 + 설명)
         query_text = f"{current_ticket_data.get('subject', '')} {current_ticket_data.get('description_text', '')}"
         if not query_text.strip():
             logger.warning(f"티켓 {ticket_id}에 대한 검색 쿼리 텍스트가 비어있습니다.")
             return SimilarTicketsResponse(ticket_id=ticket_id, similar_tickets=[])
-
-        # 3. 쿼리 임베딩 생성 (llm_router에 해당 기능이 있다고 가정)
-        # 실제로는 llm_router.generate_embedding 같은 함수를 호출해야 합니다.
-        # 임시로 llm_router.generate_text를 사용하여 유사한 텍스트를 생성하고, 
-        # 이를 retriever가 처리할 수 있는 형태로 변환해야 하지만,
-        # retriever.retrieve_top_k_docs는 query_embedding을 직접 받습니다.
-        # 따라서, 임베딩 생성 기능이 llm_router에 추가되어야 합니다.
-        # 여기서는 임베딩 생성 함수가 있다고 가정하고 진행합니다.
-        # 예시: query_embedding = await llm_router.generate_embedding(query_text)
-        
-        # 임베딩 기능이 아직 없으므로, 임시로 retriever가 텍스트를 직접 처리한다고 가정하거나,
-        # 또는 이 기능을 우회하고 더미 데이터를 반환합니다.
-        # 여기서는 retriever.py에 텍스트 기반 검색 기능이 없으므로,
-        # 임베딩을 생성해야 합니다. llm_router.py에 임베딩 함수를 추가해야 합니다.
-        # 지금은 임시로 빈 결과를 반환하거나, 더미 임베딩을 사용합니다.
-        
-        # 임베딩 생성 함수 호출 (llm_router.py에 추가 필요)
-        # from .llm_router import generate_embedding # 이 함수가 구현되어야 함
-        # query_embedding = await generate_embedding(query_text)
-        # 데모를 위해 임시 임베딩 (실제로는 모델을 통해 생성)
-        # 실제 구현에서는 llm_router.py에 임베딩 생성 함수를 만들고 호출해야 합니다.
-        try:
-            # llm_router에 임베딩 생성 함수가 있다고 가정합니다.
-            # from .llm_router import get_text_embedding # 예시 함수명
-            # query_embedding = await get_text_embedding(query_text)
-            # 임시 코드: 실제 임베딩 함수가 없으므로, 이 부분은 개념 증명용입니다.
-            # retriever.py는 query_embedding을 List[float]으로 기대합니다.
-            # 간단한 텍스트 기반 검색을 위해 retriever를 수정하거나, 여기서 임베딩을 생성해야 합니다.
-            # 지금은 retriever.py가 query_embedding을 받는다는 전제하에,
-            # 임베딩 생성 로직이 필요함을 명시하고 넘어갑니다.
-            # 이 예제에서는 임베딩 생성 로직을 생략하고, retriever가 처리할 수 있는
-            # 더미 데이터를 사용하거나, retriever의 기능을 확장해야 합니다.
-
-            # 임시: 실제 임베딩 생성 로직 필요
-            # 예시: query_embedding = await llm_router.get_embedding(query_text, model="text-embedding-ada-002")
-            # 지금은 retriever.py의 retrieve_top_k_docs가 query_embedding을 받으므로,
-            # 이 부분을 실제 임베딩 생성 코드로 대체해야 합니다.
-            # 임시로, retriever가 텍스트를 직접 처리할 수 있도록 수정하거나,
-            # llm_router에 임베딩 생성 함수를 추가해야 합니다.
-
-            # 현재 retriever.py는 임베딩 벡터를 직접 받습니다.
-            # llm_router.py에 임베딩 생성 함수를 추가하고 여기서 호출해야 합니다.
-            # 예: from .llm_router import generate_embedding
-            # query_embedding = await generate_embedding(text_for_embedding=query_text, model_type="ticket_similarity")
-
-            # 임시로 더미 임베딩 사용 (실제로는 LLM 통해 생성)
-            # 실제 프로젝트에서는 이 부분을 llm_router.generate_embedding(query_text) 등으로 대체해야 합니다.
-            query_embedding = [0.1] * 768 # 예시 임베딩 벡터 (차원 수는 모델에 따라 다름)
-            logger.info(f"티켓 {ticket_id} 유사 티켓 검색을 위한 임베딩 생성 (더미)")
-
-        except AttributeError as e:
-            logger.error(f"llm_router에 임베딩 생성 함수가 필요합니다: {e}")
-            raise HTTPException(status_code=500, detail="내부 서버 오류: 임베딩 생성 기능이 설정되지 않았습니다.")
-
-
-        # 4. 유사 티켓 검색
-        # retriever.py의 retrieve_top_k_docs는 company_id를 필수로 받을 수 있습니다.
-        # 현재 DEFAULT_COMPANY_ID로 설정되어 있으므로, 이 값을 사용하여 검색합니다.
-        similar_tickets_result = retrieve_top_k_docs(
-            query_embedding=query_embedding, 
-            top_k=5, 
-            doc_type="ticket"  # 티켓 문서만 검색
-        )
-        
+        # 실제 구현에서는 llm_router.generate_embedding 등으로 임베딩 생성 필요
+        query_embedding = [0.1] * 768
+        logger.info(f"티켓 {ticket_id} 유사 티켓 검색을 위한 임베딩 생성 (더미)")
+        similar_tickets_result = retriever.retrieve_top_k_docs(query_embedding=query_embedding, top_k=5, doc_type="ticket")
         similar_tickets_list = []
         if similar_tickets_result and similar_tickets_result.get("ids"):
             for i, doc_id in enumerate(similar_tickets_result["ids"]):
                 metadata = similar_tickets_result["metadatas"][i] if i < len(similar_tickets_result.get("metadatas", [])) else {}
-                # 제목은 'title' 또는 'subject' 필드에서 가져옵니다.
                 title = metadata.get("title", metadata.get("subject", f"유사 티켓 {doc_id}"))
-                # URL 또는 링크 정보가 메타데이터에 포함되어야 함
-                # 예: link = metadata.get("url") 또는 metadata.get("link")
-                # 지금은 임시로 ID 기반 링크 생성
-                link = metadata.get("url", f"/tickets/{doc_id}") 
-                # 문서 내용의 일부를 요약으로 사용
                 summary_text = similar_tickets_result["documents"][i] if i < len(similar_tickets_result.get("documents", [])) else "요약 정보 없음"
                 summary = summary_text[:150] + "..." if len(summary_text) > 150 else summary_text
-                score = similar_tickets_result["distances"][i] if i < len(similar_tickets_result.get("distances", [])) else 0.0
-                
-                similar_tickets_list.append(
-                    SimilarTicketItem(
-                        id=str(doc_id),
-                        title=title,
-                        summary=summary, # 티켓 요약 또는 내용 일부
-                        score=score # 유사도 점수
-                    )
-                )
-        
+                similar_tickets_list.append(SimilarTicketItem(id=str(doc_id), title=title, summary=summary))
         logger.info(f"티켓 {ticket_id}에 대한 유사 티켓 {len(similar_tickets_list)}건 검색 완료")
         return SimilarTicketsResponse(ticket_id=ticket_id, similar_tickets=similar_tickets_list)
-
     except HTTPException as e:
-        raise e # HTTPException은 그대로 전달
+        raise e
     except Exception as e:
         logger.error(f"유사 티켓 검색 중 오류 발생 (티켓 ID: {ticket_id}): {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"유사 티켓 검색 중 내부 서버 오류 발생: {str(e)}")
 
-
 @app.get("/related_docs/{ticket_id}", response_model=RelatedDocsResponse)
 async def get_related_documents(ticket_id: str):
-    """
-    주어진 티켓 ID와 관련된 지식베이스 문서 목록을 반환합니다.
-    """
     try:
-        # 1. 현재 티켓 상세 정보 가져오기
-        current_ticket_data = await fetcher.fetch_ticket_details(int(ticket_id))
+        current_ticket_data = await fetcher.fetch_ticket_details(ticket_id)
         if not current_ticket_data:
             raise HTTPException(status_code=404, detail=f"티켓 ID {ticket_id}를 찾을 수 없습니다.")
-
-        # 2. 검색 쿼리 생성 (예: 티켓 제목 + 설명)
         query_text = f"{current_ticket_data.get('subject', '')} {current_ticket_data.get('description_text', '')}"
         if not query_text.strip():
-            logger.warning(f"티켓 {ticket_id}에 대한 관련 문서 검색 쿼리가 비어있습니다.")
+            logger.warning(f"티켓 {ticket_id}에 대한 검색 쿼리 텍스트가 비어있습니다.")
             return RelatedDocsResponse(ticket_id=ticket_id, related_documents=[])
-
-        # 3. 쿼리 임베딩 생성 (llm_router에 실제 구현 필요)
-        # from .llm_router import generate_embedding # 이 함수가 구현되어야 함
-        # query_embedding = await generate_embedding(query_text)
-        # 임시로 고정된 더미 임베딩 사용 (실제로는 모델을 통해 생성)
-        query_embedding = [0.1] * 768 # 예시 임베딩 벡터 (차원 수는 모델에 따라 다름)
+        query_embedding = [0.1] * 768
         logger.info(f"티켓 {ticket_id} 관련 문서 검색을 위한 임베딩 생성 (더미)")
-
-        # 4. 관련 문서 검색 (KB 문서 대상)
-        # retriever.py의 retrieve_top_k_docs는 company_id를 필수로 받을 수 있습니다.
-        # 현재 DEFAULT_COMPANY_ID로 설정되어 있으므로, 이 값을 사용하여 검색합니다.
-        related_docs_result = retriever.retrieve_top_k_docs(
-            query_embedding=query_embedding, 
-            top_k=5, 
-            doc_type="kb"  # 지식베이스(KB) 문서만 검색
-        )
-        
-        related_documents_list = []
+        related_docs_result = retriever.retrieve_top_k_docs(query_embedding=query_embedding, top_k=5, doc_type="kb")
+        related_docs_list = []
         if related_docs_result and related_docs_result.get("ids"):
             for i, doc_id in enumerate(related_docs_result["ids"]):
                 metadata = related_docs_result["metadatas"][i] if i < len(related_docs_result.get("metadatas", [])) else {}
-                # KB 문서의 경우, 제목은 보통 'title' 또는 'subject' 필드에 있을 수 있음
-                # Freshdesk API 응답을 확인하여 정확한 필드명 사용 필요
-                # 여기서는 'title'을 우선 사용하고, 없으면 'name'을 사용
-                title = metadata.get("title", metadata.get("name", f"관련 문서 {doc_id}"))
-                # KB 문서의 URL 또는 링크 정보가 메타데이터에 포함되어야 함
-                # 예: link = metadata.get("url") 또는 metadata.get("link")
-                # 지금은 임시로 ID 기반 링크 생성
-                link = metadata.get("url", f"/kb/articles/{doc_id}") 
-                # 문서 내용의 일부를 요약으로 사용
-                # retriever 결과에 문서 내용(text)이 포함되어야 함
-                # 현재 retriever.py의 retrieve_top_k_docs는 "documents" 키로 문서 텍스트 목록을 반환
+                title = metadata.get("title", f"관련 문서 {doc_id}")
+                url = metadata.get("url", None)
                 summary_text = related_docs_result["documents"][i] if i < len(related_docs_result.get("documents", [])) else "요약 정보 없음"
                 summary = summary_text[:150] + "..." if len(summary_text) > 150 else summary_text
-                score = related_docs_result["distances"][i] if i < len(related_docs_result.get("distances", [])) else 0.0
-                
-                related_documents_list.append(
-                    RelatedDocumentItem(
-                        id=str(doc_id),
-                        title=title,
-                        link=link, # 실제 문서 링크
-                        summary=summary, # 문서 요약 또는 내용 일부
-                        score=score # 유사도 점수
-                    )
-                )
-        
-        logger.info(f"티켓 {ticket_id}에 대한 관련 문서 {len(related_documents_list)}건 검색 완료")
-        return RelatedDocsResponse(ticket_id=ticket_id, related_documents=related_documents_list)
-
+                source_type = metadata.get("source_type", "kb")
+                related_docs_list.append(RelatedDocumentItem(id=str(doc_id), title=title, summary=summary, url=url, source_type=source_type))
+        logger.info(f"티켓 {ticket_id}에 대한 관련 문서 {len(related_docs_list)}건 검색 완료")
+        return RelatedDocsResponse(ticket_id=ticket_id, related_documents=related_docs_list)
     except HTTPException as e:
-        raise e # HTTPException은 그대로 전달
+        raise e
     except Exception as e:
         logger.error(f"관련 문서 검색 중 오류 발생 (티켓 ID: {ticket_id}): {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"관련 문서 검색 중 내부 서버 오류 발생: {str(e)}")

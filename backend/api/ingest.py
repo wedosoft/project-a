@@ -15,10 +15,10 @@ import shutil
 import os
 import json
 from datetime import datetime
-from fetcher import fetch_tickets, fetch_kb_articles, FRESHDESK_DOMAIN
-from embedder import embed_documents, process_documents
-from attachment_processor import process_attachments as process_attachment_files
-from vectordb import vector_db
+from freshdesk.fetcher import fetch_tickets, fetch_kb_articles, FRESHDESK_DOMAIN
+from core.embedder import embed_documents, process_documents
+from data.attachment_processor import process_attachments as process_attachment_files
+from core.vectordb import vector_db
 from typing import Dict, Any, Union
 
 # 로깅 설정

@@ -9,7 +9,7 @@
 
 import logging
 from typing import List, Dict, Any, Optional
-from vectordb import vector_db
+from core.vectordb import vector_db
 
 # 로깅 설정
 logger = logging.getLogger(__name__)
