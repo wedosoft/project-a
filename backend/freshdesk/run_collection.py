@@ -10,11 +10,16 @@ import sys
 from pathlib import Path
 from datetime import datetime
 
-# 현재 디렉토리를 Python 경로에 추가
+# backend 루트 경로를 sys.path에 추가
+BACKEND_ROOT = str(Path(__file__).parent.parent)
+if BACKEND_ROOT not in sys.path:
+    sys.path.insert(0, BACKEND_ROOT)
+
+# 현재 디렉토리를 Python 경로에 추가 (필요시)
 sys.path.append(str(Path(__file__).parent))
 
-from optimized_fetcher import OptimizedFreshdeskFetcher
-from data_processor import DataProcessor, process_collected_data
+from freshdesk.optimized_fetcher import OptimizedFreshdeskFetcher
+from data.data_processor import process_collected_data
 
 # 로깅 설정
 logging.basicConfig(
@@ -33,7 +38,7 @@ async def full_collection_workflow():
     """전체 수집 워크플로우"""
     
     # 설정
-    OUTPUT_DIR = "freshdesk_full_data"  # 전체 데이터 수집용 디렉토리
+    OUTPUT_DIR = str(Path(__file__).parent.parent / "freshdesk_full_data")  # backend/freshdesk_full_data
     START_DATE = "2015-01-01"  # 가능한 가장 오래된 날짜부터 시작
     MAX_TICKETS = None  # 무제한 수집 (None = 제한 없음)
     INCLUDE_CONVERSATIONS = True  # 대화내역 포함 여부 (시간 2배 증가)
@@ -93,8 +98,26 @@ async def full_collection_workflow():
         # 2단계: 데이터 후처리
         logger.info("\n2단계: 데이터 후처리 시작")
         await process_collected_data(OUTPUT_DIR)
-        
-        # 3단계: 완료 리포트
+
+        # 3단계: 임베딩 및 Qdrant 저장
+        logger.info("\n3단계: 임베딩 및 Qdrant 저장 시작 (ingest.py main 함수 호출)")
+        try:
+            # ingest.py의 main 함수 동기/비동기 모두 지원
+            from api import ingest
+            if hasattr(ingest, 'main'):
+                main_func = ingest.main
+                if asyncio.iscoroutinefunction(main_func):
+                    await main_func(OUTPUT_DIR)
+                else:
+                    main_func(OUTPUT_DIR)
+                logger.info("임베딩 및 Qdrant 저장 완료")
+            else:
+                logger.error("ingest.py에 main 함수가 없습니다. 수동으로 확인하세요.")
+        except Exception as e:
+            logger.error(f"ingest.py 실행 중 오류 발생: {e}")
+            logger.error("임베딩 및 Qdrant 저장 단계에서 문제가 발생했습니다. 로그를 확인하세요.")
+
+        # 4단계: 완료 리포트
         end_time = datetime.now()
         duration = end_time - start_time
         
@@ -118,18 +141,49 @@ async def full_collection_workflow():
 
 
 async def quick_test():
-    """빠른 테스트 (100개 티켓만 수집)"""
+    """빠른 테스트 (1000개 티켓만 수집, 후처리 및 Qdrant 저장까지 전체 워크플로우 실행)"""
     logger.info("=== 빠른 테스트 모드 ===")
-    
-    async with OptimizedFreshdeskFetcher("freshdesk_test_data") as fetcher:
-        stats = await fetcher.collect_all_tickets(
-            start_date="2024-01-01",
-            max_tickets=100,
-            include_conversations=False,
-            include_attachments=False
-        )
-    
-    logger.info(f"테스트 완료: {stats}")
+    OUTPUT_DIR = str(Path(__file__).parent / "freshdesk_test_data")  # backend/freshdesk/freshdesk_test_data
+    try:
+        # 1단계: 티켓 데이터 수집
+        logger.info("\n1단계: 티켓 데이터 수집 시작 (테스트)")
+        async with OptimizedFreshdeskFetcher(OUTPUT_DIR) as fetcher:
+            stats = await fetcher.collect_all_tickets(
+                start_date="2024-01-01",
+                max_tickets=1000,
+                include_conversations=False,
+                include_attachments=True
+            )
+        logger.info(f"수집 완료: {stats}")
+
+        # 2단계: 데이터 후처리
+        logger.info("\n2단계: 데이터 후처리 시작 (테스트)")
+        await process_collected_data(OUTPUT_DIR)
+
+        # 3단계: 임베딩 및 Qdrant 저장
+        logger.info("\n3단계: 임베딩 및 Qdrant 저장 시작 (ingest.py main 함수 호출, 테스트)")
+        try:
+            from api import ingest
+            if hasattr(ingest, 'main'):
+                main_func = ingest.main
+                if asyncio.iscoroutinefunction(main_func):
+                    await main_func(OUTPUT_DIR)
+                else:
+                    main_func(OUTPUT_DIR)
+                logger.info("임베딩 및 Qdrant 저장 완료 (테스트)")
+            else:
+                logger.error("ingest.py에 main 함수가 없습니다. 수동으로 확인하세요.")
+        except Exception as e:
+            logger.error(f"ingest.py 실행 중 오류 발생: {e}")
+            logger.error("임베딩 및 Qdrant 저장 단계에서 문제가 발생했습니다. 로그를 확인하세요.")
+
+        logger.info("\n=== 빠른 테스트 전체 완료 ===")
+        logger.info(f"수집된 티켓 수: {stats['total_tickets_collected']:,}개 (테스트)")
+        logger.info(f"생성된 청크 수: {stats['chunks_created']}개 (테스트)")
+        logger.info(f"출력 파일: {OUTPUT_DIR}/all_tickets.json, {OUTPUT_DIR}/tickets_export.csv")
+    except Exception as e:
+        logger.error(f"빠른 테스트 중 오류 발생: {e}")
+        raise
 
 
 async def resume_collection():
@@ -161,7 +215,7 @@ if __name__ == "__main__":
     print("Freshdesk 대용량 티켓 수집기")
     print("=============================")
     print("1. 전체 수집 (무제한)")
-    print("2. 빠른 테스트 (100건)")
+    print("2. 빠른 테스트 (1000건)")
     print("3. 중단된 수집 재개")
     print("4. 종료")
     

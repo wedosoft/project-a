@@ -180,7 +180,7 @@ async def fetch_tickets() -> List[Dict[str, Any]]:
     async with httpx.AsyncClient() as client:
         # 먼저 총 티켓 수를 확인
         try:
-            params = {"page": 1, "per_page": 1}
+            params = {"page": 1, "per_page": 1, "include": "description"}
             tickets = await fetch_with_retry(client, f"{BASE_URL}/tickets", params)
             # 헤더에서 총 티켓 수 확인 시도
             total_count = int(client.headers.get('X-Total-Count', 0))
@@ -200,7 +200,8 @@ async def fetch_tickets() -> List[Dict[str, Any]]:
                     "per_page": PER_PAGE, 
                     "order_type": "asc", 
                     "order_by": "created_at",
-                    "updated_since": "2015-01-01T00:00:00Z"  # 오래된 날짜부터 모든 티켓
+                    "updated_since": "2015-01-01T00:00:00Z",  # 오래된 날짜부터 모든 티켓
+                    "include": "description"  # description 필드 포함
                 }
                 logger.info(f"티켓 데이터 페이지 {page} 요청 중...")
                 

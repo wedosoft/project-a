@@ -7,7 +7,7 @@ import os
 import httpx
 import asyncio
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict
 from datetime import datetime, timedelta
 import json
 from pathlib import Path
@@ -47,7 +47,13 @@ class OptimizedFreshdeskFetcher:
     """
     
     def __init__(self, output_dir: str = "freshdesk_data"):
-        self.output_dir = Path(output_dir)
+        # output_dir이 절대경로가 아니면 backend/ 기준으로 보정
+        output_path = Path(output_dir)
+        if not output_path.is_absolute():
+            # backend/ 하위로 강제
+            backend_root = Path(__file__).parent.parent
+            output_path = backend_root / output_path
+        self.output_dir = output_path.resolve()
         self.output_dir.mkdir(exist_ok=True)
         self.progress_file = self.output_dir / "progress.json"
         self.client = None
@@ -203,34 +209,35 @@ class OptimizedFreshdeskFetcher:
         include_conversations: bool, 
         include_attachments: bool
     ) -> List[Dict]:
-        """티켓에 대화내역과 첨부파일 정보 추가"""
+        """티켓에 대화내역, 첨부파일, description, description_text 등 모든 주요 필드 추가"""
         enriched_tickets = []
-        
         for ticket in tickets:
             ticket_id = ticket.get("id")
-            
             try:
+                # description, description_text 등 주요 필드가 누락된 경우 상세 정보로 보완
+                if not ticket.get("description") or not ticket.get("description_text") or (include_attachments and "attachments" not in ticket):
+                    from .fetcher import fetch_ticket_details
+                    detail = await fetch_ticket_details(ticket_id)
+                    if detail:
+                        ticket.update({
+                            k: v for k, v in detail.items() if k not in ticket or not ticket[k]
+                        })
                 if include_conversations:
-                    conversations = await self.fetch_with_retry(
-                        f"{BASE_URL}/tickets/{ticket_id}/conversations"
-                    )
-                    ticket["conversations"] = conversations
-                    await asyncio.sleep(REQUEST_DELAY)
-                
+                    conversations = ticket.get("conversations")
+                    if not conversations:
+                        from .fetcher import fetch_ticket_conversations
+                        conversations = await fetch_ticket_conversations(None, ticket_id)
+                        ticket["conversations"] = conversations
                 if include_attachments:
-                    # 티켓 상세 정보에서 첨부파일 추출
-                    ticket_detail = await self.fetch_with_retry(
-                        f"{BASE_URL}/tickets/{ticket_id}"
-                    )
-                    ticket["attachments"] = ticket_detail.get("attachments", [])
-                    await asyncio.sleep(REQUEST_DELAY)
-                    
+                    attachments = ticket.get("attachments")
+                    if not attachments:
+                        from .fetcher import fetch_ticket_attachments
+                        attachments = await fetch_ticket_attachments(None, ticket_id)
+                        ticket["attachments"] = attachments
                 enriched_tickets.append(ticket)
-                
             except Exception as e:
                 logger.error(f"티켓 {ticket_id} 추가 정보 수집 오류: {e}")
-                enriched_tickets.append(ticket)  # 기본 정보라도 저장
-                
+                enriched_tickets.append(ticket)
         return enriched_tickets
 
     def save_tickets_chunk(self, tickets: List[Dict], chunk_id: str):
