@@ -97,7 +97,9 @@ jobs:
           EOF
 
           # 개발용 .env 파일 생성 (빈 값들)
-          cp .env.example .env      # Docker 환경 설정 및 확인 (공식 GitHub Actions 사용)
+          cp .env.example .env
+
+      # Docker 환경 설정 및 확인 (공식 GitHub Actions 사용)
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -186,29 +188,18 @@ jobs:
 
           cd backend
 
+          # Python 버전 확인
+          python -c "import sys; print(f'Python version: {sys.version}')"
+
           # 기본 의존성 테스트
-          python -c "
-          import sys
-          print(f'Python version: {sys.version}')
+          echo "Testing FastAPI import..."
+          python -c "import fastapi; print('✓ FastAPI imported successfully')" || echo "✗ FastAPI import failed"
 
-          try:
-              import fastapi
-              print('✓ FastAPI imported successfully')
-          except ImportError as e:
-              print(f'✗ FastAPI import failed: {e}')
+          echo "Testing Pydantic import..."
+          python -c "import pydantic; print('✓ Pydantic imported successfully')" || echo "✗ Pydantic import failed"
 
-          try:
-              import pydantic
-              print('✓ Pydantic imported successfully')  
-          except ImportError as e:
-              print(f'✗ Pydantic import failed: {e}')
-              
-          try:
-              import httpx
-              print('✓ HTTPX imported successfully')
-          except ImportError as e:
-              print(f'✗ HTTPX import failed: {e}')
-          "
+          echo "Testing HTTPX import..."
+          python -c "import httpx; print('✓ HTTPX imported successfully')" || echo "✗ HTTPX import failed"
 
           # 프로젝트 모듈 구문 검사
           echo "Checking Python syntax for project files..."
@@ -226,7 +217,7 @@ jobs:
           echo "Python executable: $(which python)"
 
           echo "=== Installed Python Packages ==="
-          pip list | head -30
+          pip list 2>/dev/null | head -30 || echo "Package list unavailable"
 
           echo "=== Project Context ==="
           echo "Project Name: Freshdesk Custom App Backend"
