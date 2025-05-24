@@ -138,7 +138,8 @@ jobs:
 
           echo "Checking required files..."
           missing_required=false
-          for file in "${required_files[@]}"; do
+          for file in "${required_files[@]}"
+          do
             if [ -f "$file" ]; then
               echo "✓ $file exists"
             else
@@ -148,7 +149,8 @@ jobs:
           done
 
           echo "Checking optional files..."
-          for file in "${optional_files[@]}"; do
+          for file in "${optional_files[@]}"
+          do
             if [ -f "$file" ]; then
               echo "✓ $file exists"
             else
