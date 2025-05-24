@@ -139,7 +139,6 @@ jobs:
               missing_required=true
             fi
           done
-          done
 
           echo "Checking optional files..."
           for file in "${optional_files[@]}"; do
