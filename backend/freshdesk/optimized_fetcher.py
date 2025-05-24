@@ -46,7 +46,7 @@ class OptimizedFreshdeskFetcher:
     대용량 티켓 데이터 수집을 위한 최적화된 클래스
     """
     
-    def __init__(self, output_dir: str = "freshdesk_full_data"):
+    def __init__(self, output_dir: str = "freshdesk_data"):
         # output_dir이 절대경로가 아니면 backend/ 기준으로 보정
         output_path = Path(output_dir)
         if not output_path.is_absolute():
@@ -380,8 +380,9 @@ class OptimizedFreshdeskFetcher:
 
 
 async def main():
-    """사용 예제"""
-    async with OptimizedFreshdeskFetcher("freshdesk_full_data") as fetcher:
+    """전체 데이터 수집 함수 - freshdesk_full_data 디렉토리 사용"""
+    output_dir = "freshdesk_full_data"
+    async with OptimizedFreshdeskFetcher(output_dir) as fetcher:
         stats = await fetcher.collect_all_tickets(
             start_date="2015-01-01",  # 가능한 가장 오래된 날짜부터
             end_date=None,  # 현재까지
@@ -421,5 +422,5 @@ async def test_collection_limit():
 
 if __name__ == "__main__":
     # 기본 호출은 main()이지만, 테스트를 원할 경우 test_collection_limit() 호출
-    asyncio.run(main())
-    # asyncio.run(test_collection_limit())
+    # asyncio.run(main())
+    asyncio.run(test_collection_limit())
