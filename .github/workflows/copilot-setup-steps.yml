@@ -38,6 +38,7 @@ jobs:
 
       # Python 의존성 설치
       - name: Install Python dependencies
+        shell: bash
         run: |
           pip install --upgrade pip
           if [ -f "backend/requirements.txt" ]; then
@@ -50,6 +51,7 @@ jobs:
 
       # 개발 도구 설치 (포맷팅, 린팅)
       - name: Install development tools
+        shell: bash
         run: |
           pip install black flake8 pytest pytest-asyncio mypy
           # MCP 서버 설치 (선택적)
@@ -58,6 +60,7 @@ jobs:
 
       # 프로젝트 디렉토리 구조 생성
       - name: Create project directories
+        shell: bash
         run: |
           mkdir -p backend/{data,logs,attachment_cache}
           mkdir -p .vscode
@@ -65,6 +68,7 @@ jobs:
 
       # 환경 설정 파일 생성
       - name: Set up environment configuration
+        shell: bash
         run: |
           echo "Setting up environment configuration..."
 
@@ -96,6 +100,7 @@ jobs:
 
       # Docker 환경 확인
       - name: Verify Docker environment
+        shell: bash
         run: |
           echo "Checking Docker availability..."
           docker --version || echo "Docker not available"
@@ -111,6 +116,7 @@ jobs:
 
       # 프로젝트 구조 검증
       - name: Validate project structure
+        shell: bash
         run: |
           echo "=== Validating Project Structure ==="
 
@@ -155,6 +161,7 @@ jobs:
 
       # Python 모듈 임포트 테스트
       - name: Test Python imports and syntax
+        shell: bash
         run: |
           echo "=== Testing Python Environment ==="
 
@@ -190,6 +197,7 @@ jobs:
 
       # 환경 정보 및 컨텍스트 출력
       - name: Display environment info and project context
+        shell: bash
         run: |
           echo "=== Environment Information ==="
           echo "Python version: $(python --version)"
