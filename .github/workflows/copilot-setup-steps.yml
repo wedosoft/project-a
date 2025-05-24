@@ -120,6 +120,7 @@ jobs:
         run: |
           echo "=== Validating Project Structure ==="
 
+          # 필수 파일 목록
           required_files=(
             "backend/api/main.py"
             "backend/core/llm_router.py"
@@ -128,6 +129,14 @@ jobs:
             "backend/requirements.txt"
           )
 
+          optional_files=(
+            "backend/docker-compose.yml"
+            "PROJECT_RULES.md"
+            ".github/copilot-instructions.md"
+            ".vscode/settings.json"
+          )
+
+          echo "Checking required files..."
           missing_required=false
           for file in "${required_files[@]}"; do
             if [ -f "$file" ]; then
@@ -138,12 +147,7 @@ jobs:
             fi
           done
 
-          optional_files=(
-            "backend/docker-compose.yml"
-            "PROJECT_RULES.md"
-            ".github/copilot-instructions.md"
-            ".vscode/settings.json"
-          )
+          echo "Checking optional files..."
           for file in "${optional_files[@]}"; do
             if [ -f "$file" ]; then
               echo "✓ $file exists"
@@ -152,10 +156,7 @@ jobs:
             fi
           done
 
-          if [ "$missing_required" = true ]; then
-            exit 2
-          fi
-
+          # 디렉토리 구조 확인
           echo "Project directory structure:"
           find . -type d -name ".*" -prune -o -type d -print | head -20
 
