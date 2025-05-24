@@ -43,6 +43,19 @@ def check_system_resources():
     
     return True
 
+# 벡터DB 초기화 설정
+VECTOR_DB_CONFIG = {
+    "auto_reset_on_full_collection": False,  # 자동 초기화 여부
+    "create_backup_before_reset": True,      # 초기화 전 백업 생성
+    "backup_retention_days": 30,             # 백업 보관 기간
+    "confirm_required": True,                # 사용자 확인 필수 여부
+}
+
+# 환경변수로도 제어 가능
+import os
+RESET_VECTORDB = os.getenv("RESET_VECTORDB", "false").lower() == "true"
+SKIP_VECTORDB_CONFIRMATION = os.getenv("SKIP_VECTORDB_CONFIRMATION", "false").lower() == "true"
+
 # 6. 백그라운드 실행 스크립트
 BACKGROUND_COLLECTION_SCRIPT = """
 #!/bin/bash
