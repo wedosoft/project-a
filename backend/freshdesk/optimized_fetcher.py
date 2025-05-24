@@ -380,8 +380,9 @@ class OptimizedFreshdeskFetcher:
 
 
 async def main():
-    """사용 예제"""
-    async with OptimizedFreshdeskFetcher("freshdesk_full_data") as fetcher:
+    """전체 데이터 수집 함수 - freshdesk_full_data 디렉토리 사용"""
+    output_dir = "freshdesk_full_data"
+    async with OptimizedFreshdeskFetcher(output_dir) as fetcher:
         stats = await fetcher.collect_all_tickets(
             start_date="2015-01-01",  # 가능한 가장 오래된 날짜부터
             end_date=None,  # 현재까지
