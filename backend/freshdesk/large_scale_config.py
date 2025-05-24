@@ -4,6 +4,11 @@
 500만건 이상의 티켓을 제한 없이 처리하기 위한 최적화 설정
 """
 
+# 출력 디렉토리 설정 가이드
+# * 테스트 모드: freshdesk_test_data (test_collection_limit() 함수 사용)
+# * 전체 수집 모드: freshdesk_full_data (main() 함수 사용)
+# 주의: output_dir 인자를 명시적으로 전달하여 설정 가능
+
 # 1. 메모리 사용량 최적화
 CHUNK_SIZE = 5000  # 기존 10,000에서 5,000으로 줄여서 메모리 사용량 감소
 
