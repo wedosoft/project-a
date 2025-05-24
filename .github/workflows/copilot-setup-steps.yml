@@ -33,7 +33,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
+          # 현재 프로젝트에 package.json이 없어서 캐시 비활성화
+          # cache: "npm"
 
       # Python 의존성 설치
       - name: Install Python dependencies
@@ -62,7 +63,7 @@ jobs:
           mkdir -p .vscode
           mkdir -p .github/{workflows,ISSUE_TEMPLATE}
 
-            # 환경 설정 파일 생성
+      # 환경 설정 파일 생성
       - name: Set up environment configuration
         run: |
           echo "Setting up environment configuration..."
@@ -101,11 +102,11 @@ jobs:
           docker-compose --version || echo "Docker Compose not available"
 
           # docker-compose.yml 존재 확인
-          if [ -f "docker-compose.yml" ]; then
-            echo "✓ docker-compose.yml found"
-            docker-compose config || echo "Docker compose configuration validation failed"
+          if [ -f "backend/docker-compose.yml" ]; then
+            echo "✓ backend/docker-compose.yml found"
+            cd backend && docker-compose config || echo "Docker compose configuration validation failed"
           else
-            echo "✗ docker-compose.yml not found"
+            echo "✗ backend/docker-compose.yml not found"
           fi
 
       # 프로젝트 구조 검증
@@ -123,7 +124,7 @@ jobs:
           )
 
           optional_files=(
-            "docker-compose.yml"
+            "backend/docker-compose.yml"
             "PROJECT_RULES.md"
             ".github/copilot-instructions.md"
             ".vscode/settings.json"
@@ -137,6 +138,7 @@ jobs:
               echo "✗ $file missing (REQUIRED)"
               missing_required=true
             fi
+          done
           done
 
           echo "Checking optional files..."
