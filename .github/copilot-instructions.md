@@ -40,6 +40,8 @@ backend/
 - **문서화**: 독스트링과 인라인 주석 필수
 - **에러 처리**: try-catch 블록과 적절한 로깅
 - **로깅**: 구조화된 로깅 (JSON 형태 권장)
+- **한글 주석 필수**: 모든 코드의 주석과 설명은 반드시 한글로 작성
+- **충실한 주석**: 코드의 의도, 비즈니스 로직, 복잡한 알고리즘에 대한 상세한 한글 설명 추가
 
 ### 4. 핵심 컴포넌트
 
@@ -164,5 +166,60 @@ EMBEDDING_MODEL=text-embedding-3-small
 - Qdrant 상태: 대시보드 또는 API 직접 조회
 - Freshdesk API: Rate limit 및 권한 확인
 - 성능 이슈: 프로파일링 및 메트릭 수집
+
+## 한글 주석 및 문서화 가이드라인
+
+### 필수 주석 항목
+
+1. **함수/클래스 독스트링**: 모든 함수와 클래스에 한글 독스트링 필수
+
+   ```python
+   def process_ticket_data(ticket_id: str) -> Dict[str, Any]:
+       """
+       티켓 데이터를 처리하고 벡터 임베딩을 생성합니다.
+
+       Args:
+           ticket_id: 처리할 티켓의 고유 ID
+
+       Returns:
+           처리된 티켓 데이터와 메타데이터를 포함한 딕셔너리
+
+       Raises:
+           ValueError: 유효하지 않은 티켓 ID인 경우
+       """
+   ```
+
+2. **비즈니스 로직 설명**: 복잡한 비즈니스 로직에는 상세한 한글 설명 추가
+
+   ```python
+   # Freshdesk API에서 대용량 데이터를 청크 단위로 가져오는 로직
+   # Rate limit을 고려하여 요청 간격을 조절합니다
+   for chunk in paginate_tickets(start_date, end_date):
+       # 각 청크는 최대 100개 티켓을 포함
+       processed_chunk = await process_ticket_chunk(chunk)
+   ```
+
+3. **알고리즘 및 최적화 설명**: 성능 최적화나 특별한 알고리즘 사용 시 이유 설명
+
+   ```python
+   # Vector DB 검색 성능 향상을 위해 임베딩을 배치 단위로 처리
+   # 메모리 사용량을 제한하기 위해 청크 크기를 1000개로 설정
+   EMBEDDING_BATCH_SIZE = 1000
+   ```
+
+4. **설정 및 환경변수 설명**: 환경변수나 설정값의 용도와 기본값 설명
+   ```python
+   # Qdrant 클라우드 연결을 위한 설정
+   # QDRANT_URL: Qdrant 클러스터 URL (필수)
+   # QDRANT_API_KEY: API 키 (필수)
+   QDRANT_URL = os.getenv("QDRANT_URL")
+   ```
+
+### 코드 수정 시 주의사항
+
+- 기존 코드 수정 시 변경 이유와 영향을 주석으로 명시
+- 임시 해결책이나 TODO 항목은 명확히 표시
+- 외부 API 연동 시 에러 처리 로직과 재시도 정책 설명
+- 성능에 민감한 부분은 벤치마크 결과나 측정 기준 명시
 
 이 가이드라인을 따라 안정적이고 확장 가능한 코드를 작성해 주세요.
