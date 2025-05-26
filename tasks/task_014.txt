@@ -1,0 +1,245 @@
+# Task ID: 14
+# Title: Implement Logging and Monitoring
+# Status: pending
+# Dependencies: 1, 12
+# Priority: medium
+# Description: Create a comprehensive logging and monitoring system to track API usage, performance metrics, and error conditions.
+# Details:
+1. Implement structured JSON logging
+2. Create middleware for request/response logging
+3. Add performance metrics collection
+4. Implement error tracking and reporting
+5. Create health check endpoints
+6. Add usage statistics collection
+7. Implement log rotation and management
+8. Create dashboard for monitoring key metrics
+
+Example code:
+```python
+from fastapi import FastAPI, Request, Response
+from starlette.middleware.base import BaseHTTPMiddleware
+import time
+import json
+import logging
+import uuid
+from datetime import datetime
+import psutil
+
+app = FastAPI()
+
+# Configure JSON logger
+class JsonFormatter(logging.Formatter):
+    def format(self, record):
+        log_record = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "level": record.levelname,
+            "message": record.getMessage(),
+            "module": record.module,
+            "function": record.funcName,
+            "line": record.lineno
+        }
+        
+        # Add exception info if available
+        if record.exc_info:
+            log_record["exception"] = {
+                "type": record.exc_info[0].__name__,
+                "message": str(record.exc_info[1]),
+                "traceback": self.formatException(record.exc_info)
+            }
+            
+        # Add extra fields from record
+        if hasattr(record, "extra"):
+            log_record.update(record.extra)
+            
+        return json.dumps(log_record)
+
+# Set up logger
+logger = logging.getLogger("app")
+logger.setLevel(logging.INFO)
+
+handler = logging.StreamHandler()
+handler.setFormatter(JsonFormatter())
+logger.addHandler(handler)
+
+# Request/response logging middleware
+class LoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        # Generate request ID
+        request_id = str(uuid.uuid4())
+        
+        # Start timer
+        start_time = time.time()
+        
+        # Log request
+        logger.info(
+            f"Request started: {request.method} {request.url.path}",
+            extra={
+                "request_id": request_id,
+                "method": request.method,
+                "path": request.url.path,
+                "query_params": str(request.query_params),
+                "client_ip": request.client.host,
+                "user_agent": request.headers.get("user-agent", "")
+            }
+        )
+        
+        # Process request
+        try:
+            response = await call_next(request)
+            
+            # Calculate duration
+            duration = time.time() - start_time
+            
+            # Log response
+            logger.info(
+                f"Request completed: {request.method} {request.url.path}",
+                extra={
+                    "request_id": request_id,
+                    "status_code": response.status_code,
+                    "duration": duration,
+                    "content_length": response.headers.get("content-length", 0)
+                }
+            )
+            
+            # Add request ID to response headers
+            response.headers["X-Request-ID"] = request_id
+            
+            # Update metrics
+            app.state.metrics.record_request(
+                path=request.url.path,
+                method=request.method,
+                status_code=response.status_code,
+                duration=duration
+            )
+            
+            return response
+        except Exception as e:
+            # Log exception
+            logger.error(
+                f"Request failed: {request.method} {request.url.path}",
+                exc_info=True,
+                extra={
+                    "request_id": request_id,
+                    "error": str(e)
+                }
+            )
+            raise
+
+app.add_middleware(LoggingMiddleware)
+
+# Metrics collection
+class MetricsCollector:
+    def __init__(self):
+        self.requests = {}
+        self.errors = {}
+        self.start_time = time.time()
+        
+    def record_request(self, path, method, status_code, duration):
+        # Create key
+        key = f"{method}:{path}"
+        
+        # Initialize if not exists
+        if key not in self.requests:
+            self.requests[key] = {
+                "count": 0,
+                "total_duration": 0,
+                "status_codes": {}
+            }
+            
+        # Update metrics
+        self.requests[key]["count"] += 1
+        self.requests[key]["total_duration"] += duration
+        
+        # Update status code counts
+        status_str = str(status_code)
+        if status_str not in self.requests[key]["status_codes"]:
+            self.requests[key]["status_codes"][status_str] = 0
+        self.requests[key]["status_codes"][status_str] += 1
+        
+        # Record errors (4xx and 5xx)
+        if status_code >= 400:
+            if key not in self.errors:
+                self.errors[key] = {}
+            if status_str not in self.errors[key]:
+                self.errors[key][status_str] = 0
+            self.errors[key][status_str] += 1
+    
+    def get_metrics(self):
+        # Calculate uptime
+        uptime = time.time() - self.start_time
+        
+        # Get system metrics
+        system_metrics = {
+            "cpu_percent": psutil.cpu_percent(),
+            "memory_percent": psutil.virtual_memory().percent,
+            "disk_percent": psutil.disk_usage("/").percent
+        }
+        
+        # Calculate request stats
+        request_stats = {}
+        for key, data in self.requests.items():
+            avg_duration = data["total_duration"] / data["count"] if data["count"] > 0 else 0
+            request_stats[key] = {
+                "count": data["count"],
+                "avg_duration": avg_duration,
+                "status_codes": data["status_codes"]
+            }
+            
+        return {
+            "uptime": uptime,
+            "system": system_metrics,
+            "requests": request_stats,
+            "errors": self.errors
+        }
+
+# Initialize metrics on startup
+@app.on_event("startup")
+async def startup_event():
+    app.state.metrics = MetricsCollector()
+
+# Health check endpoint
+@app.get("/health")
+async def health_check():
+    return {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+# Metrics endpoint
+@app.get("/metrics")
+async def get_metrics():
+    return app.state.metrics.get_metrics()
+
+# Example of contextual logging in an endpoint
+@app.post("/api/v1/example")
+async def example_endpoint(request: Request):
+    # Create context logger with request info
+    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+    context = {"request_id": request_id, "endpoint": "example"}
+    
+    logger.info("Processing example request", extra=context)
+    
+    # Do some work
+    try:
+        # Simulate processing
+        time.sleep(0.1)
+        
+        # Log successful completion
+        logger.info("Example request processed successfully", extra=context)
+        
+        return {"status": "success", "request_id": request_id}
+    except Exception as e:
+        # Log error with context
+        logger.error("Error processing example request", exc_info=True, extra=context)
+        raise
+```
+
+# Test Strategy:
+1. Verify structured JSON logging format
+2. Test request/response logging captures all required information
+3. Validate error logging includes stack traces
+4. Test metrics collection for different endpoints
+5. Verify health check endpoint
+6. Test system metrics collection
+7. Validate log rotation
+8. Test performance under high logging volume

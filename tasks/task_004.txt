@@ -1,0 +1,78 @@
+# Task ID: 4
+# Title: Implement OpenAI Embeddings Service
+# Status: pending
+# Dependencies: 1
+# Priority: high
+# Description: Create a service to generate embeddings using OpenAI's text-embedding-3-small model with efficient batching and error handling.
+# Details:
+1. Set up OpenAI API client with proper authentication
+2. Create an embeddings service with async support
+3. Implement text chunking for optimal embedding generation
+4. Add batching logic to efficiently process large datasets
+5. Implement retry logic and error handling
+6. Create caching mechanism to avoid redundant embedding generation
+7. Add monitoring for token usage and costs
+
+Example code:
+```python
+from openai import AsyncOpenAI
+import hashlib
+import asyncio
+
+class EmbeddingService:
+    def __init__(self, api_key: str, model: str = "text-embedding-3-small"):
+        self.client = AsyncOpenAI(api_key=api_key)
+        self.model = model
+        self.cache = {}
+        
+    async def get_embedding(self, text: str):
+        # Simple cache using text hash
+        text_hash = hashlib.md5(text.encode()).hexdigest()
+        if text_hash in self.cache:
+            return self.cache[text_hash]
+            
+        response = await self.client.embeddings.create(
+            model=self.model,
+            input=text
+        )
+        embedding = response.data[0].embedding
+        self.cache[text_hash] = embedding
+        return embedding
+        
+    async def get_embeddings_batch(self, texts: list[str], batch_size: int = 20):
+        results = []
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i+batch_size]
+            batch_results = await asyncio.gather(*[self.get_embedding(text) for text in batch])
+            results.extend(batch_results)
+        return results
+```
+
+# Test Strategy:
+1. Unit tests for embedding generation
+2. Test caching mechanism works correctly
+3. Verify batching logic with different batch sizes
+4. Test error handling and retry logic
+5. Measure performance with various text lengths
+6. Validate token usage monitoring
+7. Test with different types of text content
+
+# Subtasks:
+## 1. Core Embedding Generation with API Integration and Caching [pending]
+### Dependencies: None
+### Description: Implement the core functionality to generate embeddings via OpenAI API with a caching mechanism to improve performance and reduce API calls.
+### Details:
+Create a service that connects to OpenAI's embedding API (text-embedding-3-small model), implements proper authentication, handles API responses, and includes a caching layer to store previously generated embeddings. Implement error handling for API failures, rate limiting, and network issues. Include comprehensive unit tests for the embedding generation process and cache hit/miss scenarios.
+
+## 2. Text Chunking and Preprocessing Strategies [pending]
+### Dependencies: 4.1
+### Description: Develop robust text preprocessing and chunking mechanisms to optimize embedding quality and handle various input formats.
+### Details:
+Create preprocessing utilities to clean and normalize text (removing unnecessary whitespace, handling special characters). Implement configurable text chunking strategies based on token limits, semantic boundaries, or fixed sizes. Add validation for input text and chunk size constraints. Develop unit tests for various text formats and edge cases, including very long texts and multilingual content.
+
+## 3. Batch Processing with Performance Optimization and Monitoring [pending]
+### Dependencies: 4.1, 4.2
+### Description: Implement efficient batch processing for embedding generation with performance monitoring and optimization.
+### Details:
+Create a batch processing system that efficiently groups text chunks for API calls while respecting rate limits. Implement performance metrics collection (latency, throughput, error rates) and logging. Add configurable batch sizes and parallel processing options. Develop a monitoring dashboard for real-time performance tracking. Include comprehensive integration tests for various batch sizes and load scenarios.
+

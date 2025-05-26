@@ -1,0 +1,170 @@
+# Task ID: 11
+# Title: Implement Image Gallery API
+# Status: pending
+# Dependencies: 2, 8
+# Priority: low
+# Description: Create an API endpoint for retrieving and processing images from ticket attachments and knowledge base articles.
+# Details:
+1. Implement `/image_gallery` endpoint for retrieving images
+2. Create image processing service for:
+   - Thumbnail generation
+   - EXIF data extraction
+   - Basic image analysis
+3. Implement caching for processed images
+4. Add filtering by image type, size, and date
+5. Create pagination support
+6. Implement secure URL generation for image access
+7. Add metadata extraction from images
+
+Example code:
+```python
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from pydantic import BaseModel
+from typing import List, Optional, Dict, Any
+from datetime import datetime
+import io
+from PIL import Image, ExifTags
+import hashlib
+
+router = APIRouter(prefix="/api/v1")
+
+class ImageMetadata(BaseModel):
+    width: int
+    height: int
+    format: str
+    size_bytes: int
+    exif: Optional[Dict[str, Any]] = None
+
+class ImageItem(BaseModel):
+    id: str
+    ticket_id: int
+    filename: str
+    content_type: str
+    created_at: datetime
+    thumbnail_url: str
+    full_url: str
+    metadata: Optional[ImageMetadata] = None
+
+class ImageGalleryResponse(BaseModel):
+    images: List[ImageItem]
+    total: int
+    page: int
+    per_page: int
+
+class ImageProcessor:
+    def __init__(self, cache_dir: str = "/tmp/image_cache"):
+        self.cache_dir = cache_dir
+        os.makedirs(cache_dir, exist_ok=True)
+        
+    async def process_image(self, image_data: bytes, filename: str):
+        # Generate hash for caching
+        file_hash = hashlib.md5(image_data).hexdigest()
+        cache_path = os.path.join(self.cache_dir, f"{file_hash}.jpg")
+        
+        # Check cache
+        if os.path.exists(cache_path):
+            with open(cache_path, "rb") as f:
+                thumbnail_data = f.read()
+        else:
+            # Process image
+            img = Image.open(io.BytesIO(image_data))
+            
+            # Extract metadata
+            metadata = {
+                "width": img.width,
+                "height": img.height,
+                "format": img.format,
+                "size_bytes": len(image_data)
+            }
+            
+            # Extract EXIF if available
+            exif_data = {}
+            if hasattr(img, '_getexif') and img._getexif():
+                exif = {ExifTags.TAGS[k]: v for k, v in img._getexif().items() if k in ExifTags.TAGS}
+                exif_data = {k: str(v) for k, v in exif.items()}  # Convert to strings for JSON
+            metadata["exif"] = exif_data
+            
+            # Generate thumbnail
+            img.thumbnail((200, 200))
+            thumb_io = io.BytesIO()
+            img.save(thumb_io, format='JPEG')
+            thumbnail_data = thumb_io.getvalue()
+            
+            # Save to cache
+            with open(cache_path, "wb") as f:
+                f.write(thumbnail_data)
+                
+        return thumbnail_data, metadata
+
+@router.get("/image_gallery", response_model=ImageGalleryResponse)
+async def get_image_gallery(
+    ticket_id: int,
+    company_id: int,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    req: Request
+):
+    try:
+        # Get services
+        freshdesk_client = req.app.state.freshdesk_client
+        image_processor = req.app.state.image_processor
+        
+        # Get ticket attachments
+        attachments = await freshdesk_client.get_ticket_attachments(ticket_id, company_id)
+        
+        # Filter image attachments
+        image_attachments = [a for a in attachments if a["content_type"].startswith("image/")]
+        
+        # Paginate
+        start_idx = (page - 1) * per_page
+        end_idx = start_idx + per_page
+        page_attachments = image_attachments[start_idx:end_idx]
+        
+        # Process images
+        images = []
+        for attachment in page_attachments:
+            # Download attachment
+            attachment_data = await freshdesk_client.download_attachment(
+                attachment["id"], ticket_id, company_id
+            )
+            
+            # Process image
+            thumbnail_data, metadata = await image_processor.process_image(
+                attachment_data, attachment["filename"]
+            )
+            
+            # Generate URLs (in a real app, these would be secure URLs)
+            base_url = f"/api/v1/attachments/{company_id}/{ticket_id}"
+            thumbnail_url = f"{base_url}/thumbnail/{attachment['id']}"
+            full_url = f"{base_url}/full/{attachment['id']}"
+            
+            images.append(ImageItem(
+                id=str(attachment["id"]),
+                ticket_id=ticket_id,
+                filename=attachment["filename"],
+                content_type=attachment["content_type"],
+                created_at=attachment["created_at"],
+                thumbnail_url=thumbnail_url,
+                full_url=full_url,
+                metadata=ImageMetadata(**metadata)
+            ))
+        
+        return ImageGalleryResponse(
+            images=images,
+            total=len(image_attachments),
+            page=page,
+            per_page=per_page
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+```
+
+# Test Strategy:
+1. Test image processing with different image types
+2. Verify thumbnail generation
+3. Test EXIF data extraction
+4. Validate caching mechanism
+5. Test pagination with large image sets
+6. Verify URL generation and security
+7. Test with various image sizes and formats
+8. Measure performance with different numbers of images
