@@ -1,0 +1,141 @@
+# Task ID: 9
+# Title: Implement API Endpoints for Reply Generation
+# Status: pending
+# Dependencies: 6, 7, 8
+# Priority: medium
+# Description: Create FastAPI endpoints for AI-powered reply generation and block-based content manipulation to support the BlockNote editor integration.
+# Details:
+1. Implement `/generate_reply` endpoint for full reply generation
+2. Create `/rewrite_block` endpoint for individual block improvement
+3. Design Pydantic models for BlockNote editor data structure
+4. Implement context preservation between requests
+5. Add support for different reply styles and tones
+6. Create response validation and quality checks
+7. Implement streaming responses for long-form content
+
+Example code:
+```python
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from typing import List, Dict, Any, Optional
+
+router = APIRouter(prefix="/api/v1")
+
+class Block(BaseModel):
+    id: str
+    type: str
+    content: Dict[str, Any]
+
+class GenerateReplyRequest(BaseModel):
+    context_id: str
+    ticket_id: int
+    company_id: int
+    blocks: Optional[List[Block]] = None  # Existing blocks if any
+    style: Optional[str] = "professional"  # professional, friendly, technical
+    tone: Optional[str] = "helpful"  # helpful, empathetic, direct
+
+class GenerateReplyResponse(BaseModel):
+    blocks: List[Block]
+
+@router.post("/generate_reply", response_model=GenerateReplyResponse)
+async def generate_reply(request: GenerateReplyRequest, req: Request):
+    try:
+        # Get services from app state
+        freshdesk_client = req.app.state.freshdesk_client
+        context_manager = req.app.state.context_manager
+        llm_router = req.app.state.llm_router
+        embedding_service = req.app.state.embedding_service
+        
+        # Get ticket data
+        ticket = await freshdesk_client.get_ticket(request.ticket_id, request.company_id)
+        
+        # Get context from previous session or create new
+        # context = req.app.state.cache.get(request.context_id) or {}
+        
+        # Create prompt for reply generation
+        prompt = await context_manager.create_prompt(
+            "reply", ticket, request.company_id, embedding_service
+        )
+        
+        # Add style and tone instructions
+        prompt += f"\n\nPlease write in a {request.style} style with a {request.tone} tone."
+        
+        # Generate reply
+        reply_text = await llm_router.generate(prompt)
+        
+        # Convert to blocks format
+        # This would need a parser to convert text to BlockNote format
+        blocks = [
+            Block(id="1", type="paragraph", content={"text": "Hello,"}),
+            Block(id="2", type="paragraph", content={"text": reply_text}),
+            Block(id="3", type="paragraph", content={"text": "Best regards,"})
+        ]
+        
+        return GenerateReplyResponse(blocks=blocks)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+class RewriteBlockRequest(BaseModel):
+    context_id: str
+    block: Block
+    instruction: str  # e.g., "Make more concise", "Add more details"
+    company_id: int
+
+class RewriteBlockResponse(BaseModel):
+    block: Block
+
+@router.post("/rewrite_block", response_model=RewriteBlockResponse)
+async def rewrite_block(request: RewriteBlockRequest, req: Request):
+    try:
+        # Get LLM router
+        llm_router = req.app.state.llm_router
+        
+        # Create prompt for block rewriting
+        block_text = request.block.content.get("text", "")
+        prompt = f"Rewrite the following text according to this instruction: {request.instruction}\n\nOriginal text: {block_text}\n\nRewritten text:"
+        
+        # Generate rewritten text
+        rewritten_text = await llm_router.generate(prompt)
+        
+        # Create new block with same structure but updated text
+        new_block = Block(
+            id=request.block.id,
+            type=request.block.type,
+            content={**request.block.content, "text": rewritten_text}
+        )
+        
+        return RewriteBlockResponse(block=new_block)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+```
+
+# Test Strategy:
+1. Test reply generation with different ticket types
+2. Verify block rewriting with various instructions
+3. Test different styles and tones
+4. Validate BlockNote format compatibility
+5. Test streaming responses for large replies
+6. Verify context preservation between requests
+7. Test error handling for malformed blocks
+8. Measure response quality with different prompts
+
+# Subtasks:
+## 1. Full Reply Generation Endpoint with BlockNote Integration [pending]
+### Dependencies: None
+### Description: Implement the main endpoint for generating complete email replies with BlockNote editor integration
+### Details:
+Create an API endpoint that accepts email content and context, then generates a complete reply using AI. Integrate with BlockNote to structure the response in blocks. Define request/response models including parameters for tone, style, and length. Create sequence diagrams showing the flow from client request through AI processing to BlockNote-formatted response.
+
+## 2. Block-level Rewriting and Manipulation Functionality [pending]
+### Dependencies: 9.1
+### Description: Develop endpoints for manipulating and rewriting specific content blocks
+### Details:
+Implement functionality to rewrite, edit, or regenerate specific blocks of content rather than entire replies. Create endpoints for operations like tone adjustment, elaboration, summarization, and formatting changes on individual blocks. Define request/response models that maintain block IDs and relationships. Create sequence diagrams showing how block manipulations preserve surrounding context.
+
+## 3. Streaming Response Implementation with Context Preservation [pending]
+### Dependencies: 9.1, 9.2
+### Description: Implement streaming capabilities for real-time reply generation with context preservation
+### Details:
+Develop streaming response functionality to deliver generated content in real-time chunks. Implement context preservation mechanisms to maintain coherence across streaming sessions. Define WebSocket or Server-Sent Events protocols for the streaming interface. Create sequence diagrams showing the streaming flow, including handling of interruptions and modifications during generation.
+
