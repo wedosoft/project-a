@@ -58,6 +58,14 @@ class OptimizedFreshdeskFetcher:
         self.progress_file = self.output_dir / "progress.json"
         self.client = None
         
+        # 설정값 인스턴스 변수 초기화 (large_scale_config.py 연동 용이하게)
+        self.MAX_RETRIES = MAX_RETRIES
+        self.RETRY_DELAY = RETRY_DELAY
+        self.PER_PAGE = PER_PAGE
+        self.REQUEST_DELAY = REQUEST_DELAY
+        self.CHUNK_SIZE = CHUNK_SIZE
+        self.SAVE_INTERVAL = SAVE_INTERVAL
+        
     async def __aenter__(self):
         self.client = httpx.AsyncClient(timeout=30.0)
         return self
@@ -81,17 +89,32 @@ class OptimizedFreshdeskFetcher:
     async def fetch_with_retry(self, url: str, params: Dict = None) -> Dict:
         """재시도 로직이 포함된 API 호출"""
         retries = 0
-        while retries < MAX_RETRIES:
+        while retries < self.MAX_RETRIES:
             try:
                 resp = await self.client.get(url, headers=HEADERS, auth=AUTH, params=params)
                 
-                # Rate limit 체크
+                # Rate limit 체크 (명시적인 429 상태 코드)
                 if resp.status_code == 429:
                     retry_after = int(resp.headers.get('Retry-After', 60))
                     logger.warning(f"Rate limit 도달. {retry_after}초 대기 중...")
                     await asyncio.sleep(retry_after)
                     retries += 1
                     continue
+                
+                # 헤더에서 API 호출 제한 정보 확인
+                remaining = resp.headers.get('X-RateLimit-Remaining')
+                if remaining and int(remaining) <= 1:  # 남은 요청이 1개 이하면 잠시 대기
+                    wait_time = 5  # 기본 5초 대기
+                    reset_time = resp.headers.get('X-RateLimit-Reset')
+                    if reset_time:
+                        # Unix timestamp에서 현재 시간을 빼서 남은 시간 계산
+                        import time
+                        now = int(time.time())
+                        reset = int(reset_time)
+                        wait_time = max(reset - now, 1)  # 최소 1초
+                    
+                    logger.info(f"API 제한에 도달하여 {wait_time}초 대기 중 (남은 요청: {remaining})")
+                    await asyncio.sleep(wait_time)
                     
                 resp.raise_for_status()
                 return resp.json()
@@ -100,8 +123,8 @@ class OptimizedFreshdeskFetcher:
                 logger.error(f"HTTP 오류 {e.response.status_code}: {e}")
                 if e.response.status_code in [500, 502, 503, 504]:
                     retries += 1
-                    wait_time = RETRY_DELAY * (2 ** retries)
-                    logger.info(f"{wait_time}초 대기 후 재시도...")
+                    wait_time = self.RETRY_DELAY * (2 ** retries)
+                    logger.info(f"{wait_time}초 대기 후 재시도 ({retries}/{self.MAX_RETRIES})...")
                     await asyncio.sleep(wait_time)
                 else:
                     raise
@@ -109,11 +132,15 @@ class OptimizedFreshdeskFetcher:
             except Exception as e:
                 logger.error(f"요청 오류: {e}")
                 retries += 1
-                if retries < MAX_RETRIES:
-                    wait_time = RETRY_DELAY * (2 ** retries)
+                if retries < self.MAX_RETRIES:
+                    wait_time = self.RETRY_DELAY * (2 ** retries)
+                    logger.info(f"요청 오류 발생 후 {wait_time}초 대기 후 재시도 ({retries}/{self.MAX_RETRIES})...")
                     await asyncio.sleep(wait_time)
                 else:
                     raise
+        
+        # 최대 재시도 횟수 초과
+        raise Exception(f"최대 재시도 횟수({self.MAX_RETRIES})에 도달했습니다: {url}")
 
     def get_date_ranges(self, start_date: str = "2015-01-01", end_date: str = None) -> List[tuple]:
         """
@@ -171,7 +198,7 @@ class OptimizedFreshdeskFetcher:
             
             params = {
                 "page": page,
-                "per_page": PER_PAGE,
+                "per_page": self.PER_PAGE,
                 "updated_since": start_date,
                 "order_by": "updated_at",
                 "order_type": "asc"
@@ -191,6 +218,9 @@ class OptimizedFreshdeskFetcher:
                     if t.get('updated_at', '') <= end_date
                 ]
                 
+                # 모든 티켓이 종료 날짜 이내인 경우에만 계속 수집
+                end_date_filter_active = len(batch_tickets) != len(filtered_tickets)
+                
                 # 최대 티켓 수 제한 적용
                 if remaining_tickets is not None and len(tickets) + len(filtered_tickets) > remaining_tickets:
                     filtered_tickets = filtered_tickets[:remaining_tickets - len(tickets)]
@@ -204,16 +234,17 @@ class OptimizedFreshdeskFetcher:
                 
                 tickets.extend(filtered_tickets)
                 
-                # 종료 날짜를 넘어선 티켓이 있으면 중단
-                if len(batch_tickets) > len(filtered_tickets):
-                    logger.info(f"날짜 범위 종료점 도달 (페이지 {page})")
+                # 종료 날짜 필터가 활성화되고 필터링으로 일부 티켓이 제외된 경우
+                # 즉, 이미 종료 날짜를 넘어선 티켓이 포함되어 있으면 중단
+                if end_date_filter_active:
+                    logger.info(f"날짜 범위 종료점 도달 (페이지 {page}, 필터링됨: {len(batch_tickets) - len(filtered_tickets)}개)")
                     break
                     
-                if len(batch_tickets) < PER_PAGE or (remaining_tickets is not None and len(tickets) >= remaining_tickets):
+                if len(batch_tickets) < self.PER_PAGE or (remaining_tickets is not None and len(tickets) >= remaining_tickets):
                     break
                     
                 page += 1
-                await asyncio.sleep(REQUEST_DELAY)
+                await asyncio.sleep(self.REQUEST_DELAY)
                 
                 logger.info(f"페이지 {page-1} 완료: {len(filtered_tickets)}개 티켓 (현재까지 총 {len(tickets)}개)")
                 
@@ -341,7 +372,7 @@ class OptimizedFreshdeskFetcher:
                     break
                 
                 # 청크 크기에 도달하면 저장
-                if len(current_chunk) >= CHUNK_SIZE:
+                if len(current_chunk) >= self.CHUNK_SIZE:
                     self.save_tickets_chunk(current_chunk, f"{chunk_counter:04d}")
                     chunk_counter += 1
                     current_chunk = []
