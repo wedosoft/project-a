@@ -9,6 +9,7 @@ AI 기반 응답 생성 기능을 제공합니다.
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 import uuid
@@ -28,7 +29,7 @@ from core.vectordb import vector_db
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from freshdesk import fetcher
 from prometheus_client import Counter, Histogram
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 
 # Prometheus 메트릭 정의
 # LLM 라우터에서 정의된 메트릭을 여기서도 사용할 수 있도록 공유하거나,
@@ -99,9 +100,14 @@ class DocumentInfo(BaseModel):
     title: str
     content: str
     source_id: str = ""
-    source_url: str = ""
+    source_url: str = ""  # 빈 문자열을 기본값으로 설정
     relevance_score: float = 0.0
     doc_type: Optional[str] = None # 문서 타입을 명시 (예: "ticket", "kb", "faq")
+    
+    @validator('source_url')
+    def ensure_source_url_is_str(cls, v):
+        """URL이 None이면 빈 문자열로 변환"""
+        return v or ""
 
 
 # 블록 기반 응답 형식을 위한 모델
@@ -536,7 +542,13 @@ async def query_endpoint(req: QueryRequest, company_id: str = Depends(get_compan
 class SimilarTicketItem(BaseModel):
     id: str = Field(description="유사 티켓의 ID")
     title: Optional[str] = Field(default=None, description="유사 티켓의 제목")
-    ticket_summary: Optional[str] = Field(default=None, description="유사 티켓의 내용 요약")  # summary → ticket_summary로 필드명 변경 (일관성)
+    issue: Optional[str] = Field(default=None, description="문제 상황 요약")
+    solution: Optional[str] = Field(default=None, description="해결책 요약")
+    ticket_url: Optional[str] = Field(default=None, description="원본 티켓 링크")
+    similarity_score: Optional[float] = Field(default=None, description="유사도 점수 (0.0 ~ 1.0)")
+    
+    # 기존 호환성을 위한 필드 (deprecated)
+    ticket_summary: Optional[str] = Field(default=None, description="유사 티켓의 내용 요약 (deprecated)")  
 
 class SimilarTicketsResponse(BaseModel):
     ticket_id: str = Field(description="원본 티켓의 ID")
@@ -548,10 +560,44 @@ class RelatedDocumentItem(BaseModel):
     doc_summary: Optional[str] = Field(default=None, description="관련 문서의 내용 요약")  # summary → doc_summary로 필드명 변경 (일관성)
     url: Optional[str] = Field(default=None, description="관련 문서의 URL (해당하는 경우)")
     source_type: Optional[str] = Field(default=None, description="문서 출처 유형 (예: 'kb', 'faq')")
+    similarity_score: Optional[float] = Field(default=None, description="유사도 점수 (0.0 ~ 1.0)")
 
 class RelatedDocsResponse(BaseModel):
     ticket_id: str = Field(description="원본 티켓의 ID")
     related_documents: List[RelatedDocumentItem] = Field(description="검색된 관련 문서 목록")
+
+
+# 자연어 검색 요청/응답 모델
+class QueryRequest(BaseModel):
+    """자연어 기반 검색 요청 모델"""
+    
+    query: str = Field(description="사용자의 자연어 검색 질문")
+    top_k: int = Field(default=5, description="반환할 최대 결과 수")
+    company_id: Optional[str] = Field(default=None, description="회사 ID (헤더에서 자동 추출 시 생략 가능)")
+    search_types: Optional[List[str]] = Field(default=["all"], description="검색할 문서 유형 (ticket, kb, faq, all)")
+    min_similarity: float = Field(default=0.5, description="최소 유사도 임계값")
+
+
+class QueryResultItem(BaseModel):
+    """검색 결과 항목"""
+    
+    id: str = Field(description="문서 고유 ID")
+    title: Optional[str] = Field(default=None, description="문서 제목")
+    content_summary: str = Field(description="문서 내용 요약")
+    source_type: str = Field(description="문서 유형 (ticket, kb, faq)")
+    url: Optional[str] = Field(default=None, description="문서 URL")
+    similarity_score: float = Field(description="유사도 점수 (0.0 ~ 1.0)")
+    created_at: Optional[str] = Field(default=None, description="문서 생성일")
+    metadata: Optional[Dict[str, Any]] = Field(default=None, description="추가 메타데이터")
+
+
+class QueryResponse(BaseModel):
+    """자연어 기반 검색 응답 모델"""
+    
+    query: str = Field(description="검색 질문")
+    results: List[QueryResultItem] = Field(description="검색 결과 목록")
+    total_results: int = Field(description="총 검색 결과 수")
+    search_time_ms: int = Field(description="검색 소요 시간 (밀리초)")
 
 
 # 응답 생성 요청/응답 모델
@@ -590,7 +636,8 @@ async def get_initial_context(
         통합된 초기 데이터 (요약, 유사 티켓, 추천 솔루션 등)
     """
     # 캐시된 데이터가 있는지 확인
-    cached_data = ticket_context_cache.get(f"ctx_{ticket_id}")
+    context_cache_key = f"ctx_{ticket_id}"
+    cached_data = ticket_context_cache.get(context_cache_key)
     if cached_data:
         logger.info(f"티켓 ID {ticket_id} 캐시된 컨텍스트 데이터를 반환합니다.")
         return cached_data
@@ -604,7 +651,6 @@ async def get_initial_context(
     
     # 티켓 데이터 조회
     try:
-        
         # 동기 메서드 호출로 수정
         ticket_data = vector_db.get_by_id(id=ticket_id, company_id=search_company_id)
         if not ticket_data:
@@ -652,93 +698,86 @@ async def get_initial_context(
     # 티켓 정보 구성을 위한 모든 텍스트
     ticket_full_text = f"{ticket_title}\n\n{ticket_body}\n\n" + "\n\n".join(ticket_conversations)
     
+    # 작업 병렬 처리를 위한 태스크 준비
+    tasks = []
     similar_tickets = []
     kb_documents = []
     ticket_summary = None
     
     # 컨텍스트 구축 시작 시간
-    context_start_time = time.time()
-    
-    # 작업 병렬 처리를 위한 태스크 준비
-    tasks = []
-    
-    # 1. 유사 티켓 검색 태스크
+    context_start_time = time.time()        # 1. 유사 티켓 조회 - 내부 엔드포인트 직접 호출
     if include_similar_tickets:
         async def fetch_similar_tickets():
             try:
-                # 티켓 임베딩 생성
-                ticket_embedding = embed_documents([ticket_full_text])[0]
+                # /similar_tickets/{ticket_id} 엔드포인트 직접 호출
+                similar_tickets_response = await get_similar_tickets(ticket_id, company_id)
                 
-                # 유사 티켓 검색 (현재 티켓은 별도로 필터링 처리)
-                similar_tickets_raw = retrieve_top_k_docs(
-                    ticket_embedding, 5, search_company_id, doc_type="ticket"  # 조금 더 많이 가져와서 현재 티켓 제외
-                )
-                
-                # 검색 결과를 DocumentInfo 형식으로 변환하며 현재 티켓 제외
+                # 응답 형식 변환: SimilarTicketItem[] -> DocumentInfo[]
                 st_results = []
-                for i, doc_id in enumerate(similar_tickets_raw.get("ids", [])):
-                    # 현재 티켓 ID와 동일한 경우 스킵
-                    if str(doc_id) == str(ticket_id) or str(doc_id) == f"ticket-{ticket_id}":
-                        continue
+                for item in similar_tickets_response.similar_tickets:
+                    # 구조화된 형식으로 content 생성
+                    content_parts = []
                     
-                    metadata = similar_tickets_raw.get("metadatas", [])[i] if i < len(similar_tickets_raw.get("metadatas", [])) else {}
-                    title = metadata.get("subject", metadata.get("title", f"유사 티켓 {doc_id}"))
-                    content = similar_tickets_raw.get("documents", [])[i] if i < len(similar_tickets_raw.get("documents", [])) else "내용 없음"
+                    # 문제 상황 추가
+                    if item.issue:
+                        content_parts.append(f"문제 상황: {item.issue}")
+                    
+                    # 해결책 추가
+                    if item.solution:
+                        content_parts.append(f"해결책: {item.solution}")
+                        
+                    # ticket_summary가 있으면 추가
+                    if item.ticket_summary:
+                        content_parts.append(f"요약: {item.ticket_summary}")
+                    
+                    # content 구성
+                    content = "\n\n".join(content_parts) if content_parts else f"티켓 {item.id} 관련 정보"
                     
                     st_results.append(DocumentInfo(
-                        title=title,
-                        content=content[:500] + "..." if len(content) > 500 else content,
-                        source_id=str(doc_id),
-                        relevance_score=round(((2 - similar_tickets_raw.get("distances", [])[i]) / 2) * 100, 1) if i < len(similar_tickets_raw.get("distances", [])) else 0.0,
+                        title=item.title or f"티켓 {item.id}",
+                        content=content,
+                        source_id=str(item.id),
+                        source_url=item.ticket_url,
+                        relevance_score=item.similarity_score,  # 원래 유사도 값 그대로 유지
                         doc_type="ticket"
                     ))
-                    
-                    # 최대 3개까지만 수집
-                    if len(st_results) >= 3:
-                        break
                 
-                logger.info(f"유사 티켓 {len(st_results)}개 검색됨")
+                logger.info(f"유사 티켓 {len(st_results)}개 검색됨 (/similar_tickets 엔드포인트 호출)")
                 return st_results
             except Exception as e:
                 logger.error(f"유사 티켓 검색 중 오류 발생: {str(e)}")
                 return []  # 오류 시 빈 리스트 반환
-                
+        
         tasks.append(fetch_similar_tickets())
     
-    # 2. 지식베이스 문서 검색 태스크
+    # 2. 지식베이스 문서 검색 - 내부 엔드포인트 직접 호출
     if include_kb_docs:
         async def fetch_kb_documents():
             try:
-                # 티켓 임베딩 생성 (이미 생성한 경우 재사용)
-                ticket_embedding = embed_documents([ticket_full_text])[0]
+                # /related_docs/{ticket_id} 엔드포인트 직접 호출
+                related_docs_response = await get_related_documents(ticket_id, company_id)
                 
-                # 지식베이스 문서 검색
-                kb_docs_raw = retrieve_top_k_docs(
-                    ticket_embedding, 3, search_company_id, doc_type="kb"
-                )
-                
-                # 검색 결과를 DocumentInfo 형식으로 변환
+                # 응답 형식 변환: RelatedDocumentItem[] -> DocumentInfo[]
                 kb_results = []
-                for i, doc_id in enumerate(kb_docs_raw.get("ids", [])):
-                    metadata = kb_docs_raw.get("metadatas", [])[i] if i < len(kb_docs_raw.get("metadatas", [])) else {}
-                    title = metadata.get("title", metadata.get("subject", f"문서 {doc_id}"))
-                    content = kb_docs_raw.get("documents", [])[i] if i < len(kb_docs_raw.get("documents", [])) else "내용 없음"
+                for item in related_docs_response.related_documents:
+                    # source_url이 None이면 빈 문자열로 설정하여 오류 방지
+                    source_url = item.url or ""
                     
                     kb_results.append(DocumentInfo(
-                        title=title,
-                        content=content[:500] + "..." if len(content) > 500 else content,
-                        source_id=str(doc_id),
-                        source_url=metadata.get("url", ""),
-                        relevance_score=round(((2 - kb_docs_raw.get("distances", [])[i]) / 2) * 100, 1) if i < len(kb_docs_raw.get("distances", [])) else 0.0,
-                        doc_type="kb"
+                        title=item.title or f"문서 {item.id}",
+                        content=item.doc_summary or "내용 없음",
+                        source_id=str(item.id),
+                        source_url=source_url,
+                        relevance_score=item.similarity_score,  # 원래 유사도 값 그대로 유지
+                        doc_type=item.source_type or "kb"
                     ))
                 
-                logger.info(f"지식베이스 문서 {len(kb_results)}개 검색됨")
+                logger.info(f"지식베이스 문서 {len(kb_results)}개 검색됨 (/related_docs 엔드포인트 호출)")
                 return kb_results
             except Exception as e:
                 logger.error(f"지식베이스 문서 검색 중 오류 발생: {str(e)}")
                 return []  # 오류 시 빈 리스트 반환
-                
+        
         tasks.append(fetch_kb_documents())
     
     # 3. 티켓 요약 생성 태스크
@@ -758,103 +797,26 @@ async def get_initial_context(
                     )
                 
                 # 대화 내역을 안전하게 처리
-                conversation_text = ""
-                if ticket_conversations:
-                    conversation_text = "\n".join(ticket_conversations[:3])
-                else:
-                    conversation_text = "대화 내역 없음"
+                conversations = ticket_conversations or []
                 
-                # 프롬프트 길이 제한 (토큰 초과 방지)
-                max_content_length = 2000
+                # 티켓 정보 수집
+                ticket_info = {
+                    "subject": ticket_title,
+                    "description": ticket_body,
+                    "conversations": conversations,
+                    "metadata": ticket_metadata
+                }
                 
-                truncated_body = ticket_body[:max_content_length] if ticket_body else "내용 없음"
-                if len(ticket_body or "") > max_content_length:
-                    truncated_body += "... (내용 축약됨)"
+                # LLM 호출하여 요약 생성
+                response = await llm_router.generate_ticket_summary(ticket_info)
                 
-                truncated_conversations = conversation_text[:max_content_length]
-                if len(conversation_text) > max_content_length:
-                    truncated_conversations += "... (대화 내역 축약됨)"
-                
-                # 간소화된 요약용 프롬프트 생성
-                prompt = f"""다음 고객 지원 티켓을 분석하여 JSON 형식으로 응답해주세요:
-
-티켓 제목: {ticket_title or '제목 없음'}
-
-티켓 내용: {truncated_body}
-
-대화 내역: {truncated_conversations}
-
-다음 JSON 형식으로만 응답해주세요:
-{{
-  "summary": "티켓의 핵심 내용을 3-4줄로 요약",
-  "key_points": ["주요 포인트 1", "주요 포인트 2", "주요 포인트 3"],
-  "sentiment": "긍정적 또는 중립적 또는 부정적",
-  "priority_recommendation": "높음 또는 보통 또는 낮음",
-  "category_suggestion": ["기술지원", "문의"],
-  "customer_summary": "고객 상황 요약",
-  "request_summary": "고객이 요청한 내용",
-  "urgency_level": "높음 또는 보통 또는 낮음"
-}}"""
-                
-                logger.info(f"티켓 {ticket_id} LLM 호출 시작 (프롬프트 길이: {len(prompt)} 문자)")
-                
-                # LLM 호출을 통한 요약 생성
-                response = await call_llm(
-                    prompt, 
-                    system_prompt="당신은 고객 지원 티켓을 분석하는 AI입니다. 반드시 유효한 JSON만 응답하세요."
-                )
-                
-                logger.info(f"티켓 {ticket_id} LLM 응답 받음 (길이: {len(response.text)} 문자)")
-                
-                # 응답에서 JSON 부분 추출 시도
-                summary_data = None
-                
-                # 1. JSON 코드 블록에서 추출 시도
-                json_match = re.search(r'```json\s*([\s\S]*?)\s*```', response.text)
-                if json_match:
-                    json_str = json_match.group(1).strip()
-                    try:
-                        summary_data = json.loads(json_str)
-                        logger.info(f"티켓 {ticket_id} JSON 코드 블록에서 파싱 성공")
-                    except json.JSONDecodeError as e:
-                        logger.warning(f"티켓 {ticket_id} JSON 코드 블록 파싱 실패: {e}")
-                
-                # 2. 직접 JSON 파싱 시도
-                if not summary_data:
-                    try:
-                        # 중괄호로 시작하고 끝나는 부분 찾기
-                        json_match = re.search(r'\{[\s\S]*\}', response.text)
-                        if json_match:
-                            json_str = json_match.group(0)
-                            summary_data = json.loads(json_str)
-                            logger.info(f"티켓 {ticket_id} 직접 JSON 파싱 성공")
-                    except json.JSONDecodeError as e:
-                        logger.warning(f"티켓 {ticket_id} 직접 JSON 파싱 실패: {e}")
-                
-                # 3. JSON 파싱이 모두 실패한 경우 기본값으로 요약 생성
-                if not summary_data:
-                    logger.warning(f"티켓 {ticket_id} JSON 파싱 실패, 텍스트 기반 요약 생성")
-                    summary_data = {
-                        "summary": f"티켓 제목: {ticket_title}. {truncated_body[:200]}",
-                        "key_points": ["요약 생성 중 오류 발생", "수동 처리 필요"],
-                        "sentiment": "중립적",
-                        "priority_recommendation": "보통",
-                        "category_suggestion": ["기술지원"],
-                        "customer_summary": truncated_body[:100] if truncated_body != "내용 없음" else "고객 정보 부족",
-                        "request_summary": "명확한 요청 내용 파악 필요",
-                        "urgency_level": "보통"
-                    }
-                
-                # 티켓 요약 객체 생성
+                # LLM 응답 파싱
                 ticket_summary = TicketSummaryContent(
-                    ticket_summary=summary_data.get("summary", "요약 생성 실패"),
-                    key_points=summary_data.get("key_points", []),
-                    sentiment=summary_data.get("sentiment", "중립적"),
-                    priority_recommendation=summary_data.get("priority_recommendation", "보통"),
-                    category_suggestion=summary_data.get("category_suggestion", []),
-                    customer_summary=summary_data.get("customer_summary", None),
-                    request_summary=summary_data.get("request_summary", None),
-                    urgency_level=summary_data.get("urgency_level", "보통")
+                    ticket_summary=response.get('summary', '요약 생성에 실패했습니다.'),
+                    key_points=response.get('key_points', []),
+                    sentiment=response.get('sentiment', '중립적'),
+                    priority_recommendation=response.get('priority_recommendation', '보통'),
+                    urgency_level=response.get('urgency_level', '보통')
                 )
                 
                 logger.info(f"티켓 {ticket_id} 요약 생성 완료: {ticket_summary.ticket_summary[:100]}...")
@@ -874,7 +836,7 @@ async def get_initial_context(
                     priority_recommendation="보통",
                     urgency_level="보통"
                 )
-                
+        
         tasks.append(generate_summary())
     
     # 모든 태스크 병렬 실행
@@ -894,7 +856,9 @@ async def get_initial_context(
         ticket_summary = results[result_idx]
     
     # 컨텍스트 구축 소요 시간
-    context_time = time.time() - context_start_time        # 컨텍스트 캐싱 (향후 요청에서 재사용할 수 있도록)
+    context_time = time.time() - context_start_time
+    
+    # 결과 구성
     result = InitResponse(
         ticket_id=ticket_id,
         ticket_data=ticket_metadata,
@@ -905,7 +869,6 @@ async def get_initial_context(
         metadata={
             "duration_ms": int((time.time() - start_time) * 1000),
             "context_time_ms": int(context_time * 1000),
-            "model_used": response.model_used if 'response' in locals() else None,
             "similar_tickets_count": len(similar_tickets),
             "kb_docs_count": len(kb_documents)
         }
@@ -915,7 +878,7 @@ async def get_initial_context(
     ticket_context_cache[context_id] = {
         "ticket_id": ticket_id,
         "company_id": search_company_id,
-        "ticket_data": ticket_data,
+        "ticket_data": ticket_metadata,
         "similar_tickets": similar_tickets,
         "kb_documents": kb_documents,
         "created_at": time.time()
@@ -924,29 +887,132 @@ async def get_initial_context(
     return result
 
 @app.get("/similar_tickets/{ticket_id}", response_model=SimilarTicketsResponse)
-async def get_similar_tickets(ticket_id: str):
+async def get_similar_tickets(ticket_id: str, company_id: str = Depends(get_company_id)):
+    """
+    특정 티켓 ID와 유사한 과거 티켓 목록을 검색하여 반환합니다.
+    
+    Args:
+        ticket_id: 유사 티켓을 검색할 기준이 되는 티켓의 고유 ID
+        company_id: 회사 ID (헤더에서 자동 추출)
+        
+    Returns:
+        SimilarTicketsResponse: 유사 티켓 목록
+    """
     try:
-        current_ticket_data = await fetcher.fetch_ticket_details(ticket_id)
-        if not current_ticket_data:
-            raise HTTPException(status_code=404, detail=f"티켓 ID {ticket_id}를 찾을 수 없습니다.")
-        query_text = f"{current_ticket_data.get('subject', '')} {current_ticket_data.get('description_text', '')}"
-        if not query_text.strip():
+        logger.info(f"유사 티켓 검색 시작 (ticket_id: {ticket_id}, company_id: {company_id})")
+        
+        # 1. 현재 티켓 데이터를 Qdrant에서 가져오기 시도
+        current_ticket_data = vector_db.get_by_id(ticket_id, company_id)
+        
+        if not current_ticket_data or not current_ticket_data.get("metadata"):
+            # Qdrant에서 찾을 수 없으면 Freshdesk API에서 가져오기
+            logger.info(f"Qdrant에서 티켓 {ticket_id}를 찾을 수 없어 Freshdesk API를 호출합니다.")
+            current_ticket_data = await fetcher.fetch_ticket_details(ticket_id)
+            if not current_ticket_data:
+                raise HTTPException(status_code=404, detail=f"티켓 ID {ticket_id}를 찾을 수 없습니다.")
+        else:
+            # Qdrant에서 가져온 경우 metadata를 최상위로 올리기
+            current_ticket_data = current_ticket_data["metadata"]
+            logger.info(f"Qdrant에서 티켓 {ticket_id} 데이터를 성공적으로 가져왔습니다.")
+        
+        # 2. 검색용 쿼리 텍스트 생성
+        search_query = await llm_router.generate_search_query(current_ticket_data)
+        if not search_query.strip():
             logger.warning(f"티켓 {ticket_id}에 대한 검색 쿼리 텍스트가 비어있습니다.")
             return SimilarTicketsResponse(ticket_id=ticket_id, similar_tickets=[])
-        # 실제 구현에서는 llm_router.generate_embedding 등으로 임베딩 생성 필요
-        query_embedding = [0.1] * 768
-        logger.info(f"티켓 {ticket_id} 유사 티켓 검색을 위한 임베딩 생성 (더미)")
-        similar_tickets_result = retriever.retrieve_top_k_docs(query_embedding=query_embedding, top_k=5, doc_type="ticket")
+        
+        # 3. 검색 쿼리 임베딩 생성
+        try:
+            query_embedding = await llm_router.generate_embedding(search_query)
+            logger.info(f"검색 쿼리 임베딩 생성 완료 (vector_size: {len(query_embedding)})")
+        except Exception as e:
+            logger.error(f"임베딩 생성 실패, 더미 임베딩 사용: {e}")
+            # 임베딩 생성 실패 시 더미 임베딩 사용 (fallback)
+            query_embedding = [0.1] * 1536  # OpenAI embedding 차원에 맞춤
+        
+        # 4. 벡터 DB에서 유사 티켓 검색
+        similar_tickets_result = retriever.retrieve_top_k_docs(
+            query_embedding=query_embedding, 
+            top_k=10,  # 더 많이 가져와서 필터링
+            doc_type="ticket",
+            company_id=company_id
+        )
+        
+        # 5. 검색 결과 처리
         similar_tickets_list = []
         if similar_tickets_result and similar_tickets_result.get("ids"):
             for i, doc_id in enumerate(similar_tickets_result["ids"]):
+                # 현재 티켓과 동일한 ID는 제외
+                if str(doc_id) == str(ticket_id):
+                    continue
+                    
                 metadata = similar_tickets_result["metadatas"][i] if i < len(similar_tickets_result.get("metadatas", [])) else {}
-                title = metadata.get("title", metadata.get("subject", f"유사 티켓 {doc_id}"))
-                summary_text = similar_tickets_result["documents"][i] if i < len(similar_tickets_result.get("documents", [])) else "요약 정보 없음"
-                summary = summary_text[:150] + "..." if len(summary_text) > 150 else summary_text
-                similar_tickets_list.append(SimilarTicketItem(id=str(doc_id), title=title, ticket_summary=summary))
+                
+                # 티켓 제목 추출
+                title = (
+                    metadata.get("title") or 
+                    metadata.get("subject") or 
+                    f"티켓 {doc_id}"
+                )
+                
+                # 거리/점수 정보 추가
+                distance = similar_tickets_result.get("distances", [0])[i] if i < len(similar_tickets_result.get("distances", [])) else 0
+                similarity_score = max(0, 1 - distance)  # 거리를 유사도로 변환
+                
+                # 티켓 ID 추출 (original_id 또는 doc_id 사용)
+                original_ticket_id = metadata.get("original_id", str(doc_id))
+                
+                # "ticket-xxxx" 형식에서 숫자 부분만 추출
+                ticket_number = original_ticket_id
+                if isinstance(original_ticket_id, str) and original_ticket_id.startswith("ticket-"):
+                    ticket_number = original_ticket_id.replace("ticket-", "")
+                
+                # Freshdesk 원본 티켓 링크 생성
+                freshdesk_domain = os.getenv("FRESHDESK_DOMAIN", "your-domain.freshdesk.com")
+                ticket_url = f"https://{freshdesk_domain}.freshdesk.com/a/tickets/{ticket_number}"
+                
+                # Issue/Solution 분석을 위한 티켓 데이터 구성
+                ticket_data_for_analysis = {
+                    "id": ticket_number,
+                    "subject": title,
+                    "description_text": similar_tickets_result["documents"][i] if i < len(similar_tickets_result.get("documents", [])) else "",
+                    "status": metadata.get("status", ""),
+                    "priority": metadata.get("priority", "")
+                }
+                
+                # LLM을 사용한 Issue/Solution 분석 수행
+                try:
+                    analysis_result = await llm_router.analyze_ticket_issue_solution(ticket_data_for_analysis)
+                    issue = analysis_result.get("issue", "문제 상황을 분석할 수 없습니다.")
+                    solution = analysis_result.get("solution", "해결책을 찾을 수 없습니다.")
+                except Exception as e:
+                    logger.warning(f"티켓 {doc_id} Issue/Solution 분석 실패: {e}")
+                    issue = "문제 상황 분석 실패"
+                    solution = "해결책 분석 실패"
+                
+                # 기존 호환성을 위한 요약 생성
+                summary_text = similar_tickets_result["documents"][i] if i < len(similar_tickets_result.get("documents", [])) else ""
+                if not summary_text:
+                    summary_text = metadata.get("description_text", "요약 정보 없음")
+                summary = summary_text[:200] + "..." if len(summary_text) > 200 else summary_text
+                
+                similar_tickets_list.append(SimilarTicketItem(
+                    id=str(ticket_number),  # 순수 티켓 번호만 사용
+                    title=title,
+                    issue=issue,
+                    solution=solution,
+                    ticket_url=ticket_url,
+                    similarity_score=round(similarity_score, 3),
+                    ticket_summary=summary  # 기존 호환성을 위해 유지
+                ))
+                
+                # 최대 5개까지만 반환
+                if len(similar_tickets_list) >= 5:
+                    break
+        
         logger.info(f"티켓 {ticket_id}에 대한 유사 티켓 {len(similar_tickets_list)}건 검색 완료")
-        return SimilarTicketsResponse(ticket_id=ticket_id, similar_tickets=similar_tickets_list)
+        return SimilarTicketsResponse(ticket_id=str(ticket_id), similar_tickets=similar_tickets_list)
+        
     except HTTPException as e:
         raise e
     except Exception as e:
@@ -954,30 +1020,285 @@ async def get_similar_tickets(ticket_id: str):
         raise HTTPException(status_code=500, detail=f"유사 티켓 검색 중 내부 서버 오류 발생: {str(e)}")
 
 @app.get("/related_docs/{ticket_id}", response_model=RelatedDocsResponse)
-async def get_related_documents(ticket_id: str):
+async def get_related_documents(ticket_id: str, company_id: str = Depends(get_company_id)):
+    """
+    특정 티켓 ID와 관련된 기술 문서(KB)나 FAQ 목록을 검색하여 반환합니다.
+    
+    Args:
+        ticket_id: 관련 문서를 검색할 기준이 되는 티켓의 고유 ID
+        company_id: 회사 ID (헤더에서 자동 추출)
+        
+    Returns:
+        RelatedDocsResponse: 관련 문서 목록
+    """
     try:
-        current_ticket_data = await fetcher.fetch_ticket_details(ticket_id)
-        if not current_ticket_data:
-            raise HTTPException(status_code=404, detail=f"티켓 ID {ticket_id}를 찾을 수 없습니다.")
-        query_text = f"{current_ticket_data.get('subject', '')} {current_ticket_data.get('description_text', '')}"
-        if not query_text.strip():
+        logger.info(f"관련 문서 검색 시작 (ticket_id: {ticket_id}, company_id: {company_id})")
+        
+        # 1. 현재 티켓 데이터를 Qdrant에서 가져오기 시도
+        current_ticket_data = None
+        try:
+            current_ticket_data = vector_db.get_by_id(ticket_id, company_id)
+        except Exception as e:
+            logger.warning(f"Qdrant에서 티켓 {ticket_id} 조회 실패: {e}")
+        
+        if not current_ticket_data or not current_ticket_data.get("metadata"):
+            # Qdrant에서 찾을 수 없으면 Freshdesk API에서 가져오기
+            logger.info(f"Qdrant에서 티켓 {ticket_id}를 찾을 수 없어 Freshdesk API를 호출합니다.")
+            try:
+                current_ticket_data = await fetcher.fetch_ticket_details(ticket_id)
+            except Exception as api_error:
+                logger.error(f"Freshdesk API에서 티켓 {ticket_id} 조회 실패: {api_error}")
+                current_ticket_data = None
+                
+            if not current_ticket_data:
+                raise HTTPException(status_code=404, detail=f"티켓 ID {ticket_id}를 찾을 수 없습니다.")
+        else:
+            # Qdrant에서 가져온 경우 metadata를 최상위로 올리기
+            current_ticket_data = current_ticket_data["metadata"]
+            logger.info(f"Qdrant에서 티켓 {ticket_id} 데이터를 성공적으로 가져왔습니다.")
+        
+        # 2. 검색용 쿼리 텍스트 생성
+        search_query = None
+        try:
+            search_query = await llm_router.generate_search_query(current_ticket_data)
+        except Exception as query_error:
+            logger.error(f"검색 쿼리 생성 실패: {query_error}")
+            # 쿼리 생성 실패 시 티켓 제목과 내용을 사용
+            subject = current_ticket_data.get("subject", "")
+            description = current_ticket_data.get("description", "")
+            search_query = f"{subject} {description[:200]}"
+            
+        if not search_query or not search_query.strip():
             logger.warning(f"티켓 {ticket_id}에 대한 검색 쿼리 텍스트가 비어있습니다.")
             return RelatedDocsResponse(ticket_id=ticket_id, related_documents=[])
-        query_embedding = [0.1] * 768
-        logger.info(f"티켓 {ticket_id} 관련 문서 검색을 위한 임베딩 생성 (더미)")
-        related_docs_result = retriever.retrieve_top_k_docs(query_embedding=query_embedding, top_k=5, doc_type="kb")
+        
+        # 3. 검색 쿼리 임베딩 생성
+        try:
+            query_embedding = await llm_router.generate_embedding(search_query)
+            logger.info(f"검색 쿼리 임베딩 생성 완료 (vector_size: {len(query_embedding)})")
+        except Exception as e:
+            logger.error(f"임베딩 생성 실패, 더미 임베딩 사용: {e}")
+            # 임베딩 생성 실패 시 더미 임베딩 사용 (fallback)
+            query_embedding = [0.1] * 1536  # OpenAI embedding 차원에 맞춤
+        
+        # 4. 벡터 DB에서 관련 문서 검색 (KB, FAQ 등)
+        related_docs_result = None
+        try:
+            # KB 문서는 type이 1인 경우 (published 상태)
+            # 또는 source_type이 "kb"인 경우로 식별
+            related_docs_result = retriever.retrieve_top_k_docs(
+                query_embedding=query_embedding, 
+                top_k=10,  # 더 많이 가져와서 필터링
+                doc_type="kb",  # "kb" 타입으로 검색 (vectordb.py에서 1과 "1"도 함께 처리)
+                company_id=company_id
+            )
+            logger.info(f"KB 검색 완료: {len(related_docs_result.get('documents', []))}개 결과")
+            
+            # 결과가 없으면 메모리 내 필터링 방식으로 시도
+            if not related_docs_result.get('documents'):
+                logger.info(f"KB 문서(type=1) 검색 결과가 없어 직접 검색 시도")
+                
+                # 필터 없이 검색 후 메모리에서 필터링
+                all_results = vector_db.search(
+                    query_embedding=query_embedding,
+                    top_k=30,  # 더 많은 결과에서 필터링
+                    company_id=company_id
+                )
+                
+                # 검색 결과에서 KB 문서만 추출
+                documents = []
+                metadatas = []
+                distances = []
+                ids = []
+                
+                # 결과가 있는 경우 필터링
+                if all_results and all_results.get("metadatas"):
+                    for i, metadata in enumerate(all_results.get("metadatas", [])):
+                        # KB 문서 타입 (published=1 또는 draft=2)
+                        doc_type = metadata.get("type")
+                        source_type = metadata.get("source_type")
+                        status = metadata.get("status")
+                        
+                        # KB 문서 조건: 
+                        # 1. type이 "1" 또는 숫자 1인 경우
+                        # 2. type이 "kb"인 경우
+                        # 3. source_type이 "kb"인 경우
+                        # 4. status가 1(published)인 경우
+                        if (doc_type == "1" or doc_type == 1 or 
+                            doc_type == "kb" or source_type == "kb" or 
+                            status == 1 or status == "1"):
+                            
+                            if i < len(all_results.get("documents", [])):
+                                documents.append(all_results["documents"][i])
+                                metadatas.append(metadata)
+                                
+                                if "distances" in all_results and i < len(all_results["distances"]):
+                                    distances.append(all_results["distances"][i])
+                                
+                                if "ids" in all_results and i < len(all_results["ids"]):
+                                    ids.append(all_results["ids"][i])
+                
+                # 필터링된 결과 구성
+                related_docs_result = {
+                    "documents": documents,
+                    "metadatas": metadatas, 
+                    "distances": distances,
+                    "ids": ids
+                }
+                logger.info(f"메모리 내 필터링 후 KB 문서(type=1) 검색 결과: {len(documents)}개")
+        except Exception as kb_error:
+            logger.error(f"KB 문서 검색 실패: {kb_error}", exc_info=True)
+            related_docs_result = {
+                "documents": [],
+                "metadatas": [],
+                "distances": [],
+                "ids": []
+            }
+        
+        # 5. FAQ 검색도 수행
+        faq_results = []
+        try:
+            faq_results = vector_db.search_faqs(
+                query_embedding=query_embedding,
+                top_k=5,
+                company_id=company_id,
+                min_score=0.5  # 유사도 임계값을 50%로 낮춤 (원래 0.6)
+            )
+            logger.info(f"FAQ 검색 결과: {len(faq_results)}건")
+        except Exception as e:
+            logger.warning(f"FAQ 검색 실패: {e}")
+        
+        # 6. 검색 결과 처리 및 병합
         related_docs_list = []
+        
+        # KB 문서 처리
         if related_docs_result and related_docs_result.get("ids"):
             for i, doc_id in enumerate(related_docs_result["ids"]):
                 metadata = related_docs_result["metadatas"][i] if i < len(related_docs_result.get("metadatas", [])) else {}
-                title = metadata.get("title", f"관련 문서 {doc_id}")
+                
+                title = metadata.get("title", f"문서 {doc_id}")
                 url = metadata.get("url", None)
-                summary_text = related_docs_result["documents"][i] if i < len(related_docs_result.get("documents", [])) else "요약 정보 없음"
-                summary = summary_text[:150] + "..." if len(summary_text) > 150 else summary_text
-                source_type = metadata.get("source_type", "kb")
-                related_docs_list.append(RelatedDocumentItem(id=str(doc_id), title=title, doc_summary=summary, url=url, source_type=source_type))
-        logger.info(f"티켓 {ticket_id}에 대한 관련 문서 {len(related_docs_list)}건 검색 완료")
+                
+                # 문서 요약 생성
+                summary_text = related_docs_result["documents"][i] if i < len(related_docs_result.get("documents", [])) else ""
+                if not summary_text:
+                    summary_text = metadata.get("description", "요약 정보 없음")
+                
+                summary = summary_text[:200] + "..." if len(summary_text) > 200 else summary_text
+                source_type = metadata.get("source_type", metadata.get("type", "kb"))
+                
+                # 거리/점수 정보 추가
+                distance = related_docs_result.get("distances", [0])[i] if i < len(related_docs_result.get("distances", [])) else 0
+                similarity_score = max(0, 1 - distance)  # 거리를 유사도로 변환
+                
+                # KB 문서 URL 생성 또는 개선
+                if not url and (source_type == "kb" or source_type == "1"):
+                    # 원본 문서 ID 추출 (필요한 경우)
+                    article_id = metadata.get("article_id", metadata.get("original_id", doc_id))
+                    if isinstance(article_id, str) and article_id.startswith("kb-"):
+                        article_id = article_id.replace("kb-", "")
+                    
+                    # 생성된 URL이 있는지 먼저 확인
+                    url = metadata.get("url", None)
+                    if not url:
+                        # Freshdesk 도메인을 사용하여 URL 생성
+                        freshdesk_domain = os.getenv("FRESHDESK_DOMAIN", "your-domain.freshdesk.com")
+                        # 도메인 검증 및 URL 구성
+                        if not freshdesk_domain:
+                            logger.warning("FRESHDESK_DOMAIN 환경 변수가 설정되지 않았습니다.")
+                            url = None
+                        else:
+                            # 도메인 값에 이미 .freshdesk.com이 포함되어 있는지 확인
+                            if ".freshdesk.com" in freshdesk_domain:
+                                domain_base = freshdesk_domain
+                            else:
+                                domain_base = f"{freshdesk_domain}.freshdesk.com"
+                                
+                            # URL 생성
+                            url = f"https://{domain_base}/support/solutions/articles/{article_id}"
+                
+                related_docs_list.append(RelatedDocumentItem(
+                    id=str(doc_id), 
+                    title=title, 
+                    doc_summary=summary, 
+                    url=url, 
+                    source_type="kb",  # 명시적으로 'kb'로 설정
+                    similarity_score=round(similarity_score, 3)
+                ))
+        
+        # FAQ 결과 처리
+        for faq in faq_results:
+            title = f"FAQ: {faq.get('question', '질문 없음')}"
+            summary = faq.get('answer', '답변 없음')
+            
+            # FAQ 답변이 너무 길면 자르기
+            if len(summary) > 200:
+                summary = summary[:200] + "..."
+                
+            # FAQ URL 생성 (가능한 경우)
+            faq_url = None
+            faq_id = faq.get('id')
+            if faq_id:
+                # FAQ ID로 URL 생성 (가능한 경우)
+                if isinstance(faq_id, str) and faq_id.startswith("faq-"):
+                    faq_number = faq_id.replace("faq-", "")
+                    freshdesk_domain = os.getenv("FRESHDESK_DOMAIN", "")
+                    if freshdesk_domain:
+                        # 도메인 값에 이미 .freshdesk.com이 포함되어 있는지 확인
+                        if ".freshdesk.com" in freshdesk_domain:
+                            domain_base = freshdesk_domain
+                        else:
+                            domain_base = f"{freshdesk_domain}.freshdesk.com"
+                            
+                        # FAQ URL 생성
+                        faq_url = f"https://{domain_base}/support/solutions/faqs/{faq_number}"
+            
+            # FAQ 점수 계산
+            score = faq.get('score', 0.5)
+            
+            related_docs_list.append(RelatedDocumentItem(
+                id=str(faq.get('id', 'faq_unknown')),
+                title=title,
+                doc_summary=summary,
+                url=faq_url,
+                source_type="faq",
+                similarity_score=round(score, 3)
+            ))
+        
+        # 유사도 점수 기준으로 정렬하고 상위 결과만 반환
+        related_docs_list.sort(key=lambda x: x.similarity_score, reverse=True)
+        
+        # 너무 낮은 유사도 점수의 결과 필터링 - 임계값 0.3에서 0.25로 더 낮춤 (25%)
+        min_similarity = 0.25  # 더 많은 결과를 얻기 위해 임계값을 25%로 낮춤
+        filtered_docs = [doc for doc in related_docs_list if doc.similarity_score >= min_similarity]
+        
+        # 최대 반환 결과 수 제한 (상위 5개)
+        if filtered_docs:
+            logger.info(f"임계값 {min_similarity} 이상의 관련 문서 {len(filtered_docs)}건 발견")
+            related_docs_list = filtered_docs[:5]
+        else:
+            # 유사도가 낮더라도 검색 결과가 있으면 결과는 반환
+            if related_docs_list:
+                logger.info(f"임계값보다 낮은 문서만 발견되어 상위 3개 반환")
+                related_docs_list = related_docs_list[:3]
+            else:
+                # 결과가 전혀 없으면 빈 응답 반환
+                logger.warning("관련 문서 검색 결과가 없습니다.")
+        
+        # 관련 문서 유형별 카운팅을 위한 통계 계산
+        docs_by_type = {}
+        for doc in related_docs_list:
+            doc_type = doc.source_type or "unknown"
+            if doc_type in docs_by_type:
+                docs_by_type[doc_type] += 1
+            else:
+                docs_by_type[doc_type] = 1
+                
+        # 결과 통계 로깅
+        type_counts = ", ".join([f"{k}: {v}" for k, v in docs_by_type.items()])
+        logger.info(f"티켓 {ticket_id}에 대한 관련 문서 검색 완료: 총 {len(related_docs_list)}건 (유형별: {type_counts})")
         return RelatedDocsResponse(ticket_id=ticket_id, related_documents=related_docs_list)
+        
     except HTTPException as e:
         raise e
     except Exception as e:
@@ -1164,3 +1485,152 @@ async def generate_reply(request: GenerateReplyRequest):
             context_docs=kb_documents + similar_tickets,
             metadata={"error": str(e)}
         )
+
+
+@app.post("/query", response_model=QueryResponse)
+async def search_query(req: QueryRequest, company_id: str = Depends(get_company_id)):
+    """
+    자연어 기반 검색 엔드포인트 - 사용자의 질문에 대해 관련 문서들을 검색합니다.
+    
+    프론트엔드의 "OO와 대화하기" 탭에서 사용되는 엔드포인트로,
+    티켓, KB 문서, FAQ를 통합 검색하여 관련성 높은 결과를 반환합니다.
+    
+    Args:
+        req: 검색 요청 (질문, 검색 옵션 등)
+        company_id: 회사 ID (헤더에서 자동 추출)
+        
+    Returns:
+        QueryResponse: 검색 결과 목록
+    """
+    start_time = time.time()
+    
+    try:
+        logger.info(f"자연어 검색 시작 (query: {req.query[:50]}..., company_id: {company_id})")
+        
+        # 회사 ID 오버라이드 (요청에 명시된 경우)
+        if req.company_id:
+            company_id = req.company_id
+        
+        # 검색 질의가 비어있는 경우 처리
+        if not req.query.strip():
+            logger.warning("빈 검색 질의가 제공되었습니다.")
+            return QueryResponse(
+                query=req.query,
+                results=[],
+                total_results=0,
+                search_time_ms=0
+            )
+        
+        # 1. 검색 쿼리 임베딩 생성
+        try:
+            query_embedding = await llm_router.generate_embedding(req.query)
+            logger.info(f"검색 쿼리 임베딩 생성 완료 (vector_size: {len(query_embedding)})")
+        except Exception as e:
+            logger.error(f"임베딩 생성 실패, 더미 임베딩 사용: {e}")
+            # 임베딩 생성 실패 시 더미 임베딩 사용 (fallback)
+            query_embedding = [0.1] * 1536  # OpenAI embedding 차원에 맞춤
+        
+        # 2. 검색할 문서 유형 결정
+        search_types = req.search_types if req.search_types and req.search_types != ["all"] else ["ticket", "kb", "faq"]
+        
+        all_results = []
+        
+        # 3. 각 문서 유형별로 검색 수행
+        for doc_type in search_types:
+            try:
+                if doc_type == "faq":
+                    # FAQ 검색
+                    faq_results = vector_db.search_faqs(
+                        query_embedding=query_embedding,
+                        top_k=req.top_k,
+                        company_id=company_id,
+                        min_score=req.min_similarity
+                    )
+                    
+                    # FAQ 결과 변환
+                    for faq_item in faq_results:
+                        similarity_score = faq_item.get("score", 0.0)
+                        if similarity_score >= req.min_similarity:
+                            all_results.append(QueryResultItem(
+                                id=faq_item.get("id", ""),
+                                title=f"FAQ: {faq_item.get('question', '')[:80]}...",
+                                content_summary=faq_item.get("answer", "")[:300] + ("..." if len(faq_item.get("answer", "")) > 300 else ""),
+                                source_type="faq",
+                                url=faq_item.get("url"),
+                                similarity_score=round(similarity_score, 3),
+                                created_at=faq_item.get("created_at"),
+                                metadata=faq_item
+                            ))
+                
+                else:
+                    # 티켓 또는 KB 문서 검색
+                    search_result = retriever.retrieve_top_k_docs(
+                        query_embedding=query_embedding,
+                        top_k=req.top_k,
+                        doc_type=doc_type,
+                        company_id=company_id
+                    )
+                    
+                    # 검색 결과 변환
+                    if search_result and search_result.get("ids"):
+                        for i, doc_id in enumerate(search_result["ids"]):
+                            # 유사도 계산
+                            distance = search_result.get("distances", [0])[i] if i < len(search_result.get("distances", [])) else 0
+                            similarity_score = max(0, 1 - distance)  # 거리를 유사도로 변환
+                            
+                            # 최소 유사도 임계값 확인
+                            if similarity_score < req.min_similarity:
+                                continue
+                            
+                            metadata = search_result["metadatas"][i] if i < len(search_result.get("metadatas", [])) else {}
+                            content = search_result["documents"][i] if i < len(search_result.get("documents", [])) else ""
+                            
+                            # 제목 추출
+                            title = (
+                                metadata.get("title") or 
+                                metadata.get("subject") or 
+                                f"{doc_type.upper()} {doc_id}"
+                            )
+                            
+                            # 내용 요약 (300자 제한)
+                            content_summary = content[:300] + ("..." if len(content) > 300 else "")
+                            
+                            all_results.append(QueryResultItem(
+                                id=str(doc_id),
+                                title=title,
+                                content_summary=content_summary,
+                                source_type=doc_type,
+                                url=metadata.get("url"),
+                                similarity_score=round(similarity_score, 3),
+                                created_at=metadata.get("created_at"),
+                                metadata=metadata
+                            ))
+                        
+            except Exception as e:
+                logger.error(f"{doc_type} 검색 중 오류 발생: {e}")
+                continue
+        
+        # 4. 결과 정렬 및 필터링
+        # 유사도 점수 기준 내림차순 정렬
+        all_results.sort(key=lambda x: x.similarity_score, reverse=True)
+        
+        # 상위 결과만 반환 (top_k 제한)
+        final_results = all_results[:req.top_k]
+        
+        # 5. 응답 생성
+        search_time_ms = int((time.time() - start_time) * 1000)
+        
+        logger.info(f"자연어 검색 완료 (총 {len(final_results)}건, {search_time_ms}ms 소요)")
+        
+        return QueryResponse(
+            query=req.query,
+            results=final_results,
+            total_results=len(final_results),
+            search_time_ms=search_time_ms
+        )
+        
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.error(f"자연어 검색 중 예상치 못한 오류 발생: {e}")
+        raise HTTPException(status_code=500, detail=f"검색 중 오류가 발생했습니다: {str(e)}")
