@@ -76,6 +76,8 @@ class OptimizedFreshdeskFetcher:
 
     def save_progress(self, progress_data: Dict):
         """진행 상황을 파일에 저장"""
+        # 타임스탬프 추가로 최종 업데이트 시간 기록
+        progress_data["last_updated_timestamp"] = datetime.now().isoformat()
         with open(self.progress_file, 'w') as f:
             json.dump(progress_data, f, indent=2)
             
@@ -83,8 +85,18 @@ class OptimizedFreshdeskFetcher:
         """저장된 진행 상황 로드"""
         if self.progress_file.exists():
             with open(self.progress_file, 'r') as f:
-                return json.load(f)
-        return {"last_updated": None, "total_collected": 0, "chunks_completed": []}
+                progress = json.load(f)
+                logger.info(f"기존 진행 상황 로드: {progress.get('total_collected', 0):,}개 티켓, {len(progress.get('completed_ranges', []))}개 날짜 범위 완료")
+                return progress
+        # 기본 진행 정보 생성
+        return {
+            "last_updated": None,
+            "last_updated_timestamp": None,
+            "total_collected": 0,
+            "completed_ranges": [],  # 완료된 날짜 범위 목록
+            "range_details": {},     # 각 범위별 세부 정보 (티켓 수, 마지막 페이지 등)
+            "chunks_completed": []
+        }
 
     async def fetch_with_retry(self, url: str, params: Dict = None) -> Dict:
         """재시도 로직이 포함된 API 호출"""
@@ -142,10 +154,17 @@ class OptimizedFreshdeskFetcher:
         # 최대 재시도 횟수 초과
         raise Exception(f"최대 재시도 횟수({self.MAX_RETRIES})에 도달했습니다: {url}")
 
-    def get_date_ranges(self, start_date: str = "2015-01-01", end_date: str = None) -> List[tuple]:
+    def get_date_ranges(self, start_date: str = "2015-01-01", end_date: str = None, days_per_chunk: int = 30) -> List[tuple]:
         """
-        30일 단위로 날짜 범위를 분할하여 반환
-        (Freshdesk 30일 제한 우회)
+        날짜 범위를 분할하여 반환
+        
+        Args:
+            start_date: 시작 날짜 (YYYY-MM-DD)
+            end_date: 종료 날짜 (YYYY-MM-DD), 없으면 현재 날짜
+            days_per_chunk: 청크당 일수 (기본 30일, 대용량 티켓 수집 시 7-14일 권장)
+        
+        Returns:
+            List[tuple]: (시작날짜, 종료날짜) 튜플 목록
         """
         if end_date is None:
             end_date = datetime.now().strftime("%Y-%m-%d")
@@ -156,14 +175,22 @@ class OptimizedFreshdeskFetcher:
         ranges = []
         current = start
         
+        # 날짜가 너무 오래된 경우 경고 표시
+        days_total = (end - start).days
+        if days_total > 365 * 5:  # 5년 이상
+            logger.warning(f"매우 긴 기간({days_total}일, {days_total/365:.1f}년)의 티켓을 수집합니다. 시간이 오래 걸릴 수 있습니다.")
+            logger.warning(f"총 {days_total / days_per_chunk:.0f}개의 날짜 범위로 분할됩니다.")
+        
         while current < end:
-            range_end = min(current + timedelta(days=29), end)
+            # 종료 날짜는 현재 날짜 + days_per_chunk - 1 (당일 포함)이거나, end 중 더 이른 날짜
+            range_end = min(current + timedelta(days=days_per_chunk - 1), end)
             ranges.append((
                 current.strftime("%Y-%m-%dT00:00:00Z"),
                 range_end.strftime("%Y-%m-%dT23:59:59Z")
             ))
             current = range_end + timedelta(days=1)
             
+        logger.info(f"총 {len(ranges)}개의 날짜 범위로 분할되었습니다. ({start_date} ~ {end_date}, {days_per_chunk}일 단위)")
         return ranges
 
     async def fetch_tickets_by_date_range(
@@ -310,25 +337,48 @@ class OptimizedFreshdeskFetcher:
         include_attachments: bool = False,
         max_tickets: int = None,
         resource_check_func = None,
-        resource_check_interval: int = 1000
+        resource_check_interval: int = 1000,
+        days_per_chunk: int = 30,  # 날짜 범위 청크 크기 (일)
+        adaptive_rate: bool = True   # 적응형 속도 조절 활성화 여부
     ) -> Dict:
         """
         모든 티켓을 효율적으로 수집
         
+        Args:
+            start_date: 시작 날짜 (YYYY-MM-DD)
+            end_date: 종료 날짜 (없으면 현재까지)
+            include_conversations: 대화 내역 포함 여부
+            include_attachments: 첨부파일 정보 포함 여부
+            max_tickets: 최대 수집 티켓 수 (None=무제한)
+            resource_check_func: 리소스 체크 함수 (None=체크 안함)
+            resource_check_interval: 리소스 체크 간격 (티켓 수)
+            days_per_chunk: 날짜 범위 분할 단위 (일)
+            adaptive_rate: 서버 응답에 따른 요청 간격 자동 조절
+            
         Returns:
-            수집 통계 정보
+            Dict: 수집 통계 정보
         """
         progress = self.load_progress()
-        date_ranges = self.get_date_ranges(start_date, end_date)
+        date_ranges = self.get_date_ranges(start_date, end_date, days_per_chunk)
         
-        total_tickets = 0
-        chunk_counter = 0
+        total_tickets = progress.get("total_collected", 0)
+        chunk_counter = len(progress.get("chunks_completed", []))
         current_chunk = []
+        
+        # 이미 완료된 날짜 범위가 있으면 표시
+        completed_ranges = progress.get("completed_ranges", [])
+        if completed_ranges:
+            logger.info(f"이미 {len(completed_ranges)}/{len(date_ranges)}개 날짜 범위가 처리되었습니다.")
         
         logger.info(f"총 {len(date_ranges)}개 날짜 범위로 분할하여 수집 시작")
         
         if max_tickets is not None:
             logger.info(f"최대 {max_tickets}개 티켓만 수집합니다")
+        
+        # 적응형 속도 조절 설정
+        if adaptive_rate:
+            original_request_delay = self.REQUEST_DELAY
+            consecutive_429_count = 0  # 연속 429 오류 횟수 추적
         
         for i, (range_start, range_end) in enumerate(date_ranges):
             # 최대 티켓 수 제한이 있을 경우만 체크
@@ -344,11 +394,13 @@ class OptimizedFreshdeskFetcher:
                 
             # 이미 처리된 날짜 범위는 건너뛰기
             range_id = f"{range_start}_{range_end}"
-            if range_id in progress.get("completed_ranges", []):
-                logger.info(f"날짜 범위 {range_start} ~ {range_end} 이미 처리됨, 건너뜀")
+            if range_id in completed_ranges:
+                logger.info(f"날짜 범위 {i+1}/{len(date_ranges)}: {range_start} ~ {range_end} 이미 처리됨, 건너뜀")
                 continue
             
             try:
+                logger.info(f"날짜 범위 {i+1}/{len(date_ranges)} 처리 중: {range_start} ~ {range_end}")
+                
                 # 현재까지 수집된 티켓 수를 전달하여 페이지별로 제한 적용
                 tickets = await self.fetch_tickets_by_date_range(
                     range_start, range_end, 
@@ -357,15 +409,38 @@ class OptimizedFreshdeskFetcher:
                     current_total=total_tickets  # 현재까지 수집된 티켓 수 전달
                 )
                 
+                # 적응형 속도 조절
+                if adaptive_rate:
+                    if consecutive_429_count > 0:
+                        # 정상 응답이 오면 연속 오류 카운터를 리셋
+                        consecutive_429_count = 0
+                        # 서서히 원래 속도로 복귀 (25% 감소씩)
+                        self.REQUEST_DELAY = max(original_request_delay, self.REQUEST_DELAY * 0.75)
+                        logger.info(f"요청 간격 조정: {self.REQUEST_DELAY:.2f}초")
+                
+                range_ticket_count = len(tickets)
+                logger.info(f"날짜 범위 {range_start} ~ {range_end}에서 {range_ticket_count}개 티켓 수집됨")
+                
                 current_chunk.extend(tickets)
-                total_tickets += len(tickets)
+                total_tickets += range_ticket_count
                 
                 # max_tickets에 도달했으면 더 이상 수집하지 않음
                 if max_tickets is not None and total_tickets >= max_tickets:
                     logger.info(f"최대 티켓 수({max_tickets})에 정확히 도달, 수집 완료")
-                    # 진행 상황 업데이트 후 종료
-                    if range_id not in progress.get("completed_ranges", []):
+                    
+                    # 이 범위에서 일부만 사용한 경우 상세 정보 기록
+                    range_details = {
+                        "tickets_collected": range_ticket_count,
+                        "partial": True,  # 부분적으로 수집됨
+                        "completed_at": datetime.now().isoformat()
+                    }
+                    progress.setdefault("range_details", {})[range_id] = range_details
+                    
+                    # 완료된 범위 목록에 추가
+                    if range_id not in completed_ranges:
                         progress.setdefault("completed_ranges", []).append(range_id)
+                    
+                    # 진행 상황 업데이트 후 종료
                     progress["total_collected"] = total_tickets
                     progress["last_updated"] = datetime.now().isoformat()
                     self.save_progress(progress)
@@ -373,40 +448,86 @@ class OptimizedFreshdeskFetcher:
                 
                 # 청크 크기에 도달하면 저장
                 if len(current_chunk) >= self.CHUNK_SIZE:
-                    self.save_tickets_chunk(current_chunk, f"{chunk_counter:04d}")
+                    chunk_id = f"{chunk_counter:04d}"
+                    self.save_tickets_chunk(current_chunk, chunk_id)
+                    progress.setdefault("chunks_completed", []).append(chunk_id)
                     chunk_counter += 1
                     current_chunk = []
                 
+                # 이 날짜 범위의 상세 정보 기록
+                range_details = {
+                    "tickets_collected": range_ticket_count,
+                    "partial": False,  # 전체 수집됨
+                    "completed_at": datetime.now().isoformat()
+                }
+                progress.setdefault("range_details", {})[range_id] = range_details
+                
                 # 진행 상황 업데이트
-                if range_id not in progress.get("completed_ranges", []):
+                if range_id not in completed_ranges:
                     progress.setdefault("completed_ranges", []).append(range_id)
                 progress["total_collected"] = total_tickets
                 progress["last_updated"] = datetime.now().isoformat()
                 self.save_progress(progress)
                 
-                logger.info(f"진행률: {i+1}/{len(date_ranges)} ({total_tickets}개 수집)")
+                logger.info(f"진행률: {i+1}/{len(date_ranges)} ({total_tickets:,}개 수집)")
+                
+            except httpx.HTTPStatusError as e:
+                # HTTP 429 (Too Many Requests) 오류 처리
+                if e.response.status_code == 429 and adaptive_rate:
+                    consecutive_429_count += 1
+                    # 429 오류가 연속으로 발생하면 요청 간격을 점진적으로 증가
+                    self.REQUEST_DELAY *= (1.5 + (0.5 * consecutive_429_count))
+                    logger.warning(f"Rate limit 도달로 요청 간격 증가: {self.REQUEST_DELAY:.2f}초")
+                    
+                    # 너무 빈번한 요청으로 잠시 대기 후 다음 범위 시도
+                    retry_after = int(e.response.headers.get('Retry-After', 60))
+                    logger.warning(f"{retry_after}초 대기 후 다음 날짜 범위 시도...")
+                    await asyncio.sleep(retry_after)
+                    continue
+                    
+                logger.error(f"날짜 범위 {range_start} ~ {range_end} 처리 중 HTTP 오류: {e}")
+                # 실패한 범위 정보 기록
+                progress.setdefault("failed_ranges", []).append({
+                    "range_id": range_id,
+                    "error": str(e),
+                    "error_time": datetime.now().isoformat()
+                })
+                self.save_progress(progress)
+                continue
                 
             except Exception as e:
                 logger.error(f"날짜 범위 {range_start} ~ {range_end} 처리 오류: {e}")
+                # 실패한 범위 정보 기록
+                progress.setdefault("failed_ranges", []).append({
+                    "range_id": range_id,
+                    "error": str(e),
+                    "error_time": datetime.now().isoformat()
+                })
+                self.save_progress(progress)
                 continue
         
         # 마지막 청크 저장
         if current_chunk:
-            self.save_tickets_chunk(current_chunk, f"{chunk_counter:04d}")
+            chunk_id = f"{chunk_counter:04d}"
+            self.save_tickets_chunk(current_chunk, chunk_id)
+            progress.setdefault("chunks_completed", []).append(chunk_id)
         
         # 최종 통계
         stats = {
             "total_tickets_collected": total_tickets,
             "chunks_created": chunk_counter + (1 if current_chunk else 0),
             "date_ranges_processed": len(progress.get("completed_ranges", [])),
-            "collection_completed": datetime.now().isoformat()
+            "collection_completed": datetime.now().isoformat(),
+            "days_per_chunk": days_per_chunk,
+            "adaptive_rate": adaptive_rate,
+            "final_request_delay": self.REQUEST_DELAY if adaptive_rate else "N/A"
         }
         
         # 통계 저장
         with open(self.output_dir / "collection_stats.json", 'w') as f:
-            json.dump(stats, f, indent=2)
+            json.dump(stats, f, ensure_ascii=False, indent=2)
         
-        logger.info(f"수집 완료: 총 {total_tickets}개 티켓")
+        logger.info(f"수집 완료: 총 {total_tickets:,}개 티켓")
         return stats
 
 
@@ -441,12 +562,16 @@ async def test_collection_limit():
             end_date=None,
             include_conversations=True,
             include_attachments=True,  # 첨부파일도 항상 포함
-            max_tickets=max_tickets  # 100개로 제한
+            max_tickets=max_tickets,  # 100개로 제한
+            days_per_chunk=7,         # 테스트에서는 7일 단위로 분할
+            adaptive_rate=True        # 적응형 속도 조절 활성화
         )
     
     elapsed = datetime.now() - start_time
     logging.info(f"테스트 완료: {stats}")
     logging.info(f"소요 시간: {elapsed}")
+    logging.info(f"수집된 티켓 수: {stats['total_tickets_collected']:,}")
+    logging.info("=============================================")
     logging.info(f"수집된 티켓 수: {stats['total_tickets_collected']}")
     logging.info("============================================")
 
