@@ -1,6 +1,6 @@
 # Task ID: 2
 # Title: Implement Freshdesk API Integration
-# Status: pending
+# Status: in-progress
 # Dependencies: 1
 # Priority: high
 # Description: Create a service to interact with Freshdesk API for retrieving ticket data, knowledge base articles, and attachments with proper pagination and error handling.
@@ -43,3 +43,35 @@ class FreshdeskClient:
 4. Verify error handling for various API error scenarios
 5. Test rate limiting behavior
 6. Validate company_id isolation works correctly
+
+# Subtasks:
+## 1. Freshdesk API 클라이언트 구현 및 인증 시스템 구축 [pending]
+### Dependencies: None
+### Description: 비동기 Freshdesk API 클라이언트를 개발하고 API 키 기반 인증 시스템을 구축합니다.
+### Details:
+httpx 라이브러리를 사용하여 비동기 HTTP 클라이언트 구현, Freshdesk API 인증을 위한 API 키 관리 시스템 개발, 기본 HTTP 클라이언트 추상화 구현, 커넥션 풀링 및 재사용 최적화, Freshdesk API 연결 상태 모니터링, 인증 오류 처리 메커니즘 구현, 헤더 및 인증 파라미터 설정 표준화
+
+## 2. 티켓 데이터 검색 및 페이징 시스템 구현 [pending]
+### Dependencies: None
+### Description: 티켓 및 대화 데이터를 효율적으로 검색하고 페이징 처리하는 메커니즘을 구현합니다.
+### Details:
+Freshdesk API를 통한 티켓 검색 엔드포인트 구현, 대량 데이터(500만+ 티켓) 처리를 위한 페이징 알고리즘 개발, 날짜 범위 및 메타데이터 기반 필터링 구현, 커서 기반 페이지네이션 최적화, 티켓 필터링 옵션 구현 (상태, 우선순위, 그룹, 요청자 등), 컬렉션 응답 처리 및 파싱, 결과 캐싱 메커니즘 구현
+
+## 3. 지식베이스 문서 검색 및 관리 API 구현 [pending]
+### Dependencies: None
+### Description: 지식베이스 문서 및 카테고리를 검색하고 관리하는 API 연동을 구현합니다.
+### Details:
+지식베이스 폴더 및 카테고리 구조 조회 기능 구현, 문서 콘텐츠 및 메타데이터 검색 기능 개발, 계층적 카테고리 구조 처리 로직, HTML 콘텐츠 처리 및 정제, 문서 버전 관리 지원, 다국어 문서 지원, 검색 결과 정렬 및 필터링
+
+## 4. 첨부 파일 다운로드 및 처리 시스템 구현 [pending]
+### Dependencies: None
+### Description: 티켓 및 지식베이스 첨부 파일 다운로드와 처리를 위한 시스템을 구현합니다.
+### Details:
+첨부 파일 다운로드 API 구현, 대용량 파일 처리를 위한 스트리밍 지원, 파일 유형별 처리 로직 구현 (이미지, 문서, 압축 파일 등), 첨부 파일 메타데이터 추출, 첨부 파일 캐싱 메커니즘 구현, 파일 처리 작업의 비동기적 실행, 오류 복구 및 재시도 로직
+
+## 5. 오류 처리 및 API 제한 관리 메커니즘 구현 [pending]
+### Dependencies: None
+### Description: API 요청 실패 및 제한 초과에 대한 강력한 오류 처리 및 재시도 메커니즘을 구현합니다.
+### Details:
+지수 백오프를 사용한 재시도 알고리즘 구현, Freshdesk API 제한(rate limit) 감지 및 처리, 일시적 서비스 중단과 영구적 오류 구분, 오류 유형별 로깅 및 모니터링, 대량 요청 중 부분적 실패 처리, 비즈니스 로직 트랜잭션 보장, 장애 복구 정책 개발, 백그라운드 재시도 큐 구현
+

@@ -1,6 +1,6 @@
 # Task ID: 3
 # Title: Set Up Qdrant Vector Database Integration
-# Status: pending
+# Status: in-progress
 # Dependencies: 1
 # Priority: high
 # Description: Implement connection to Qdrant Cloud for vector storage and retrieval, with support for multi-tenant data isolation based on company_id.

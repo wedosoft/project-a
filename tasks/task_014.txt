@@ -1,6 +1,6 @@
 # Task ID: 14
 # Title: Implement Logging and Monitoring
-# Status: pending
+# Status: deferred
 # Dependencies: 1, 12
 # Priority: medium
 # Description: Create a comprehensive logging and monitoring system to track API usage, performance metrics, and error conditions.
@@ -243,3 +243,35 @@ async def example_endpoint(request: Request):
 6. Test system metrics collection
 7. Validate log rotation
 8. Test performance under high logging volume
+
+# Subtasks:
+## 1. 구조화된 JSON 로깅 시스템 구현 [pending]
+### Dependencies: None
+### Description: 구조화된 JSON 로깅 및 로그 관리 시스템을 구현합니다.
+### Details:
+구조화된 JSON 로깅 시스템 설계, 로그 레벨 정책 설정, 컨텍스트 기반 로깅 구현, 로그 라우팅 메커니즘 구축, 로그 회전 및 보존 정책 구현, 민감 정보 필터링 및 마스킹, 로그 상관 관계 ID 시스템 구현, 비동기 로깅 최적화
+
+## 2. API 요청/응답 로깅 미들웨어 구현 [pending]
+### Dependencies: None
+### Description: API 요청 및 응답 로깅을 위한 미들웨어를 개발합니다.
+### Details:
+모든 요청/응답 로깅 미들웨어 구현, 요청 ID 생성 및 추적 메커니즘 개발, 응답 시간 측정 및 기록, 헤더 및 페이로드 로깅 (민감 정보 제외), 오류 상황 상세 로깅, 로그 포맷 표준화, 대용량 페이로드 처리 최적화, 로그 필터링 및 검색 용이성 개선
+
+## 3. 성능 메트릭 수집 및 모니터링 시스템 개발 [pending]
+### Dependencies: None
+### Description: 성능 메트릭 수집 및 모니터링 시스템을 개발합니다.
+### Details:
+주요 성능 지표(KPI) 정의 및 측정 구현, API 응답 시간 기록 및 분석, 메모리 및 CPU 사용량 모니터링, 외부 API 호출 성능 추적, 시계열 데이터 저장 메커니즘, 임계값 기반 알림 시스템, 대시보드 시각화 데이터 준비, 부하 상황에서의 성능 저하 탐지
+
+## 4. 오류 추적 및 예외 처리 시스템 구현 [pending]
+### Dependencies: None
+### Description: 오류 추적 및 예외 처리 시스템을 구현합니다.
+### Details:
+전역 예외 처리 미들웨어 구현, 구조화된 오류 응답 정의, 오류 유형별 분류 및 코드화, 스택 트레이스 포착 및 기록, 재발생 오류 추적 메커니즘, 사용자 친화적인 오류 메시지 변환, 오류 통계 수집 및 분석, 주요 오류에 대한 알림 시스템 구축
+
+## 5. 상태 확인 및 헬스체크 엔드포인트 구현 [pending]
+### Dependencies: None
+### Description: 상태 확인 및 헬스체크 엔드포인트를 구현합니다.
+### Details:
+기본 및 상세 헬스체크 엔드포인트 구현, 종속 서비스 상태 확인(Redis, Qdrant 등), 시스템 리소스 상태 보고, 자가 진단 기능 구현, 외부 API 연결 상태 점검, 데이터베이스 연결 검증, 응답 시간 및 지연 메트릭 수집, 장애 복구 프로세스 연동
+

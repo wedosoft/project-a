@@ -1,6 +1,6 @@
 # Task ID: 13
 # Title: Implement Security and Multi-tenant Isolation
-# Status: pending
+# Status: deferred
 # Dependencies: 1, 3, 12
 # Priority: high
 # Description: Implement security measures and multi-tenant data isolation to ensure customer data is properly segregated and protected.
