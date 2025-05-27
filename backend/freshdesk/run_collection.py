@@ -44,13 +44,20 @@ async def full_collection_workflow():
     MAX_TICKETS = None  # 무제한 수집 (None = 제한 없음)
     INCLUDE_CONVERSATIONS = True  # 대화내역 포함 여부 (시간 2배 증가)
     INCLUDE_ATTACHMENTS = True    # 첨부파일 정보 포함 여부 (메타데이터만, 실제 파일 다운로드 X)
+    DAYS_PER_CHUNK = 14  # 날짜 범위 청크 크기 (기본 14일)
+    ADAPTIVE_RATE = True  # 서버 응답에 따른 요청 간격 자동 조절
     
     # large_scale_config.py에서 대용량 설정 가져오기
     try:
         from large_scale_config import CHUNK_SIZE, REQUEST_DELAY, MAX_RETRIES, SAVE_INTERVAL, check_system_resources
+        # 날짜 범위 청크 크기도 설정 파일에서 가져오기 시도
+        from large_scale_config import DAYS_PER_CHUNK as CONFIG_DAYS_PER_CHUNK
+        DAYS_PER_CHUNK = CONFIG_DAYS_PER_CHUNK  # 설정 파일 값으로 덮어쓰기
         logger.info("대용량 설정 파일 로드 완료")
     except ImportError:
         logger.warning("large_scale_config.py 파일을 찾을 수 없습니다. 기본 설정을 사용합니다.")
+    except AttributeError as e:
+        logger.warning(f"설정 파일에서 일부 값을 찾을 수 없습니다: {e}")
     
     logger.info("=== Freshdesk 전체 티켓 수집 시작 (무제한) ===")
     logger.info(f"출력 디렉토리: {OUTPUT_DIR}")
@@ -58,6 +65,8 @@ async def full_collection_workflow():
     logger.info(f"최대 티켓 수: 무제한")
     logger.info(f"대화내역 포함: {INCLUDE_CONVERSATIONS}")
     logger.info(f"첨부파일 포함: {INCLUDE_ATTACHMENTS}")
+    logger.info(f"날짜 범위 청크 크기: {DAYS_PER_CHUNK}일")
+    logger.info(f"적응형 속도 조절: {'활성화' if ADAPTIVE_RATE else '비활성화'}")
     
     start_time = datetime.now()
     
@@ -91,7 +100,9 @@ async def full_collection_workflow():
                 include_attachments=INCLUDE_ATTACHMENTS,
                 max_tickets=MAX_TICKETS,  # None = 무제한
                 resource_check_func=resource_check_func,
-                resource_check_interval=resource_check_interval
+                resource_check_interval=resource_check_interval,
+                days_per_chunk=DAYS_PER_CHUNK,  # 날짜 범위 청크 크기
+                adaptive_rate=ADAPTIVE_RATE     # 적응형 속도 조절
             )
         
         logger.info(f"수집 완료: {stats}")
