@@ -7,24 +7,24 @@
 프로젝트 규칙 및 가이드라인: /PROJECT_RULES.md 참조
 """
 
-import os
 import logging
-import uuid
-from typing import List, Dict, Any, Optional, Union
-from abc import ABC, abstractmethod
+import os
 import time
+import uuid
+from abc import ABC, abstractmethod
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Union
 
 # Qdrant 클라이언트
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import (
-    PointStruct,
-    Filter,
-    FieldCondition,
-    MatchValue,
     CollectionStatus,
+    FieldCondition,
+    Filter,
+    MatchValue,
+    PointStruct,
 )
-from qdrant_client.models import VectorParams, Distance
+from qdrant_client.models import Distance, VectorParams
 
 # 로깅 설정
 logger = logging.getLogger(__name__)
@@ -65,6 +65,11 @@ class VectorDBInterface(ABC):
     @abstractmethod
     def count(self, company_id: Optional[str] = None) -> int:
         """문서 수 반환"""
+        pass
+    
+    @abstractmethod
+    def get_by_id(self, id: str, company_id: Optional[str] = None) -> Dict[str, Any]:
+        """ID로 단일 문서 조회"""
         pass
 
 
@@ -573,58 +578,131 @@ class QdrantAdapter(VectorDBInterface):
         ID로 단일 문서 조회
 
         Args:
-            id: 조회할 문서의 ID (원본 문자열 ID)
-            company_id: 회사 ID 필터 (선택 사항)
+            id: 조회할 문서의 ID (원본 티켓 ID, 예: "4243")
+            company_id: 회사 ID 필터 (선택 사항, None이면 "default" 사용)
 
         Returns:
             조회된 문서 정보 (메타데이터와 임베딩 포함)
         """
         try:
-            # 문자열 ID를 UUID로 변환
-            import uuid
-            from hashlib import md5
+            # company_id가 None이면 "default"로 설정
+            search_company_id = company_id if company_id else "default"
+            logger.info(f"문서 조회 시작 (id: {id}, company_id: {search_company_id})")
             
-            uuid_id = uuid.UUID(md5(id.encode()).hexdigest())
+            # 검색할 ID 값들 준비
+            search_values = []
             
-            # 회사 ID 필터링
-            filter_condition = None
-            if company_id:
-                filter_condition = Filter(
-                    must=[
+            # 1. 입력된 ID 그대로 (문자열)
+            search_values.append(id)
+            
+            # 2. 숫자형 ID 변환 시도
+            try:
+                numeric_id = int(id)
+                search_values.append(numeric_id)
+            except ValueError:
+                pass
+            
+            # 3. "ticket-" 접두사가 없다면 추가
+            if not id.startswith("ticket-"):
+                search_values.append(f"ticket-{id}")
+            
+            # 4. "ticket-" 접두사가 있다면 제거
+            if id.startswith("ticket-"):
+                search_values.append(id.replace("ticket-", ""))
+                try:
+                    clean_numeric = int(id.replace("ticket-", ""))
+                    search_values.append(clean_numeric)
+                except ValueError:
+                    pass
+            
+            logger.info(f"ID '{id}' 검색 시도값들: {search_values}")
+            
+            # 각 검색값으로 payload 필터링 시도
+            for search_value in search_values:
+                # id 필드로 검색
+                filter_conditions = []
+                
+                # company_id 필터 추가 (수정된 company_id 사용)
+                filter_conditions.append(
+                    FieldCondition(
+                        key="company_id",
+                        match=MatchValue(value=search_company_id)
+                    )
+                )
+                
+                # ID 필터 추가 (id 필드)
+                filter_conditions.append(
+                    FieldCondition(
+                        key="id",
+                        match=MatchValue(value=search_value)
+                    )
+                )
+                
+                try:
+                    # scroll로 필터링된 결과 검색
+                    scroll_result = self.client.scroll(
+                        collection_name=self.collection_name,
+                        scroll_filter=Filter(must=filter_conditions),
+                        limit=1,
+                        with_payload=True,
+                        with_vectors=True
+                    )
+                    
+                    if scroll_result[0]:  # 결과가 있으면
+                        point = scroll_result[0][0]
+                        logger.info(f"ID '{id}' 문서를 찾았습니다 (검색값: {search_value})")
+                        return {
+                            "id": point.payload.get("original_id", point.payload.get("id", id)),
+                            "metadata": point.payload,
+                            "embedding": point.vector
+                        }
+                        
+                except Exception as search_error:
+                    logger.debug(f"ID 필드 '{search_value}' 검색 실패: {search_error}")
+                
+                # original_id 필드로도 검색 시도
+                try:
+                    filter_conditions_orig = []
+                    
+                    # company_id 필터 추가 (수정된 company_id 사용)
+                    filter_conditions_orig.append(
                         FieldCondition(
                             key="company_id",
-                            match=MatchValue(value=company_id),
+                            match=MatchValue(value=search_company_id)
                         )
-                    ]
-                )
+                    )
+                    
+                    # original_id 필터 추가
+                    filter_conditions_orig.append(
+                        FieldCondition(
+                            key="original_id",
+                            match=MatchValue(value=str(search_value))
+                        )
+                    )
+                    
+                    scroll_result_orig = self.client.scroll(
+                        collection_name=self.collection_name,
+                        scroll_filter=Filter(must=filter_conditions_orig),
+                        limit=1,
+                        with_payload=True,
+                        with_vectors=True
+                    )
+                    
+                    if scroll_result_orig[0]:  # 결과가 있으면
+                        point = scroll_result_orig[0][0]
+                        logger.info(f"ID '{id}' 문서를 찾았습니다 (original_id 검색값: {search_value})")
+                        return {
+                            "id": point.payload.get("original_id", point.payload.get("id", id)),
+                            "metadata": point.payload,
+                            "embedding": point.vector
+                        }
+                        
+                except Exception as search_error:
+                    logger.debug(f"original_id 필드 '{search_value}' 검색 실패: {search_error}")
             
-            # 단일 포인트 조회 - filter 매개변수는 retrieve에서 지원되지 않음
-            points = self.client.retrieve(
-                collection_name=self.collection_name,
-                ids=[str(uuid_id)],
-                with_payload=True,
-                with_vectors=True
-            )
-            
-            # 결과가 있고 회사 ID 필터가 설정된 경우 수동으로 필터링
-            if points and len(points) > 0 and company_id:
-                # 회사 ID가 일치하는지 확인
-                if points[0].payload.get("company_id") != company_id:
-                    logger.warning(f"ID '{id}'에 해당하는 문서가 있지만 회사 ID '{company_id}'와 일치하지 않습니다.")
-                    return {}
-            
-            # 결과가 있으면 첫 번째 포인트 반환
-            if points and len(points) > 0:
-                # 원본 ID를 반환 결과에 포함
-                original_id = points[0].payload.get("original_id", id)
-                return {
-                    "id": original_id,  # 원본 ID 반환
-                    "metadata": points[0].payload,
-                    "embedding": points[0].vector
-                }
-            else:
-                logger.warning(f"ID '{id}'로 문서를 찾을 수 없습니다.")
-                return {}
+            # 모든 방법으로 찾지 못한 경우
+            logger.warning(f"ID '{id}'로 문서를 찾을 수 없습니다. 시도한 검색값들: {search_values}")
+            return {}
                 
         except Exception as e:
             logger.error(f"ID '{id}'로 문서 조회 중 오류 발생: {e}")
