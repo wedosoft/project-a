@@ -7,24 +7,24 @@
 프로젝트 규칙 및 가이드라인: /PROJECT_RULES.md 참조
 """
 
-import os
 import logging
-import uuid
-from typing import List, Dict, Any, Optional, Union
-from abc import ABC, abstractmethod
+import os
 import time
+import uuid
+from abc import ABC, abstractmethod
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Union
 
 # Qdrant 클라이언트
 from qdrant_client import QdrantClient
 from qdrant_client.http.models import (
-    PointStruct,
-    Filter,
-    FieldCondition,
-    MatchValue,
     CollectionStatus,
+    FieldCondition,
+    Filter,
+    MatchAny,
+    MatchValue,
 )
-from qdrant_client.models import VectorParams, Distance
+from qdrant_client.models import Distance, VectorParams
 
 # 로깅 설정
 logger = logging.getLogger(__name__)
@@ -66,6 +66,11 @@ class VectorDBInterface(ABC):
     def count(self, company_id: Optional[str] = None) -> int:
         """문서 수 반환"""
         pass
+    
+    @abstractmethod
+    def get_by_id(self, id: str, company_id: Optional[str] = None) -> Dict[str, Any]:
+        """ID로 단일 문서 조회"""
+        pass
 
 
 class QdrantAdapter(VectorDBInterface):
@@ -75,7 +80,7 @@ class QdrantAdapter(VectorDBInterface):
         """Qdrant 클라이언트 초기화"""
         self.collection_name = collection_name
         self.client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
-        self._ensure_collection_exists() # 기본 문서 컬렉션 확인
+        self._ensure_collection_exists() # 기본 문서 컬렉션 확인 (인덱스 생성 포함)
         self._ensure_faq_collection_exists() # FAQ 컬렉션 확인
 
     def _ensure_collection_exists(self) -> None:
@@ -89,6 +94,38 @@ class QdrantAdapter(VectorDBInterface):
                 collection_name=self.collection_name,
                 vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
             )
+            
+            # 필수 인덱스 생성 (성능 및 필터링 향상)
+            try:
+                logger.info(f"필수 필드에 대한 인덱스 생성 중...")
+                # 회사 ID 인덱스 생성
+                self.client.create_payload_index(collection_name=self.collection_name, field_name="company_id", field_schema="keyword")
+                # 문서 타입 인덱스 생성 - 키워드 및 정수 타입 모두 시도
+                try:
+                    self.client.create_payload_index(collection_name=self.collection_name, field_name="type", field_schema="keyword")
+                    logger.info(f"type 인덱스(keyword) 생성 완료")
+                except Exception as type_err:
+                    logger.warning(f"type 키워드 인덱스 생성 실패: {type_err}, 정수 인덱스 시도...")
+                    try:
+                        self.client.create_payload_index(collection_name=self.collection_name, field_name="type", field_schema="integer")
+                        logger.info(f"type 인덱스(integer) 생성 완료")
+                    except Exception as int_err:
+                        logger.warning(f"type 정수 인덱스 생성 실패: {int_err}")
+                
+                # 소스 타입 인덱스 생성
+                self.client.create_payload_index(collection_name=self.collection_name, field_name="source_type", field_schema="keyword")
+                
+                # 상태 인덱스 생성 (KB published 상태 = 1)
+                try:
+                    self.client.create_payload_index(collection_name=self.collection_name, field_name="status", field_schema="integer")
+                    logger.info(f"status 인덱스(integer) 생성 완료")
+                except Exception as status_err:
+                    logger.warning(f"status 인덱스 생성 실패: {status_err}")
+                
+                logger.info(f"인덱스 생성 완료")
+            except Exception as e:
+                logger.warning(f"인덱스 생성 중 오류 발생 (비정상적인 동작이 예상될 수 있음): {e}")
+                
             logger.info(f"컬렉션 '{self.collection_name}' 생성 완료")
 
     def _ensure_faq_collection_exists(self) -> None:
@@ -213,28 +250,82 @@ class QdrantAdapter(VectorDBInterface):
         if not company_id:
             raise ValueError("FAQ 검색 시 company_id는 필수입니다.")
 
-        filter_conditions = [
-            FieldCondition(key="company_id", match=MatchValue(value=company_id))
-        ]
-        if category:
-            filter_conditions.append(
-                FieldCondition(key="category", match=MatchValue(value=category))
-            )
-        
-        faq_filter = Filter(must=filter_conditions)
-
+        # 컬렉션이 존재하는지 확인
         try:
-            search_results = self.client.search(
-                collection_name=FAQ_COLLECTION_NAME,
-                query_vector=query_embedding,
-                query_filter=faq_filter, # query_filter 사용
-                limit=top_k,
-                with_payload=True,
-                score_threshold=min_score # 최소 점수 임계값 설정
-            )
+            collections = self.client.get_collections()
+            collection_names = [collection.name for collection in collections.collections]
+            if FAQ_COLLECTION_NAME not in collection_names:
+                logger.warning(f"FAQ 컬렉션 '{FAQ_COLLECTION_NAME}'이 존재하지 않아 빈 결과 반환")
+                return []
+        except Exception as e:
+            logger.error(f"FAQ 컬렉션 확인 실패: {e}")
+            return []
+        
+        try:
+            logger.info(f"FAQ 검색 시작 (company_id: {company_id}, category: {category}, min_score: {min_score})")
+            
+            # payload 기반 필터링을 위한 필터 조건 구성
+            filter_conditions = [
+                FieldCondition(key="company_id", match=MatchValue(value=company_id))
+            ]
+            if category:
+                filter_conditions.append(
+                    FieldCondition(key="category", match=MatchValue(value=category))
+                )
+            
+            faq_filter = Filter(must=filter_conditions)
+
+            try:
+                # query_filter 매개변수로 검색 시도
+                search_results = self.client.search(
+                    collection_name=FAQ_COLLECTION_NAME,
+                    query_vector=query_embedding,
+                    query_filter=faq_filter, # query_filter 사용
+                    limit=top_k,
+                    with_payload=True,
+                    score_threshold=min_score # 최소 점수 임계값 설정
+                )
+            except Exception as filter_err:
+                logger.warning(f"query_filter를 사용한 FAQ 검색 실패: {filter_err}, filter로 다시 시도")
+                # filter 매개변수로 다시 시도
+                try:
+                    search_results = self.client.search(
+                        collection_name=FAQ_COLLECTION_NAME,
+                        query_vector=query_embedding,
+                        filter=faq_filter, # filter 사용
+                        limit=top_k,
+                        with_payload=True,
+                        score_threshold=min_score
+                    )
+                except Exception as e:
+                    logger.warning(f"filter를 사용한 FAQ 검색 실패: {e}, 필터링 없이 검색 후 메모리에서 처리")
+                    
+                    # 필터링 없이 검색 후 메모리에서 처리
+                    raw_results = self.client.search(
+                        collection_name=FAQ_COLLECTION_NAME,
+                        query_vector=query_embedding,
+                        limit=top_k * 3, # 더 많은 결과를 가져와서 필터링
+                        with_payload=True,
+                        score_threshold=min_score
+                    )
+                    
+                    # 메모리에서 company_id 필터링
+                    search_results = []
+                    for result in raw_results:
+                        if result.payload.get("company_id") == company_id:
+                            # 카테고리 필터링 (설정된 경우)
+                            if not category or result.payload.get("category") == category:
+                                search_results.append(result)
+                    
+                    # 최대 개수 제한
+                    search_results = search_results[:top_k]
             
             faqs = []
             for hit in search_results:
+                # score가 min_score보다 낮으면 제외 (추가 안전 장치)
+                if min_score and hit.score < min_score:
+                    continue
+                    
                 faq_data = {
                     "id": hit.id,
                     "score": hit.score,
@@ -420,12 +511,44 @@ class QdrantAdapter(VectorDBInterface):
         
         # 문서 타입 필터 추가 (있는 경우)
         if doc_type:
-            filter_conditions.append(
-                FieldCondition(
-                    key="type",
-                    match=MatchValue(value=doc_type)
+            logger.info(f"문서 타입 필터 적용: {doc_type}")
+            if doc_type == "ticket":
+                # 티켓 타입의 경우 Freshdesk 티켓 유형들을 포함
+                ticket_types = ["Problem", "Incident", "Question", "Task", "Change"]
+                filter_conditions.append(
+                    FieldCondition(
+                        key="type",
+                        match=MatchAny(any=ticket_types)
+                    )
                 )
-            )
+            elif doc_type == "kb":
+                # KB 문서의 경우 type이 "1" 또는 숫자 1, 또는 "kb" 값을 갖는 문서를 포함
+                # type 필드에 "1"이나 "kb" 값이 없을 경우를 대비하여 source_type도 확인
+                try:
+                    # 필터를 리스트로 수정하여 Filter 생성 오류 방지
+                    filter_conditions.append(
+                        Filter(
+                            should=[
+                                FieldCondition(key="type", match=MatchValue(value="1")),
+                                FieldCondition(key="type", match=MatchValue(value=1)),  # 숫자 값도 시도
+                                FieldCondition(key="type", match=MatchValue(value="kb")),
+                                FieldCondition(key="source_type", match=MatchValue(value="kb"))
+                            ]
+                        )
+                    )
+                    logger.info(f"KB 문서 복합 필터 성공적으로 생성됨")
+                except Exception as e:
+                    # 복합 필터 생성에 실패한 경우 메모리 내 필터링을 위한 플래그 설정
+                    logger.warning(f"KB 복합 필터 생성 실패: {e}, 메모리 내 필터링 적용")
+                    # 메모리 내 필터링을 위해 doc_type만 설정하고 필터에는 추가하지 않음
+            else:
+                # 기타 타입은 그대로 매칭
+                filter_conditions.append(
+                    FieldCondition(
+                        key="type",
+                        match=MatchValue(value=doc_type)
+                    )
+                )
         
         company_filter = Filter(must=filter_conditions)
         
@@ -435,21 +558,38 @@ class QdrantAdapter(VectorDBInterface):
             search_results = self.client.search(
                 collection_name=self.collection_name,
                 query_vector=query_embedding,
-                limit=top_k,
-                filter=company_filter,
+                limit=top_k * 3,  # 더 많은 결과를 가져와서 필터링 (KB 문서 확보)
+                query_filter=company_filter,  # filter 대신 query_filter 사용
                 with_payload=True
             )
+            logger.info(f"query_filter를 사용한 검색 성공: {len(search_results)}개 결과")
         except Exception as e:
-            # 'filter' 매개변수가 지원되지 않는 경우 대체 방법 사용
-            logger.warning(f"filter 매개변수를 사용한 검색 실패: {e}, 대체 방법 시도 중...")
+            # 'filter' 또는 'query_filter' 매개변수가 지원되지 않는 경우 대체 방법 사용
+            logger.warning(f"필터를 사용한 검색 실패: {str(e)}\nRaw response content:\n{getattr(e, 'response', None) and e.response.content.decode('utf-8', errors='replace')[:200]} ...", exc_info=False)
             
             # 전체 검색 후 메모리에서 필터링
+            logger.info(f"필터 없이 검색 후 메모리에서 필터링 시도")
             search_results = self.client.search(
                 collection_name=self.collection_name,
                 query_vector=query_embedding,
-                limit=top_k * 10,  # 더 많은 결과를 가져와서 필터링
+                limit=top_k * 20,  # 훨씬 더 많은 결과를 가져와서 필터링
                 with_payload=True
             )
+            
+            # KB 문서를 찾기 위해 모든 결과 확인을 위한 로깅
+            all_types = set()
+            kb_types = set()
+            for result in search_results:
+                result_type = result.payload.get("type", "")
+                result_source_type = result.payload.get("source_type", "")
+                all_types.add(f"type:{result_type}")
+                all_types.add(f"source_type:{result_source_type}")
+                if result_type == "1" or result_type == "kb" or result_source_type == "kb":
+                    kb_types.add(f"type:{result_type},source_type:{result_source_type}")
+            
+            logger.info(f"검색된 총 결과 {len(search_results)}개, 발견된 문서 타입들: {all_types}")
+            if doc_type == "kb":
+                logger.info(f"KB 문서로 판단되는 타입: {kb_types}")
             
             # 메모리 내 필터링 (company_id 및 선택적 doc_type)
             filtered_results = []
@@ -459,13 +599,31 @@ class QdrantAdapter(VectorDBInterface):
                     continue
                     
                 # 문서 타입 필터링 (필요한 경우)
-                if doc_type and result.payload.get("type") != doc_type:
-                    continue
+                if doc_type:
+                    result_type = result.payload.get("type", "")
+                    result_source_type = result.payload.get("source_type", "")
+                    
+                    if doc_type == "ticket":
+                        # 티켓 타입의 경우 Freshdesk 티켓 유형들을 허용
+                        ticket_types = ["Problem", "Incident", "Question", "Task", "Change"]
+                        if result_type not in ticket_types:
+                            continue
+                    elif doc_type == "kb":
+                        # KB 문서의 경우 type이 "1" 또는 숫자 1이거나 "kb", 또는 source_type이 "kb"인 경우 포함
+                        # 문자열과 숫자 모두 처리할 수 있도록 함
+                        if (result_type != "1" and result_type != 1 and result_type != "kb" and 
+                            result_source_type != "kb"):
+                            continue
+                    else:
+                        # 기타 타입은 정확히 매칭
+                        if result_type != doc_type and result_source_type != doc_type:
+                            continue
                     
                 filtered_results.append(result)
             
             # 필터링된 결과 잘라내기
             search_results = filtered_results[:top_k]
+            logger.info(f"메모리 내 필터링 후 결과: {len(search_results)}개 {'('+ doc_type + ')' if doc_type else ''}")
         
         # ChromaDB 형식과 호환되는 결과 포맷으로 변환
         documents = []
@@ -573,58 +731,131 @@ class QdrantAdapter(VectorDBInterface):
         ID로 단일 문서 조회
 
         Args:
-            id: 조회할 문서의 ID (원본 문자열 ID)
-            company_id: 회사 ID 필터 (선택 사항)
+            id: 조회할 문서의 ID (원본 티켓 ID, 예: "4243")
+            company_id: 회사 ID 필터 (선택 사항, None이면 "default" 사용)
 
         Returns:
             조회된 문서 정보 (메타데이터와 임베딩 포함)
         """
         try:
-            # 문자열 ID를 UUID로 변환
-            import uuid
-            from hashlib import md5
+            # company_id가 None이면 "default"로 설정
+            search_company_id = company_id if company_id else "default"
+            logger.info(f"문서 조회 시작 (id: {id}, company_id: {search_company_id})")
             
-            uuid_id = uuid.UUID(md5(id.encode()).hexdigest())
+            # 검색할 ID 값들 준비
+            search_values = []
             
-            # 회사 ID 필터링
-            filter_condition = None
-            if company_id:
-                filter_condition = Filter(
-                    must=[
+            # 1. 입력된 ID 그대로 (문자열)
+            search_values.append(id)
+            
+            # 2. 숫자형 ID 변환 시도
+            try:
+                numeric_id = int(id)
+                search_values.append(numeric_id)
+            except ValueError:
+                pass
+            
+            # 3. "ticket-" 접두사가 없다면 추가
+            if not id.startswith("ticket-"):
+                search_values.append(f"ticket-{id}")
+            
+            # 4. "ticket-" 접두사가 있다면 제거
+            if id.startswith("ticket-"):
+                search_values.append(id.replace("ticket-", ""))
+                try:
+                    clean_numeric = int(id.replace("ticket-", ""))
+                    search_values.append(clean_numeric)
+                except ValueError:
+                    pass
+            
+            logger.info(f"ID '{id}' 검색 시도값들: {search_values}")
+            
+            # 각 검색값으로 payload 필터링 시도
+            for search_value in search_values:
+                # id 필드로 검색
+                filter_conditions = []
+                
+                # company_id 필터 추가 (수정된 company_id 사용)
+                filter_conditions.append(
+                    FieldCondition(
+                        key="company_id",
+                        match=MatchValue(value=search_company_id)
+                    )
+                )
+                
+                # ID 필터 추가 (id 필드)
+                filter_conditions.append(
+                    FieldCondition(
+                        key="id",
+                        match=MatchValue(value=search_value)
+                    )
+                )
+                
+                try:
+                    # scroll로 필터링된 결과 검색
+                    scroll_result = self.client.scroll(
+                        collection_name=self.collection_name,
+                        scroll_filter=Filter(must=filter_conditions),
+                        limit=1,
+                        with_payload=True,
+                        with_vectors=True
+                    )
+                    
+                    if scroll_result[0]:  # 결과가 있으면
+                        point = scroll_result[0][0]
+                        logger.info(f"ID '{id}' 문서를 찾았습니다 (검색값: {search_value})")
+                        return {
+                            "id": point.payload.get("original_id", point.payload.get("id", id)),
+                            "metadata": point.payload,
+                            "embedding": point.vector
+                        }
+                        
+                except Exception as search_error:
+                    logger.debug(f"ID 필드 '{search_value}' 검색 실패: {search_error}")
+                
+                # original_id 필드로도 검색 시도
+                try:
+                    filter_conditions_orig = []
+                    
+                    # company_id 필터 추가 (수정된 company_id 사용)
+                    filter_conditions_orig.append(
                         FieldCondition(
                             key="company_id",
-                            match=MatchValue(value=company_id),
+                            match=MatchValue(value=search_company_id)
                         )
-                    ]
-                )
+                    )
+                    
+                    # original_id 필터 추가
+                    filter_conditions_orig.append(
+                        FieldCondition(
+                            key="original_id",
+                            match=MatchValue(value=str(search_value))
+                        )
+                    )
+                    
+                    scroll_result_orig = self.client.scroll(
+                        collection_name=self.collection_name,
+                        scroll_filter=Filter(must=filter_conditions_orig),
+                        limit=1,
+                        with_payload=True,
+                        with_vectors=True
+                    )
+                    
+                    if scroll_result_orig[0]:  # 결과가 있으면
+                        point = scroll_result_orig[0][0]
+                        logger.info(f"ID '{id}' 문서를 찾았습니다 (original_id 검색값: {search_value})")
+                        return {
+                            "id": point.payload.get("original_id", point.payload.get("id", id)),
+                            "metadata": point.payload,
+                            "embedding": point.vector
+                        }
+                        
+                except Exception as search_error:
+                    logger.debug(f"original_id 필드 '{search_value}' 검색 실패: {search_error}")
             
-            # 단일 포인트 조회 - filter 매개변수는 retrieve에서 지원되지 않음
-            points = self.client.retrieve(
-                collection_name=self.collection_name,
-                ids=[str(uuid_id)],
-                with_payload=True,
-                with_vectors=True
-            )
-            
-            # 결과가 있고 회사 ID 필터가 설정된 경우 수동으로 필터링
-            if points and len(points) > 0 and company_id:
-                # 회사 ID가 일치하는지 확인
-                if points[0].payload.get("company_id") != company_id:
-                    logger.warning(f"ID '{id}'에 해당하는 문서가 있지만 회사 ID '{company_id}'와 일치하지 않습니다.")
-                    return {}
-            
-            # 결과가 있으면 첫 번째 포인트 반환
-            if points and len(points) > 0:
-                # 원본 ID를 반환 결과에 포함
-                original_id = points[0].payload.get("original_id", id)
-                return {
-                    "id": original_id,  # 원본 ID 반환
-                    "metadata": points[0].payload,
-                    "embedding": points[0].vector
-                }
-            else:
-                logger.warning(f"ID '{id}'로 문서를 찾을 수 없습니다.")
-                return {}
+            # 모든 방법으로 찾지 못한 경우
+            logger.warning(f"ID '{id}'로 문서를 찾을 수 없습니다. 시도한 검색값들: {search_values}")
+            return {}
                 
         except Exception as e:
             logger.error(f"ID '{id}'로 문서 조회 중 오류 발생: {e}")

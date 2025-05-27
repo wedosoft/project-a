@@ -1,0 +1,196 @@
+# Task ID: 11
+# Title: Implement Image Gallery API
+# Status: deferred
+# Dependencies: 2, 8
+# Priority: low
+# Description: Create an API endpoint for retrieving and processing images from ticket attachments and knowledge base articles.
+# Details:
+1. Implement `/image_gallery` endpoint for retrieving images
+2. Create image processing service for:
+   - Thumbnail generation
+   - EXIF data extraction
+   - Basic image analysis
+3. Implement caching for processed images
+4. Add filtering by image type, size, and date
+5. Create pagination support
+6. Implement secure URL generation for image access
+7. Add metadata extraction from images
+
+Example code:
+```python
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from pydantic import BaseModel
+from typing import List, Optional, Dict, Any
+from datetime import datetime
+import io
+from PIL import Image, ExifTags
+import hashlib
+
+router = APIRouter(prefix="/api/v1")
+
+class ImageMetadata(BaseModel):
+    width: int
+    height: int
+    format: str
+    size_bytes: int
+    exif: Optional[Dict[str, Any]] = None
+
+class ImageItem(BaseModel):
+    id: str
+    ticket_id: int
+    filename: str
+    content_type: str
+    created_at: datetime
+    thumbnail_url: str
+    full_url: str
+    metadata: Optional[ImageMetadata] = None
+
+class ImageGalleryResponse(BaseModel):
+    images: List[ImageItem]
+    total: int
+    page: int
+    per_page: int
+
+class ImageProcessor:
+    def __init__(self, cache_dir: str = "/tmp/image_cache"):
+        self.cache_dir = cache_dir
+        os.makedirs(cache_dir, exist_ok=True)
+        
+    async def process_image(self, image_data: bytes, filename: str):
+        # Generate hash for caching
+        file_hash = hashlib.md5(image_data).hexdigest()
+        cache_path = os.path.join(self.cache_dir, f"{file_hash}.jpg")
+        
+        # Check cache
+        if os.path.exists(cache_path):
+            with open(cache_path, "rb") as f:
+                thumbnail_data = f.read()
+        else:
+            # Process image
+            img = Image.open(io.BytesIO(image_data))
+            
+            # Extract metadata
+            metadata = {
+                "width": img.width,
+                "height": img.height,
+                "format": img.format,
+                "size_bytes": len(image_data)
+            }
+            
+            # Extract EXIF if available
+            exif_data = {}
+            if hasattr(img, '_getexif') and img._getexif():
+                exif = {ExifTags.TAGS[k]: v for k, v in img._getexif().items() if k in ExifTags.TAGS}
+                exif_data = {k: str(v) for k, v in exif.items()}  # Convert to strings for JSON
+            metadata["exif"] = exif_data
+            
+            # Generate thumbnail
+            img.thumbnail((200, 200))
+            thumb_io = io.BytesIO()
+            img.save(thumb_io, format='JPEG')
+            thumbnail_data = thumb_io.getvalue()
+            
+            # Save to cache
+            with open(cache_path, "wb") as f:
+                f.write(thumbnail_data)
+                
+        return thumbnail_data, metadata
+
+@router.get("/image_gallery", response_model=ImageGalleryResponse)
+async def get_image_gallery(
+    ticket_id: int,
+    company_id: int,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    req: Request
+):
+    try:
+        # Get services
+        freshdesk_client = req.app.state.freshdesk_client
+        image_processor = req.app.state.image_processor
+        
+        # Get ticket attachments
+        attachments = await freshdesk_client.get_ticket_attachments(ticket_id, company_id)
+        
+        # Filter image attachments
+        image_attachments = [a for a in attachments if a["content_type"].startswith("image/")]
+        
+        # Paginate
+        start_idx = (page - 1) * per_page
+        end_idx = start_idx + per_page
+        page_attachments = image_attachments[start_idx:end_idx]
+        
+        # Process images
+        images = []
+        for attachment in page_attachments:
+            # Download attachment
+            attachment_data = await freshdesk_client.download_attachment(
+                attachment["id"], ticket_id, company_id
+            )
+            
+            # Process image
+            thumbnail_data, metadata = await image_processor.process_image(
+                attachment_data, attachment["filename"]
+            )
+            
+            # Generate URLs (in a real app, these would be secure URLs)
+            base_url = f"/api/v1/attachments/{company_id}/{ticket_id}"
+            thumbnail_url = f"{base_url}/thumbnail/{attachment['id']}"
+            full_url = f"{base_url}/full/{attachment['id']}"
+            
+            images.append(ImageItem(
+                id=str(attachment["id"]),
+                ticket_id=ticket_id,
+                filename=attachment["filename"],
+                content_type=attachment["content_type"],
+                created_at=attachment["created_at"],
+                thumbnail_url=thumbnail_url,
+                full_url=full_url,
+                metadata=ImageMetadata(**metadata)
+            ))
+        
+        return ImageGalleryResponse(
+            images=images,
+            total=len(image_attachments),
+            page=page,
+            per_page=per_page
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+```
+
+# Test Strategy:
+1. Test image processing with different image types
+2. Verify thumbnail generation
+3. Test EXIF data extraction
+4. Validate caching mechanism
+5. Test pagination with large image sets
+6. Verify URL generation and security
+7. Test with various image sizes and formats
+8. Measure performance with different numbers of images
+
+# Subtasks:
+## 1. 이미지 검색 및 조회 API 엔드포인트 구현 [pending]
+### Dependencies: None
+### Description: 티켓 및 지식베이스 문서 첨부 이미지를 조회하고 검색하기 위한 API 엔드포인트를 구현합니다.
+### Details:
+이미지 목록 조회 엔드포인트 설계 및 구현, 이미지 메타데이터 필터링 기능 개발, 페이징 처리 메커니즘 구현, 이미지 조회 보안 정책 적용, 메타데이터 기반 검색 기능 개발, 이미지 소스 출처 추적 기능, Pydantic 모델을 사용한 응답 스키마 정의, 캐싱 처리
+
+## 2. 이미지 썸네일 생성 및 메타데이터 처리 서비스 개발 [pending]
+### Dependencies: None
+### Description: 이미지 썸네일 및 전처리를 위한 서비스를 개발합니다.
+### Details:
+이미지 리사이징 및 썸네일 생성 로직 구현, 이미지 포맷 변환 기능 개발 (JPG, PNG, WebP 등), 메타데이터 추출 (EXIF, 크기, 해상도 등), 이미지 최적화 알고리즘 적용, 비동기 이미지 처리 파이프라인 구축, 이미지 품질 조정 기능, 캐시 무효화 전략 개발, Pillow 또는 OpenCV 라이브러리 활용
+
+## 3. 이미지 캐싱 및 성능 최적화 시스템 구현 [pending]
+### Dependencies: None
+### Description: 이미지 캐싱 및 성능 최적화를 위한 시스템을 구현합니다.
+### Details:
+이미지 캐싱 전략 설계, 로컬 및 분산 캐싱 구현, 이미지 해시 기반 중복 방지, 만료 정책 및 캐시 무효화 구현, 메모리 사용량 최적화, 병렬 이미지 처리를 위한 작업 큐 구현, 이미지 처리 속도 모니터링, 캐시 히트/미스 분석 도구 개발
+
+## 4. 이미지 URL 생성 및 보안 액세스 관리 [pending]
+### Dependencies: None
+### Description: 이미지 URL 생성 및 액세스 보안을 관리하는 시스템을 구현합니다.
+### Details:
+서명된 URL 생성 메커니즘 구현, 시간 제한 액세스 토큰 발급, 이미지 액세스 권한 검증, company_id 기반 액세스 제어, 이미지 워터마킹 옵션 구현, 이미지 다운로드 추적 및 기록, 악의적인 요청 탐지 및 차단, CORS 보안 설정 구현
+
