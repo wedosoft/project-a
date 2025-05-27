@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>자연어 기반 상담사 지원 시스템</title>
+    <style>
+        :root {
+            --primary-color: #3498db;
+            --secondary-color: #2ecc71;
+            --accent-color: #f39c12;
+            --text-color: #333;
+            --light-bg: #f9f9f9;
+            --border-color: #ddd;
+            --shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Pretendard', 'Noto Sans KR', sans-serif;
+        }
+
+        body {
+            background-color: #f5f7fa;
+            color: var(--text-color);
+            line-height: 1.6;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .app-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            margin-bottom: 20px;
+        }
+
+        .app-title {
+            color: var(--primary-color);
+            font-size: 1.8rem;
+        }
+
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 300px;
+            grid-template-rows: auto 1fr;
+            gap: 20px;
+            flex: 1;
+        }
+
+        .card {
+            background: white;
+            border-radius: 8px;
+            box-shadow: var(--shadow);
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        /* 티켓 컨텍스트 및 요약 영역 */
+        .ticket-context {
+            grid-column: 1;
+            grid-row: 1;
+        }
+
+        .ticket-summary {
+            margin-bottom: 15px;
+        }
+
+        .summary-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .summary-title {
+            font-size: 1.2rem;
+            color: var(--primary-color);
+        }
+
+        .refresh-button {
+            background: var(--light-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 5px 10px;
+            cursor: pointer;
+        }
+
+        .summary-content {
+            border-left: 3px solid var(--primary-color);
+            padding-left: 15px;
+            margin-bottom: 15px;
+        }
+
+        .key-points {
+            background: var(--light-bg);
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+
+        .key-points ul {
+            list-style: disc;
+            padding-left: 20px;
+        }
+
+        .priority-tag {
+            display: inline-block;
+            background: var(--accent-color);
+            color: white;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+
+        .quick-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .action-button {
+            background: var(--secondary-color);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 8px 15px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .action-button:hover {
+            opacity: 0.9;
+        }
+
+        /* 자연어 명령 입력 영역 */
+        .command-input {
+            grid-column: 1;
+            grid-row: 2;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .input-container {
+            display: flex;
+            margin-bottom: 15px;
+        }
+
+        .command-textarea {
+            flex: 1;
+            height: 70px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 10px;
+            font-size: 1rem;
+            resize: vertical;
+        }
+
+        .command-button {
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 0 20px;
+            margin-left: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .command-button:hover {
+            background: #2980b9;
+        }
+
+        .suggestions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .suggestion-chip {
+            background: var(--light-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 15px;
+            padding: 5px 15px;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .suggestion-chip:hover {
+            border-color: var(--primary-color);
+            background: #e8f4fc;
+        }
+
+        /* 응답 및 제안 표시 영역 */
+        .response-area {
+            grid-column: 1;
+            grid-row: 3;
+            margin-top: 20px;
+        }
+
+        .response-content {
+            background: white;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 15px;
+            min-height: 200px;
+            margin-bottom: 15px;
+        }
+
+        .response-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .copy-button {
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 8px 15px;
+            cursor: pointer;
+        }
+
+        .modify-button {
+            background: var(--accent-color);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 8px 15px;
+            cursor: pointer;
+        }
+
+        /* 관련 정보 탐색 영역 */
+        .related-info {
+            grid-column: 2;
+            grid-row: 1 / span 3;
+        }
+
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 15px;
+        }
+
+        .tab {
+            padding: 10px 15px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .tab.active {
+            border-bottom: 2px solid var(--primary-color);
+            color: var(--primary-color);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .similar-ticket, .kb-article {
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 10px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .similar-ticket:hover, .kb-article:hover {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 5px rgba(52, 152, 219, 0.3);
+        }
+
+        .ticket-title, .article-title {
+            color: var(--primary-color);
+            font-weight: 500;
+            margin-bottom: 5px;
+        }
+
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            color: var(--primary-color);
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+
+        .status-high {
+            background-color: #e74c3c;
+        }
+
+        .status-medium {
+            background-color: var(--accent-color);
+        }
+
+        .status-low {
+            background-color: var(--secondary-color);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="app-header">
+            <h1 class="app-title">상담사 지원 시스템</h1>
+            <div class="ticket-id">티켓 #12345</div>
+        </header>
+
+        <main class="main-content">
+            <!-- 티켓 컨텍스트 및 요약 영역 -->
+            <section class="ticket-context card">
+                <div class="ticket-summary">
+                    <div class="summary-header">
+                        <h2 class="summary-title">티켓 요약</h2>
+                        <button class="refresh-button">갱신</button>
+                    </div>
+                    <div class="summary-content">
+                        <p>고객이 결제 시스템 연동 중 API 인증 에러가 발생하여 연동이 실패하고 있습니다. 개발 환경에서는 정상 작동하지만 프로덕션에서 401 인증 오류가 발생합니다.</p>
+                        <div class="key-points">
+                            <h3>핵심 사항:</h3>
+                            <ul>
+                                <li>결제 시스템 API 연동 실패</li>
+                                <li>프로덕션 환경에서만 401 오류 발생</li>
+                                <li>고객사 프로젝트 기한: 5월 30일</li>
+                            </ul>
+                        </div>
+                        <div class="ticket-meta">
+                            <span class="status-indicator status-high"></span>
+                            <span class="priority-tag">높은 우선순위</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="quick-actions">
+                    <button class="action-button">응답 초안 생성</button>
+                    <button class="action-button">유사 케이스 검색</button>
+                    <button class="action-button">해결책 제안</button>
+                </div>
+            </section>
+
+            <!-- 자연어 명령 입력 영역 -->
+            <section class="command-input card">
+                <h2 class="section-title">자연어 명령 입력</h2>
+                <div class="input-container">
+                    <textarea class="command-textarea" placeholder="자연어로 명령을 입력하세요. 예: '이 티켓에 대한 응답 초안을 작성해줘'"></textarea>
+                    <button class="command-button">처리하기</button>
+                </div>
+                <div class="suggestions">
+                    <div class="suggestion-chip">응답 초안 작성</div>
+                    <div class="suggestion-chip">비슷한 문제 찾기</div>
+                    <div class="suggestion-chip">해결책 제안</div>
+                    <div class="suggestion-chip">추가 정보 요청 메시지</div>
+                </div>
+            </section>
+
+            <!-- 응답 및 제안 표시 영역 -->
+            <section class="response-area card">
+                <h2 class="section-title">응답 결과</h2>
+                <div class="response-content">
+                    <p>안녕하세요, [고객명]님.</p>
+                    <p>API 인증 오류 관련하여 문의 주셔서 감사합니다.</p>
+                    <p>프로덕션 환경에서 401 오류가 발생하는 원인은 주로 다음과 같습니다:</p>
+                    <ol>
+                        <li>API 키가 개발용과 프로덕션용으로 분리되어 있는 경우</li>
+                        <li>프로덕션 환경의 IP 제한 설정</li>
+                        <li>환경변수 미설정 또는 오류</li>
+                    </ol>
+                    <p>우선 프로덕션 환경에서 사용 중인 API 키를 확인해 주시고, 결제 시스템 대시보드에서 해당 키의 권한 및 상태를 확인해 주세요.</p>
+                    <p>확인 후에도 문제가 지속된다면, API 요청 로그와 함께 다시 연락주시면 추가 지원 드리겠습니다.</p>
+                </div>
+                <div class="response-actions">
+                    <button class="copy-button">응답 복사</button>
+                    <button class="modify-button">응답 수정 요청</button>
+                    <button class="action-button">티켓에 적용</button>
+                </div>
+            </section>
+
+            <!-- 관련 정보 탐색 영역 -->
+            <aside class="related-info card">
+                <div class="tabs">
+                    <div class="tab active" data-tab="similar-tickets">유사 티켓</div>
+                    <div class="tab" data-tab="kb-articles">지식베이스</div>
+                    <div class="tab" data-tab="templates">응답 템플릿</div>
+                </div>
+
+                <!-- 유사 티켓 탭 -->
+                <div class="tab-content active" id="similar-tickets">
+                    <div class="similar-ticket">
+                        <div class="ticket-title">#9876: 결제 API 인증 실패</div>
+                        <div class="ticket-snippet">프로덕션 환경에서 API 키 문제로 인한 인증 실패. IP 화이트리스트 설정 추가로 해결됨.</div>
+                        <div class="ticket-meta">3일 전 해결됨</div>
+                    </div>
+                    <div class="similar-ticket">
+                        <div class="ticket-title">#8765: API 인증 401 오류</div>
+                        <div class="ticket-snippet">개발/프로덕션 환경 간 API 키 차이로 인한 오류. API 키 재발급 후 해결.</div>
+                        <div class="ticket-meta">7일 전 해결됨</div>
+                    </div>
+                </div>
+
+                <!-- 지식베이스 탭 -->
+                <div class="tab-content" id="kb-articles">
+                    <div class="kb-article">
+                        <div class="article-title">결제 API 인증 문제 해결 가이드</div>
+                        <div class="article-snippet">다양한 환경에서 발생하는 결제 API 인증 문제와 해결책을 설명합니다.</div>
+                    </div>
+                    <div class="kb-article">
+                        <div class="article-title">API 키 관리 모범 사례</div>
+                        <div class="article-snippet">개발 및 프로덕션 환경에서 API 키를 안전하게 관리하는 방법을 설명합니다.</div>
+                    </div>
+                </div>
+
+                <!-- 응답 템플릿 탭 -->
+                <div class="tab-content" id="templates">
+                    <div class="kb-article">
+                        <div class="article-title">API 인증 오류 응답 템플릿</div>
+                        <div class="article-snippet">API 인증 관련 문제에 대한 기본 응답 템플릿입니다.</div>
+                    </div>
+                    <div class="kb-article">
+                        <div class="article-title">추가 정보 요청 템플릿</div>
+                        <div class="article-snippet">문제 해결을 위해 추가 정보가 필요할 때 사용하는 템플릿입니다.</div>
+                    </div>
+                </div>
+            </aside>
+        </main>
+    </div>
+
+    <script>
+        // 간단한 탭 전환 기능 구현
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', function() {
+                // 모든 탭에서 active 클래스 제거
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                // 클릭된 탭에 active 클래스 추가
+                this.classList.add('active');
+                
+                // 모든 탭 컨텐츠 숨기기
+                document.querySelectorAll('.tab-content').forEach(content => {
+                    content.classList.remove('active');
+                });
+                
+                // 해당 탭의 컨텐츠 표시
+                const tabId = this.getAttribute('data-tab');
+                document.getElementById(tabId).classList.add('active');
+            });
+        });
+
+        // 명령어 제안 클릭 시 입력창에 추가
+        document.querySelectorAll('.suggestion-chip').forEach(chip => {
+            chip.addEventListener('click', function() {
+                document.querySelector('.command-textarea').value = this.textContent;
+            });
+        });
+
+        // 빠른 액션 버튼 클릭 시 해당 명령 실행
+        document.querySelectorAll('.action-button').forEach(button => {
+            button.addEventListener('click', function() {
+                const command = this.textContent;
+                document.querySelector('.command-textarea').value = command;
+                // 실제 구현에서는 여기에 명령 실행 로직 추가
+            });
+        });
+    </script>
+</body>
+</html>
