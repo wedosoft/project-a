@@ -1,6 +1,6 @@
 # Task ID: 5
 # Title: Develop Data Processing Pipeline
-# Status: pending
+# Status: deferred
 # Dependencies: 2, 3, 4
 # Priority: high
 # Description: Create a pipeline for processing Freshdesk tickets and knowledge base articles into chunks, generating embeddings, and storing them in Qdrant with proper metadata.

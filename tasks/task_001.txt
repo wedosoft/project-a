@@ -60,7 +60,7 @@ requirements.txt
 ### Details:
 Create a `src/` directory as the root of the application containing submodules. Inside `src/`, create `main.py` to initialize the FastAPI app. Add `config.py` for environment variables and configuration management using Pydantic settings. Establish directories and files for modular components such as `router.py`, `schemas.py`, `models.py`, `service.py`, `dependencies.py`, `constants.py`, `utils.py`, and `exceptions.py` for each domain module. Use `.env` files for environment variables and configure loading in `config.py`.
 
-## 2. API Routing and Middleware Setup [pending]
+## 2. API Routing and Middleware Setup [done]
 ### Dependencies: 1.1
 ### Description: Implement API routing with FastAPI routers and configure middleware for request handling and cross-cutting concerns.
 ### Details:
@@ -72,9 +72,15 @@ Define routers in each module's `router.py` to group related endpoints. Register
 ### Details:
 Create `models.py` in each module for SQLAlchemy ORM models following naming conventions. Use Alembic for database migrations. Implement service logic in `service.py` to encapsulate business rules and database interactions. Configure database connection settings in `config.py` and initialize the database session in `main.py` or a dedicated `database.py` module. Ensure async database support if using async drivers. Define Pydantic schemas in `schemas.py` for request/response validation.
 
-## 4. Docker Containerization and Deployment Configuration [pending]
+## 4. Docker Containerization and Deployment Configuration [done]
 ### Dependencies: 1.1, 1.2, 1.3
 ### Description: Containerize the FastAPI application using Docker and prepare deployment configurations for production environments.
 ### Details:
 Create a `Dockerfile` based on the official Python image, copying the `src/` directory and installing dependencies from `requirements.txt` or `pyproject.toml`. Configure the container to run the FastAPI app with an ASGI server like Uvicorn. Write a `.dockerignore` file to exclude unnecessary files. Provide instructions or scripts to build and run the Docker image (`docker build -t myimage .` and `docker run -d -p 80:80 myimage`). Optionally, prepare deployment manifests or configurations for orchestration platforms like Kubernetes. Manage environment variables securely in the container runtime.
+
+## 5. MVP Core Features Implementation [pending]
+### Dependencies: 1.1
+### Description: Focus on implementing the minimum viable product (MVP) core features with high priority.
+### Details:
+Identify and implement the essential features required for the MVP. Prioritize functionality that delivers immediate value to users. Ensure that core API endpoints are fully functional and tested. Focus on critical path workflows before adding additional features. Document MVP requirements and acceptance criteria clearly. Implement basic error handling and logging for the MVP features.
 

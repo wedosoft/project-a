@@ -1,6 +1,6 @@
 # Task ID: 10
 # Title: Implement Similar Tickets and Documents Search API
-# Status: pending
+# Status: deferred
 # Dependencies: 3, 4, 5
 # Priority: medium
 # Description: Create API endpoints for retrieving similar tickets and knowledge base documents based on semantic search and metadata filtering.
