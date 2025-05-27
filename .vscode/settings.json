@@ -73,14 +73,13 @@
     "editor.codeActionsOnSave": {
         "source.organizeImports": "explicit"
     },
-    // 확장 기능 추천
-    "extensions.recommendations": [
-        "ms-python.python",
-        "ms-python.flake8",
-        "ms-python.black-formatter",
-        "github.copilot",
-        "github.copilot-chat",
-        "ms-azuretools.vscode-docker",
-        "redhat.vscode-yaml"
-    ]
+    // Task Master MCP 서버에서 환경변수 로드
+    "terminal.integrated.env.osx": {
+        "PYTHONPATH": "${workspaceFolder}/backend"
+    },
+    // MCP 설정 추가
+    "chat.mcp.enabled": true,
+    "chat.mcp.keysFile": "${workspaceFolder}/.vscode/mcp.json",
+    // MCP 서버 및 Taskmaster가 동일한 .env 파일을 참조하도록 설정
+    "dotenv.enableAutocloaking": false
 }
