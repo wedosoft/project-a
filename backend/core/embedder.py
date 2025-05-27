@@ -6,13 +6,14 @@ OpenAI API를 사용하여 텍스트 임베딩을 생성합니다.
 
 프로젝트 규칙 및 가이드라인: /PROJECT_RULES.md 참조
 """
-import os
 import logging
-from typing import List, Any, Dict, Tuple
 import math
-import tiktoken
+import os
 import re
+from typing import Any, Dict, List, Tuple
+
 import numpy as np
+import tiktoken
 
 # 로깅 설정
 logger = logging.getLogger(__name__)
@@ -163,21 +164,45 @@ def embed_documents(docs: List[str]) -> List[List[float]]:
     """
     문서 리스트를 임베딩 벡터 리스트로 변환합니다.
     대용량 문서를 처리하기 위해 배치 처리를 수행합니다.
-    참고: 이 함수는 이미 청크로 분할된 문서를 가정합니다.
+    각 문서는 토큰 제한에 맞게 자동으로 잘립니다.
     """
     # 문서가 없으면 빈 리스트 반환
     if not docs:
         return []
     
+    # 각 문서의 토큰 수를 확인하고 필요시 자르기
+    processed_docs = []
+    for i, doc in enumerate(docs):
+        token_count = count_tokens(doc)
+        logger.error(f"문서 {i} 토큰 수: {token_count}")
+        
+        if token_count > MAX_TOKENS_PER_CHUNK:
+            # 토큰 수가 제한을 초과하는 경우 잘라서 처리
+            logger.warning(f"문서 {i}가 토큰 제한을 초과합니다 ({token_count} > {MAX_TOKENS_PER_CHUNK}). 텍스트를 잘라서 처리합니다.")
+            tokens = tokenizer.encode(doc)
+            truncated_tokens = tokens[:MAX_TOKENS_PER_CHUNK]
+            truncated_text = tokenizer.decode(truncated_tokens)
+            processed_docs.append(truncated_text)
+        else:
+            processed_docs.append(doc)
+    
     # 토큰 제한을 고려하여 최적의 배치로 분할
-    batches = create_optimal_batches(docs)
+    batches = create_optimal_batches(processed_docs)
     all_embeddings = []
     
     for i, batch in enumerate(batches):
-        logger.info(f"배치 {i+1}/{len(batches)} 처리 중... ({i*MAX_BATCH_SIZE}~{i*MAX_BATCH_SIZE+len(batch)-1})")
+        logger.info(f"배치 {i+1}/{len(batches)} 처리 중... ({i*len(batch)}~{i*len(batch)+len(batch)-1})")
         try:
             batch_embeddings = []
             for text in batch:
+                # 최종 안전장치: 임베딩 생성 전 토큰 수 재확인
+                final_token_count = count_tokens(text)
+                if final_token_count > MAX_TOKENS_PER_CHUNK:
+                    logger.error(f"최종 검사에서 토큰 초과 감지: {final_token_count} 토큰, 추가 절단 실행")
+                    tokens = tokenizer.encode(text)
+                    truncated_tokens = tokens[:MAX_TOKENS_PER_CHUNK]
+                    text = tokenizer.decode(truncated_tokens)
+                
                 response = client.embeddings.create(
                     model=MODEL_NAME,
                     input=text

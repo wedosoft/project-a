@@ -1,7 +1,7 @@
-# Freshdesk Custom App 백엔드 서비스
+# 자연어 기반 Freshdesk 상담사 지원 시스템
 
-이 프로젝트는 Freshdesk Custom App(Prompt Canvas)을 위한 백엔드 서비스입니다.
-RAG(Retrieval-Augmented Generation) 기술을 활용하여 Freshdesk 티켓과 지식베이스를 기반으로 AI 기반 응답 생성 기능을 제공합니다.
+이 프로젝트는 Freshdesk Custom App을 위한 자연어 기반 상담사 지원 시스템입니다.
+RAG(Retrieval-Augmented Generation) 기술을 활용하여 Freshdesk 티켓과 지식베이스 데이터를 기반으로 상담사의 자연어 요청을 처리하고 맥락에 맞는 AI 응답을 생성하는 기능을 제공합니다.
 
 ## 프로젝트 문서
 

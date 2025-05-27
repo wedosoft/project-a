@@ -101,8 +101,10 @@ class LLMProviderStats(BaseModel):
     total_requests: int = 0
     successful_requests: int = 0
     failed_requests: int = 0
+    consecutive_failures: int = 0  # 연속 실패 횟수 추가
     total_tokens_used: int = 0
     total_latency_ms: float = 0.0  # 평균 계산을 위한 총 지연 시간
+    last_error_timestamp: Optional[float] = None  # 마지막 오류 발생 시간 (타임스탬프)
     error_details: List[Dict[str, Any]] = Field(default_factory=list)
 
     @property
@@ -121,8 +123,10 @@ class LLMProviderStats(BaseModel):
 
         if success:
             self.successful_requests += 1
+            self.consecutive_failures = 0  # 성공 시 연속 실패 횟수 리셋
         else:
             self.failed_requests += 1
+            self.consecutive_failures += 1  # 실패 시 연속 실패 횟수 증가
             if error_info:
                 self.error_details.append(error_info)
 
@@ -132,6 +136,24 @@ class LLMProviderStats(BaseModel):
         if self.total_requests == 0:
             return 1.0  # 요청이 없으면 100% 성공으로 간주 (또는 0.0으로 할 수도 있음)
         return self.successful_requests / self.total_requests
+
+    def record_success(self, duration_ms: float, tokens_used: Optional[int] = None):
+        """성공한 요청 통계를 기록합니다."""
+        self.add_request_stats(duration_ms, tokens_used, success=True)
+        
+        # Prometheus 메트릭 업데이트
+        llm_provider_consecutive_failures.labels(provider=self.provider_name).set(self.consecutive_failures)
+        llm_provider_success_rate.labels(provider=self.provider_name).set(self.success_rate)
+
+    def record_failure(self, duration_ms: float = 0, error_info: Optional[Dict[str, Any]] = None):
+        """실패한 요청 통계를 기록합니다."""
+        import time
+        self.last_error_timestamp = time.time()  # 마지막 오류 시간 기록
+        self.add_request_stats(duration_ms, None, success=False, error_info=error_info)
+        
+        # Prometheus 메트릭 업데이트
+        llm_provider_consecutive_failures.labels(provider=self.provider_name).set(self.consecutive_failures)
+        llm_provider_success_rate.labels(provider=self.provider_name).set(self.success_rate)
 
 
 class LLMProvider:
@@ -589,6 +611,61 @@ class LLMRouter:
         logger.info(f"시도할 제공자 순서: {ordered_list}")
         return ordered_list
 
+    async def generate_ticket_summary(self, ticket_data: Dict[str, Any], max_tokens: int = 500) -> str:
+        """
+        티켓 데이터를 기반으로 LLM을 사용하여 요약문을 생성합니다.
+        
+        Args:
+            ticket_data: 티켓 정보가 포함된 딕셔너리
+            max_tokens: 요약문 최대 토큰 수
+            
+        Returns:
+            생성된 티켓 요약문
+            
+        Raises:
+            RuntimeError: 모든 LLM 제공자 호출이 실패한 경우
+        """
+        # 컨텍스트 빌더를 사용하여 LLM 프롬프트에 적합한 형태로 티켓 정보 구성
+        subject = ticket_data.get("subject", "제목 없음")
+        description = ticket_data.get("description_text", "설명 없음")
+        conversations = ticket_data.get("conversations", [])
+        
+        # 간단한 프롬프트 구성
+        prompt_context = f"티켓 제목: {subject}\n티켓 설명: {description}\n"
+        
+        if conversations:
+            prompt_context += "\n최근 대화 내용:\n"
+            # 마지막 3개의 사용자 및 상담원 메시지만 포함
+            for conv in sorted(conversations, key=lambda c: c.get("created_at"), reverse=True)[:3]:
+                sender = "사용자" if conv.get("user_id") else "상담원"
+                body = conv.get("body_text", "내용 없음")
+                prompt_context += f"- {sender}: {body[:200]}...\n"
+                
+        system_prompt = (
+            "당신은 AI 지원 에이전트입니다. 제공된 티켓 정보를 바탕으로 티켓의 핵심 내용을 간결하게 요약해주세요. "
+            "요약은 주요 문제점, 고객의 요청, 현재 상태를 포함해야 합니다. "
+            "한국어로 답변해주세요."
+        )
+        
+        prompt = f"다음 티켓 정보를 요약해주세요:\n\n{prompt_context}"
+        
+        logger.info(f"티켓 요약 생성 요청 (ticket_id: {ticket_data.get('id')}, prompt_length: {len(prompt)} chars)")
+        
+        try:
+            # self.generate를 사용하여 텍스트 생성
+            response = await self.generate(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                max_tokens=max_tokens,
+                temperature=0.3
+            )
+            logger.info(f"티켓 요약 생성 완료 (ticket_id: {ticket_data.get('id')}, model: {response.model_used}, duration: {response.duration_ms}ms)")
+            return response.text
+        except Exception as e:
+            logger.error(f"티켓 요약 생성 중 오류 발생 (ticket_id: {ticket_data.get('id')}): {e}")
+            # 오류 발생 시 기본 메시지 반환
+            return "티켓 요약 생성에 실패했습니다."
+
     # choose_provider 메소드는 _get_ordered_providers로 통합되거나, 더 복잡한 선택 로직을 위해 남겨둘 수 있음.
     # 현재 generate 메소드에서 _get_ordered_providers를 직접 사용하므로 choose_provider는 제거 또는 리팩토링.
     # def choose_provider(self, prompt: str, estimated_tokens: int, has_images: bool) -> LLMProvider:
@@ -603,52 +680,4 @@ async def generate_text(prompt: str, system_prompt: str = None, max_tokens: int 
     """텍스트 생성 편의 함수"""
     return await llm_router.generate(prompt, system_prompt, max_tokens, temperature)
 
-async def generate_ticket_summary(ticket_data: Dict[str, Any], max_tokens: int = 500) -> str:
-    """
-    티켓 데이터를 기반으로 LLM을 사용하여 요약문을 생성합니다.
-    """
-    # 컨텍스트 빌더를 사용하여 LLM 프롬프트에 적합한 형태로 티켓 정보 구성
-    # 예시: 티켓 제목, 설명, 최신 대화 몇 개 등
-    # 실제 구현에서는 context_builder.py의 함수를 활용하여 더 정교하게 구성해야 함
-    
-    subject = ticket_data.get("subject", "제목 없음")
-    description = ticket_data.get("description_text", "설명 없음") # Freshdesk는 description_text 필드 사용
-    conversations = ticket_data.get("conversations", [])
-    
-    # 간단한 프롬프트 구성 예시
-    prompt_context = f"티켓 제목: {subject}\
-티켓 설명: {description}\
-"
-    
-    if conversations:
-        prompt_context += "\\n최근 대화 내용:\n"
-        # 마지막 3개의 사용자 및 상담원 메시지만 포함 (간단히)
-        for conv in sorted(conversations, key=lambda c: c.get("created_at"), reverse=True)[:3]:
-            sender = "사용자" if conv.get("user_id") else "상담원"
-            body = conv.get("body_text", "내용 없음") # Freshdesk는 body_text 필드 사용
-            prompt_context += f"- {sender}: {body[:200]}...\n" # 메시지 길이 제한
-            
-    system_prompt = (
-        "당신은 AI 지원 에이전트입니다. 제공된 티켓 정보를 바탕으로 티켓의 핵심 내용을 간결하게 요약해주세요. "
-        "요약은 주요 문제점, 고객의 요청, 현재 상태를 포함해야 합니다. "
-        "한국어로 답변해주세요."
-    )
-    
-    prompt = f"다음 티켓 정보를 요약해주세요:\n\n{prompt_context}"
-    
-    logger.info(f"티켓 요약 생성 요청 (ticket_id: {ticket_data.get('id')}, prompt_length: {len(prompt)} chars)")
-    
-    try:
-        # llm_router를 사용하여 텍스트 생성
-        response = await llm_router.generate(
-            prompt=prompt,
-            system_prompt=system_prompt,
-            max_tokens=max_tokens, # 요약문 최대 토큰 수
-            temperature=0.3 # 약간 더 창의적인 요약 (0.0 ~ 1.0)
-        )
-        logger.info(f"티켓 요약 생성 완료 (ticket_id: {ticket_data.get('id')}, model: {response.model_used}, duration: {response.duration_ms}ms)")
-        return response.text
-    except Exception as e:
-        logger.error(f"티켓 요약 생성 중 오류 발생 (ticket_id: {ticket_data.get('id')}): {e}")
-        # 오류 발생 시 기본 메시지 또는 예외를 다시 발생시킬 수 있음
-        return "티켓 요약 생성에 실패했습니다."
+# 중복된 standalone 함수는 제거하고 LLMRouter 클래스의 메서드를 사용
