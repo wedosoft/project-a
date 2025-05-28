@@ -159,8 +159,7 @@ backend/venv/
 backend/qdrant_data/
 backend/qdrant_storage/
 backend/attachment_cache
-backend/freshdesk_full_data/
-backend/freshdesk_test_data/
+backend/freshdesk*/
 
 # Added by Claude Task Master
 # Logs
