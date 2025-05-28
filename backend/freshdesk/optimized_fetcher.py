@@ -26,8 +26,45 @@ FRESHDESK_API_KEY = os.getenv("FRESHDESK_API_KEY")
 if not FRESHDESK_DOMAIN or not FRESHDESK_API_KEY:
     raise RuntimeError("FRESHDESK_DOMAIN, FRESHDESK_API_KEY 환경 변수가 필요합니다.")
 
-BASE_URL = f"https://{FRESHDESK_DOMAIN}.freshdesk.com/api/v2"
-HEADERS = {"Content-Type": "application/json"}
+def extract_company_id_from_domain(domain: str) -> str:
+    """
+    FRESHDESK_DOMAIN에서 company_id를 추출합니다.
+    
+    Args:
+        domain: Freshdesk 도메인 (예: "your-company.freshdesk.com" 또는 "your-company")
+        
+    Returns:
+        str: 추출된 company_id
+    """
+    if not domain:
+        raise ValueError("도메인이 비어있습니다.")
+    
+    # .freshdesk.com이 포함된 경우 제거
+    if ".freshdesk.com" in domain:
+        company_id = domain.replace(".freshdesk.com", "")
+    else:
+        company_id = domain
+    
+    # https:// 또는 http://가 포함된 경우 제거
+    if company_id.startswith(("https://", "http://")):
+        from urllib.parse import urlparse
+        parsed_url = urlparse(company_id)
+        company_id = parsed_url.netloc.replace(".freshdesk.com", "")
+    
+    return company_id
+
+# company_id 자동 추출
+COMPANY_ID = extract_company_id_from_domain(FRESHDESK_DOMAIN)
+logger.info(f"FRESHDESK_DOMAIN '{FRESHDESK_DOMAIN}'에서 추출된 company_id: '{COMPANY_ID}'")
+
+BASE_URL = f"https://{FRESHDESK_DOMAIN}" if ".freshdesk.com" in FRESHDESK_DOMAIN else f"https://{FRESHDESK_DOMAIN}.freshdesk.com"
+BASE_URL += "/api/v2"
+
+# X-Company-ID 헤더를 포함한 기본 헤더 설정
+HEADERS = {
+    "Content-Type": "application/json",
+    "X-Company-ID": COMPANY_ID
+}
 AUTH = (FRESHDESK_API_KEY, "X")
 
 # 최적화된 설정
