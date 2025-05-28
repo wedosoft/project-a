@@ -5,10 +5,10 @@
 # Priority: medium
 # Description: Response Assembler 모듈 구현: LLM Orchestrator로부터 받은 최종 LLM 응답과 기타 필요한 정보(예: 참고 자료, 유사 티켓 목록)를 조합하여 API 엔드포인트가 프론트엔드에 전달할 최종 응답 객체를 생성하는 모듈을 구현합니다.
 # Details:
-`api/response_assembler.py` (또는 각 엔드포인트 핸들러 내)에 `ResponseAssembler` 클래스 또는 관련 함수들을 구현합니다. 주요 기능: 1) `/init` 엔드포인트: 티켓 요약 정보, 유사 티켓 목록, 추천 기술 자료 목록을 조합. 2) `/query` 엔드포인트: LLM 생성 답변, 사용된 컨텍스트, 메타데이터를 조합. 프론트엔드 요구사항 고려 (BlockNote 에디터 등). 민감 정보 마스킹/필터링. `company_id` 정보 제외. LLM Orchestrator, Retriever, API 스키마와 협력. 상세한 한글 주석 필수.
+`api/response_assembler.py` (또는 각 엔드포인트 핸들러 내)에 `ResponseAssembler` 클래스 또는 관련 함수들을 구현합니다. 주요 기능: 1) `/init` 엔드포인트: 티켓 요약 정보, 유사 티켓 목록, 추천 기술 자료 목록을 조합. 2) `/query` 엔드포인트: LLM 생성 답변, 사용된 컨텍스트, 메타데이터를 조합. 프론트엔드 요구사항 고려 (HTML 렌더링을 위한 마크다운 형식). 민감 정보 마스킹/필터링. `company_id` 정보 제외. LLM Orchestrator, Retriever, API 스키마와 협력. 상세한 한글 주석 필수.
 
 # Test Strategy:
-1) `/init` 엔드포인트 응답 조립 로직 테스트: 다양한 입력에 따른 최종 응답 객체 검증. 2) `/query` 엔드포인트 응답 조립 로직 테스트: 다양한 입력에 따른 최종 응답 객체 검증. 3) Pydantic 스키마 준수 확인. 4) BlockNote/마크다운 형식 변환 정확성 검증. 5) 민감 정보 마스킹/필터링 로직 검증.
+1) `/init` 엔드포인트 응답 조립 로직 테스트: 다양한 입력에 따른 최종 응답 객체 검증. 2) `/query` 엔드포인트 응답 조립 로직 테스트: 다양한 입력에 따른 최종 응답 객체 검증. 3) Pydantic 스키마 준수 확인. 4) 마크다운 형식 변환 정확성 검증. 5) 민감 정보 마스킹/필터링 로직 검증.
 
 # Subtasks:
 ## 10.1. ResponseAssembler 클래스 또는 핵심 함수 기본 구조 설계 및 구현 [pending]
@@ -35,7 +35,7 @@
 ### Details:
 
 
-## 10.5. BlockNote 또는 마크다운 형식으로 최종 응답 내용 변환 로직 구현 [pending]
+## 10.5. 마크다운 형식으로 최종 응답 내용 변환 로직 구현 [pending]
 ### Dependencies: None
 ### Description: 
 ### Details:

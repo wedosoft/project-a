@@ -78,8 +78,8 @@
       "taskTitle": "Implement API Endpoints for Reply Generation",
       "complexityScore": 7,
       "recommendedSubtasks": 3,
-      "expansionPrompt": "Break down the reply generation API implementation into: 1) Full reply generation endpoint with BlockNote integration, 2) Block-level rewriting and manipulation functionality, and 3) Streaming response implementation with context preservation. Include detailed request/response models and sequence diagrams for each endpoint.",
-      "reasoning": "This task involves creating endpoints for AI-powered reply generation with support for block-based content manipulation. The complexity comes from implementing streaming responses, context preservation, and supporting different styles and tones. The task requires integration with the BlockNote editor and careful handling of context between requests."
+      "expansionPrompt": "Break down the reply generation API implementation into: 1) Full reply generation endpoint with markdown output, 2) Content formatting and sanitization functionality, and 3) Streaming response implementation with context preservation. Include detailed request/response models and sequence diagrams for each endpoint.",
+      "reasoning": "This task involves creating endpoints for AI-powered reply generation with support for markdown-based content formatting. The complexity comes from implementing streaming responses, context preservation, and supporting different styles and tones. The task requires integration with traditional HTML/CSS/JavaScript frontend and careful handling of context between requests."
     },
     {
       "taskId": 10,

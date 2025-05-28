@@ -12,7 +12,7 @@
 - **LLM**: Anthropic Claude, OpenAI GPT, Google Gemini (LLM Router 패턴)
 - **외부 API**: Freshdesk API (티켓, 지식베이스)
 - **컨테이너**: Docker, docker-compose
-- **프론트엔드**: BlockNote 에디터, Freshdesk FDK
+- **프론트엔드**: 전통적인 HTML/CSS/JavaScript, Freshdesk FDK
 
 ## 코딩 규칙 및 가이드라인
 
@@ -122,11 +122,11 @@ EMBEDDING_MODEL=text-embedding-3-small
 - 고객사별 설정 관리
 - 보안 및 격리 보장
 
-#### BlockNote 에디터 연동
+#### 마크다운 렌더링 연동
 
-- 블록 기반 응답 생성
-- 리치 텍스트 포맷 지원
-- 실시간 편집 기능
+- 마크다운 파싱 라이브러리를 사용한 HTML 변환
+- XSS 공격 방지를 위한 콘텐츠 새니타이징
+- 리치 텍스트 요소의 안전한 렌더링
 
 ### 10. 테스트 및 디버깅
 

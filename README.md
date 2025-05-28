@@ -61,16 +61,20 @@ docker-compose down
 
 ## Task Master 사용하기
 
-프로젝트에는 태스크 관리를 위한 Task Master가 통합되어 있습니다. 모든 Task Master 관련 기능은 단일 통합 스크립트(`taskmaster.sh`)를 통해 사용할 수 있습니다.
+프로젝트에는 태스크 관리를 위한 Task Master가 통합되어 있습니다.
 
-### 통합 스크립트 사용법
+### Task Master 명령어 사용법
 
 ```bash
-# 도움말 보기
-./taskmaster.sh help
-
 # Task Master 명령 실행 (예: 태스크 목록 확인)
-./taskmaster.sh run list
+cd tasks && python -c "
+import json
+with open('tasks.json', 'r') as f:
+    tasks = json.load(f)
+print(f'총 {len(tasks)} 개의 태스크가 있습니다')
+for task in tasks[:5]:  # 처음 5개만 표시
+    print(f'- {task[\"id\"]}: {task[\"title\"]}')
+"
 
 # 다음 태스크 가져오기
 ./taskmaster.sh run next
@@ -83,6 +87,16 @@ docker-compose down
 
 # 환경 변수 로드하기
 ./taskmaster.sh load-env
+```
+
+### 브랜치 체크 명령어
+
+```bash
+# 브랜치 접근 권한 확인 (Shell 스크립트)
+./scripts/check_branch.sh
+
+# 브랜치 접근 권한 확인 (Python)
+cd backend && python utils/branch_checker.py
 ```
 
 ### 문제 해결

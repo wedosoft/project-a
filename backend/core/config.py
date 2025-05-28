@@ -153,7 +153,7 @@ def export_settings_for_taskmaster():
         settings_dict = config.dict()
         
         # 환경 변수로 내보내고 결과 출력
-        print("Task Master에 사용할 환경 변수를 내보냅니다...\n")
+        print("✅ Task Master 환경 변수를 내보냅니다...\n")
         print("# 다음 명령어를 실행하여 환경 변수를 설정할 수 있습니다:")
         
         # Bash 스크립트용 명령어 생성

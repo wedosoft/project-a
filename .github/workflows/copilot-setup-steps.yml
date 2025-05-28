@@ -233,7 +233,7 @@ jobs:
           echo "  - Qdrant vector database integration"
           echo "  - Multi-LLM router (Claude, GPT, Gemini)"
           echo "  - Freshdesk API connector"
-          echo "  - BlockNote editor integration"
+          echo "  - 마크다운 렌더링 및 HTML 변환"
 
           echo "=== Copilot Agent Context ==="
           echo "This environment is configured for GitHub Copilot coding agent"
