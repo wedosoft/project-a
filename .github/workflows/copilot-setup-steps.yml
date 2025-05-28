@@ -20,11 +20,43 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          # dev 브랜치 기반으로 작업하도록 설정
+          # main 브랜치가 아닌 경우 dev를 기본으로 체크아웃
+          ref: ${{ github.ref_name == 'main' && 'main' || 'dev' }}
+
+      # 브랜치 체크 및 안내
+      - name: Check branch and provide guidance
+        run: |
+          echo "=== GitHub Copilot 브랜치 전략 체크 ==="
+          echo "현재 브랜치: ${{ github.ref_name }}"
+          echo "기본 브랜치: ${{ github.event.repository.default_branch }}"
+
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "⚠️  main 브랜치에서 실행 중입니다."
+            echo "💡 GitHub Copilot은 다음 워크플로우를 따라야 합니다:"
+            echo "   1. dev 브랜치에서 새 브랜치 생성"
+            echo "   2. 작업 완료 후 dev로 PR 생성"
+            echo "   3. 리뷰 완료 후 dev에 머지"
+            echo ""
+            echo "🔗 자세한 가이드: .github/COPILOT_WORKFLOW.md"
+          elif [ "${{ github.ref_name }}" = "dev" ]; then
+            echo "✅ dev 브랜치에서 실행 중입니다."
+            echo "📝 Task Master 파일들이 포함된 개발 환경입니다."
+          else
+            echo "🌿 feature/copilot 브랜치에서 실행 중입니다."
+            echo "📌 작업 완료 후 dev 브랜치로 PR을 생성해주세요."
+          fi
 
       # main 브랜치가 아닌 경우에만 Copilot Agent 방화벽 해제
-      - name: Disable Copilot Agent Firewall (non-main branches)
-        if: github.ref != 'refs/heads/main'
-        run: echo "COPILOT_AGENT_FIREWALL_ENABLED=false" >> $GITHUB_ENV
+      - name: Configure Copilot Agent settings
+        run: |
+          if [ "${{ github.ref_name }}" != "main" ]; then
+            echo "COPILOT_AGENT_FIREWALL_ENABLED=false" >> $GITHUB_ENV
+            echo "✅ Copilot Agent 활성화 (non-main 브랜치)"
+          else
+            echo "🔒 main 브랜치에서는 제한적 Copilot 모드"
+          fi
 
       # Python 3.10 설정 (백엔드 개발 환경)
       - name: Set up Python 3.10

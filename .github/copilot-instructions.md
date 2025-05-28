@@ -223,3 +223,77 @@ EMBEDDING_MODEL=text-embedding-3-small
 - 성능에 민감한 부분은 벤치마크 결과나 측정 기준 명시
 
 이 가이드라인을 따라 안정적이고 확장 가능한 코드를 작성해 주세요.
+
+## 🔀 Git 브랜치 전략 및 워크플로우
+
+### 브랜치 구조
+
+- **main**: 프로덕션 배포용 브랜치 (Task Master 파일 없음)
+- **dev**: 개발 메인 브랜치 (Task Master 파일 포함, 모든 새 브랜치의 베이스)
+- **feature/**: 기능 개발 브랜치 (dev에서 분기)
+- **copilot/**: GitHub Copilot 자동 생성 브랜치 (dev에서 분기)
+
+### GitHub Copilot 브랜치 전략
+
+**⚠️ 중요: GitHub Copilot이 새 브랜치를 생성할 때는 반드시 `dev` 브랜치에서 분기해야 합니다.**
+
+#### 1. 새 브랜치 생성 시
+
+```bash
+# 항상 dev 브랜치에서 시작
+git checkout dev
+git pull origin dev
+
+# 새 브랜치 생성 (예시)
+git checkout -b copilot/feature-name
+git checkout -b feature/feature-name
+```
+
+#### 2. Pull Request 생성 시
+
+- **Base 브랜치**: `dev` (main이 아님)
+- **Head 브랜치**: 작업한 브랜치
+- **리뷰어**: 프로젝트 관리자 지정
+- **라벨**: 적절한 라벨 추가 (feature, bugfix, enhancement 등)
+
+#### 3. 브랜치 네이밍 컨벤션
+
+```
+copilot/[작업-유형]-[간단한-설명]
+copilot/fix-api-error-handling
+copilot/feature-vector-search-optimization
+copilot/refactor-llm-router-logic
+```
+
+#### 4. 커밋 메시지 컨벤션
+
+```
+[타입]: [간단한 설명]
+
+[상세 설명]
+- 변경된 주요 내용
+- 이유와 배경
+- 영향 받는 컴포넌트
+
+예시:
+feat: Qdrant 벡터 검색 성능 최적화
+
+- 배치 처리를 통한 임베딩 생성 속도 개선
+- 메모리 사용량 30% 감소
+- 검색 응답 시간 2초 → 0.8초 단축
+```
+
+### 자동화된 워크플로우 지침
+
+1. **작업 시작 전**: 항상 dev 브랜치 최신 상태 확인
+2. **개발 진행**: dev 기준으로 새 브랜치 생성
+3. **PR 생성**: dev를 대상으로 PR 생성
+4. **리뷰 완료 후**: dev로 머지
+5. **릴리스 준비**: dev → main 머지 (Task Master 파일 제외)
+
+### 🚨 주의사항
+
+- **절대 main 브랜치에서 직접 분기하지 마세요**
+- **Task Master 관련 파일들은 dev 브랜치에서만 관리됩니다**
+- **main 브랜치로의 직접 푸시는 금지되어 있습니다**
+- **모든 변경사항은 PR을 통해서만 반영됩니다**
