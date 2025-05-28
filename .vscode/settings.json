@@ -16,7 +16,7 @@
     "explorer.fileNesting.patterns": {
         "*.py": "${capture}.cpython-*.pyc"
     },
-    "workbench.colorTheme": "Tomorrow Night Blue",
+    "workbench.colorTheme": "Default Light Modern",
     // 프로젝트 규칙 파일을 쉽게 열기 위한 설정
     "workbench.editorAssociations": {
         "PROJECT_RULES.md": "vscode.markdown.preview.editor"

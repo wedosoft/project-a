@@ -1,117 +1,88 @@
 # Task ID: 7
-# Title: Develop Context-Based Prompt Engineering
+# Title: /init/{ticket_id} 엔드포인트 구현
 # Status: pending
-# Dependencies: 5, 6
-# Priority: medium
-# Description: Create a system for dynamically constructing prompts based on ticket context, retrieved similar content, and user requirements.
+# Dependencies: 2, 3, 4, 5, 6
+# Priority: high
+# Description: LLM에 전달할 최적의 컨텍스트를 구성하는 Context Builder 모듈을 `core/context_builder.py`에 구현합니다. 이 모듈은 `/init` 및 `/query` API 요청에 따라 다양한 소스(티켓 정보, 유사 티켓, 기술 자료, 사용자 질문 등)로부터 컨텍스트를 조합합니다.
 # Details:
-1. Design prompt templates for different use cases:
-   - Ticket summarization
-   - Response generation
-   - Block rewriting
-   - Question answering
-2. Implement a context manager that can:
-   - Combine ticket information
-   - Add relevant knowledge base content
-   - Include similar tickets
-   - Format for specific LLM providers
-3. Create a system for managing prompt length to avoid token limits
-4. Implement relevance scoring for context selection
-5. Add support for different languages
-6. Create a template engine for prompt construction
-
-Example code:
-```python
-class PromptTemplate:
-    def __init__(self, template: str, max_context_length: int = 4000):
-        self.template = template
-        self.max_context_length = max_context_length
-        
-    def format(self, **kwargs):
-        return self.template.format(**kwargs)
-        
-class ContextManager:
-    def __init__(self, vector_store):
-        self.vector_store = vector_store
-        self.templates = {
-            "summarize": PromptTemplate(
-                "Summarize the following ticket:\n\nTicket: {ticket_text}\n\nSummary:"
-            ),
-            "reply": PromptTemplate(
-                "Generate a helpful reply to the customer ticket below.\n\n"
-                "Ticket: {ticket_text}\n\n"
-                "Similar tickets: {similar_tickets}\n\n"
-                "Knowledge base: {knowledge_base}\n\n"
-                "Reply:"
-            )
-        }
-        
-    async def get_context(self, ticket, company_id, embedding_service):
-        # Get ticket embedding
-        ticket_text = ticket["subject"] + "\n" + ticket["description"]
-        embedding = await embedding_service.get_embedding(ticket_text)
-        
-        # Get similar tickets
-        similar_tickets = await self.vector_store.search(
-            company_id, "tickets", embedding, limit=3
-        )
-        
-        # Get relevant knowledge base articles
-        kb_articles = await self.vector_store.search(
-            company_id, "knowledge_base", embedding, limit=3
-        )
-        
-        # Format context
-        similar_tickets_text = "\n\n".join([item.payload["text"] for item in similar_tickets])
-        kb_text = "\n\n".join([item.payload["text"] for item in kb_articles])
-        
-        return {
-            "ticket_text": ticket_text,
-            "similar_tickets": similar_tickets_text,
-            "knowledge_base": kb_text
-        }
-        
-    async def create_prompt(self, prompt_type, ticket, company_id, embedding_service):
-        context = await self.get_context(ticket, company_id, embedding_service)
-        template = self.templates.get(prompt_type)
-        if not template:
-            raise ValueError(f"Unknown prompt type: {prompt_type}")
-            
-        return template.format(**context)
-```
+- `core/context_builder.py`에 `ContextBuilder` 클래스 또는 관련 함수들을 구현합니다.
+- 주요 기능:
+    - 현재 티켓 정보(요약, 주요 내용)를 컨텍스트에 포함합니다.
+    - Retriever 모듈을 사용하여 검색된 유사 티켓 및 관련 기술 자료를 컨텍스트에 추가합니다.
+    - 사용자의 질문(`query_text`)을 컨텍스트에 명확하게 포함시킵니다.
+    - 컨텍스트의 총 길이를 LLM의 최대 토큰 제한에 맞게 동적으로 조절합니다 (중요도 기반으로 정보 필터링/요약).
+    - 컨텍스트 구성 시 프롬프트 엔지니어링 기법을 적용하여 LLM이 더 정확하고 관련성 높은 답변을 생성하도록 유도합니다.
+    - `context_type` (예: 'similar_tickets_only', 'solutions_only', 'full_rag')에 따라 컨텍스트 구성 전략을 다르게 적용할 수 있도록 유연하게 설계합니다.
+    - `company_id`를 고려하여 해당 회사의 데이터만 컨텍스트 구성에 사용하도록 합니다.
+- Retriever 모듈(`core/retriever.py`) 및 LLM Orchestrator(`core/llm_orchestrator.py`)와 긴밀하게 협력합니다.
+- 모든 코드에는 상세한 한글 주석을 필수로 작성합니다.
 
 # Test Strategy:
-1. Test prompt generation with different contexts
-2. Verify context truncation works correctly
-3. Test relevance scoring for context selection
-4. Validate language support
-5. Test with various ticket types and content
-6. Measure token usage for different prompts
-7. Test template rendering with edge cases
-8. Verify prompt effectiveness with actual LLM responses
+- 다양한 입력(티켓 정보, 검색 결과, 사용자 질문)에 따른 컨텍스트 구성 결과 검증.
+- 컨텍스트 길이 조절 로직 테스트 (토큰 제한 초과 여부, 정보 누락 최소화).
+- `context_type`에 따른 컨텍스트 구성 변화 확인.
+- 프롬프트 엔지니어링 적용 결과 (LLM 응답 품질 변화) 간접적 평가.
+- `company_id`에 따른 데이터 격리 검증.
+- Retriever 모듈과의 연동 테스트.
 
 # Subtasks:
-## 1. Design prompt templates for different use cases [pending]
+## 7.1. `ContextBuilder` 클래스 또는 핵심 함수 기본 구조 설계 및 구현 [pending]
 ### Dependencies: None
-### Description: Create specialized prompt templates that accommodate various use cases such as customer support, content generation, data analysis, and technical assistance
+### Description: `core/context_builder.py`에 Context Builder 모듈의 기본 구조를 설계하고 구현합니다.
 ### Details:
-Develop a library of prompt templates with placeholders for context insertion. Each template should include sections for directives, role definitions, context placement, and output formatting instructions. Consider different structures for factual queries versus creative tasks.
 
-## 2. Implement context management and selection logic [pending]
-### Dependencies: 7.1
-### Description: Develop algorithms to select and prioritize relevant context from various sources based on the query and use case
-### Details:
-Create a context selection system that can retrieve information from knowledge bases, conversation history, and user profiles. Implement filtering mechanisms to remove irrelevant information and prioritize context based on recency, relevance, and importance to the query.
 
-## 3. Build relevance scoring and context optimization system [pending]
-### Dependencies: 7.2
-### Description: Create a system to score context relevance and optimize context selection for maximum prompt effectiveness
+## 7.2. 현재 티켓 정보를 컨텍스트에 추가하는 로직 구현 [pending]
+### Dependencies: None
+### Description: 티켓 요약 및 주요 내용을 컨텍스트에 포함시키는 기능을 구현합니다.
 ### Details:
-Implement semantic similarity algorithms to score context relevance to the query. Develop methods to summarize lengthy context while preserving key information. Create a ranking system that balances information completeness with token efficiency.
 
-## 4. Develop template rendering with token management [pending]
-### Dependencies: 7.1, 7.3
-### Description: Create a rendering system that combines templates with selected context while managing token limits
+
+## 7.3. 유사 티켓 목록을 컨텍스트에 통합하는 로직 구현 [pending]
+### Dependencies: None
+### Description: Retriever로부터 받은 유사 티켓 정보를 컨텍스트에 효과적으로 통합하는 로직을 구현합니다.
 ### Details:
-Build a template rendering engine that can dynamically insert context into templates while tracking token usage. Implement fallback mechanisms for when context exceeds token limits, including context truncation, summarization, or template simplification strategies.
+
+
+## 7.4. 관련 기술 자료 목록을 컨텍스트에 통합하는 로직 구현 [pending]
+### Dependencies: None
+### Description: Retriever로부터 받은 관련 기술 자료를 컨텍스트에 통합하는 로직을 구현합니다.
+### Details:
+
+
+## 7.5. 사용자 질문을 컨텍스트에 포함시키는 로직 구현 [pending]
+### Dependencies: None
+### Description: 사용자의 질문(`query_text`)을 컨텍스트에 명확하게 포함시키는 로직을 구현합니다.
+### Details:
+
+
+## 7.6. 컨텍스트 길이 동적 조절 및 최적화 로직 구현 [pending]
+### Dependencies: None
+### Description: LLM의 최대 토큰 제한을 고려하여 컨텍스트 길이를 동적으로 조절하고, 중요도 기반으로 정보를 필터링/요약하는 로직을 구현합니다.
+### Details:
+
+
+## 7.7. `context_type`에 따른 다양한 컨텍스트 구성 전략 구현 [pending]
+### Dependencies: None
+### Description: 다양한 컨텍스트 타입(예: 'similar_tickets_only', 'solutions_only', 'full_rag')에 따라 컨텍스트 구성 전략을 다르게 적용하는 로직을 구현합니다.
+### Details:
+
+
+## 7.8. 프롬프트 엔지니어링 기법 적용 [pending]
+### Dependencies: None
+### Description: 컨텍스트 구성 시 프롬프트 엔지니어링 기법(역할 부여, 명확한 지시사항 추가 등)을 적용하여 LLM이 더 정확한 답변을 생성하도록 유도합니다.
+### Details:
+
+
+## 7.9. `company_id`를 고려한 데이터 필터링 로직 통합 [pending]
+### Dependencies: None
+### Description: `company_id`를 기반으로 해당 회사의 데이터만 컨텍스트 구성에 사용되도록 필터링 로직을 통합합니다.
+### Details:
+
+
+## 7.1. Context Builder 모듈 단위 테스트 작성 [pending]
+### Dependencies: None
+### Description: `tests/core/` 디렉토리에 Context Builder 모듈의 기능을 검증하는 단위 테스트를 작성합니다.
+### Details:
+
 

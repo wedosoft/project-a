@@ -1,277 +1,95 @@
 # Task ID: 14
-# Title: Implement Logging and Monitoring
-# Status: deferred
-# Dependencies: 1, 12
+# Title: 티켓 요약 카드 컴포넌트 개발
+# Status: pending
+# Dependencies: 12, 13
 # Priority: medium
-# Description: Create a comprehensive logging and monitoring system to track API usage, performance metrics, and error conditions.
+# Description: 백엔드 FastAPI 애플리케이션을 위한 Dockerfile 및 docker-compose.yml 파일을 작성하여 컨테이너화하고, 개발 및 프로덕션 환경 관리를 용이하게 합니다.
 # Details:
-1. Implement structured JSON logging
-2. Create middleware for request/response logging
-3. Add performance metrics collection
-4. Implement error tracking and reporting
-5. Create health check endpoints
-6. Add usage statistics collection
-7. Implement log rotation and management
-8. Create dashboard for monitoring key metrics
+**Dockerfile (`backend/Dockerfile`)**:
+- Python 3.10을 공식 베이스 이미지로 사용합니다.
+- 작업 디렉토리를 설정하고, `requirements.txt`를 복사하여 의존성을 설치합니다.
+- 애플리케이션 코드를 컨테이너에 복사합니다.
+- FastAPI 애플리케이션 실행을 위해 Uvicorn을 사용하며, 적절한 포트(예: 8000)를 노출합니다.
+- 멀티스테이지 빌드를 활용하여 최종 이미지 크기를 최적화할 수 있습니다 (선택적).
+- 비루트 사용자로 애플리케이션을 실행하도록 설정하여 보안을 강화합니다 (선택적).
 
-Example code:
-```python
-from fastapi import FastAPI, Request, Response
-from starlette.middleware.base import BaseHTTPMiddleware
-import time
-import json
-import logging
-import uuid
-from datetime import datetime
-import psutil
+**docker-compose.yml (`docker-compose.yml` 또는 `backend/docker-compose.yml`)**:
+- 백엔드 서비스(`backend`)를 정의하고, 위에서 작성한 Dockerfile을 빌드하도록 설정합니다.
+- 환경 변수 파일을 (`.env`) 참조하여 컨테이너에 환경 변수를 주입합니다. (예: `env_file: ./backend/.env`)
+- 포트 매핑 설정을 통해 호스트와 컨테이너 간 포트를 연결합니다 (예: `8000:8000`).
+- 볼륨 마운트를 설정하여 개발 시 코드 변경 사항이 컨테이너에 실시간으로 반영되도록 합니다 (개발 환경용 설정).
+- (선택적) Qdrant, 데이터베이스 등 외부 서비스가 로컬 개발 환경에 필요하다면, 해당 서비스들도 docker-compose에 추가할 수 있습니다. (단, Qdrant Cloud 사용 시에는 불필요)
+- 네트워크 설정을 통해 서비스 간 통신을 관리합니다 (필요시).
 
-app = FastAPI()
-
-# Configure JSON logger
-class JsonFormatter(logging.Formatter):
-    def format(self, record):
-        log_record = {
-            "timestamp": datetime.utcnow().isoformat(),
-            "level": record.levelname,
-            "message": record.getMessage(),
-            "module": record.module,
-            "function": record.funcName,
-            "line": record.lineno
-        }
-        
-        # Add exception info if available
-        if record.exc_info:
-            log_record["exception"] = {
-                "type": record.exc_info[0].__name__,
-                "message": str(record.exc_info[1]),
-                "traceback": self.formatException(record.exc_info)
-            }
-            
-        # Add extra fields from record
-        if hasattr(record, "extra"):
-            log_record.update(record.extra)
-            
-        return json.dumps(log_record)
-
-# Set up logger
-logger = logging.getLogger("app")
-logger.setLevel(logging.INFO)
-
-handler = logging.StreamHandler()
-handler.setFormatter(JsonFormatter())
-logger.addHandler(handler)
-
-# Request/response logging middleware
-class LoggingMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        # Generate request ID
-        request_id = str(uuid.uuid4())
-        
-        # Start timer
-        start_time = time.time()
-        
-        # Log request
-        logger.info(
-            f"Request started: {request.method} {request.url.path}",
-            extra={
-                "request_id": request_id,
-                "method": request.method,
-                "path": request.url.path,
-                "query_params": str(request.query_params),
-                "client_ip": request.client.host,
-                "user_agent": request.headers.get("user-agent", "")
-            }
-        )
-        
-        # Process request
-        try:
-            response = await call_next(request)
-            
-            # Calculate duration
-            duration = time.time() - start_time
-            
-            # Log response
-            logger.info(
-                f"Request completed: {request.method} {request.url.path}",
-                extra={
-                    "request_id": request_id,
-                    "status_code": response.status_code,
-                    "duration": duration,
-                    "content_length": response.headers.get("content-length", 0)
-                }
-            )
-            
-            # Add request ID to response headers
-            response.headers["X-Request-ID"] = request_id
-            
-            # Update metrics
-            app.state.metrics.record_request(
-                path=request.url.path,
-                method=request.method,
-                status_code=response.status_code,
-                duration=duration
-            )
-            
-            return response
-        except Exception as e:
-            # Log exception
-            logger.error(
-                f"Request failed: {request.method} {request.url.path}",
-                exc_info=True,
-                extra={
-                    "request_id": request_id,
-                    "error": str(e)
-                }
-            )
-            raise
-
-app.add_middleware(LoggingMiddleware)
-
-# Metrics collection
-class MetricsCollector:
-    def __init__(self):
-        self.requests = {}
-        self.errors = {}
-        self.start_time = time.time()
-        
-    def record_request(self, path, method, status_code, duration):
-        # Create key
-        key = f"{method}:{path}"
-        
-        # Initialize if not exists
-        if key not in self.requests:
-            self.requests[key] = {
-                "count": 0,
-                "total_duration": 0,
-                "status_codes": {}
-            }
-            
-        # Update metrics
-        self.requests[key]["count"] += 1
-        self.requests[key]["total_duration"] += duration
-        
-        # Update status code counts
-        status_str = str(status_code)
-        if status_str not in self.requests[key]["status_codes"]:
-            self.requests[key]["status_codes"][status_str] = 0
-        self.requests[key]["status_codes"][status_str] += 1
-        
-        # Record errors (4xx and 5xx)
-        if status_code >= 400:
-            if key not in self.errors:
-                self.errors[key] = {}
-            if status_str not in self.errors[key]:
-                self.errors[key][status_str] = 0
-            self.errors[key][status_str] += 1
-    
-    def get_metrics(self):
-        # Calculate uptime
-        uptime = time.time() - self.start_time
-        
-        # Get system metrics
-        system_metrics = {
-            "cpu_percent": psutil.cpu_percent(),
-            "memory_percent": psutil.virtual_memory().percent,
-            "disk_percent": psutil.disk_usage("/").percent
-        }
-        
-        # Calculate request stats
-        request_stats = {}
-        for key, data in self.requests.items():
-            avg_duration = data["total_duration"] / data["count"] if data["count"] > 0 else 0
-            request_stats[key] = {
-                "count": data["count"],
-                "avg_duration": avg_duration,
-                "status_codes": data["status_codes"]
-            }
-            
-        return {
-            "uptime": uptime,
-            "system": system_metrics,
-            "requests": request_stats,
-            "errors": self.errors
-        }
-
-# Initialize metrics on startup
-@app.on_event("startup")
-async def startup_event():
-    app.state.metrics = MetricsCollector()
-
-# Health check endpoint
-@app.get("/health")
-async def health_check():
-    return {
-        "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat()
-    }
-
-# Metrics endpoint
-@app.get("/metrics")
-async def get_metrics():
-    return app.state.metrics.get_metrics()
-
-# Example of contextual logging in an endpoint
-@app.post("/api/v1/example")
-async def example_endpoint(request: Request):
-    # Create context logger with request info
-    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
-    context = {"request_id": request_id, "endpoint": "example"}
-    
-    logger.info("Processing example request", extra=context)
-    
-    # Do some work
-    try:
-        # Simulate processing
-        time.sleep(0.1)
-        
-        # Log successful completion
-        logger.info("Example request processed successfully", extra=context)
-        
-        return {"status": "success", "request_id": request_id}
-    except Exception as e:
-        # Log error with context
-        logger.error("Error processing example request", exc_info=True, extra=context)
-        raise
-```
+- `requirements.txt` 파일에는 FastAPI, Uvicorn, Pydantic, httpx, python-dotenv 등 필요한 모든 Python 라이브러리와 버전을 명시합니다.
+- 모든 코드 및 설정 파일에는 상세한 한글 주석을 필수로 작성합니다.
 
 # Test Strategy:
-1. Verify structured JSON logging format
-2. Test request/response logging captures all required information
-3. Validate error logging includes stack traces
-4. Test metrics collection for different endpoints
-5. Verify health check endpoint
-6. Test system metrics collection
-7. Validate log rotation
-8. Test performance under high logging volume
+- `docker build` 명령어를 사용하여 Docker 이미지가 성공적으로 빌드되는지 확인.
+- `docker-compose up` 명령어를 사용하여 백엔드 서비스가 정상적으로 실행되는지 확인.
+- 컨테이너 로그를 통해 애플리케이션 시작 오류 여부 확인.
+- 호스트에서 매핑된 포트(예: `http://localhost:8000`)로 접속하여 API (예: 헬스체크 엔드포인트)가 정상 응답하는지 테스트.
+- 환경 변수가 컨테이너 내 애플리케이션에 올바르게 주입되었는지 확인.
+- 개발 환경에서 코드 변경 시 볼륨 마운트를 통해 컨테이너에 자동 반영(Uvicorn --reload 사용 시)되는지 확인.
 
 # Subtasks:
-## 1. 구조화된 JSON 로깅 시스템 구현 [pending]
+## 14.1. 백엔드 Python 의존성 목록을 `backend/requirements.txt` 파일로 정리 [pending]
 ### Dependencies: None
-### Description: 구조화된 JSON 로깅 및 로그 관리 시스템을 구현합니다.
+### Description: 
 ### Details:
-구조화된 JSON 로깅 시스템 설계, 로그 레벨 정책 설정, 컨텍스트 기반 로깅 구현, 로그 라우팅 메커니즘 구축, 로그 회전 및 보존 정책 구현, 민감 정보 필터링 및 마스킹, 로그 상관 관계 ID 시스템 구현, 비동기 로깅 최적화
 
-## 2. API 요청/응답 로깅 미들웨어 구현 [pending]
-### Dependencies: None
-### Description: API 요청 및 응답 로깅을 위한 미들웨어를 개발합니다.
-### Details:
-모든 요청/응답 로깅 미들웨어 구현, 요청 ID 생성 및 추적 메커니즘 개발, 응답 시간 측정 및 기록, 헤더 및 페이로드 로깅 (민감 정보 제외), 오류 상황 상세 로깅, 로그 포맷 표준화, 대용량 페이로드 처리 최적화, 로그 필터링 및 검색 용이성 개선
 
-## 3. 성능 메트릭 수집 및 모니터링 시스템 개발 [pending]
+## 14.2. `backend/Dockerfile` 작성 (Python 3.10 베이스, 의존성 설치, 코드 복사, Uvicorn 실행) [pending]
 ### Dependencies: None
-### Description: 성능 메트릭 수집 및 모니터링 시스템을 개발합니다.
+### Description: 
 ### Details:
-주요 성능 지표(KPI) 정의 및 측정 구현, API 응답 시간 기록 및 분석, 메모리 및 CPU 사용량 모니터링, 외부 API 호출 성능 추적, 시계열 데이터 저장 메커니즘, 임계값 기반 알림 시스템, 대시보드 시각화 데이터 준비, 부하 상황에서의 성능 저하 탐지
 
-## 4. 오류 추적 및 예외 처리 시스템 구현 [pending]
-### Dependencies: None
-### Description: 오류 추적 및 예외 처리 시스템을 구현합니다.
-### Details:
-전역 예외 처리 미들웨어 구현, 구조화된 오류 응답 정의, 오류 유형별 분류 및 코드화, 스택 트레이스 포착 및 기록, 재발생 오류 추적 메커니즘, 사용자 친화적인 오류 메시지 변환, 오류 통계 수집 및 분석, 주요 오류에 대한 알림 시스템 구축
 
-## 5. 상태 확인 및 헬스체크 엔드포인트 구현 [pending]
+## 14.3. (선택적) Dockerfile에 멀티스테이지 빌드 및 비루트 사용자 실행 로직 추가 [pending]
 ### Dependencies: None
-### Description: 상태 확인 및 헬스체크 엔드포인트를 구현합니다.
+### Description: 
 ### Details:
-기본 및 상세 헬스체크 엔드포인트 구현, 종속 서비스 상태 확인(Redis, Qdrant 등), 시스템 리소스 상태 보고, 자가 진단 기능 구현, 외부 API 연결 상태 점검, 데이터베이스 연결 검증, 응답 시간 및 지연 메트릭 수집, 장애 복구 프로세스 연동
+
+
+## 14.4. 루트 또는 `backend/` 디렉토리에 `docker-compose.yml` 파일 작성 [pending]
+### Dependencies: None
+### Description: 
+### Details:
+
+
+## 14.5. `docker-compose.yml`에 백엔드 서비스 정의 (빌드 컨텍스트, Dockerfile 경로, 포트 매핑, 환경 변수 파일 참조) [pending]
+### Dependencies: None
+### Description: 
+### Details:
+
+
+## 14.6. (개발용) `docker-compose.yml`에 소스 코드 볼륨 마운트 설정 추가 [pending]
+### Dependencies: None
+### Description: 
+### Details:
+
+
+## 14.7. (선택적) 로컬 개발용 외부 서비스(예: 로컬 Qdrant)를 `docker-compose.yml`에 추가 [pending]
+### Dependencies: None
+### Description: 
+### Details:
+
+
+## 14.8. Docker 이미지 빌드 테스트 (`docker build . -t backend-app`) [pending]
+### Dependencies: None
+### Description: 
+### Details:
+
+
+## 14.9. Docker Compose 실행 테스트 (`docker-compose up`) [pending]
+### Dependencies: None
+### Description: 
+### Details:
+
+
+## 14.10. 실행된 컨테이너의 API 엔드포인트(헬스체크 등) 접근 테스트 [pending]
+### Dependencies: None
+### Description: 
+### Details:
+
 
