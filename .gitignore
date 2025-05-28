@@ -183,4 +183,10 @@ node_modules/
 # OS specific
 # Task files
 tasks.json
-tasks/ 
+tasks/
+
+# Task Master 관련 파일들 (main 브랜치에서만 무시)
+# 이 파일들은 dev 브랜치에서만 관리됩니다
+.taskmasterconfig
+docs/task-master-command.txt
+scripts/task-complexity-report.json
