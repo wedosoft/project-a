@@ -67,6 +67,44 @@ class Settings(BaseSettings):
             return parsed_url.netloc
         return v
 
+    @property
+    def extracted_company_id(self) -> str:
+        """
+        FRESHDESK_DOMAIN에서 company_id를 자동으로 추출합니다.
+        
+        Returns:
+            str: 추출된 company_id
+        """
+        domain = self.FRESHDESK_DOMAIN
+        
+        # .freshdesk.com이 포함된 경우 제거
+        if ".freshdesk.com" in domain:
+            company_id = domain.replace(".freshdesk.com", "")
+        else:
+            company_id = domain
+        
+        # https:// 또는 http://가 포함된 경우 제거 (validator에서 이미 처리되지만 안전장치)
+        if company_id.startswith(("https://", "http://")):
+            from urllib.parse import urlparse
+            parsed_url = urlparse(company_id)
+            company_id = parsed_url.netloc.replace(".freshdesk.com", "")
+        
+        return company_id
+
+    @property
+    def freshdesk_api_headers(self) -> Dict[str, str]:
+        """
+        Freshdesk API 호출에 사용할 헤더를 반환합니다.
+        X-Company-ID가 자동으로 포함됩니다.
+        
+        Returns:
+            Dict[str, str]: API 호출용 헤더
+        """
+        return {
+            "Content-Type": "application/json",
+            "X-Company-ID": self.extracted_company_id
+        }
+
     class Config:
         """Pydantic 설정 클래스"""
         env_file = ".env"
