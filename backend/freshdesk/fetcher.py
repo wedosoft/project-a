@@ -149,7 +149,8 @@ async def fetch_ticket_attachments(client: httpx.AsyncClient, ticket_id: int) ->
         # 대화 내역의 첨부파일도 확인
         conversations = await fetch_ticket_conversations(client, ticket_id)
         for conv in conversations:
-            if "attachments" in conv and conv["attachments"]:
+            # conv가 None이 아니고 딕셔너리 타입인지 확인
+            if conv is not None and isinstance(conv, dict) and "attachments" in conv and conv["attachments"]:
                 for attachment in conv["attachments"]:
                     attachments.append({
                         "id": attachment.get("id"),
