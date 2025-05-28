@@ -1,86 +1,55 @@
 # Task ID: 1
-# Title: Setup FastAPI Project Structure
-# Status: in-progress
+# Title: FastAPI 프로젝트 초기 설정
+# Status: pending
 # Dependencies: None
 # Priority: high
-# Description: Initialize the FastAPI project with async support, Docker configuration, and project structure following best practices for a scalable backend service.
+# Description: FastAPI 백엔드 프로젝트 초기 설정 및 PRD/가이드라인 기반 핵심 구조(폴더, 로깅, 환경변수) 정의
 # Details:
-1. Create a new Python 3.10+ project
-2. Set up FastAPI with async/await support
-3. Configure project structure with modules for:
-   - API routes
-   - Database connections
-   - LLM integrations
-   - Freshdesk API client
-   - Utilities
-4. Create Dockerfile and docker-compose.yml for containerization
-5. Set up environment variables management for API keys and configuration
-6. Configure CORS and security headers
-7. Implement basic health check endpoint
-8. Set up structured JSON logging
-
-Code structure example:
-```
-/app
-  /api
-    /v1
-      __init__.py
-      router.py
-      endpoints/
-  /core
-    config.py
-    security.py
-    logging.py
-  /db
-    vector_store.py
-  /services
-    freshdesk.py
-    llm_router.py
-  /models
-    pydantic_models.py
-  main.py
-Dockerfile
-docker-compose.yml
-.env.example
-requirements.txt
-```
+Python 3.10 환경에서 FastAPI 프레임워크 기반 프로젝트 구조 설정. 필요한 패키지: fastapi, uvicorn[standard], pydantic 등 핵심 패키지 설치 (requirements.txt에 버전 명시 필수). PRD에 명시된 백엔드 폴더 구조 (backend/api/, backend/core/, backend/freshdesk/, backend/data/, backend/docs/) 생성 및 기본 __init__.py 파일 포함. backend/core/는 주요 비즈니스 로직(Context Builder, Retriever, LLM Orchestrator, Response Assembler 등 추상적 모듈 포함)을 담도록 설계. Docker (Dockerfile, docker-compose.yml) 설정: Python 3.10 환경, 명시적 버전 사용. 환경변수 관리: .env 및 .env.example 파일 생성 및 기본 설정 항목 정의 (예: FRESHDESK_DOMAIN, QDRANT_URL 등). 로깅 설정: 구조화된 JSON 로깅 기본 설정. 한글 주석 및 문서화 원칙 프로젝트 전반에 적용되도록 초기 가이드라인 설정.
 
 # Test Strategy:
-1. Verify project structure follows best practices
-2. Test Docker build and container startup
-3. Validate environment variable loading
-4. Test health check endpoint returns 200 OK
-5. Verify CORS configuration works correctly
-6. Ensure logging is properly configured and outputs structured JSON
+프로젝트 구조 및 PRD 명시 폴더 구조 일치 여부 검증. requirements.txt 기반 의존성 설치 및 버전 확인. Docker 컨테이너 빌드 및 실행, 기본 FastAPI 서버 동작 테스트. 환경변수 로딩 테스트. 초기 JSON 형식 로깅 설정 검증.
 
 # Subtasks:
-## 1. Core Project Scaffolding and Environment Configuration [done]
+## 1.1. Python 패키지 설치 및 requirements.txt 생성 [pending]
 ### Dependencies: None
-### Description: Set up the foundational project structure and configure environment management for the FastAPI application.
+### Description: 필요한 Python 패키지 설치 및 버전 명시된 requirements.txt 파일 생성
 ### Details:
-Create a `src/` directory as the root of the application containing submodules. Inside `src/`, create `main.py` to initialize the FastAPI app. Add `config.py` for environment variables and configuration management using Pydantic settings. Establish directories and files for modular components such as `router.py`, `schemas.py`, `models.py`, `service.py`, `dependencies.py`, `constants.py`, `utils.py`, and `exceptions.py` for each domain module. Use `.env` files for environment variables and configure loading in `config.py`.
 
-## 2. API Routing and Middleware Setup [done]
-### Dependencies: 1.1
-### Description: Implement API routing with FastAPI routers and configure middleware for request handling and cross-cutting concerns.
-### Details:
-Define routers in each module's `router.py` to group related endpoints. Register these routers in `src/main.py` to compose the full API. Set up middleware in `main.py` for tasks such as CORS, logging, authentication, and error handling. Use FastAPI's dependency injection system via `dependencies.py` to manage shared dependencies and middleware logic. Ensure async support for routes and middleware for scalability.
 
-## 3. Database and Service Integration Foundations [pending]
-### Dependencies: 1.1, 1.2
-### Description: Integrate database models, migrations, and service layers to support business logic and data persistence.
+## 1.2. PRD 기반 폴더 구조 생성 [pending]
+### Dependencies: None
+### Description: backend/api/, backend/core/, backend/freshdesk/, backend/data/, backend/docs/ 폴더 생성 및 기본 __init__.py 파일 포함
 ### Details:
-Create `models.py` in each module for SQLAlchemy ORM models following naming conventions. Use Alembic for database migrations. Implement service logic in `service.py` to encapsulate business rules and database interactions. Configure database connection settings in `config.py` and initialize the database session in `main.py` or a dedicated `database.py` module. Ensure async database support if using async drivers. Define Pydantic schemas in `schemas.py` for request/response validation.
 
-## 4. Docker Containerization and Deployment Configuration [done]
-### Dependencies: 1.1, 1.2, 1.3
-### Description: Containerize the FastAPI application using Docker and prepare deployment configurations for production environments.
-### Details:
-Create a `Dockerfile` based on the official Python image, copying the `src/` directory and installing dependencies from `requirements.txt` or `pyproject.toml`. Configure the container to run the FastAPI app with an ASGI server like Uvicorn. Write a `.dockerignore` file to exclude unnecessary files. Provide instructions or scripts to build and run the Docker image (`docker build -t myimage .` and `docker run -d -p 80:80 myimage`). Optionally, prepare deployment manifests or configurations for orchestration platforms like Kubernetes. Manage environment variables securely in the container runtime.
 
-## 5. MVP Core Features Implementation [pending]
-### Dependencies: 1.1
-### Description: Focus on implementing the minimum viable product (MVP) core features with high priority.
+## 1.3. Docker 설정 파일 생성 [pending]
+### Dependencies: None
+### Description: Python 3.10 기반 Dockerfile 및 docker-compose.yml 파일 생성, 명시적 버전 사용
 ### Details:
-Identify and implement the essential features required for the MVP. Prioritize functionality that delivers immediate value to users. Ensure that core API endpoints are fully functional and tested. Focus on critical path workflows before adding additional features. Document MVP requirements and acceptance criteria clearly. Implement basic error handling and logging for the MVP features.
+
+
+## 1.4. 환경변수 관리 설정 [pending]
+### Dependencies: None
+### Description: .env 및 .env.example 파일 생성, 기본 설정 항목(FRESHDESK_DOMAIN, QDRANT_URL 등) 정의
+### Details:
+
+
+## 1.5. 로깅 시스템 설정 [pending]
+### Dependencies: None
+### Description: 구조화된 JSON 로깅 기본 설정 구현
+### Details:
+
+
+## 1.6. 한글 주석 및 문서화 가이드라인 설정 [pending]
+### Dependencies: None
+### Description: 프로젝트 전반에 적용될 한글 주석 및 문서화 원칙 가이드라인 작성
+### Details:
+
+
+## 1.7. 기본 FastAPI 앱 설정 [pending]
+### Dependencies: None
+### Description: 기본 FastAPI 애플리케이션 설정 및 헬스체크 엔드포인트 구현
+### Details:
+
 
