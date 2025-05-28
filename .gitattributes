@@ -4,3 +4,4 @@
 # Task Master 파일들의 브랜치별 처리
 tasks.json merge=ours
 tasks/ merge=ours
+.taskmasterconfig merge=ours
