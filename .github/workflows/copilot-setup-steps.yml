@@ -21,6 +21,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # main 브랜치가 아닌 경우에만 Copilot Agent 방화벽 해제
+      - name: Disable Copilot Agent Firewall (non-main branches)
+        if: github.ref != 'refs/heads/main'
+        run: echo "COPILOT_AGENT_FIREWALL_ENABLED=false" >> $GITHUB_ENV
+
       # Python 3.10 설정 (백엔드 개발 환경)
       - name: Set up Python 3.10
         uses: actions/setup-python@v4
