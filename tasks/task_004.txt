@@ -1,6 +1,6 @@
 # Task ID: 4
 # Title: LLM Router 패턴 구현
-# Status: pending
+# Status: completed
 # Dependencies: 1
 # Priority: high
 # Description: Freshdesk API를 사용하여 티켓, 기술 자료(솔루션), 첨부 파일 데이터를 수집, 처리 및 Qdrant에 저장하는 모듈을 개발합니다. 이 모듈은 대용량 데이터 처리, Freshdesk API rate limit 처리, 첨부 파일 처리 기능을 포함해야 합니다.

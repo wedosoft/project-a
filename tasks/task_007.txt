@@ -1,6 +1,6 @@
 # Task ID: 7
 # Title: /init/{ticket_id} 엔드포인트 구현
-# Status: pending
+# Status: completed
 # Dependencies: 2, 3, 4, 5, 6
 # Priority: high
 # Description: LLM에 전달할 최적의 컨텍스트를 구성하는 Context Builder 모듈을 `core/context_builder.py`에 구현합니다. 이 모듈은 `/init` 및 `/query` API 요청에 따라 다양한 소스(티켓 정보, 유사 티켓, 기술 자료, 사용자 질문 등)로부터 컨텍스트를 조합합니다.
@@ -85,4 +85,28 @@
 ### Description: `tests/core/` 디렉토리에 Context Builder 모듈의 기능을 검증하는 단위 테스트를 작성합니다.
 ### Details:
 
+
+## 11. Design prompt templates for different use cases [pending]
+### Dependencies: None
+### Description: Create a library of prompt templates optimized for different scenarios such as question answering, summarization, code generation, and creative writing.
+### Details:
+Develop at least 5 template patterns with placeholders for context insertion. Each template should include: 1) System instruction component, 2) Context insertion points, 3) User query placement, 4) Optional few-shot examples section. Document the expected input/output format for each template and provide usage guidelines. Include templates for both zero-shot and few-shot learning approaches.
+
+## 12. Implement context management and selection logic [pending]
+### Dependencies: 7.11
+### Description: Develop algorithms to efficiently store, retrieve, and select the most relevant context pieces for inclusion in prompts.
+### Details:
+Create a context storage system with metadata tagging. Implement retrieval functions based on semantic similarity, recency, and explicit relationships. Design context selection algorithms for different use cases (e.g., chronological for conversations, relevance-based for QA). Include logic for handling context windows that exceed token limits through chunking, summarization, or prioritization.
+
+## 13. Build relevance scoring and context optimization system [pending]
+### Dependencies: 7.12
+### Description: Create mechanisms to evaluate and rank context pieces by relevance to the current query, and optimize context selection for maximum information value within token constraints.
+### Details:
+Implement vector embedding-based similarity scoring between queries and context pieces. Develop hybrid scoring that combines semantic similarity with other factors (recency, source reliability, etc.). Create algorithms for context deduplication and redundancy reduction. Design adaptive context selection that adjusts based on previous interaction outcomes. Include methods for context compression while preserving key information.
+
+## 14. Develop template rendering with token management [pending]
+### Dependencies: 7.11, 7.13
+### Description: Create a system that efficiently combines selected context with appropriate templates while managing token limits and optimizing prompt structure.
+### Details:
+Build a rendering engine that fills template placeholders with selected context. Implement token counting to ensure prompts stay within model limits. Create prioritization logic for context inclusion when token limits are approached. Design dynamic template selection based on context volume and query type. Include fallback strategies for handling excessive context (summarization, chunking into multiple queries, etc.).
 

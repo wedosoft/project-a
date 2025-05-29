@@ -1,6 +1,6 @@
 # Task ID: 8
 # Title: /query 엔드포인트 구현
-# Status: pending
+# Status: completed
 # Dependencies: 2, 3, 4, 5, 6
 # Priority: high
 # Description: Qdrant 벡터 DB에서 관련 정보를 검색하는 Retriever 모듈을 `core/retriever.py`에 구현합니다. 이 모듈은 Context Builder의 요청에 따라 유사 티켓, 관련 기술 자료 등을 검색하여 제공합니다.

@@ -1,11 +1,79 @@
 # Task ID: 20
-# Title: iparams.html 관리자 설정 페이지 개발
+# Title: Freshdesk 사용자 컨텍스트 연동 및 앱/API 접근 제어 (MVP)
 # Status: pending
-# Dependencies: 11
-# Priority: low
-# Description: 앱 설정을 위한 관리자 설정 페이지 구현
+# Dependencies: 6, 13
+# Priority: high
+# Description: Freshdesk 환경에서 이미 인증된 사용자 세션을 활용하고, 백엔드 API 호출 시 Freshdesk Signed Request 또는 유사한 메커니즘을 통해 요청을 검증합니다. MVP 범위에서는 복잡한 역할 기반 접근 제어(RBAC) 대신 기본적인 앱 접근 권한 확인 및 `company_id` 기반 데이터 격리 검증에 중점을 둡니다. Freshdesk 앱의 보안 요구사항을 준수합니다.
 # Details:
-iparams.html 페이지 설계 및 구현. 기본 설정 UI 구현: 자연어 명령 인식 범위 설정, 응답 스타일 및 문체/톤 설정, 금지 표현 목록 관리, 데이터 검색 기간 설정(1개월, 3개월, 6개월, 전체). 설정 저장 및 불러오기 로직. 설정 유효성 검증. 기본값 설정. 설정 초기화 기능. 설정 변경 히스토리(선택적). 도움말 및 설명 텍스트 추가.
+- Freshdesk 사용자 정보(ID, 이메일, `company_id`, 역할 등)를 프론트엔드에서 백엔드로 안전하게 전달하는 방법 연구 및 설계 (예: Freshdesk `request` API 활용).\n- 백엔드 API 요청 시 Freshdesk Signed Request 검증 로직 구현 또는 서버리스 환경의 경우 Freshdesk에서 발급한 토큰 기반 검증 로직 구현.\n- 각 API 엔드포인트에서 `company_id`를 추출하고, 이를 기반으로 데이터 접근 권한을 확인하는 로직 통합 (Qdrant 검색 시 `company_id` 필터링 등).\n- (MVP 범위) 기본적인 앱 사용 권한 확인 로직 구현 (예: 특정 Freshdesk 그룹 사용자만 접근 허용).\n- 민감 정보(API 키 등)가 클라이언트에 노출되지 않도록 서버 사이드에서 관리.\n- 모든 인증/권한 부여 로직에 대한 상세한 한글 주석 및 로깅 필수.
 
 # Test Strategy:
-설정 UI 렌더링 테스트, 설정 저장/불러오기 기능 검증, 유효성 검증 테스트, 기본값 설정 테스트, 초기화 기능 테스트
+- Freshdesk 사용자 컨텍스트 정보(user_id, account_id/company_id)가 백엔드로 올바르게 전달되고 사용되는지 테스트.\n- 유효하지 않은 요청(서명 오류, 토큰 오류, 권한 없는 사용자)에 대한 API 접근 거부 테스트 (401/403 에러 반환).\n- `company_id`가 다른 사용자가 타 회사의 데이터에 접근할 수 없는지 격리 테스트 (API 레벨 및 데이터베이스 쿼리 레벨).\n- Freshdesk Signed Request 검증 로직의 정확성 및 보안성 검토.
+
+# Subtasks:
+## 20.1. Freshdesk 사용자 정보 백엔드 전달 방식 설계 [pending]
+### Dependencies: None
+### Description: Freshdesk FDK의 `request` API 또는 유사 기능을 활용하여 사용자 ID, `company_id` 등의 정보를 백엔드로 안전하게 전달하는 방식 설계
+### Details:
+
+
+## 20.2. 백엔드 API 요청 검증 로직 구현 (Signed Request 또는 토큰 기반) [pending]
+### Dependencies: None
+### Description: FastAPI 미들웨어 또는 의존성 주입을 사용하여 Freshdesk Signed Request 검증 또는 토큰 기반 요청 검증 로직 구현
+### Details:
+
+
+## 20.3. `company_id` 기반 데이터 접근 제어 로직 통합 [pending]
+### Dependencies: None
+### Description: 모든 핵심 API 엔드포인트 및 서비스 로직에 `company_id` 기반 데이터 필터링 및 접근 제어 로직 통합
+### Details:
+
+
+## 20.4. 기본적인 앱 사용 권한 확인 로직 구현 (MVP) [pending]
+### Dependencies: None
+### Description: 특정 Freshdesk 사용자 그룹 또는 역할에 따른 기본적인 앱 사용 권한 확인 로직 구현 (선택적, MVP 범위 내)
+### Details:
+
+
+## 20.5. 인증/권한 부여 관련 단위 테스트 및 통합 테스트 작성 [pending]
+### Dependencies: None
+### Description: 구현된 인증 및 권한 부여 로직에 대한 단위 테스트 및 통합 테스트 작성
+### Details:
+
+
+## 6. 사용자 정보 전달 설계 [pending]
+### Dependencies: None
+### Description: Freshdesk에서 애플리케이션으로 사용자 정보를 안전하게 전달하는 방법 설계
+### Details:
+Freshdesk Signed Request 메커니즘 분석, JWT 또는 기타 토큰 기반 인증 방식 검토, 사용자 식별자 및 필요한 속성 정의, 보안 취약점 분석
+
+## 7. API 요청 검증 구현 [pending]
+### Dependencies: 20.6
+### Description: 들어오는 모든 API 요청에 대한 검증 로직 구현
+### Details:
+요청 헤더 검증, 토큰 유효성 검사, 요청 본문 유효성 검사, 악의적인 요청 필터링, 속도 제한 구현
+
+## 8. company_id 기반 접근 제어 구현 [pending]
+### Dependencies: 20.6, 20.7
+### Description: 사용자의 company_id를 기반으로 데이터 접근 제어 메커니즘 구현
+### Details:
+데이터베이스 쿼리에 company_id 필터 적용, 다중 테넌트 데이터 격리 구현, 크로스 테넌트 액세스 방지 로직 개발
+
+## 9. 사용자 권한 확인 시스템 개발 [pending]
+### Dependencies: 20.6, 20.8
+### Description: 사용자 역할 및 권한에 따른 기능 접근 제어 시스템 개발
+### Details:
+역할 기반 접근 제어(RBAC) 구현, 권한 매트릭스 정의, 권한 검사 미들웨어 개발, 권한 거부 시 적절한 오류 응답 구현
+
+## 10. 인증 및 권한 테스트 수행 [pending]
+### Dependencies: 20.7, 20.8, 20.9
+### Description: 구현된 인증 및 권한 시스템에 대한 종합적인 테스트 수행
+### Details:
+단위 테스트 작성, 통합 테스트 작성, 보안 취약점 테스트, 경계 조건 테스트, 성능 테스트
+
+## 11. 코드 주석화 및 로깅 구현 [pending]
+### Dependencies: 20.7, 20.8, 20.9, 20.10
+### Description: 보안 관련 코드에 대한 상세한 주석 작성 및 로깅 시스템 구현
+### Details:
+코드 주석 작성, 보안 이벤트 로깅 구현, 감사 추적 기능 개발, 로그 분석 도구 통합, 문서화
+

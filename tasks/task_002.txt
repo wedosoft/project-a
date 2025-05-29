@@ -1,6 +1,6 @@
 # Task ID: 2
 # Title: Qdrant Cloud 연동 및 벡터 DB 설정
-# Status: pending
+# Status: completed
 # Dependencies: 1
 # Priority: high
 # Description: Qdrant Cloud 연동, `company_id` 기반 멀티테넌트 데이터 격리를 위한 컬렉션 구조 설계 및 핵심 CRUD 기능 구현. PRD 및 가이드라인 준수.

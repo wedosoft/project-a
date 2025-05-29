@@ -258,7 +258,7 @@
           "status": "pending"
         },
         {
-          "id": "5.10",
+          "id": 5.1,
           "title": "에러 처리 및 구조화된 로깅 강화",
           "description": "임베딩 생성 및 Qdrant 저장 과정에서의 오류(OpenAI API 오류, Qdrant 연결 오류, 데이터 형식 오류 등)를 상세히 처리하고 구조화된 로깅 구현",
           "status": "pending"
@@ -267,45 +267,6 @@
           "id": 5.11,
           "title": "단위 테스트 및 통합 테스트 작성",
           "description": "임베딩 및 Qdrant 저장 관련 단위 테스트 및 통합 테스트 작성 (`tests/core/` 또는 `tests/data/`)",
-          "status": "pending"
-        },
-        {
-          "id": "5.12",
-          "title": "Text Chunking and Preprocessing Strategies",
-          "description": "Develop and implement text chunking and preprocessing strategies optimized for different content types (tickets, knowledge base articles, documentation).",
-          "dependencies": [],
-          "details": "Design and implement preprocessing pipelines that include: tokenization, sentence splitting, chunking strategies (fixed-size, semantic, hybrid approaches), metadata preservation during chunking, content-specific preprocessing rules, handling of special characters and formatting, and normalization techniques. Create detailed data flow diagrams showing the preprocessing steps for each content type. Document the rationale behind each chunking strategy and its appropriateness for different content types.",
-          "status": "pending"
-        },
-        {
-          "id": "5.13",
-          "title": "Ticket Processing Workflow Implementation",
-          "description": "Design and implement the complete workflow for processing support tickets from ingestion to embedding generation and storage.",
-          "dependencies": [
-            "5.12"
-          ],
-          "details": "Create a comprehensive ticket processing pipeline that includes: ticket data extraction, metadata parsing, content cleaning, applying the appropriate chunking strategy, embedding generation for each chunk, metadata association with embeddings, vector database storage with proper indexing, and logging/monitoring of the process. Develop data flow diagrams illustrating the complete ticket processing workflow from source to storage. Include error handling and retry mechanisms for each processing stage.",
-          "status": "pending"
-        },
-        {
-          "id": "5.14",
-          "title": "Knowledge Base Article Processing Workflow",
-          "description": "Design and implement the complete workflow for processing knowledge base articles from ingestion to embedding generation and storage.",
-          "dependencies": [
-            "5.12"
-          ],
-          "details": "Create a comprehensive knowledge base article processing pipeline that includes: article data extraction, metadata parsing, content cleaning, applying the appropriate chunking strategy, handling of structured sections and hierarchies, embedding generation for each chunk, metadata association with embeddings, vector database storage with proper indexing, and logging/monitoring of the process. Develop data flow diagrams illustrating the complete knowledge base article processing workflow. Include special handling for article relationships, versioning, and hierarchical structure preservation.",
-          "status": "pending"
-        },
-        {
-          "id": "5.15",
-          "title": "Incremental Update and Batch Processing Optimization",
-          "description": "Design and implement systems for efficient incremental updates and optimized batch processing of content.",
-          "dependencies": [
-            "5.13",
-            "5.14"
-          ],
-          "details": "Develop mechanisms for: detecting and processing only changed/new content, efficient batch processing for large content volumes, scheduling strategies for regular updates, optimizing resource usage during processing, handling of deleted content, maintaining consistency between source data and embeddings, and performance monitoring. Create detailed data flow diagrams for both incremental update processes and batch processing workflows. Implement benchmarking tools to measure and optimize processing throughput and resource utilization.",
           "status": "pending"
         }
       ]
@@ -377,7 +338,7 @@
           "status": "pending"
         },
         {
-          "id": "6.10",
+          "id": 6.1,
           "title": "API 문서 자동 생성 확인",
           "description": "Swagger/OpenAPI를 통한 API 문서 자동 생성 확인 및 필요시 문서 개선",
           "status": "pending"
@@ -419,103 +380,64 @@
       "testStrategy": "- 다양한 입력(티켓 정보, 검색 결과, 사용자 질문)에 따른 컨텍스트 구성 결과 검증.\n- 컨텍스트 길이 조절 로직 테스트 (토큰 제한 초과 여부, 정보 누락 최소화).\n- `context_type`에 따른 컨텍스트 구성 변화 확인.\n- 프롬프트 엔지니어링 적용 결과 (LLM 응답 품질 변화) 간접적 평가.\n- `company_id`에 따른 데이터 격리 검증.\n- Retriever 모듈과의 연동 테스트.",
       "subtasks": [
         {
-          "id": "7.1",
+          "id": 7.1,
           "title": "`ContextBuilder` 클래스 또는 핵심 함수 기본 구조 설계 및 구현",
           "description": "`core/context_builder.py`에 Context Builder 모듈의 기본 구조를 설계하고 구현합니다.",
-          "status": "done"
+          "status": "pending"
         },
         {
-          "id": "7.2",
+          "id": 7.2,
           "title": "현재 티켓 정보를 컨텍스트에 추가하는 로직 구현",
           "description": "티켓 요약 및 주요 내용을 컨텍스트에 포함시키는 기능을 구현합니다.",
-          "status": "done"
+          "status": "pending"
         },
         {
-          "id": "7.3",
+          "id": 7.3,
           "title": "유사 티켓 목록을 컨텍스트에 통합하는 로직 구현",
           "description": "Retriever로부터 받은 유사 티켓 정보를 컨텍스트에 효과적으로 통합하는 로직을 구현합니다.",
-          "status": "done"
+          "status": "pending"
         },
         {
-          "id": "7.4",
+          "id": 7.4,
           "title": "관련 기술 자료 목록을 컨텍스트에 통합하는 로직 구현",
           "description": "Retriever로부터 받은 관련 기술 자료를 컨텍스트에 통합하는 로직을 구현합니다.",
-          "status": "done"
+          "status": "pending"
         },
         {
-          "id": "7.5",
+          "id": 7.5,
           "title": "사용자 질문을 컨텍스트에 포함시키는 로직 구현",
           "description": "사용자의 질문(`query_text`)을 컨텍스트에 명확하게 포함시키는 로직을 구현합니다.",
-          "status": "done"
+          "status": "pending"
         },
         {
-          "id": "7.6",
+          "id": 7.6,
           "title": "컨텍스트 길이 동적 조절 및 최적화 로직 구현",
           "description": "LLM의 최대 토큰 제한을 고려하여 컨텍스트 길이를 동적으로 조절하고, 중요도 기반으로 정보를 필터링/요약하는 로직을 구현합니다.",
-          "status": "done"
+          "status": "pending"
         },
         {
-          "id": "7.7",
+          "id": 7.7,
           "title": "`context_type`에 따른 다양한 컨텍스트 구성 전략 구현",
           "description": "다양한 컨텍스트 타입(예: 'similar_tickets_only', 'solutions_only', 'full_rag')에 따라 컨텍스트 구성 전략을 다르게 적용하는 로직을 구현합니다.",
-          "status": "done"
+          "status": "pending"
         },
         {
-          "id": "7.8",
+          "id": 7.8,
           "title": "프롬프트 엔지니어링 기법 적용",
           "description": "컨텍스트 구성 시 프롬프트 엔지니어링 기법(역할 부여, 명확한 지시사항 추가 등)을 적용하여 LLM이 더 정확한 답변을 생성하도록 유도합니다.",
-          "status": "done"
+          "status": "pending"
         },
         {
-          "id": "7.9",
+          "id": 7.9,
           "title": "`company_id`를 고려한 데이터 필터링 로직 통합",
           "description": "`company_id`를 기반으로 해당 회사의 데이터만 컨텍스트 구성에 사용되도록 필터링 로직을 통합합니다.",
-          "status": "done"
+          "status": "pending"
         },
         {
-          "id": "7.10",
+          "id": 7.1,
           "title": "Context Builder 모듈 단위 테스트 작성",
           "description": "`tests/core/` 디렉토리에 Context Builder 모듈의 기능을 검증하는 단위 테스트를 작성합니다.",
-          "status": "done"
-        },
-        {
-          "id": "7.11",
-          "title": "Design prompt templates for different use cases",
-          "description": "Create a library of prompt templates optimized for different scenarios such as question answering, summarization, code generation, and creative writing.",
-          "dependencies": [],
-          "details": "Develop at least 5 template patterns with placeholders for context insertion. Each template should include: 1) System instruction component, 2) Context insertion points, 3) User query placement, 4) Optional few-shot examples section. Document the expected input/output format for each template and provide usage guidelines. Include templates for both zero-shot and few-shot learning approaches.",
-          "status": "done"
-        },
-        {
-          "id": "7.12",
-          "title": "Implement context management and selection logic",
-          "description": "Develop algorithms to efficiently store, retrieve, and select the most relevant context pieces for inclusion in prompts.",
-          "dependencies": [
-            "7.11"
-          ],
-          "details": "Create a context storage system with metadata tagging. Implement retrieval functions based on semantic similarity, recency, and explicit relationships. Design context selection algorithms for different use cases (e.g., chronological for conversations, relevance-based for QA). Include logic for handling context windows that exceed token limits through chunking, summarization, or prioritization.",
-          "status": "done"
-        },
-        {
-          "id": "7.13",
-          "title": "Build relevance scoring and context optimization system",
-          "description": "Create mechanisms to evaluate and rank context pieces by relevance to the current query, and optimize context selection for maximum information value within token constraints.",
-          "dependencies": [
-            "7.12"
-          ],
-          "details": "Implement vector embedding-based similarity scoring between queries and context pieces. Develop hybrid scoring that combines semantic similarity with other factors (recency, source reliability, etc.). Create algorithms for context deduplication and redundancy reduction. Design adaptive context selection that adjusts based on previous interaction outcomes. Include methods for context compression while preserving key information.",
-          "status": "done"
-        },
-        {
-          "id": "7.14",
-          "title": "Develop template rendering with token management",
-          "description": "Create a system that efficiently combines selected context with appropriate templates while managing token limits and optimizing prompt structure.",
-          "dependencies": [
-            "7.11",
-            "7.13"
-          ],
-          "details": "Build a rendering engine that fills template placeholders with selected context. Implement token counting to ensure prompts stay within model limits. Create prioritization logic for context inclusion when token limits are approached. Design dynamic template selection based on context volume and query type. Include fallback strategies for handling excessive context (summarization, chunking into multiple queries, etc.).",
-          "status": "done"
+          "status": "pending"
         }
       ]
     },
@@ -710,20 +632,20 @@
       "id": 11,
       "title": "Freshdesk FDK 프로젝트 초기 설정",
       "description": "Freshdesk FDK를 사용하여 앱의 기본 UI 구조와 레이아웃을 PRD에 명시된 대로 구현합니다. 여기에는 티켓 요약 카드, 3개의 탭 영역(유사 티켓, 추천 솔루션, OO와 대화하기)이 포함됩니다.",
-      "status": "in-progress",
+      "status": "pending",
       "dependencies": [],
       "priority": "high",
-      "details": "Freshdesk FDK의 `app/` 디렉토리 내에 HTML, CSS, JavaScript 파일들을 생성하여 UI를 구성합니다. (예: `app/template.html`, `app/styles/main.css`, `app/scripts/app.js` 등)\n\n**티켓 요약 카드 (Ticket Summary Card)**:\n- `/init` API로부터 받은 티켓 요약 정보를 표시합니다.\n- 간결하고 명확한 정보 전달에 중점을 둡니다.\n\n**3개의 탭 영역 (Tabs Area)**:\n- **유사 티켓 (Similar Tickets) 탭**: `/init` API로부터 받은 유사 티켓 목록을 표시합니다. 각 티켓은 제목, ID, 유사도 점수 등을 포함할 수 있습니다.\n- **추천 솔루션 (Recommended Solutions) 탭**: `/init` API로부터 받은 추천 기술 자료(솔루션) 목록을 표시합니다. 각 솔루션은 제목, ID, 관련성 점수 등을 포함할 수 있습니다.\n- **OO와 대화하기 (Chat with OO) 탭**: 사용자가 현재 티켓 컨텍스트 내에서 LLM과 직접 대화할 수 있는 인터페이스를 제공합니다. 입력창과 대화 내용 표시 영역으로 구성됩니다. `/query` API를 호출하여 LLM 응답을 받아 표시합니다.\n\n**기술 스택 및 구현 방식**:\n- 순수 JavaScript: 바닐라 JavaScript를 사용하여 DOM 조작 및 이벤트 처리를 구현합니다.\n- API 연동: XMLHttpRequest 또는 Fetch API를 사용하여 백엔드 API (`/init`, `/query`)를 호출하고 응답을 처리합니다.\n- 스타일링: CSS를 사용하여 UI를 스타일링합니다. 반응형 디자인을 고려합니다.\n- 모듈화: JavaScript 코드를 기능별로 모듈화하여 관리합니다.\n- 모든 코드에는 상세한 한글 주석을 필수로 작성합니다.\n\n**기본 설정 작업**:\n- Freshdesk CLI 설치 및 설정(fdk-cli)\n- FDK 프로젝트 생성 및 기본 구조 설정\n- 프로젝트 구조 설정: app/, assets/, config/, scripts/, styles/\n- 기본 스타일 및 테마 설정\n- 개발 환경 설정 및 로컬 테스트 환경 구성\n- 빌드 및 배포 스크립트 설정\n- manifest.json 구성(앱 메타데이터, 권한 등)\n- iparams.json 및 iparams.html 초기 설정",
-      "testStrategy": "- 티켓 요약 카드 UI 및 데이터 표시 정확성 검증\n- 각 탭(유사 티켓, 추천 솔루션, OO와 대화하기)의 UI 및 기능 정상 동작 확인\n- API 호출 및 응답 데이터 처리 로직 검증\n- 상태 관리 로직의 정확성 검증\n- 다양한 화면 크기에서의 반응형 UI 동작 확인\n- 사용자 인터랙션(탭 전환, 입력, 버튼 클릭 등)에 대한 UI 반응성 테스트\n- 프로젝트 구조 검증, 로컬 개발 환경 테스트, 빌드 프로세스 검증, manifest.json 유효성 검증\n- iparams.html 관리자 설정 화면 기능 검증",
+      "details": "Freshdesk FDK의 `app/` 디렉토리 내에 React 컴포넌트들을 생성하여 UI를 구성합니다. (예: `app/components/TicketSummaryCard.js`, `app/components/TabsArea.js` 등)\n\n**티켓 요약 카드 (Ticket Summary Card)**:\n- `/init` API로부터 받은 티켓 요약 정보를 표시합니다.\n- 간결하고 명확한 정보 전달에 중점을 둡니다.\n\n**3개의 탭 영역 (Tabs Area)**:\n- **유사 티켓 (Similar Tickets) 탭**: `/init` API로부터 받은 유사 티켓 목록을 표시합니다. 각 티켓은 제목, ID, 유사도 점수 등을 포함할 수 있습니다.\n- **추천 솔루션 (Recommended Solutions) 탭**: `/init` API로부터 받은 추천 기술 자료(솔루션) 목록을 표시합니다. 각 솔루션은 제목, ID, 관련성 점수 등을 포함할 수 있습니다.\n- **OO와 대화하기 (Chat with OO) 탭**: 사용자가 현재 티켓 컨텍스트 내에서 LLM과 직접 대화할 수 있는 인터페이스를 제공합니다. 입력창과 대화 내용 표시 영역으로 구성됩니다. `/query` API를 호출하여 LLM 응답을 받아 표시합니다.\n\n**기술 스택 및 구현 방식**:\n- 상태 관리: Zustand (또는 React Context)를 사용하여 API 응답 데이터, 사용자 입력, UI 상태 등을 관리합니다.\n- API 연동: Axios 또는 Fetch API를 사용하여 백엔드 API (`/init`, `/query`)를 호출하고 응답을 처리합니다.\n- 스타일링: Freshdesk 앱 스타일에 맞춰 CSS 또는 CSS-in-JS 라이브러리를 사용하여 UI를 스타일링합니다. 반응형 디자인을 고려합니다.\n- 컴포넌트 기반 개발: 재사용 가능한 UI 컴포넌트를 적극적으로 활용합니다.\n- 모든 코드에는 상세한 한글 주석을 필수로 작성합니다.\n\n**기본 설정 작업**:\n- Freshdesk CLI 설치 및 설정(fdk-cli)\n- FDK 프로젝트 생성 및 기본 구조 설정\n- 필요한 의존성 설치: React, Zustand(3.7.0+) 또는 React Context, Axios, React Query(선택적)\n- 프로젝트 구조 설정: app/, assets/, config/, services/, components/, hooks/\n- 기본 스타일 및 테마 설정\n- 개발 환경 설정 및 로컬 테스트 환경 구성\n- 빌드 및 배포 스크립트 설정\n- manifest.json 구성(앱 메타데이터, 권한 등)\n- iparams.json 초기 설정",
+      "testStrategy": "- 티켓 요약 카드 UI 및 데이터 표시 정확성 검증\n- 각 탭(유사 티켓, 추천 솔루션, OO와 대화하기)의 UI 및 기능 정상 동작 확인\n- API 호출 및 응답 데이터 처리 로직 검증\n- 상태 관리 로직(Zustand/Context)의 정확성 검증\n- 다양한 화면 크기에서의 반응형 UI 동작 확인\n- 사용자 인터랙션(탭 전환, 입력, 버튼 클릭 등)에 대한 UI 반응성 테스트\n- 프로젝트 구조 검증, 의존성 설치 확인, 로컬 개발 환경 테스트, 빌드 프로세스 검증, manifest.json 유효성 검증",
       "subtasks": [
         {
           "id": 11.1,
-          "title": "티켓 요약 카드 HTML/CSS/JS 기본 구조 및 UI 구현",
+          "title": "TicketSummaryCard React 컴포넌트 기본 구조 및 UI 구현",
           "status": "pending"
         },
         {
           "id": 11.2,
-          "title": "탭 영역 HTML/CSS/JS 및 3개 탭(유사 티켓, 추천 솔루션, OO와 대화하기) 기본 구조 구현",
+          "title": "TabsArea React 컴포넌트 및 3개 탭(유사 티켓, 추천 솔루션, OO와 대화하기) 기본 구조 구현",
           "status": "pending"
         },
         {
@@ -743,12 +665,12 @@
         },
         {
           "id": 11.6,
-          "title": "JavaScript 상태 관리 모듈 구현 (app/scripts/state.js)",
+          "title": "Zustand (또는 React Context) 스토어 설정 및 상태 관리 로직 초기 구현 (API 데이터, UI 상태 등)",
           "status": "pending"
         },
         {
           "id": 11.7,
-          "title": "백엔드 API (/init, /query) 호출을 위한 서비스 모듈(Fetch API 사용) 구현 (app/scripts/api.js)",
+          "title": "백엔드 API (/init, /query) 호출을 위한 서비스 모듈(Axios/Fetch 사용) 구현 (app/services/api.js)",
           "status": "pending"
         },
         {
@@ -762,149 +684,13 @@
           "status": "pending"
         },
         {
-          "id": "11.10",
+          "id": 11.1,
           "title": "기본 CSS 스타일링 및 Freshdesk UI 가이드라인 준수",
           "status": "pending"
         },
         {
           "id": 11.11,
-          "title": "각 주요 UI 요소에 대한 단위 테스트 작성 (선택적)",
-          "status": "pending"
-        },
-        {
-          "id": 11.12,
-          "title": "iparams.html 관리자 설정 화면 구현",
-          "status": "pending",
-          "details": "앱 설치 시 필요한 설정 파라미터를 입력받는 관리자 설정 화면을 HTML/CSS/JavaScript로 구현합니다. 필요한 설정 항목들을 폼 요소로 구성하고, 유효성 검사 및 저장 기능을 구현합니다."
-        },
-        {
-          "id": 12,
-          "title": "Freshdesk FDK 프로젝트 초기화",
-          "description": "Freshdesk FDK CLI를 사용하여 새 프로젝트를 생성하고 기본 구조 설정",
-          "dependencies": [],
-          "details": "FDK CLI 설치, 'fdk create' 명령어로 프로젝트 생성, 필요한 기본 디렉토리 구조 확인 및 설정, package.json 초기 구성",
-          "status": "pending"
-        },
-        {
-          "id": 13,
-          "title": "개발환경 세팅",
-          "description": "로컬 개발 환경 구성 및 필요한 도구 설치",
-          "dependencies": [
-            12
-          ],
-          "details": "Node.js 환경 설정, 필요한 npm 패키지 설치, ESLint/Prettier 설정, 개발 서버 실행 및 테스트, 디버깅 환경 구성",
-          "status": "pending"
-        },
-        {
-          "id": 14,
-          "title": "HTML/CSS/JS 구조 설계",
-          "description": "애플리케이션의 전체 구조와 계층 설계",
-          "dependencies": [
-            12,
-            13
-          ],
-          "details": "HTML 구조 설계, CSS 스타일 구조 설계, JavaScript 모듈 구조 설계, 파일 구조 최적화, 코드 조직화 방안 수립",
-          "status": "pending"
-        },
-        {
-          "id": 15,
-          "title": "상태 관리 전략 수립",
-          "description": "애플리케이션의 상태 관리 방식 결정 및 구현",
-          "dependencies": [
-            14
-          ],
-          "details": "바닐라 JavaScript 기반 상태 관리 패턴 설계, 이벤트 기반 상태 업데이트 구현, 비동기 상태 관리 전략, 상태 지속성 관리 방안",
-          "status": "pending"
-        },
-        {
-          "id": 16,
-          "title": "각 탭별 UI 구현",
-          "description": "애플리케이션의 각 탭에 필요한 UI 요소 개발",
-          "dependencies": [
-            14,
-            15
-          ],
-          "details": "각 탭별 HTML 구조 구현, CSS 스타일링, 필요한 UI 요소 개발, 사용자 인터랙션 요소 구현, 반응형 디자인 적용, 접근성 고려",
-          "status": "pending"
-        },
-        {
-          "id": 17,
-          "title": "탭별 비즈니스 로직 구현",
-          "description": "각 탭의 기능 및 비즈니스 로직 개발",
-          "dependencies": [
-            15,
-            16
-          ],
-          "details": "각 탭별 핵심 기능 구현, 이벤트 핸들러 작성, 유효성 검사 로직 구현, 에러 처리 로직 개발, 비즈니스 규칙 적용",
-          "status": "pending"
-        },
-        {
-          "id": 18,
-          "title": "API 연동 구현",
-          "description": "Freshdesk API 및 필요한 외부 API 연동",
-          "dependencies": [
-            15,
-            17
-          ],
-          "details": "Freshdesk Client SDK 활용, Fetch API 호출 함수 구현, 응답 데이터 처리 로직, 에러 핸들링, 캐싱 전략 수립, API 요청 최적화",
-          "status": "pending"
-        },
-        {
-          "id": 19,
-          "title": "스타일링 및 UI 개선",
-          "description": "애플리케이션 전체 스타일링 및 UI/UX 최적화",
-          "dependencies": [
-            16,
-            17
-          ],
-          "details": "CSS 스타일 적용, 디자인 시스템 구현, 테마 설정, 애니메이션 추가, 반응형 디자인 최적화, Freshdesk UI 가이드라인 준수",
-          "status": "pending"
-        },
-        {
-          "id": 20,
-          "title": "manifest.json 및 iparams 구성",
-          "description": "앱 설정을 위한 manifest 파일 및 설치 파라미터 구성",
-          "dependencies": [
-            12
-          ],
-          "details": "manifest.json 파일 구성, 필요한 권한 설정, iparams.json 파일 작성, iparams.html 구현, 설치 시 필요한 파라미터 정의, 앱 아이콘 및 메타데이터 설정",
-          "status": "pending"
-        },
-        {
-          "id": 21,
-          "title": "테스트 코드 작성 및 실행",
-          "description": "단위 테스트 및 통합 테스트 작성",
-          "dependencies": [
-            17,
-            18,
-            19
-          ],
-          "details": "JavaScript 테스트 프레임워크 설정, 함수 단위 테스트 작성, API 모킹 및 테스트, 통합 테스트 시나리오 작성, 테스트 자동화 구성",
-          "status": "pending"
-        },
-        {
-          "id": 22,
-          "title": "코드 품질 개선 및 문서화",
-          "description": "코드 리팩토링, 주석 추가 및 문서화",
-          "dependencies": [
-            17,
-            18,
-            19,
-            21
-          ],
-          "details": "코드 리팩토링, 중복 코드 제거, 성능 최적화, JSDoc 형식 주석 추가, README 및 사용 설명서 작성, 코드 컨벤션 준수 확인",
-          "status": "pending"
-        },
-        {
-          "id": 23,
-          "title": "빌드 및 배포 프로세스 구성",
-          "description": "프로덕션 빌드 설정 및 Freshdesk 마켓플레이스 배포 준비",
-          "dependencies": [
-            20,
-            21,
-            22
-          ],
-          "details": "빌드 스크립트 최적화, 번들 크기 최소화, 환경별 설정 분리, FDK 패키징 명령어 구성, 배포 자동화 설정, 마켓플레이스 제출 요구사항 확인",
+          "title": "각 주요 UI 컴포넌트에 대한 단위 테스트 또는 스토리북(Storybook) 설정 (선택적)",
           "status": "pending"
         }
       ]
@@ -918,12 +704,12 @@
         11
       ],
       "priority": "high",
-      "details": "- 마크다운 라이브러리(marked.js)를 사용하여 LLM 응답을 HTML로 변환하여 표시합니다.\n- 'OO와 대화하기' 탭의 대화 내용 표시 영역에 HTML 기반 콘텐츠 렌더링 시스템을 구현합니다.\n- 백엔드 `/query` API로부터 받은 LLM 응답을 안전하게 HTML로 파싱하고 표시합니다.\n  - marked.js를 사용하여 마크다운 텍스트를 HTML로 변환하는 로직을 구현합니다.\n  - XSS 공격 방지를 위한 콘텐츠 새니타이징을 적용합니다.\n- LLM 응답에 포함된 코드 블록, 목록, 인용구, 테이블 등의 리치 텍스트 요소가 올바르게 렌더링되도록 합니다.\n- 사용자의 메시지 입력 및 편집 기능을 일반 텍스트영역(textarea)으로 구현합니다.\n- CSS를 사용하여 Freshdesk UI와 일관된 스타일링을 적용합니다.\n- 대화가 길어질 경우 스크롤 처리 및 성능 최적화를 고려합니다.\n- 모든 코드에는 상세한 한글 주석을 필수로 작성합니다.\n- React를 사용하지 않고 전통적인 HTML/CSS/JavaScript만으로 구현합니다.",
-      "testStrategy": "- marked.js를 사용한 마크다운-HTML 변환이 정상적으로 작동하는지 확인.\n- 백엔드로부터 받은 다양한 형식의 LLM 응답(텍스트, 코드 블록, 목록 등)이 올바르게 HTML로 렌더링되는지 검증.\n- XSS 공격 방지를 위한 새니타이징 로직의 효과성 테스트.\n- 리치 텍스트 요소(코드 하이라이팅, 목록 들여쓰기 등)의 올바른 렌더링 확인.\n- CSS 스타일링 및 UI 일관성 검증.\n- 긴 대화 내용에 대한 스크롤 및 성능 테스트.\n- 일반 textarea를 통한 사용자 입력 처리가 정상적으로 작동하는지 확인.",
+      "details": "- 마크다운 라이브러리(marked.js 또는 유사)를 사용하여 LLM 응답을 HTML로 변환하여 표시합니다.\n- 'OO와 대화하기' 탭의 대화 내용 표시 영역에 HTML 기반 콘텐츠 렌더링 시스템을 구현합니다.\n- 백엔드 `/query` API로부터 받은 LLM 응답을 안전하게 HTML로 파싱하고 표시합니다.\n  - 마크다운 텍스트를 HTML로 변환하는 로직을 구현합니다.\n  - XSS 공격 방지를 위한 콘텐츠 새니타이징을 적용합니다.\n- LLM 응답에 포함된 코드 블록, 목록, 인용구, 테이블 등의 리치 텍스트 요소가 올바르게 렌더링되도록 합니다.\n- 사용자의 메시지 입력 및 편집 기능을 일반 텍스트영역(textarea)으로 구현합니다.\n- CSS를 사용하여 Freshdesk UI와 일관된 스타일링을 적용합니다.\n- 대화가 길어질 경우 스크롤 처리 및 성능 최적화를 고려합니다.\n- 모든 코드에는 상세한 한글 주석을 필수로 작성합니다.",
+      "testStrategy": "- 마크다운-HTML 변환이 정상적으로 작동하는지 확인.\n- 백엔드로부터 받은 다양한 형식의 LLM 응답(텍스트, 코드 블록, 목록 등)이 올바르게 HTML로 렌더링되는지 검증.\n- XSS 공격 방지를 위한 새니타이징 로직의 효과성 테스트.\n- 리치 텍스트 요소(코드 하이라이팅, 목록 들여쓰기 등)의 올바른 렌더링 확인.\n- CSS 스타일링 및 UI 일관성 검증.\n- 긴 대화 내용에 대한 스크롤 및 성능 테스트.",
       "subtasks": [
         {
           "id": 12.1,
-          "title": "marked.js 라이브러리 설치 및 프로젝트 설정",
+          "title": "마크다운 파싱 라이브러리(marked.js 등) 설치 및 프로젝트 설정",
           "status": "pending"
         },
         {
@@ -933,7 +719,7 @@
         },
         {
           "id": 12.3,
-          "title": "marked.js를 사용하여 백엔드 LLM 응답(마크다운)을 안전한 HTML로 변환하는 파서 구현",
+          "title": "백엔드 LLM 응답(마크다운)을 안전한 HTML로 변환하는 파서 구현",
           "status": "pending"
         },
         {
@@ -943,7 +729,7 @@
         },
         {
           "id": 12.5,
-          "title": "사용자 메시지 입력을 위한 일반 텍스트영역(textarea) 및 전송 버튼 구현",
+          "title": "사용자 메시지 입력을 위한 텍스트영역 및 전송 버튼 구현",
           "status": "pending"
         },
         {
@@ -960,114 +746,6 @@
           "id": 12.8,
           "title": "HTML 렌더링 및 XSS 방지 관련 단위 테스트 또는 기능 테스트 작성",
           "status": "pending"
-        },
-        {
-          "id": 9,
-          "title": "마크다운 파싱 구현",
-          "description": "마크다운 텍스트를 파싱하여 HTML 구조로 변환하는 기능 구현",
-          "dependencies": [],
-          "details": "마크다운 파서 라이브러리(marked.js, showdown 등) 선택 및 통합, 기본 마크다운 문법(제목, 목록, 링크, 이미지, 코드 블록 등) 지원, 커스텀 마크다운 확장 기능 검토",
-          "status": "pending"
-        },
-        {
-          "id": 10,
-          "title": "HTML 렌더링 구현",
-          "description": "파싱된 마크다운을 안전하게 HTML로 렌더링하는 기능 개발",
-          "dependencies": [
-            9
-          ],
-          "details": "파싱된 마크다운 HTML을 DOM에 삽입하는 로직 구현, 렌더링 성능 최적화, 동적 컨텐츠 업데이트 처리, 렌더링 생명주기 관리",
-          "status": "pending"
-        },
-        {
-          "id": 11,
-          "title": "XSS 방지 보안 구현",
-          "description": "사용자 입력 및 마크다운 렌더링 과정에서 XSS 공격 방지 기능 구현",
-          "dependencies": [
-            9,
-            10
-          ],
-          "details": "HTML 이스케이프 처리, 안전한 HTML 태그 및 속성 화이트리스트 설정, DOMPurify 같은 보안 라이브러리 통합, 악성 스크립트 삽입 방지 테스트",
-          "status": "pending"
-        },
-        {
-          "id": 12,
-          "title": "리치 텍스트 요소별 렌더링 구현",
-          "description": "다양한 리치 텍스트 요소(표, 코드 블록, 수식 등)에 대한 특수 렌더링 구현",
-          "dependencies": [
-            10
-          ],
-          "details": "코드 하이라이팅(Prism.js/highlight.js), 수학 수식(KaTeX/MathJax), 표 렌더링, 체크박스, 다이어그램(Mermaid) 등 특수 요소 지원, 각 요소별 스타일 및 인터랙션 구현",
-          "status": "pending"
-        },
-        {
-          "id": 13,
-          "title": "일반 텍스트영역(textarea) 기반 입력/전송 UI 개발",
-          "description": "사용자가 메시지를 입력하고 전송할 수 있는 기본 UI 구현",
-          "dependencies": [],
-          "details": "일반 HTML textarea 요소 구현, 전송 버튼 및 단축키 지원, 입력 유효성 검사, 기본적인 사용자 경험 최적화",
-          "status": "pending"
-        },
-        {
-          "id": 14,
-          "title": "CSS 스타일링 구현",
-          "description": "마크다운 렌더링 결과물에 대한 CSS 스타일링 및 테마 적용",
-          "dependencies": [
-            10,
-            12
-          ],
-          "details": "기본 마크다운 요소 스타일링, 반응형 디자인 적용, 다크/라이트 테마 지원, 커스텀 테마 옵션 구현, 일관된 디자인 시스템 적용, 접근성 고려한 스타일링",
-          "status": "pending"
-        },
-        {
-          "id": 15,
-          "title": "스크롤/성능 최적화",
-          "description": "대량의 마크다운 렌더링 시 스크롤 및 성능 최적화 구현",
-          "dependencies": [
-            10,
-            14
-          ],
-          "details": "가상 스크롤링 구현, 지연 로딩, 대용량 마크다운 처리 최적화, 이미지 최적화, 렌더링 성능 측정 및 개선, 바닐라 JavaScript 기반 최적화 기법 적용",
-          "status": "pending"
-        },
-        {
-          "id": 16,
-          "title": "테스트 구현",
-          "description": "마크다운 파싱 및 렌더링 기능에 대한 단위/통합 테스트 작성",
-          "dependencies": [
-            9,
-            10,
-            11,
-            12,
-            13,
-            14,
-            15
-          ],
-          "details": "파싱 정확도 테스트, XSS 방어 테스트, 렌더링 일관성 테스트, 성능 테스트, 브라우저 호환성 테스트, 에지 케이스 테스트, 자동화된 테스트 파이프라인 구축",
-          "status": "pending"
-        },
-        {
-          "id": 17,
-          "title": "코드 주석화 및 문서화",
-          "description": "구현된 코드에 대한 주석 추가 및 사용 문서 작성",
-          "dependencies": [
-            9,
-            10,
-            11,
-            12,
-            13,
-            14,
-            15,
-            16
-          ],
-          "details": "코드 주석 추가, 바닐라 JavaScript 코드 문서화, README 작성, 사용 예제 작성, 확장 가이드 작성, 트러블슈팅 가이드 작성, 한글 주석 상세 작성",
-          "status": "pending"
-        },
-        {
-          "id": 12.9,
-          "title": "전통적인 HTML/CSS/JavaScript 구조로 코드 구성",
-          "status": "pending",
-          "details": "React 없이 순수 JavaScript를 사용하여 DOM 조작 및 이벤트 처리 구현, 모듈 패턴 또는 클래스 기반 구조화"
         }
       ]
     },
@@ -1370,71 +1048,6 @@
           "id": "20.5",
           "title": "인증/권한 부여 관련 단위 테스트 및 통합 테스트 작성",
           "description": "구현된 인증 및 권한 부여 로직에 대한 단위 테스트 및 통합 테스트 작성",
-          "status": "pending"
-        },
-        {
-          "id": 6,
-          "title": "사용자 정보 전달 설계",
-          "description": "Freshdesk에서 애플리케이션으로 사용자 정보를 안전하게 전달하는 방법 설계",
-          "dependencies": [],
-          "details": "Freshdesk Signed Request 메커니즘 분석, JWT 또는 기타 토큰 기반 인증 방식 검토, 사용자 식별자 및 필요한 속성 정의, 보안 취약점 분석",
-          "status": "pending"
-        },
-        {
-          "id": 7,
-          "title": "API 요청 검증 구현",
-          "description": "들어오는 모든 API 요청에 대한 검증 로직 구현",
-          "dependencies": [
-            6
-          ],
-          "details": "요청 헤더 검증, 토큰 유효성 검사, 요청 본문 유효성 검사, 악의적인 요청 필터링, 속도 제한 구현",
-          "status": "pending"
-        },
-        {
-          "id": 8,
-          "title": "company_id 기반 접근 제어 구현",
-          "description": "사용자의 company_id를 기반으로 데이터 접근 제어 메커니즘 구현",
-          "dependencies": [
-            6,
-            7
-          ],
-          "details": "데이터베이스 쿼리에 company_id 필터 적용, 다중 테넌트 데이터 격리 구현, 크로스 테넌트 액세스 방지 로직 개발",
-          "status": "pending"
-        },
-        {
-          "id": 9,
-          "title": "사용자 권한 확인 시스템 개발",
-          "description": "사용자 역할 및 권한에 따른 기능 접근 제어 시스템 개발",
-          "dependencies": [
-            6,
-            8
-          ],
-          "details": "역할 기반 접근 제어(RBAC) 구현, 권한 매트릭스 정의, 권한 검사 미들웨어 개발, 권한 거부 시 적절한 오류 응답 구현",
-          "status": "pending"
-        },
-        {
-          "id": 10,
-          "title": "인증 및 권한 테스트 수행",
-          "description": "구현된 인증 및 권한 시스템에 대한 종합적인 테스트 수행",
-          "dependencies": [
-            7,
-            8,
-            9
-          ],
-          "details": "단위 테스트 작성, 통합 테스트 작성, 보안 취약점 테스트, 경계 조건 테스트, 성능 테스트",
-          "status": "pending"
-        },
-        {
-          "id": 11,
-          "title": "코드 주석화 및 로깅 구현",
-          "description": "보안 관련 코드에 대한 상세한 주석 작성 및 로깅 시스템 구현",
-          "dependencies": [
-            7,
-            8,
-            9,
-            10
-          ],
-          "details": "코드 주석 작성, 보안 이벤트 로깅 구현, 감사 추적 기능 개발, 로그 분석 도구 통합, 문서화",
           "status": "pending"
         }
       ]

@@ -1,11 +1,11 @@
 {
   "meta": {
-    "generatedAt": "2025-05-26T10:19:09.293Z",
+    "generatedAt": "2025-05-28T23:53:32.823Z",
     "tasksAnalyzed": 15,
-    "totalTasks": 15,
-    "analysisCount": 15,
+    "totalTasks": 25,
+    "analysisCount": 25,
     "thresholdScore": 5,
-    "projectName": "Taskmaster",
+    "projectName": "Freshdesk Custom App Backend",
     "usedResearch": true
   },
   "complexityAnalysis": [
@@ -91,43 +91,123 @@
     },
     {
       "taskId": 11,
-      "taskTitle": "Implement Image Gallery API",
-      "complexityScore": 5,
-      "recommendedSubtasks": 3,
-      "expansionPrompt": "Break down the image gallery API implementation into: 1) Core image retrieval and processing service, 2) Thumbnail generation and caching mechanisms, and 3) Metadata extraction and filtering capabilities. Include detailed image processing workflows and caching strategies for each component.",
-      "reasoning": "This task involves creating an API for retrieving and processing images with thumbnail generation and metadata extraction. The complexity is moderate as it requires implementing image processing, caching, and secure URL generation. The task is well-defined with clear examples and has fewer integration points than some other tasks."
+      "taskTitle": "Freshdesk FDK 프로젝트 초기 설정",
+      "complexityScore": 9,
+      "recommendedSubtasks": 12,
+      "expansionPrompt": "세부적으로 Freshdesk FDK 프로젝트 초기화, React 컴포넌트 구조 설계, 각 탭별 UI/로직 분리, 상태 관리, API 연동, 스타일링, 테스트, 빌드/배포, manifest 및 iparams 구성, 개발환경 세팅, 코드 주석화, 코드 품질 점검 등으로 세분화하세요.",
+      "reasoning": "프로젝트 구조 설계, 다양한 UI 컴포넌트 구현, 상태 관리, API 연동, 스타일링, 테스트, 빌드/배포 등 초기 세팅에 필요한 작업이 매우 많고, Freshdesk FDK와 React 환경에 대한 이해가 필수입니다. 각 영역별로 세부 구현과 검증이 필요하므로 복잡도가 높습니다."
     },
     {
       "taskId": 12,
-      "taskTitle": "Implement Caching and Performance Optimization",
+      "taskTitle": "프론트엔드 응답 표시 및 상태 관리 구현",
       "complexityScore": 8,
-      "recommendedSubtasks": 4,
-      "expansionPrompt": "Divide the caching and performance optimization implementation into: 1) Redis-based caching infrastructure, 2) Cache invalidation strategies, 3) Background processing for non-critical operations, and 4) Connection pooling and request batching optimization. Include detailed caching policies and performance benchmarking approaches for each component.",
-      "reasoning": "This task involves implementing comprehensive caching and performance optimizations across multiple components. The complexity comes from designing effective cache invalidation strategies, implementing background processing, and optimizing connection handling. This task affects the entire system and requires careful consideration of performance tradeoffs."
+      "recommendedSubtasks": 9,
+      "expansionPrompt": "마크다운 파싱, HTML 렌더링, XSS 방지, 리치 텍스트 요소별 렌더링, 입력/전송 UI, CSS 스타일링, 스크롤/성능 최적화, 테스트, 코드 주석화 등으로 세분화하세요.",
+      "reasoning": "LLM 응답의 마크다운 파싱, 보안(XSS), 다양한 리치 텍스트 렌더링, 사용자 입력 처리, 성능 최적화 등 프론트엔드에서 신경 써야 할 요소가 많고, 각 기능별로 세부 구현이 필요합니다."
     },
     {
       "taskId": 13,
-      "taskTitle": "Implement Security and Multi-tenant Isolation",
-      "complexityScore": 9,
-      "recommendedSubtasks": 4,
-      "expansionPrompt": "Break down the security and multi-tenant isolation implementation into: 1) Authentication and authorization mechanisms, 2) Request validation and company_id isolation, 3) Rate limiting and CORS configuration, and 4) Audit logging and personal data protection. Include detailed security policies and isolation strategies for each component.",
-      "reasoning": "This task involves implementing critical security measures and multi-tenant data isolation. The complexity is high as it requires careful implementation of authentication, data isolation, rate limiting, and audit logging. This task is fundamental to the system's security posture and requires thorough testing and validation."
+      "taskTitle": "API 서비스 레이어 구현",
+      "complexityScore": 7,
+      "recommendedSubtasks": 10,
+      "expansionPrompt": "iparams.json 정의, 각 파라미터 속성 상세화, iparams.html 구조 설계, 입력 필드 구현, 유효성 검사, FDK 연동, 보안 필드 처리, 스타일링, 테스트, 문서화 등으로 세분화하세요.",
+      "reasoning": "설정 파라미터 정의, 보안 입력 처리, Freshdesk FDK 연동, UI/UX 구현, 유효성 검사 등 다양한 측면에서 신경 써야 할 부분이 많아 중상급 복잡도입니다."
     },
     {
       "taskId": 14,
-      "taskTitle": "Implement Logging and Monitoring",
-      "complexityScore": 7,
-      "recommendedSubtasks": 3,
-      "expansionPrompt": "Divide the logging and monitoring implementation into: 1) Structured JSON logging with request context, 2) Performance metrics collection and health checks, and 3) Monitoring dashboard and alerting configuration. Include detailed logging schemas and metrics specifications for each component.",
-      "reasoning": "This task involves creating a comprehensive logging and monitoring system with structured logging, metrics collection, and health checks. The complexity comes from implementing proper context preservation, performance metrics, and log management. This task affects the entire system and requires careful consideration of observability requirements."
+      "taskTitle": "티켓 요약 카드 컴포넌트 개발",
+      "complexityScore": 6,
+      "recommendedSubtasks": 8,
+      "expansionPrompt": "requirements.txt 준비, Dockerfile 작성, 멀티스테이지/비루트 옵션, docker-compose.yml 작성, 서비스 정의, 볼륨 마운트, 외부 서비스 연동, 빌드/실행 테스트 등으로 세분화하세요.",
+      "reasoning": "컨테이너화 작업은 표준화된 절차가 있지만, 개발/운영 환경 분리, 보안, 외부 서비스 연동 등 신경 써야 할 부분이 있어 중간 정도의 복잡도입니다."
     },
     {
       "taskId": 15,
-      "taskTitle": "Implement Deployment and CI/CD Configuration",
+      "taskTitle": "유사 티켓 탭 컴포넌트 개발",
       "complexityScore": 7,
-      "recommendedSubtasks": 3,
-      "expansionPrompt": "Break down the deployment and CI/CD implementation into: 1) Docker and docker-compose configuration for development and production, 2) Kubernetes deployment manifests with zero-downtime updates, and 3) CI/CD pipeline setup with automated testing and deployment. Include detailed configuration files and deployment workflows for each environment.",
-      "reasoning": "This task involves creating Docker configurations, deployment scripts, and CI/CD pipelines. The complexity comes from implementing proper Kubernetes manifests, zero-downtime deployments, and automated testing. This task requires understanding of containerization, orchestration, and CI/CD best practices."
+      "recommendedSubtasks": 8,
+      "expansionPrompt": "UI 설계, 데이터 바인딩, 로딩/에러/스켈레톤 처리, 상세 모달, 답변 에디터, 정렬/필터/페이지네이션, API 연동, 테스트 등으로 세분화하세요.",
+      "reasoning": "목록 UI, 상태 관리, 상세 모달, 답변 삽입, 정렬/필터 등 다양한 UI/UX와 데이터 연동, 예외 처리까지 요구되어 복잡도가 높습니다."
+    },
+    {
+      "taskId": 16,
+      "taskTitle": "추천 솔루션 탭 컴포넌트 개발",
+      "complexityScore": 7,
+      "recommendedSubtasks": 8,
+      "expansionPrompt": "UI 스타일 가이드, 각 탭별 UI 디자인, 주요 인터랙션 프로토타입, 디자인 검토 및 피드백 등으로 세분화하세요.",
+      "reasoning": "전체 UI/UX 디자인 시스템 정의, 주요 화면/상호작용 설계, 프로토타입 제작, 피드백 반영 등 디자인과 프로토타이핑에 대한 복합적 작업이 필요합니다."
+    },
+    {
+      "taskId": 17,
+      "taskTitle": "OO와 대화하기 탭 컴포넌트 개발",
+      "complexityScore": 7,
+      "recommendedSubtasks": 9,
+      "expansionPrompt": "입력창/전송 UI, 콘텐츠 타입 선택, 대화 기록 표시, 로딩/타이핑 애니메이션, 에러/재시도, 응답 등록, 메시지 복사, 대화 저장/불러오기, API 연동 등으로 세분화하세요.",
+      "reasoning": "자연어 입력, 대화 기록, 다양한 UI/UX, 상태 관리, API 연동 등 복합적인 기능 구현이 필요해 복잡도가 높습니다."
+    },
+    {
+      "taskId": 18,
+      "taskTitle": "탭 컨테이너 및 네비게이션 구현",
+      "complexityScore": 7,
+      "recommendedSubtasks": 7,
+      "expansionPrompt": "탭 컨테이너 UI, 네비게이션 바, 활성 탭 상태 관리, 전환 애니메이션, 내용 영역 레이아웃, 반응형 디자인, 상태 지속성 등으로 세분화하세요.",
+      "reasoning": "여러 탭의 상태 관리, UI/UX, 반응형, 상태 지속성 등 다양한 UI와 데이터 흐름 관리가 필요해 중상급 복잡도입니다."
+    },
+    {
+      "taskId": 19,
+      "taskTitle": "티켓 응답 등록 기능 구현",
+      "complexityScore": 7,
+      "recommendedSubtasks": 8,
+      "expansionPrompt": "응답 등록 UI, 편집/미리보기, 확인 모달, Freshdesk API 연동, 성공/실패 피드백, 템플릿 저장, 히스토리 관리, 에러/재시도 등으로 세분화하세요.",
+      "reasoning": "응답 등록, 편집, 미리보기, API 연동, 피드백, 에러 처리 등 다양한 UI와 로직 구현이 필요해 복잡도가 높습니다."
+    },
+    {
+      "taskId": 20,
+      "taskTitle": "Freshdesk 사용자 컨텍스트 연동 및 앱/API 접근 제어 (MVP)",
+      "complexityScore": 8,
+      "recommendedSubtasks": 6,
+      "expansionPrompt": "사용자 정보 전달 설계, API 요청 검증, company_id 기반 접근 제어, 권한 확인, 인증/권한 테스트, 코드 주석화 및 로깅 등으로 세분화하세요.",
+      "reasoning": "인증/권한, 보안, 데이터 격리, Freshdesk Signed Request 등 보안과 연동에 대한 설계와 구현이 필요해 높은 복잡도입니다."
+    },
+    {
+      "taskId": 21,
+      "taskTitle": "MVP 성능 기준 설정 및 기본 로깅/모니터링 구축",
+      "complexityScore": 6,
+      "recommendedSubtasks": 5,
+      "expansionPrompt": "API 응답 시간 로깅, Qdrant/LLM 호출 로깅, 에러 로깅, 성능 지표 집계, 로깅 테스트 등으로 세분화하세요.",
+      "reasoning": "성능 기준 설정, 로깅, 모니터링 등은 표준화된 절차가 있으나, 다양한 지표와 로깅 포인트를 신경 써야 하므로 중간 정도 복잡도입니다."
+    },
+    {
+      "taskId": 22,
+      "taskTitle": "핵심 기능 단위/통합 테스트 커버리지 확보 (MVP)",
+      "complexityScore": 7,
+      "recommendedSubtasks": 7,
+      "expansionPrompt": "core/freshdesk/data 모듈 단위 테스트, 인증/권한 테스트, API 통합 테스트, 테스트 환경 구성, 커버리지 측정 등으로 세분화하세요.",
+      "reasoning": "다양한 모듈과 외부 API를 모킹하여 단위/통합 테스트를 작성해야 하므로, 테스트 설계와 구현에 상당한 노력이 필요합니다."
+    },
+    {
+      "taskId": 23,
+      "taskTitle": "MVP 수동 배포 절차 정의 및 기본 배포 스크립트 작성",
+      "complexityScore": 6,
+      "recommendedSubtasks": 6,
+      "expansionPrompt": "백엔드 Docker 빌드 스크립트, 프론트엔드 패키징 스크립트, 배포 가이드 문서, 환경별 설정 관리, 스테이징 배포 테스트, 롤백 방안 등으로 세분화하세요.",
+      "reasoning": "수동 배포 절차 정의, 스크립트 작성, 문서화, 환경 관리 등은 표준화된 작업이지만, 환경별 차이와 문서화까지 포함하면 중간 정도 복잡도입니다."
+    },
+    {
+      "taskId": 24,
+      "taskTitle": "MVP 내부 사용자 및 운영 가이드 문서화",
+      "complexityScore": 5,
+      "recommendedSubtasks": 5,
+      "expansionPrompt": "상담원용 가이드, 운영 가이드, Swagger/OpenAPI 설명 추가, 문서 검토/피드백, 문서화 표준화 등으로 세분화하세요.",
+      "reasoning": "문서화 작업은 비교적 표준화되어 있으나, 사용자/운영자 관점에서의 명확한 설명과 검토가 필요해 기본 이상의 복잡도입니다."
+    },
+    {
+      "taskId": 25,
+      "taskTitle": "MVP 기능 검증 및 내부 릴리즈 준비",
+      "complexityScore": 7,
+      "recommendedSubtasks": 7,
+      "expansionPrompt": "테스트 케이스 작성, 내부 QA, 버그 수정, UAT 계획/진행, 피드백 분석, 릴리즈 노트 작성, 최종 승인 등으로 세분화하세요.",
+      "reasoning": "QA, UAT, 피드백 수렴, 릴리즈 준비 등 다양한 검증 및 릴리즈 절차가 포함되어 있어 복잡도가 높습니다."
     }
   ]
 }

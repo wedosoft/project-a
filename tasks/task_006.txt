@@ -1,6 +1,6 @@
 # Task ID: 6
 # Title: 백엔드 API 엔드포인트 기본 구조 구현
-# Status: pending
+# Status: completed
 # Dependencies: 1
 # Priority: high
 # Description: PRD에 정의된 핵심 API 엔드포인트인 `/init/{ticket_id}`와 `/query`를 FastAPI를 사용하여 구현합니다. 이 엔드포인트들은 백엔드 서비스의 주요 기능을 제공합니다.
@@ -18,7 +18,7 @@
     - `company_id`는 헤더 또는 인증 토큰에서 추출하여 사용합니다.
     - 기능: 사용자의 `query_text`와 제공된 `ticket_id` 및 `context_type`을 기반으로 LLM에게 질의하고 답변을 생성하여 반환합니다.
     - 내부적으로 Context Builder, Retriever, LLM Orchestrator와 상호작용합니다.
-    - 응답 모델(Pydantic)은 LLM이 생성한 답변(BlockNote 형식 또는 마크다운)과 사용된 컨텍스트(참고 자료 목록 등)를 포함해야 합니다.
+    - 응답 모델(Pydantic)은 LLM이 생성한 답변(마크다운 형식)과 사용된 컨텍스트(참고 자료 목록 등)를 포함해야 합니다.
 - 모든 엔드포인트는 비동기(async/await)로 구현합니다.
 - Pydantic을 사용하여 요청 및 응답 모델을 명확히 정의하고 유효성 검사를 수행합니다.
 - 의존성 주입(FastAPI Depends)을 활용하여 서비스 모듈(Context Builder, Retriever, LLM Orchestrator 등)을 주입받습니다.
@@ -37,7 +37,7 @@
     - 다양한 `ticket_id`, `query_text`, `context_type` 조합으로 호출 시 정상 응답(LLM 답변, 참고 자료) 확인.
     - 필수 요청 필드 누락 시 에러 처리 검증.
     - LLM 연동 실패 시의 에러 처리 및 폴백 로직(정의된 경우) 검증.
-    - 응답 데이터 형식(BlockNote/마크다운) 및 내용의 정확성 검증.
+    - 응답 데이터 형식(마크다운) 및 내용의 정확성 검증.
 - 두 엔드포인트 모두에 대한 인증 및 권한 부여 로직(구현된 경우) 테스트.
 - 성능 테스트: 응답 시간, 동시 요청 처리 능력 등.
 - Rate limiting 테스트, CORS 설정 검증, 로깅 기능 테스트.
@@ -97,7 +97,7 @@
 ### Details:
 
 
-## 6.1. API 문서 자동 생성 확인 [pending]
+## 6.10. API 문서 자동 생성 확인 [pending]
 ### Dependencies: None
 ### Description: Swagger/OpenAPI를 통한 API 문서 자동 생성 확인 및 필요시 문서 개선
 ### Details:

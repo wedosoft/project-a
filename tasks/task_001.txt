@@ -1,6 +1,6 @@
 # Task ID: 1
 # Title: FastAPI 프로젝트 초기 설정
-# Status: pending
+# Status: completed
 # Dependencies: None
 # Priority: high
 # Description: FastAPI 백엔드 프로젝트 초기 설정 및 PRD/가이드라인 기반 핵심 구조(폴더, 로깅, 환경변수) 정의
