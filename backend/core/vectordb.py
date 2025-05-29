@@ -23,6 +23,7 @@ from qdrant_client.http.models import (
     Filter,
     MatchAny,
     MatchValue,
+    PointStruct,
 )
 from qdrant_client.models import Distance, VectorParams
 
@@ -944,8 +945,8 @@ class QdrantAdapter(VectorDBInterface):
             성공 여부 (bool)
         """
         import json
-        from datetime import datetime
         import os
+        from datetime import datetime
         
         name = collection_name or self.collection_name
         

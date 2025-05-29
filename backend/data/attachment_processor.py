@@ -2,25 +2,26 @@
 첨부파일 처리 모듈
 
 이 모듈은 Freshdesk에서 가져온 첨부파일을 스트리밍 방식으로 처리하는 기능을 제공합니다.
-이미지 OCR, 문서 텍스트 추출 등 다양한 첨부파일 처리를 지원하며, 디스크 공간을 최소화합니다.
+이미지 OCR, PDF 텍스트 추출, Word 문서 처리 등 다양한 첨부파일 처리를 지원하며, 
+디스크 공간을 최소화합니다.
 
 프로젝트 규칙 및 가이드라인: /PROJECT_RULES.md 참조
 """
 
-import os
-import tempfile
 import asyncio
-import httpx
-import logging
-from typing import Dict, Any, List, Optional, Tuple
-import mimetypes
-import re
-from PIL import Image, ImageEnhance, ImageFilter
-import io
-from datetime import datetime, timedelta
 import hashlib
+import io
 import json
+import logging
+import os
+import re
 import sys
+import tempfile
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+import httpx
+from PIL import Image, ImageEnhance, ImageFilter
 
 # 추가 라이브러리 - 필요시 설치 필요
 try:
@@ -76,7 +77,7 @@ MAX_FILE_SIZE = 20 * 1024 * 1024
 # 처리 결과 캐싱
 def get_cache_key(attachment: Dict[str, Any]) -> str:
     """
-    첨부파일의 캐시 키를 생성합니다.
+    첨부파일 정보를 기반으로 캐시 키를 생성합니다.
 
     Args:
         attachment: 첨부파일 정보
@@ -84,6 +85,11 @@ def get_cache_key(attachment: Dict[str, Any]) -> str:
     Returns:
         캐시 키 문자열
     """
+    # attachment가 None인 경우 예외 처리
+    if attachment is None:
+        logger.warning("attachment가 None입니다. 기본 캐시 키를 반환합니다.")
+        return hashlib.md5("none_attachment".encode()).hexdigest()
+    
     # 고유한 ID와 업데이트 시간으로 캐시 키 생성
     att_id = str(attachment.get("id", ""))
     att_updated = str(attachment.get("updated_at", ""))
@@ -160,7 +166,7 @@ def preprocess_image_for_ocr(img: Image.Image) -> Image.Image:
             ratio = max(1000 / width, 1000 / height)
             new_width = int(width * ratio)
             new_height = int(height * ratio)
-            img = img.resize((new_width, new_height), Image.LANCZOS)
+            img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
 
         # 이미지 선명도 향상
         enhancer = ImageEnhance.Contrast(img)
@@ -171,7 +177,9 @@ def preprocess_image_for_ocr(img: Image.Image) -> Image.Image:
 
         # 이진화 (흑백)
         threshold = 150
-        img = img.point(lambda p: 255 if p > threshold else 0)
+        def threshold_func(p):
+            return 255 if p > threshold else 0
+        img = img.point(threshold_func)
 
         return img
     except Exception as e:
@@ -194,7 +202,7 @@ async def process_image_stream(client: httpx.AsyncClient, url: str) -> Dict[str,
         logger.warning("Tesseract OCR이 설치되지 않았습니다. 텍스트 추출을 건너뜁니다.")
         return {
             "text": "[Tesseract OCR이 설치되지 않아 이미지 텍스트 추출이 불가능합니다]",
-            "image_url": url,  # 이미지 URL 보존
+            "image_url": url,
             "ocr_success": False,
         }
 
@@ -367,6 +375,20 @@ async def process_attachment_stream(
         처리된 첨부파일 정보 (id, name, content_type, size, updated_at 등 메타데이터 + 추출된 텍스트)
         ※ pre-signed URL(attachment_url)은 저장하지 않음. 이미지는 표시 시점에 API로 최신 URL을 발급받아야 함.
     """
+    # attachment가 None인 경우 예외 처리
+    if attachment is None:
+        logger.warning("attachment가 None입니다. 빈 결과를 반환합니다.")
+        return {
+            "id": None,
+            "name": None,
+            "content_type": None,
+            "size": None,
+            "updated_at": None,
+            "extracted_text": "",
+            "processed": False,
+            "error": "attachment가 None입니다."
+        }
+
     # 메타데이터만 추출
     result = {
         "id": attachment.get("id"),
@@ -459,11 +481,16 @@ async def process_attachments(
 
     logger.info(f"{len(attachments)}개 첨부파일 처리 시작")
 
-    # 처리할 첨부파일 필터링 (중복 제거, 크기 제한 등)
+    # 처리할 첨부파일 필터링 (중복 제거, 크기 제한, None 값 제거 등)
     filtered_attachments = []
     seen_ids = set()
 
     for att in attachments:
+        # None 값 체크
+        if att is None:
+            logger.warning("None인 첨부파일을 건너뜁니다.")
+            continue
+            
         att_id = att.get("id")
         if att_id in seen_ids:
             continue

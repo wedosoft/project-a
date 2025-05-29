@@ -6,11 +6,12 @@ Freshdesk 데이터 가져오기 모듈
 
 프로젝트 규칙 및 가이드라인: /PROJECT_RULES.md 참조
 """
-import os
-import httpx
 import asyncio
 import logging
-from typing import List, Dict, Any
+import os
+from typing import Any, Dict, List
+
+import httpx
 from dotenv import load_dotenv
 
 # .env 파일 로드
@@ -134,24 +135,8 @@ async def fetch_ticket_attachments(client: httpx.AsyncClient, ticket_id: int) ->
         # 티켓 자체의 첨부파일 정보 추출
         if "attachments" in ticket_detail and ticket_detail["attachments"]:
             for attachment in ticket_detail["attachments"]:
-                attachments.append({
-                    "id": attachment.get("id"),
-                    "name": attachment.get("name"),
-                    "content_type": attachment.get("content_type"),
-                    "size": attachment.get("size"),
-                    "attachment_url": attachment.get("attachment_url"),
-                    "created_at": attachment.get("created_at"),
-                    "updated_at": attachment.get("updated_at"),
-                    "ticket_id": ticket_id,
-                    "conversation_id": None  # 티켓 자체 첨부파일
-                })
-        
-        # 대화 내역의 첨부파일도 확인
-        conversations = await fetch_ticket_conversations(client, ticket_id)
-        for conv in conversations:
-            # conv가 None이 아니고 딕셔너리 타입인지 확인
-            if conv is not None and isinstance(conv, dict) and "attachments" in conv and conv["attachments"]:
-                for attachment in conv["attachments"]:
+                # attachment가 None이 아니고 딕셔너리 타입인지 확인
+                if attachment is not None and isinstance(attachment, dict):
                     attachments.append({
                         "id": attachment.get("id"),
                         "name": attachment.get("name"),
@@ -161,8 +146,29 @@ async def fetch_ticket_attachments(client: httpx.AsyncClient, ticket_id: int) ->
                         "created_at": attachment.get("created_at"),
                         "updated_at": attachment.get("updated_at"),
                         "ticket_id": ticket_id,
-                        "conversation_id": conv.get("id")  # 대화 ID
+                        "conversation_id": None  # 티켓 자체 첨부파일
                     })
+        
+        # 대화 내역의 첨부파일도 확인
+        conversations = await fetch_ticket_conversations(client, ticket_id)
+        for conv in conversations:
+            # conv가 None이 아니고 딕셔너리 타입인지 확인
+            if conv is not None and isinstance(conv, dict):
+                if "attachments" in conv and conv["attachments"]:
+                    # attachments가 None이 아닌지 확인
+                    for attachment in conv["attachments"]:
+                        if attachment is not None and isinstance(attachment, dict):
+                            attachments.append({
+                                "id": attachment.get("id"),
+                                "name": attachment.get("name"),
+                                "content_type": attachment.get("content_type"),
+                                "size": attachment.get("size"),
+                                "attachment_url": attachment.get("attachment_url"),
+                                "created_at": attachment.get("created_at"),
+                                "updated_at": attachment.get("updated_at"),
+                                "ticket_id": ticket_id,
+                                "conversation_id": conv.get("id")  # 대화 ID
+                            })
         
         logger.info(f"티켓 {ticket_id}의 첨부파일 {len(attachments)}개 수신 완료")
         return attachments
@@ -181,16 +187,18 @@ async def fetch_article_attachments(client: httpx.AsyncClient, article_id: int) 
         attachments = []
         if "attachments" in article_detail and article_detail["attachments"]:
             for attachment in article_detail["attachments"]:
-                attachments.append({
-                    "id": attachment.get("id"),
-                    "name": attachment.get("name"),
-                    "content_type": attachment.get("content_type"),
-                    "size": attachment.get("size"),
-                    "attachment_url": attachment.get("attachment_url"),
-                    "created_at": attachment.get("created_at"),
-                    "updated_at": attachment.get("updated_at"),
-                    "article_id": article_id
-                })
+                # attachment가 None이 아니고 딕셔너리 타입인지 확인
+                if attachment is not None and isinstance(attachment, dict):
+                    attachments.append({
+                        "id": attachment.get("id"),
+                        "name": attachment.get("name"),
+                        "content_type": attachment.get("content_type"),
+                        "size": attachment.get("size"),
+                        "attachment_url": attachment.get("attachment_url"),
+                        "created_at": attachment.get("created_at"),
+                        "updated_at": attachment.get("updated_at"),
+                        "article_id": article_id
+                    })
         
         logger.info(f"지식베이스 문서 {article_id}의 첨부파일 {len(attachments)}개 수신 완료")
         return attachments
@@ -384,13 +392,22 @@ async def fetch_ticket_details(ticket_id: int) -> Dict[str, Any]:
             ticket_url = f"{BASE_URL}/tickets/{ticket_id}"
             logger.info(f"티켓 {ticket_id} 기본 정보 요청 중: {ticket_url}")
             ticket_data = await fetch_with_retry(client, ticket_url)
+            if ticket_data is None:
+                logger.error(f"티켓 {ticket_id} 데이터가 None입니다.")
+                return {}
             logger.info(f"티켓 {ticket_id} 기본 정보 수신 완료")
 
             # 대화 내역 포함 (기존 함수 활용)
-            ticket_data["conversations"] = await fetch_ticket_conversations(client, ticket_id)
+            conversations = await fetch_ticket_conversations(client, ticket_id)
+            ticket_data["conversations"] = conversations if conversations is not None else []
             
             # 첨부파일 포함 (기존 함수 활용)
-            ticket_data["all_attachments"] = await fetch_ticket_attachments(client, ticket_id)
+            try:
+                attachments = await fetch_ticket_attachments(client, ticket_id)
+                ticket_data["all_attachments"] = attachments if attachments is not None else []
+            except Exception as e:
+                logger.error(f"티켓 {ticket_id}의 첨부파일 가져오기 중 오류 발생: {e}")
+                ticket_data["all_attachments"] = []
             
             logger.info(f"티켓 {ticket_id} 상세 정보 (대화, 첨부파일 포함) 가져오기 완료")
             return ticket_data
