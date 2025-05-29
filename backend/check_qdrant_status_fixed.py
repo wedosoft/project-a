@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-Qdrant Cloud 저장 상태 확인 스크립트
+Qdrant Cloud 저장 상태 확인 스크립트 (수정 버전)
 
 실제 Qdrant Cloud에 저장된 데이터 현황을 확인하고 리포트
+환경변수 로딩 순서를 수정하여 안정성 향상
 """
 
+import logging
 import os
 import sys
 from pathlib import Path
@@ -13,17 +15,37 @@ from pathlib import Path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
-import logging
-
-from core.vectordb import QdrantAdapter
+# 환경변수를 먼저 로드
 from dotenv import load_dotenv
 
-# 환경변수 로드 - .env 파일 경로 명시적 지정
+# .env 파일 경로 명시적 지정
 env_path = project_root / ".env"
-load_dotenv(dotenv_path=env_path)
-
 print(f"📂 .env 파일 경로: {env_path}")
 print(f"📁 .env 파일 존재 여부: {env_path.exists()}")
+
+# 환경변수 로드
+load_dotenv(dotenv_path=env_path)
+
+# 환경변수 로드 확인
+qdrant_url = os.getenv("QDRANT_URL")
+openai_key = os.getenv("OPENAI_API_KEY")
+
+print(f"🔍 기본 환경변수 확인:")
+print(f"   QDRANT_URL: {'설정됨' if qdrant_url else '❌ 미설정'}")
+print(f"   OPENAI_API_KEY: {'설정됨' if openai_key else '❌ 미설정'}")
+print()
+
+# 환경변수 로드 후에만 core 모듈 import
+if qdrant_url and openai_key:
+    try:
+        from core.vectordb import QdrantAdapter
+        print("✅ core.vectordb 모듈 로드 성공")
+    except Exception as e:
+        print(f"❌ core.vectordb 모듈 로드 실패: {e}")
+        sys.exit(1)
+else:
+    print("❌ 필수 환경변수가 설정되지 않아 종료합니다.")
+    sys.exit(1)
 
 # 로깅 설정
 logging.basicConfig(
@@ -97,6 +119,34 @@ def main():
             
             if points_count > 0:
                 print(f"   ✅ 데이터가 정상적으로 저장되어 있습니다!")
+                
+                # 샘플 데이터 몇 개 조회해보기
+                try:
+                    from core.embedder import Embedder
+                    
+                    # 임베딩 생성 후 검색
+                    embedder = Embedder()
+                    query_text = "티켓 문의"
+                    query_embedding = embedder.generate_embedding(query_text)
+                    
+                    # 올바른 파라미터로 search 메서드 호출
+                    sample_data = vector_db.search(
+                        query_embedding=query_embedding,
+                        top_k=3,
+                        company_id="kyexpert"
+                    )
+                    
+                    if sample_data and len(sample_data) > 0:
+                        print(f"   📋 샘플 데이터 미리보기:")
+                        for i, doc in enumerate(sample_data[:2], 1):
+                            content = doc.get('content', '')[:100]
+                            score = doc.get('score', 0)
+                            print(f"      {i}. Score: {score:.3f} | {content}...")
+                    else:
+                        print(f"   ⚠️  검색 테스트 실패 - 데이터 접근 불가")
+                        
+                except Exception as search_error:
+                    print(f"   ⚠️  검색 테스트 중 오류: {search_error}")
             else:
                 print(f"   ⚠️  저장된 데이터가 없습니다.")
             
@@ -112,9 +162,15 @@ def main():
     
     if total_points > 0:
         print("   ✅ Qdrant Cloud에 데이터가 정상적으로 저장되어 있습니다!")
+        print("   💡 RAG 시스템을 사용할 준비가 완료되었습니다.")
     else:
         print("   ⚠️  Qdrant Cloud에 저장된 데이터가 없습니다.")
         print("   💡 데이터 수집 및 임베딩 저장을 실행해주세요.")
+        print()
+        print("   🚀 데이터 수집 명령어:")
+        print("      python -m data.freshdesk_fetcher")
+        print("      또는")
+        print("      python freshdesk_full_data/run_collection.py")
     
     print("=" * 60)
     

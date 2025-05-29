@@ -366,7 +366,7 @@ async def resume_collection():
     """중단된 수집 재개"""
     logger.info("=== 수집 재개 모드 ===")
     
-    OUTPUT_DIR = "freshdesk_full_data"
+    OUTPUT_DIR = str(Path(__file__).parent.parent / "freshdesk_full_data")
     
     # 진행 상황 확인
     progress_file = Path(OUTPUT_DIR) / "progress.json"
@@ -383,7 +383,65 @@ async def resume_collection():
     logger.info(f"  - 완료된 날짜 범위: {len(progress.get('completed_ranges', []))}개")
     logger.info(f"  - 마지막 업데이트: {progress.get('last_updated')}")
     
-    # 수집 재개
+    # 수집 완료 여부 확인
+    is_completed = progress.get('is_completed', False)
+    if is_completed:
+        logger.info("✅ 수집이 이미 완료되었습니다!")
+        logger.info(f"  - 총 수집된 티켓: {progress.get('total_collected', 0):,}개")
+        logger.info(f"  - 완료 시간: {progress.get('completed_at', 'N/A')}")
+        
+        # 사용자에게 다시 수집할지 확인
+        if input("\n이미 수집이 완료되었습니다. 다시 수집하시겠습니까? (yes/no): ").strip().lower() not in ['yes', 'y']:
+            logger.info("수집 재개를 취소합니다.")
+            return
+        else:
+            logger.info("기존 수집을 무시하고 새로 시작합니다.")
+            # progress.json 파일 백업
+            backup_path = Path(OUTPUT_DIR) / f"progress_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            import shutil
+            shutil.copy(progress_file, backup_path)
+            logger.info(f"기존 진행 상황을 백업했습니다: {backup_path}")
+            
+            # progress.json 파일 삭제하여 처음부터 시작하도록 함
+            progress_file.unlink()
+            logger.info("progress.json 파일을 삭제했습니다. 처음부터 새로 수집을 시작합니다.")
+            
+            # 기존 데이터 파일들도 백업 (선택사항)
+            all_tickets_file = Path(OUTPUT_DIR) / "all_tickets.json"
+            if all_tickets_file.exists():
+                backup_tickets_path = Path(OUTPUT_DIR) / f"all_tickets_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                shutil.copy(all_tickets_file, backup_tickets_path)
+                logger.info(f"기존 티켓 데이터를 백업했습니다: {backup_tickets_path}")
+                # 기존 파일 삭제
+                all_tickets_file.unlink()
+                logger.info("기존 all_tickets.json 파일을 삭제했습니다.")
+            
+            # CSV 파일도 처리
+            csv_file = Path(OUTPUT_DIR) / "tickets_export.csv"
+            if csv_file.exists():
+                backup_csv_path = Path(OUTPUT_DIR) / f"tickets_export_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                shutil.copy(csv_file, backup_csv_path)
+                csv_file.unlink()
+                logger.info("기존 CSV 파일을 백업하고 삭제했습니다.")
+            
+            # 청크 파일들 삭제
+            import glob
+            chunk_files = glob.glob(str(Path(OUTPUT_DIR) / "chunk_*.json"))
+            if chunk_files:
+                logger.info(f"{len(chunk_files)}개의 청크 파일을 삭제합니다...")
+                for chunk_file in chunk_files:
+                    Path(chunk_file).unlink()
+                logger.info("모든 청크 파일을 삭제했습니다.")
+    
+    # 중단된 날짜 확인 (is_completed가 False인 경우)
+    else:
+        last_processed_date = progress.get('last_processed_date')
+        if last_processed_date:
+            logger.info(f"마지막 처리된 날짜: {last_processed_date}")
+            logger.info("이 날짜 이후부터 수집을 재개합니다.")
+    
+    # 수집 재개 - OptimizedFreshdeskFetcher가 자동으로 progress.json을 읽어서 이어서 수집
+    # progress.json이 삭제된 경우 처음부터 시작
     await full_collection_workflow()
 
 
