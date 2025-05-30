@@ -158,7 +158,9 @@ backend/.env
 backend/venv/
 backend/qdrant_data/
 backend/qdrant_storage/
-backend/attachment_cache
+backend/attachment_cache/
+backend/freshdesk_full_data/
+backend/freshdesk/freshdesk_test_data/
 
 # Added by Claude Task Master
 # Logs
