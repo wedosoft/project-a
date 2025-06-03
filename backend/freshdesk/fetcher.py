@@ -6,11 +6,12 @@ Freshdesk 데이터 가져오기 모듈
 
 프로젝트 규칙 및 가이드라인: /PROJECT_RULES.md 참조
 """
-import os
-import httpx
 import asyncio
 import logging
-from typing import List, Dict, Any
+import os
+from typing import Any, Dict, List
+
+import httpx
 from dotenv import load_dotenv
 
 # .env 파일 로드
@@ -173,11 +174,22 @@ async def fetch_ticket_attachments(client: httpx.AsyncClient, ticket_id: int) ->
 async def fetch_article_attachments(client: httpx.AsyncClient, article_id: int) -> List[Dict[str, Any]]:
     """
     지식베이스 문서의 첨부파일 정보를 가져옵니다.
+    Freshdesk API 문서에 따라 folder_id가 필요한 경우를 처리합니다.
+    
+    Args:
+        client: httpx 클라이언트 객체
+        article_id: 아티클 ID
+        
+    Returns:
+        List[Dict[str, Any]]: 첨부파일 정보 목록
     """
     try:
         logger.info(f"지식베이스 문서 {article_id}의 상세 정보 요청 중...")
+        
+        # 아티클 상세 정보를 가져옴
         article_detail = await fetch_with_retry(client, f"{BASE_URL}/solutions/articles/{article_id}")
         
+        # 첨부파일 추출
         attachments = []
         if "attachments" in article_detail and article_detail["attachments"]:
             for attachment in article_detail["attachments"]:
@@ -189,7 +201,9 @@ async def fetch_article_attachments(client: httpx.AsyncClient, article_id: int) 
                     "attachment_url": attachment.get("attachment_url"),
                     "created_at": attachment.get("created_at"),
                     "updated_at": attachment.get("updated_at"),
-                    "article_id": article_id
+                    "article_id": article_id,
+                    "folder_id": article_detail.get("folder_id"),  # 폴더 ID 추가
+                    "category_id": article_detail.get("category_id")  # 카테고리 ID 추가
                 })
         
         logger.info(f"지식베이스 문서 {article_id}의 첨부파일 {len(attachments)}개 수신 완료")
@@ -347,9 +361,15 @@ async def fetch_kb_articles() -> List[Dict[str, Any]]:
                         if not folder_articles:
                             break
                             
-                        # 각 문서에 대한 첨부파일 정보 가져오기
-                        if include_attachments:
-                            for article in folder_articles:
+                        # 카테고리 및 폴더 정보 추가
+                        for article in folder_articles:
+                            article["category_id"] = cat_id
+                            article["category_name"] = cat_name
+                            article["folder_id"] = folder_id
+                            article["folder_name"] = folder_name
+                            
+                            # 각 문서에 대한 첨부파일 정보 가져오기
+                            if include_attachments:
                                 article_id = article.get("id")
                                 attachments = await fetch_article_attachments(client, article_id)
                                 article["attachments"] = attachments

@@ -6,13 +6,39 @@ let client;
 async function showSampleModal() {
   try {
     await client.interface.trigger("showModal", {
-      title: "Sample App Form",
+      title: "프롬프트 캔버스",
       template: "modal.html",
-      noBackdrop: true
+      data: { showAiTab: false },
+      noBackdrop:true,
+      size: {
+        width: "800px",
+        height: "600px"
+      }
     });
     console.log("Modal 열림");
   } catch (err) {
     console.error("Modal 오류", err);
+  }
+}
+
+/**
+ * 코파일럿 AI 응답 모달 트리거 함수
+ */
+async function showCopilotModal() {
+  try {
+    await client.interface.trigger("showModal", {
+      title: "프롬프트 캔버스 - AI 응답 작성",
+      template: "modal.html",
+      data: { showAiTab: true },
+      noBackdrop:true,
+      size: {
+        width: "800px",
+        height: "600px"
+      }
+    });
+    console.log("AI 응답 모달 열림");
+  } catch (err) {
+    console.error("코파일럿 모달 오류", err);
   }
 }
 
@@ -39,6 +65,15 @@ app.initialized()
       sidebarButton.addEventListener("click", () => {
         console.log("사이드바 버튼 클릭 → 모달 열림");
         showSampleModal();
+      });
+    }
+    
+    // ③ AI 응답 버튼 클릭 시 코파일럿 모달 열기
+    const copilotButton = document.getElementById("openCopilotBtn");
+    if (copilotButton) {
+      copilotButton.addEventListener("click", () => {
+        console.log("AI 응답 버튼 클릭 → 코파일럿 모달 열림");
+        showCopilotModal();
       });
     }
   })

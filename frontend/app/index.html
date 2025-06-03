@@ -11,9 +11,16 @@
 </head>
 <body>
   <div class="fw-widget-wrapper">
-   
-    <!-- Sidebar button -->
-    <fw-button id="openModalBtn" color="primary">Open Modal</fw-button>
+    <div style="display: flex; flex-direction: column; gap: 10px;">
+      <!-- 기존 사이드바 버튼 -->
+      <fw-button id="openModalBtn" color="primary">Open Modal</fw-button>
+      
+      <!-- AI 응답 버튼 -->
+      <fw-button id="openCopilotBtn" color="secondary" style="--color: #1976d2;">
+        <fw-icon name="robot" slot="start"></fw-icon>
+        AI 응답 작성
+      </fw-button>
+    </div>
   </div>
   <script src="scripts/app.js"></script>
 </body>

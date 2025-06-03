@@ -2,7 +2,6 @@
 최적화된 Freshdesk 대용량 데이터 수집기
 
 무제한 티켓 데이터를 효율적으로 수집하기 위한 최적화된 접근법
-티켓 상세정보와 지식베이스 데이터를 포함한 완전한 raw 데이터 저장 지원
 """
 import asyncio
 import json
@@ -10,7 +9,7 @@ import logging
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, List
 
 import httpx
 from dotenv import load_dotenv
@@ -79,15 +78,10 @@ REQUEST_DELAY = 0.3  # Enterprise 기준 200req/min → 300ms 간격
 CHUNK_SIZE = 10000  # 청크당 티켓 수
 SAVE_INTERVAL = 1000  # 1000개마다 중간 저장
 
-# RAW 데이터 저장 설정
-RAW_DATA_CHUNK_SIZE = 1000  # raw 데이터 청크당 항목 수
-KB_CHUNK_SIZE = 500  # 지식베이스 청크당 항목 수
-
 
 class OptimizedFreshdeskFetcher:
     """
     대용량 티켓 데이터 수집을 위한 최적화된 클래스
-    티켓 상세정보와 지식베이스를 raw 데이터로 저장하여 임베딩 실패 시 재수집 방지
     """
     
     def __init__(self, output_dir: str = "freshdesk_data"):
@@ -99,17 +93,6 @@ class OptimizedFreshdeskFetcher:
             output_path = backend_root / output_path
         self.output_dir = output_path.resolve()
         self.output_dir.mkdir(exist_ok=True)
-        
-        # 하위 디렉토리 생성 (raw 데이터 저장용)
-        self.raw_data_dir = self.output_dir / "raw_data"
-        self.raw_data_dir.mkdir(exist_ok=True)
-        
-        # 세부 raw 데이터 디렉토리 생성
-        (self.raw_data_dir / "ticket_details").mkdir(exist_ok=True)
-        (self.raw_data_dir / "conversations").mkdir(exist_ok=True)
-        (self.raw_data_dir / "attachments").mkdir(exist_ok=True)
-        (self.raw_data_dir / "knowledge_base").mkdir(exist_ok=True)
-        
         self.progress_file = self.output_dir / "progress.json"
         self.client = None
         
@@ -120,8 +103,6 @@ class OptimizedFreshdeskFetcher:
         self.REQUEST_DELAY = REQUEST_DELAY
         self.CHUNK_SIZE = CHUNK_SIZE
         self.SAVE_INTERVAL = SAVE_INTERVAL
-        self.RAW_DATA_CHUNK_SIZE = RAW_DATA_CHUNK_SIZE
-        self.KB_CHUNK_SIZE = KB_CHUNK_SIZE
         
     async def __aenter__(self):
         self.client = httpx.AsyncClient(timeout=30.0)
@@ -152,15 +133,7 @@ class OptimizedFreshdeskFetcher:
             "total_collected": 0,
             "completed_ranges": [],  # 완료된 날짜 범위 목록
             "range_details": {},     # 각 범위별 세부 정보 (티켓 수, 마지막 페이지 등)
-            "chunks_completed": [],
-            # RAW 데이터 수집 진행 상황 추가
-            "raw_data_progress": {
-                "ticket_details_chunks": [],
-                "conversations_chunks": [],
-                "attachments_chunks": [],
-                "knowledge_base_chunks": [],
-                "last_kb_update": None
-            }
+            "chunks_completed": []
         }
 
     async def fetch_with_retry(self, url: str, params: Dict = None) -> Dict:
@@ -257,331 +230,6 @@ class OptimizedFreshdeskFetcher:
             
         logger.info(f"총 {len(ranges)}개의 날짜 범위로 분할되었습니다. ({start_date} ~ {end_date}, {days_per_chunk}일 단위)")
         return ranges
-
-    async def fetch_ticket_detail_raw(self, ticket_id: str) -> Optional[Dict]:
-        """
-        티켓 상세정보를 raw 형태로 수집
-        
-        Args:
-            ticket_id: 티켓 ID
-            
-        Returns:
-            Dict: 티켓 상세정보 또는 None (실패 시)
-        """
-        try:
-            detail = await self.fetch_with_retry(f"{BASE_URL}/tickets/{ticket_id}")
-            await asyncio.sleep(self.REQUEST_DELAY)
-            return detail
-        except Exception as e:
-            logger.error(f"티켓 {ticket_id} 상세정보 수집 실패: {e}")
-            return None
-    
-    async def fetch_conversations_raw(self, ticket_id: str) -> List[Dict]:
-        """
-        티켓 대화내역을 raw 형태로 수집
-        
-        Args:
-            ticket_id: 티켓 ID
-            
-        Returns:
-            List[Dict]: 대화내역 목록
-        """
-        try:
-            conversations = await self.fetch_with_retry(f"{BASE_URL}/tickets/{ticket_id}/conversations")
-            await asyncio.sleep(self.REQUEST_DELAY)
-            return conversations if conversations else []
-        except Exception as e:
-            logger.error(f"티켓 {ticket_id} 대화내역 수집 실패: {e}")
-            return []
-    
-    async def fetch_attachments_raw(self, ticket_id: str) -> List[Dict]:
-        """
-        티켓 첨부파일 정보를 raw 형태로 수집
-        
-        Args:
-            ticket_id: 티켓 ID
-            
-        Returns:
-            List[Dict]: 첨부파일 정보 목록
-        """
-        try:
-            # Freshdesk API에서 첨부파일은 보통 티켓 상세정보에 포함되어 있음
-            # 별도 엔드포인트가 없으므로 티켓 상세에서 추출
-            detail = await self.fetch_ticket_detail_raw(ticket_id)
-            if detail and 'attachments' in detail:
-                return detail['attachments']
-            return []
-        except Exception as e:
-            logger.error(f"티켓 {ticket_id} 첨부파일 정보 수집 실패: {e}")
-            return []
-    
-    async def fetch_knowledge_base_raw(self, category_id: str = None, max_articles: int = None) -> List[Dict]:
-        """
-        지식베이스 문서 수집 (raw 데이터 형태)
-        Freshdesk API 문서에 맞게 카테고리 → 폴더 → 아티클 계층 구조로 접근
-        
-        Args:
-            category_id: 특정 카테고리 ID (None이면 전체)
-            max_articles: 최대 수집 항목 수 (None이면 제한 없음)
-            
-        Returns:
-            List[Dict]: 지식베이스 항목 목록
-        """
-        all_articles = []
-        articles_count = 0
-        
-        try:
-            logger.info(f"지식베이스 수집 시작" + (f" (최대 {max_articles}개)" if max_articles else ""))
-            
-            # 1. 카테고리 목록 가져오기
-            categories = []
-            if category_id:
-                # 특정 카테고리만 조회
-                category = await self.fetch_with_retry(f"{BASE_URL}/solutions/categories/{category_id}")
-                if category:
-                    categories = [category]
-            else:
-                # 전체 카테고리 조회
-                categories = await self.fetch_with_retry(f"{BASE_URL}/solutions/categories")
-            
-            logger.info(f"카테고리 {len(categories)}개 수신 완료")
-            
-            # 2. 각 카테고리별 폴더 및 아티클 수집
-            for category in categories:
-                cat_id = category["id"]
-                cat_name = category.get("name", "Unknown")
-                logger.info(f"카테고리 '{cat_name}' (ID: {cat_id}) 처리 중...")
-                
-                # 폴더 목록 가져오기
-                folders = await self.fetch_with_retry(f"{BASE_URL}/solutions/categories/{cat_id}/folders")
-                logger.info(f"카테고리 '{cat_name}'에서 폴더 {len(folders)}개 수신 완료")
-                
-                # 3. 각 폴더별 아티클 수집
-                for folder in folders:
-                    folder_id = folder["id"]
-                    folder_name = folder.get("name", "Unknown")
-                    logger.info(f"폴더 '{folder_name}' (ID: {folder_id}) 처리 중...")
-                    
-                    # 폴더별 페이지네이션 처리
-                    page = 1
-                    while True:
-                        params = {
-                            "page": page,
-                            "per_page": self.PER_PAGE
-                        }
-                        
-                        logger.info(f"폴더 '{folder_name}'의 아티클 페이지 {page} 요청 중...")
-                        folder_articles = await self.fetch_with_retry(
-                            f"{BASE_URL}/solutions/folders/{folder_id}/articles", 
-                            params
-                        )
-                        
-                        if not folder_articles:
-                            logger.info(f"폴더 '{folder_name}'에 더 이상 아티클이 없습니다")
-                            break
-                        
-                        # 카테고리 및 폴더 정보 추가
-                        for article in folder_articles:
-                            article["category_id"] = cat_id
-                            article["category_name"] = cat_name
-                            article["folder_id"] = folder_id
-                            article["folder_name"] = folder_name
-                        
-                        # 최대 항목 수 제한이 있을 경우
-                        if max_articles is not None:
-                            remaining = max_articles - articles_count
-                            if remaining <= 0:
-                                logger.info(f"최대 수집 개수({max_articles})에 도달하여 중단")
-                                break
-                                
-                            if len(folder_articles) > remaining:
-                                folder_articles = folder_articles[:remaining]
-                            
-                            all_articles.extend(folder_articles)
-                            articles_count += len(folder_articles)
-                            logger.info(f"아티클 {len(folder_articles)}개 추가 (현재까지 총 {articles_count}/{max_articles}개)")
-                            
-                            if articles_count >= max_articles:
-                                break
-                        else:
-                            all_articles.extend(folder_articles)
-                            articles_count += len(folder_articles)
-                            logger.info(f"아티클 {len(folder_articles)}개 추가 (현재까지 총 {articles_count}개)")
-                        
-                        # 이 배치가 불완전하면 마지막 페이지
-                        if len(folder_articles) < self.PER_PAGE:
-                            break
-                            
-                        page += 1
-                        await asyncio.sleep(self.REQUEST_DELAY)
-                    
-                    # 최대 항목 수에 도달했으면 중단
-                    if max_articles is not None and articles_count >= max_articles:
-                        logger.info(f"최대 수집 개수({max_articles})에 도달하여 중단")
-                        break
-                
-                # 최대 항목 수에 도달했으면 중단
-                if max_articles is not None and articles_count >= max_articles:
-                    break
-            
-            logger.info(f"지식베이스 수집 완료: 총 {len(all_articles)}개 아티클")
-            return all_articles
-            
-        except Exception as e:
-            logger.error(f"지식베이스 수집 실패: {e}")
-            raise
-
-    def save_raw_data_chunk(self, data: List[Dict], data_type: str, chunk_id: str):
-        """
-        Raw 데이터를 청크 단위로 저장
-        
-        Args:
-            data: 저장할 데이터 목록
-            data_type: 데이터 유형 ('ticket_details', 'conversations', 'attachments', 'knowledge_base')
-            chunk_id: 청크 식별자
-        """
-        target_dir = self.raw_data_dir / data_type
-        chunk_file = target_dir / f"{data_type}_chunk_{chunk_id}.json"
-        
-        with open(chunk_file, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        
-        logger.info(f"{data_type} 청크 {chunk_id} 저장 완료: {len(data)}개 항목")
-    
-    async def collect_raw_ticket_details(self, ticket_ids: List[str], progress: Dict) -> None:
-        """
-        티켓 상세정보를 raw 데이터로 수집하여 저장
-        
-        Args:
-            ticket_ids: 수집할 티켓 ID 목록
-            progress: 진행 상황 딕셔너리
-        """
-        logger.info(f"티켓 상세정보 raw 데이터 수집 시작: {len(ticket_ids)}개")
-        
-        chunk_counter = len(progress.get("raw_data_progress", {}).get("ticket_details_chunks", []))
-        current_chunk = []
-        
-        for i, ticket_id in enumerate(ticket_ids):
-            detail = await self.fetch_ticket_detail_raw(str(ticket_id))
-            if detail:
-                current_chunk.append(detail)
-            
-            # 청크 크기에 도달하면 저장
-            if len(current_chunk) >= self.RAW_DATA_CHUNK_SIZE:
-                chunk_id = f"{chunk_counter:04d}"
-                self.save_raw_data_chunk(current_chunk, "ticket_details", chunk_id)
-                progress.setdefault("raw_data_progress", {}).setdefault("ticket_details_chunks", []).append(chunk_id)
-                chunk_counter += 1
-                current_chunk = []
-                
-                # 진행 상황 저장
-                self.save_progress(progress)
-            
-            if (i + 1) % 100 == 0:
-                logger.info(f"티켓 상세정보 수집 진행률: {i+1}/{len(ticket_ids)}")
-        
-        # 마지막 청크 저장
-        if current_chunk:
-            chunk_id = f"{chunk_counter:04d}"
-            self.save_raw_data_chunk(current_chunk, "ticket_details", chunk_id)
-            progress.setdefault("raw_data_progress", {}).setdefault("ticket_details_chunks", []).append(chunk_id)
-        
-        logger.info(f"티켓 상세정보 raw 데이터 수집 완료")
-    
-    async def collect_raw_conversations(self, ticket_ids: List[str], progress: Dict) -> None:
-        """
-        티켓 대화내역을 raw 데이터로 수집하여 저장
-        
-        Args:
-            ticket_ids: 수집할 티켓 ID 목록
-            progress: 진행 상황 딕셔너리
-        """
-        logger.info(f"티켓 대화내역 raw 데이터 수집 시작: {len(ticket_ids)}개")
-        
-        chunk_counter = len(progress.get("raw_data_progress", {}).get("conversations_chunks", []))
-        current_chunk = []
-        
-        for i, ticket_id in enumerate(ticket_ids):
-            conversations = await self.fetch_conversations_raw(str(ticket_id))
-            if conversations:
-                # 각 대화에 ticket_id 추가하여 나중에 연결 가능하도록 함
-                for conv in conversations:
-                    conv["ticket_id"] = ticket_id
-                current_chunk.extend(conversations)
-            
-            # 청크 크기에 도달하면 저장
-            if len(current_chunk) >= self.RAW_DATA_CHUNK_SIZE:
-                chunk_id = f"{chunk_counter:04d}"
-                self.save_raw_data_chunk(current_chunk, "conversations", chunk_id)
-                progress.setdefault("raw_data_progress", {}).setdefault("conversations_chunks", []).append(chunk_id)
-                chunk_counter += 1
-                current_chunk = []
-                
-                # 진행 상황 저장
-                self.save_progress(progress)
-            
-            if (i + 1) % 100 == 0:
-                logger.info(f"대화내역 수집 진행률: {i+1}/{len(ticket_ids)}")
-        
-        # 마지막 청크 저장
-        if current_chunk:
-            chunk_id = f"{chunk_counter:04d}"
-            self.save_raw_data_chunk(current_chunk, "conversations", chunk_id)
-            progress.setdefault("raw_data_progress", {}).setdefault("conversations_chunks", []).append(chunk_id)
-        
-        logger.info(f"티켓 대화내역 raw 데이터 수집 완료")
-    
-    async def collect_raw_knowledge_base(self, progress: Dict, max_articles: int = None) -> None:
-        """
-        지식베이스를 raw 데이터로 수집하여 저장
-        
-        Args:
-            progress: 진행 상황 딕셔너리
-            max_articles: 최대 수집 항목 수 (None이면 제한 없음)
-        """
-        logger.info(f"지식베이스 raw 데이터 수집 시작" + (f" (최대 {max_articles}개)" if max_articles else ""))
-        
-        try:
-            # 이미 수집된 지식베이스가 있는지 확인
-            kb_chunks = progress.get("raw_data_progress", {}).get("knowledge_base_chunks", [])
-            if kb_chunks:
-                logger.info(f"이미 수집된 지식베이스 청크가 있습니다: {len(kb_chunks)}개")
-                if max_articles:
-                    logger.info("테스트 모드: 새로 수집을 시작합니다")
-                    kb_chunks = []  # 테스트 모드에서는 기존 데이터 무시
-                else:
-                    logger.info("기존 수집 데이터를 유지합니다")
-                    return
-            
-            articles = await self.fetch_knowledge_base_raw(max_articles=max_articles)
-            
-            if not articles:
-                logger.warning("수집된 지식베이스 문서가 없습니다")
-                return
-            
-            logger.info(f"수집된 지식베이스 문서 {len(articles)}개를 청크로 저장합니다")
-            chunk_counter = len(kb_chunks)
-            
-            # 청크 단위로 저장
-            for i in range(0, len(articles), self.KB_CHUNK_SIZE):
-                chunk = articles[i:i + self.KB_CHUNK_SIZE]
-                chunk_id = f"{chunk_counter:04d}"
-                self.save_raw_data_chunk(chunk, "knowledge_base", chunk_id)
-                progress.setdefault("raw_data_progress", {}).setdefault("knowledge_base_chunks", []).append(chunk_id)
-                chunk_counter += 1
-                
-                logger.info(f"지식베이스 청크 {chunk_id} 저장 완료: {len(chunk)}개 문서")
-            
-            # 지식베이스 수집 완료 시간 기록
-            progress.setdefault("raw_data_progress", {})["last_kb_update"] = datetime.now().isoformat()
-            progress.setdefault("raw_data_progress", {})["kb_articles_collected"] = len(articles)
-            self.save_progress(progress)
-            
-            logger.info(f"지식베이스 raw 데이터 수집 완료: 총 {len(articles)}개 문서 (청크 {chunk_counter}개)")
-            
-        except Exception as e:
-            logger.error(f"지식베이스 raw 데이터 수집 중 오류 발생: {e}")
-            raise
 
     async def fetch_tickets_by_date_range(
         self, 
@@ -726,14 +374,10 @@ class OptimizedFreshdeskFetcher:
         include_conversations: bool = False,
         include_attachments: bool = False,
         max_tickets: int = None,
-        max_kb_articles: int = None,  # 지식베이스 최대 항목 수
         resource_check_func = None,
         resource_check_interval: int = 1000,
         days_per_chunk: int = 30,  # 날짜 범위 청크 크기 (일)
-        adaptive_rate: bool = True,   # 적응형 속도 조절 활성화 여부
-        collect_raw_details: bool = False,  # 티켓 상세정보 raw 데이터 수집 여부
-        collect_raw_conversations: bool = False,  # 대화내역 raw 데이터 수집 여부
-        collect_raw_kb: bool = False  # 지식베이스 raw 데이터 수집 여부
+        adaptive_rate: bool = True   # 적응형 속도 조절 활성화 여부
     ) -> Dict:
         """
         모든 티켓을 효율적으로 수집
@@ -748,9 +392,6 @@ class OptimizedFreshdeskFetcher:
             resource_check_interval: 리소스 체크 간격 (티켓 수)
             days_per_chunk: 날짜 범위 분할 단위 (일)
             adaptive_rate: 서버 응답에 따른 요청 간격 자동 조절
-            collect_raw_details: 티켓 상세정보를 raw 데이터로 수집할지 여부
-            collect_raw_conversations: 대화내역을 raw 데이터로 수집할지 여부
-            collect_raw_kb: 지식베이스를 raw 데이터로 수집할지 여부
             
         Returns:
             Dict: 수집 통계 정보
@@ -761,9 +402,6 @@ class OptimizedFreshdeskFetcher:
         total_tickets = progress.get("total_collected", 0)
         chunk_counter = len(progress.get("chunks_completed", []))
         current_chunk = []
-        
-        # 수집된 티켓 ID 목록 (raw 데이터 수집용)
-        collected_ticket_ids = []
         
         # 이미 완료된 날짜 범위가 있으면 표시
         completed_ranges = progress.get("completed_ranges", [])
@@ -820,11 +458,6 @@ class OptimizedFreshdeskFetcher:
                 
                 range_ticket_count = len(tickets)
                 logger.info(f"날짜 범위 {range_start} ~ {range_end}에서 {range_ticket_count}개 티켓 수집됨")
-                
-                # 티켓 ID 수집 (raw 데이터 수집용)
-                if collect_raw_details or collect_raw_conversations:
-                    ticket_ids = [str(t.get("id")) for t in tickets if t.get("id")]
-                    collected_ticket_ids.extend(ticket_ids)
                 
                 current_chunk.extend(tickets)
                 total_tickets += range_ticket_count
@@ -917,25 +550,6 @@ class OptimizedFreshdeskFetcher:
             self.save_tickets_chunk(current_chunk, chunk_id)
             progress.setdefault("chunks_completed", []).append(chunk_id)
         
-        # RAW 데이터 수집 (선택사항)
-        raw_stats = {}
-        if collect_raw_details and collected_ticket_ids:
-            logger.info("티켓 상세정보 raw 데이터 수집 시작...")
-            await self.collect_raw_ticket_details(collected_ticket_ids, progress)
-            raw_stats["ticket_details_collected"] = len(collected_ticket_ids)
-        
-        if collect_raw_conversations and collected_ticket_ids:
-            logger.info("티켓 대화내역 raw 데이터 수집 시작...")
-            await self.collect_raw_conversations(collected_ticket_ids, progress)
-            raw_stats["conversations_collected"] = len(collected_ticket_ids)
-        
-        if collect_raw_kb:
-            logger.info("지식베이스 raw 데이터 수집 시작...")
-            await self.collect_raw_knowledge_base(progress, max_articles=max_kb_articles)
-            raw_stats["knowledge_base_collected"] = True
-            if max_kb_articles:
-                raw_stats["max_kb_articles"] = max_kb_articles
-        
         # 최종 통계
         stats = {
             "total_tickets_collected": total_tickets,
@@ -944,8 +558,7 @@ class OptimizedFreshdeskFetcher:
             "collection_completed": datetime.now().isoformat(),
             "days_per_chunk": days_per_chunk,
             "adaptive_rate": adaptive_rate,
-            "final_request_delay": self.REQUEST_DELAY if adaptive_rate else "N/A",
-            "raw_data_stats": raw_stats
+            "final_request_delay": self.REQUEST_DELAY if adaptive_rate else "N/A"
         }
         
         # 통계 저장
@@ -953,8 +566,6 @@ class OptimizedFreshdeskFetcher:
             json.dump(stats, f, ensure_ascii=False, indent=2)
         
         logger.info(f"수집 완료: 총 {total_tickets:,}개 티켓")
-        if raw_stats:
-            logger.info(f"RAW 데이터 수집 통계: {raw_stats}")
         return stats
 
 
@@ -967,10 +578,7 @@ async def main():
             end_date=None,  # 현재까지
             include_conversations=True,  # 대화내역 항상 포함
             include_attachments=True,   # 첨부파일 정보 항상 포함
-            max_tickets=None,  # 무제한 수집
-            collect_raw_details=True,   # 티켓 상세정보 raw 데이터 수집
-            collect_raw_conversations=True,  # 대화내역 raw 데이터 수집
-            collect_raw_kb=True  # 지식베이스 raw 데이터 수집
+            max_tickets=None  # 무제한 수집
         )
         
         print(f"수집 통계: {stats}")
@@ -993,12 +601,8 @@ async def test_collection_limit():
             include_conversations=True,
             include_attachments=True,  # 첨부파일도 항상 포함
             max_tickets=max_tickets,  # 100개로 제한
-            max_kb_articles=max_tickets,  # 지식베이스도 100개로 제한
             days_per_chunk=7,         # 테스트에서는 7일 단위로 분할
-            adaptive_rate=True,       # 적응형 속도 조절 활성화
-            collect_raw_details=True, # 테스트에서도 raw 데이터 수집
-            collect_raw_conversations=True,
-            collect_raw_kb=True
+            adaptive_rate=True        # 적응형 속도 조절 활성화
         )
     
     elapsed = datetime.now() - start_time
@@ -1010,59 +614,7 @@ async def test_collection_limit():
     logging.info("============================================")
 
 
-async def collect_only_raw_data():
-    """
-    기존 티켓 기본정보를 사용하여 raw 데이터만 수집하는 함수
-    티켓 기본정보가 이미 수집된 상태에서 상세정보와 지식베이스만 추가로 수집
-    """
-    logging.info("======= RAW 데이터만 수집 모드 =======")
-    output_dir = "freshdesk_full_data"
-    
-    async with OptimizedFreshdeskFetcher(output_dir) as fetcher:
-        progress = fetcher.load_progress()
-        
-        # 기존 티켓 청크 파일에서 티켓 ID 추출
-        ticket_ids = []
-        chunks_completed = progress.get("chunks_completed", [])
-        
-        if not chunks_completed:
-            logger.error("기존 티켓 데이터가 없습니다. 먼저 티켓 기본정보를 수집하세요.")
-            return
-        
-        logger.info(f"기존 {len(chunks_completed)}개 청크에서 티켓 ID 추출 중...")
-        
-        for chunk_id in chunks_completed:
-            chunk_file = fetcher.output_dir / f"tickets_chunk_{chunk_id}.json"
-            if chunk_file.exists():
-                try:
-                    with open(chunk_file, 'r', encoding='utf-8') as f:
-                        tickets = json.load(f)
-                        chunk_ticket_ids = [str(t.get("id")) for t in tickets if t.get("id")]
-                        ticket_ids.extend(chunk_ticket_ids)
-                        logger.info(f"청크 {chunk_id}에서 {len(chunk_ticket_ids)}개 티켓 ID 추출")
-                except Exception as e:
-                    logger.error(f"청크 {chunk_id} 읽기 실패: {e}")
-        
-        logger.info(f"총 {len(ticket_ids)}개 티켓 ID 추출 완료")
-        
-        if ticket_ids:
-            # 티켓 상세정보 수집
-            await fetcher.collect_raw_ticket_details(ticket_ids, progress)
-            
-            # 대화내역 수집
-            await fetcher.collect_raw_conversations(ticket_ids, progress)
-            
-            # 지식베이스 수집
-            await fetcher.collect_raw_knowledge_base(progress)
-            
-            logger.info("RAW 데이터 수집 완료")
-        else:
-            logger.error("추출된 티켓 ID가 없습니다.")
-
-
 if __name__ == "__main__":
     # 기본 호출은 main()이지만, 테스트를 원할 경우 test_collection_limit() 호출
-    # RAW 데이터만 수집하려면 collect_only_raw_data() 호출
     # asyncio.run(main())
-    # asyncio.run(test_collection_limit())
-    asyncio.run(collect_only_raw_data())
+    asyncio.run(test_collection_limit())

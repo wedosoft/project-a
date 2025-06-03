@@ -165,8 +165,9 @@ def load_local_data(data_dir: str):
     # Enhanced Fetcher 구조 확인 (tickets/, knowledge_base/ 디렉토리)
     tickets_dir = data_path / "tickets"
     kb_dir = data_path / "knowledge_base"
+    raw_data_dir = data_path / "raw_data"
     
-    if tickets_dir.exists() or kb_dir.exists():
+    if tickets_dir.exists() or kb_dir.exists() or raw_data_dir.exists():
         logger.info("Enhanced Fetcher 구조 감지됨, 원본 데이터 로드...")
         
         # 1. 상세 티켓 정보 우선 로드
@@ -195,7 +196,8 @@ def load_local_data(data_dir: str):
         
         # 2. 지식베이스 문서 로드
         if kb_dir.exists():
-            kb_files = sorted(kb_dir.glob("articles_chunk_*.json"))
+            # 다양한 파일명 패턴 지원 (articles_chunk_*.json과 knowledge_base_chunk_*.json)
+            kb_files = sorted(list(kb_dir.glob("articles_chunk_*.json")) + list(kb_dir.glob("knowledge_base_chunk_*.json")))
             if kb_files:
                 logger.info(f"{len(kb_files)}개 지식베이스 청크 파일 로드 중...")
                 for kb_file in kb_files:
@@ -206,6 +208,19 @@ def load_local_data(data_dir: str):
                 logger.info(f"지식베이스 데이터 로드 완료: 총 {len(articles)}개")
             else:
                 logger.info("지식베이스 청크 파일이 없음")
+        
+        # 3. raw_data 디렉토리에서 지식베이스 데이터 확인
+        raw_kb_dir = raw_data_dir / "knowledge_base"
+        if raw_kb_dir.exists() and len(articles) == 0:  # 기존에 로드된 지식베이스 문서가 없을 경우에만
+            kb_files = sorted(raw_kb_dir.glob("knowledge_base_chunk_*.json"))
+            if kb_files:
+                logger.info(f"{len(kb_files)}개 raw 지식베이스 청크 파일 로드 중...")
+                for kb_file in kb_files:
+                    with open(kb_file, 'r', encoding='utf-8') as f:
+                        chunk_articles = json.load(f)
+                        articles.extend(chunk_articles)
+                        logger.info(f"{kb_file.name}: {len(chunk_articles)}개 지식베이스 문서 로드")
+                logger.info(f"Raw 지식베이스 데이터 로드 완료: 총 {len(articles)}개")
     
     else:
         # 기존 구조 처리 (하위 호환성)
