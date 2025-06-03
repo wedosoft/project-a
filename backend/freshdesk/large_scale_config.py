@@ -13,13 +13,16 @@
 CHUNK_SIZE = 5000  # 기존 10,000에서 5,000으로 줄여서 메모리 사용량 감소
 
 # 2. 네트워크 안정성 강화
-REQUEST_DELAY = 0.5  # 더 보수적인 요청 간격
+REQUEST_DELAY = 0.5  # 더 보수적인 요청 간격 
 MAX_RETRIES = 10     # 재시도 횟수 증가
 
 # 3. 디스크 I/O 최적화
 SAVE_INTERVAL = 500  # 더 자주 저장하여 데이터 손실 위험 감소
 
-# 4. 진행 상황 추적 강화
+# 4. 날짜 범위 최적화
+DAYS_PER_CHUNK = 14  # 30일보다 작은 14일 단위로 나누어 처리 (대용량 수집에 최적)
+
+# 5. 진행 상황 추적 강화
 PROGRESS_SAVE_FREQUENCY = 100  # 100개 처리할 때마다 진행 상황 저장
 
 # 5. 시스템 리소스 모니터링
@@ -42,6 +45,19 @@ def check_system_resources():
         return False
     
     return True
+
+# 벡터DB 초기화 설정
+VECTOR_DB_CONFIG = {
+    "auto_reset_on_full_collection": False,  # 자동 초기화 여부
+    "create_backup_before_reset": True,      # 초기화 전 백업 생성
+    "backup_retention_days": 30,             # 백업 보관 기간
+    "confirm_required": True,                # 사용자 확인 필수 여부
+}
+
+# 환경변수로도 제어 가능
+import os
+RESET_VECTORDB = os.getenv("RESET_VECTORDB", "false").lower() == "true"
+SKIP_VECTORDB_CONFIRMATION = os.getenv("SKIP_VECTORDB_CONFIRMATION", "false").lower() == "true"
 
 # 6. 백그라운드 실행 스크립트
 BACKGROUND_COLLECTION_SCRIPT = """

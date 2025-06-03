@@ -8,15 +8,16 @@ Qdrant 벡터 데이터베이스에 저장하는 기능을 제공합니다.
 """
 
 import asyncio
-import logging
-import time
-import sys
-import os
 import json
-from freshdesk.fetcher import fetch_tickets, fetch_kb_articles
+import logging
+import os
+import sys
+import time
+from typing import Any, Dict, Union
+
 from core.embedder import embed_documents, process_documents
 from core.vectordb import vector_db
-from typing import Dict, Any, Union
+from freshdesk.fetcher import fetch_kb_articles, fetch_tickets
 
 # 로깅 설정
 logging.basicConfig(
@@ -195,7 +196,7 @@ async def ingest(
             incremental = False
             purge = True
         
-        DEFAULT_COMPANY_ID = "kyexpert"
+        DEFAULT_COMPANY_ID = "wedosoft"
         existing_count = vector_db.count(company_id=DEFAULT_COMPANY_ID)
         logger.info(f"기존 컬렉션에 {existing_count}개 문서가 있습니다 (company_id={DEFAULT_COMPANY_ID})")
 
@@ -225,7 +226,7 @@ async def ingest(
         # 2. 삭제된 문서 감지 및 처리 (증분 업데이트 모드에서만)
         if incremental:
             # 회사 문서 수 확인 (상세 ID 목록은 Qdrant에서는 직접 조회가 어려움)
-            DEFAULT_COMPANY_ID = "kyexpert"
+            DEFAULT_COMPANY_ID = "wedosoft"
             existing_count = vector_db.count(company_id=DEFAULT_COMPANY_ID)
             logger.info(f"기존 문서 {existing_count}개 확인됨 (company_id={DEFAULT_COMPANY_ID})")
             
