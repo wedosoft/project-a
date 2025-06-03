@@ -19,6 +19,13 @@ if BACKEND_ROOT not in sys.path:
 # 현재 디렉토리를 Python 경로에 추가 (필요시)
 sys.path.append(str(Path(__file__).parent))
 
+# 환경변수 로드
+import os
+
+from dotenv import load_dotenv
+
+load_dotenv(dotenv_path=Path(BACKEND_ROOT) / '.env')
+
 from api.ingest import ingest as ingest_main
 from data.data_processor import process_collected_data
 
