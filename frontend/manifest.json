@@ -1,0 +1,30 @@
+{
+  "modules": {
+    "support_ticket": {
+      "location": {
+        "ticket_top_navigation": {
+          "url": "index.html",
+          "icon": "styles/images/icon.svg"
+        }
+      },
+      "events": {
+        "onTicketCreate": {
+          "handler": "onTicketCreateHandler"
+        },
+        "onTicketUpdate": {
+          "handler": "onTicketUpdateHandler"
+        }
+      }
+    },
+    "common": {
+      "events": {},
+      "functions": {},
+      "requests": {}
+    }
+  },
+  "platform-version": "3.0",
+  "engines": {
+    "node": "18.18.2",
+    "fdk": "9.4.2"
+  }
+}
