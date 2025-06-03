@@ -159,6 +159,7 @@ backend/venv/
 backend/qdrant_data/
 backend/qdrant_storage/
 backend/attachment_cache
+backend/freshdesk*/
 
 # Added by Claude Task Master
 # Logs
@@ -180,7 +181,9 @@ node_modules/
 *.sw?
 
 # Added by Claude Task Master
-# OS specific
 # Task files
-tasks.json
-tasks/ 
+#tasks.json
+#tasks/
+frontend/.fdk
+frontend/coverage
+frontend/.report.json

@@ -1,176 +1,137 @@
 # Task ID: 12
-# Title: Implement Caching and Performance Optimization
-# Status: deferred
-# Dependencies: 8, 9, 10, 11
-# Priority: medium
-# Description: Create a caching layer and performance optimizations to meet the response time requirements of 2 seconds or less for API endpoints.
+# Title: 프론트엔드 응답 표시 및 상태 관리 구현
+# Status: pending
+# Dependencies: 11
+# Priority: high
+# Description: 전통적인 HTML/CSS/JavaScript를 사용하여 LLM의 응답을 리치 텍스트 형식으로 표시하고, 사용자 인터랙션을 처리하는 기능을 구현합니다.
 # Details:
-1. Implement Redis-based caching for:
-   - API responses
-   - LLM responses
-   - Vector search results
-   - Embeddings
-2. Add cache invalidation strategies
-3. Implement background processing for non-critical operations
-4. Create connection pooling for database and API clients
-5. Add request batching for external API calls
-6. Implement response compression
-7. Create performance monitoring and metrics
-
-Example code:
-```python
-from fastapi import FastAPI, Request, Response
-from fastapi.middleware.gzip import GZipMiddleware
-import redis.asyncio as redis
-import json
-import time
-from functools import wraps
-
-app = FastAPI()
-app.add_middleware(GZipMiddleware, minimum_size=1000)
-
-class CacheService:
-    def __init__(self, redis_url: str, default_ttl: int = 3600):
-        self.redis = redis.from_url(redis_url)
-        self.default_ttl = default_ttl
-        
-    async def get(self, key: str):
-        value = await self.redis.get(key)
-        if value:
-            return json.loads(value)
-        return None
-        
-    async def set(self, key: str, value: any, ttl: int = None):
-        if ttl is None:
-            ttl = self.default_ttl
-        await self.redis.setex(key, ttl, json.dumps(value))
-        
-    async def delete(self, key: str):
-        await self.redis.delete(key)
-        
-    async def invalidate_pattern(self, pattern: str):
-        keys = await self.redis.keys(pattern)
-        if keys:
-            await self.redis.delete(*keys)
-
-def cached_endpoint(ttl: int = 3600):
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(*args, **kwargs):
-            # Get request from kwargs
-            request = next((arg for arg in args if isinstance(arg, Request)), 
-                          kwargs.get('req') or kwargs.get('request'))
-                          
-            if not request:
-                return await func(*args, **kwargs)
-                
-            # Create cache key from request details
-            cache_service = request.app.state.cache_service
-            path = request.url.path
-            query_string = str(request.query_params)
-            body = await request.body()
-            body_str = body.decode() if body else ""
-            
-            # Include company_id in cache key for multi-tenant isolation
-            company_id = None
-            if body_str:
-                try:
-                    body_json = json.loads(body_str)
-                    company_id = body_json.get("company_id")
-                except:
-                    pass
-                    
-            cache_key = f"api:{path}:{query_string}:{body_str}"
-            if company_id:
-                cache_key = f"company:{company_id}:{cache_key}"
-                
-            # Try to get from cache
-            cached_response = await cache_service.get(cache_key)
-            if cached_response:
-                return Response(
-                    content=cached_response["content"],
-                    status_code=cached_response["status_code"],
-                    headers=cached_response["headers"],
-                    media_type=cached_response["media_type"]
-                )
-                
-            # Execute the endpoint function
-            response = await func(*args, **kwargs)
-            
-            # Cache the response
-            if hasattr(response, "body"):
-                await cache_service.set(
-                    cache_key,
-                    {
-                        "content": response.body.decode(),
-                        "status_code": response.status_code,
-                        "headers": dict(response.headers),
-                        "media_type": response.media_type
-                    },
-                    ttl
-                )
-                
-            return response
-        return wrapper
-    return decorator
-
-# Example usage on an endpoint
-@app.get("/api/v1/similar_tickets")
-@cached_endpoint(ttl=300)  # Cache for 5 minutes
-async def get_similar_tickets(request: Request):
-    # Endpoint implementation
-    pass
-
-# Background task processing
-from fastapi.background import BackgroundTasks
-
-@app.post("/api/v1/process_data")
-async def process_data(request: Request, background_tasks: BackgroundTasks):
-    # Extract data from request
-    data = await request.json()
-    
-    # Add to background tasks
-    background_tasks.add_task(process_data_in_background, data)
-    
-    return {"status": "processing"}
-    
-async def process_data_in_background(data: dict):
-    # Long-running process
-    pass
-```
+- 마크다운 라이브러리(marked.js)를 사용하여 LLM 응답을 HTML로 변환하여 표시합니다.
+- 'OO와 대화하기' 탭의 대화 내용 표시 영역에 HTML 기반 콘텐츠 렌더링 시스템을 구현합니다.
+- 백엔드 `/query` API로부터 받은 LLM 응답을 안전하게 HTML로 파싱하고 표시합니다.
+  - marked.js를 사용하여 마크다운 텍스트를 HTML로 변환하는 로직을 구현합니다.
+  - XSS 공격 방지를 위한 콘텐츠 새니타이징을 적용합니다.
+- LLM 응답에 포함된 코드 블록, 목록, 인용구, 테이블 등의 리치 텍스트 요소가 올바르게 렌더링되도록 합니다.
+- 사용자의 메시지 입력 및 편집 기능을 일반 텍스트영역(textarea)으로 구현합니다.
+- CSS를 사용하여 Freshdesk UI와 일관된 스타일링을 적용합니다.
+- 대화가 길어질 경우 스크롤 처리 및 성능 최적화를 고려합니다.
+- 모든 코드에는 상세한 한글 주석을 필수로 작성합니다.
+- React를 사용하지 않고 전통적인 HTML/CSS/JavaScript만으로 구현합니다.
 
 # Test Strategy:
-1. Measure API response times with and without caching
-2. Test cache invalidation strategies
-3. Verify multi-tenant isolation in cache
-4. Test background processing for long-running tasks
-5. Measure memory usage under load
-6. Test connection pooling efficiency
-7. Verify response compression
-8. Load test with simulated concurrent users
+- marked.js를 사용한 마크다운-HTML 변환이 정상적으로 작동하는지 확인.
+- 백엔드로부터 받은 다양한 형식의 LLM 응답(텍스트, 코드 블록, 목록 등)이 올바르게 HTML로 렌더링되는지 검증.
+- XSS 공격 방지를 위한 새니타이징 로직의 효과성 테스트.
+- 리치 텍스트 요소(코드 하이라이팅, 목록 들여쓰기 등)의 올바른 렌더링 확인.
+- CSS 스타일링 및 UI 일관성 검증.
+- 긴 대화 내용에 대한 스크롤 및 성능 테스트.
+- 일반 textarea를 통한 사용자 입력 처리가 정상적으로 작동하는지 확인.
 
 # Subtasks:
-## 1. Implement Redis-Based Caching Infrastructure [pending]
+## 12.1. marked.js 라이브러리 설치 및 프로젝트 설정 [pending]
 ### Dependencies: None
-### Description: Set up and configure a Redis-based distributed caching layer to store frequently accessed data, ensuring high availability and scalability. Define cache namespaces, key structures, and data serialization formats. Apply best practices such as separating cache and session storage, enabling compression, and configuring L2 cache if needed.
+### Description: 
 ### Details:
-Follow Redis deployment best practices, including using separate Redis instances for cache and session data, enabling data compression (e.g., gzip), and pre-loading keys for performance. Configure replication and clustering for high availability. Document cache key naming conventions and data expiration policies.
 
-## 2. Design and Implement Cache Invalidation Strategies [pending]
-### Dependencies: 12.1
-### Description: Develop robust cache invalidation mechanisms to ensure data consistency between the cache and the underlying data store. Choose appropriate invalidation policies (e.g., time-based TTL, event-driven, or manual invalidation) for different data types and usage patterns.
-### Details:
-Define detailed caching policies, including TTL values for various data types, and implement event-driven invalidation (e.g., on data update or delete). Consider using cache versioning or tagging for bulk invalidation. Document scenarios for cache refresh and fallback strategies.
 
-## 3. Integrate Background Processing for Non-Critical Operations [pending]
-### Dependencies: 12.1, 12.2
-### Description: Offload non-critical and long-running operations (such as cache warming, batch updates, or analytics) to background processing systems to reduce latency for end-user requests.
+## 12.2. 'OO와 대화하기' 탭 내에 HTML 기반 콘텐츠 렌더링 영역 구현 [pending]
+### Dependencies: None
+### Description: 
 ### Details:
-Implement background jobs for cache pre-warming, periodic cache refresh, and bulk data processing. Use job queues or task schedulers to manage background tasks. Monitor job execution and handle failures gracefully to maintain cache integrity.
 
-## 4. Optimize Connection Pooling and Request Batching [pending]
-### Dependencies: 12.1, 12.2, 12.3
-### Description: Enhance Redis client performance by configuring connection pooling and batching multiple requests to minimize network overhead and improve throughput.
+
+## 12.3. marked.js를 사용하여 백엔드 LLM 응답(마크다운)을 안전한 HTML로 변환하는 파서 구현 [pending]
+### Dependencies: None
+### Description: 
 ### Details:
-Configure Redis client libraries to use efficient connection pools, set optimal pool sizes, and enable pipelining or batching of requests where applicable. Benchmark performance before and after optimization using metrics such as cache hit rate, latency, and throughput. Document benchmarking methodology and results.
+
+
+## 12.4. LLM 응답의 리치 텍스트 요소(코드 블록, 목록, 인용 등) 렌더링 및 스타일 적용 [pending]
+### Dependencies: None
+### Description: 
+### Details:
+
+
+## 12.5. 사용자 메시지 입력을 위한 일반 텍스트영역(textarea) 및 전송 버튼 구현 [pending]
+### Dependencies: None
+### Description: 
+### Details:
+
+
+## 12.6. 대화 내용 표시 영역 CSS 스타일링 (Freshdesk UI와 일관성 유지) [pending]
+### Dependencies: None
+### Description: 
+### Details:
+
+
+## 12.7. 긴 대화 내용 스크롤 처리 및 성능 최적화 방안 검토 및 적용 [pending]
+### Dependencies: None
+### Description: 
+### Details:
+
+
+## 12.8. HTML 렌더링 및 XSS 방지 관련 단위 테스트 또는 기능 테스트 작성 [pending]
+### Dependencies: None
+### Description: 
+### Details:
+
+
+## 9. 마크다운 파싱 구현 [pending]
+### Dependencies: None
+### Description: 마크다운 텍스트를 파싱하여 HTML 구조로 변환하는 기능 구현
+### Details:
+마크다운 파서 라이브러리(marked.js, showdown 등) 선택 및 통합, 기본 마크다운 문법(제목, 목록, 링크, 이미지, 코드 블록 등) 지원, 커스텀 마크다운 확장 기능 검토
+
+## 10. HTML 렌더링 구현 [pending]
+### Dependencies: 12.9
+### Description: 파싱된 마크다운을 안전하게 HTML로 렌더링하는 기능 개발
+### Details:
+파싱된 마크다운 HTML을 DOM에 삽입하는 로직 구현, 렌더링 성능 최적화, 동적 컨텐츠 업데이트 처리, 렌더링 생명주기 관리
+
+## 11. XSS 방지 보안 구현 [pending]
+### Dependencies: 12.9, 12.10
+### Description: 사용자 입력 및 마크다운 렌더링 과정에서 XSS 공격 방지 기능 구현
+### Details:
+HTML 이스케이프 처리, 안전한 HTML 태그 및 속성 화이트리스트 설정, DOMPurify 같은 보안 라이브러리 통합, 악성 스크립트 삽입 방지 테스트
+
+## 12. 리치 텍스트 요소별 렌더링 구현 [pending]
+### Dependencies: 12.10
+### Description: 다양한 리치 텍스트 요소(표, 코드 블록, 수식 등)에 대한 특수 렌더링 구현
+### Details:
+코드 하이라이팅(Prism.js/highlight.js), 수학 수식(KaTeX/MathJax), 표 렌더링, 체크박스, 다이어그램(Mermaid) 등 특수 요소 지원, 각 요소별 스타일 및 인터랙션 구현
+
+## 13. 일반 텍스트영역(textarea) 기반 입력/전송 UI 개발 [pending]
+### Dependencies: None
+### Description: 사용자가 메시지를 입력하고 전송할 수 있는 기본 UI 구현
+### Details:
+일반 HTML textarea 요소 구현, 전송 버튼 및 단축키 지원, 입력 유효성 검사, 기본적인 사용자 경험 최적화
+
+## 14. CSS 스타일링 구현 [pending]
+### Dependencies: 12.10, 12.12
+### Description: 마크다운 렌더링 결과물에 대한 CSS 스타일링 및 테마 적용
+### Details:
+기본 마크다운 요소 스타일링, 반응형 디자인 적용, 다크/라이트 테마 지원, 커스텀 테마 옵션 구현, 일관된 디자인 시스템 적용, 접근성 고려한 스타일링
+
+## 15. 스크롤/성능 최적화 [pending]
+### Dependencies: 12.10, 12.14
+### Description: 대량의 마크다운 렌더링 시 스크롤 및 성능 최적화 구현
+### Details:
+가상 스크롤링 구현, 지연 로딩, 대용량 마크다운 처리 최적화, 이미지 최적화, 렌더링 성능 측정 및 개선, 바닐라 JavaScript 기반 최적화 기법 적용
+
+## 16. 테스트 구현 [pending]
+### Dependencies: 12.9, 12.10, 12.11, 12.12, 12.13, 12.14, 12.15
+### Description: 마크다운 파싱 및 렌더링 기능에 대한 단위/통합 테스트 작성
+### Details:
+파싱 정확도 테스트, XSS 방어 테스트, 렌더링 일관성 테스트, 성능 테스트, 브라우저 호환성 테스트, 에지 케이스 테스트, 자동화된 테스트 파이프라인 구축
+
+## 17. 코드 주석화 및 문서화 [pending]
+### Dependencies: 12.9, 12.10, 12.11, 12.12, 12.13, 12.14, 12.15, 12.16
+### Description: 구현된 코드에 대한 주석 추가 및 사용 문서 작성
+### Details:
+코드 주석 추가, 바닐라 JavaScript 코드 문서화, README 작성, 사용 예제 작성, 확장 가이드 작성, 트러블슈팅 가이드 작성, 한글 주석 상세 작성
+
+## 12.9. 전통적인 HTML/CSS/JavaScript 구조로 코드 구성 [pending]
+### Dependencies: None
+### Description: 
+### Details:
+React 없이 순수 JavaScript를 사용하여 DOM 조작 및 이벤트 처리 구현, 모듈 패턴 또는 클래스 기반 구조화
 

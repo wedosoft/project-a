@@ -1,75 +1,86 @@
 # Task ID: 3
-# Title: Set Up Qdrant Vector Database Integration
-# Status: in-progress
+# Title: OpenAI 임베딩 모듈 구현
+# Status: completed
 # Dependencies: 1
 # Priority: high
-# Description: Implement connection to Qdrant Cloud for vector storage and retrieval, with support for multi-tenant data isolation based on company_id.
+# Description: LLM Router 및 Orchestrator 구현을 통한 다중 LLM 제공자 지원 및 프롬프트 관리 시스템 개발
 # Details:
-1. Set up connection to Qdrant Cloud using the official Python client
-2. Create a service layer for vector database operations
-3. Implement collection management with company_id prefix for multi-tenancy
-4. Configure vector dimensions for OpenAI embeddings (text-embedding-3-small)
-5. Implement CRUD operations for vectors with metadata
-6. Set up efficient batch operations for inserting vectors
-7. Implement vector search with filtering capabilities
+다음 핵심 기능을 `core/llm_router.py`에 구현:
 
-Example code:
-```python
-from qdrant_client import QdrantClient
-from qdrant_client.http import models
+1. **다중 LLM 제공자 지원**:
+   - Anthropic, OpenAI, Gemini 등 다양한 LLM 제공자 연동
+   - 자동 폴백 메커니즘 구현 (특정 LLM 실패 시 다른 LLM으로 자동 전환)
+   - 로드 밸런싱 기능 구현
+   - LLM 성능 메트릭 수집 및 모니터링
 
-class VectorStore:
-    def __init__(self, url: str, api_key: str):
-        self.client = QdrantClient(url=url, api_key=api_key)
-        
-    def get_collection_name(self, company_id: int, collection_type: str) -> str:
-        return f"company_{company_id}_{collection_type}"
-        
-    async def create_collection_if_not_exists(self, company_id: int, collection_type: str):
-        collection_name = self.get_collection_name(company_id, collection_type)
-        collections = self.client.get_collections().collections
-        if not any(c.name == collection_name for c in collections):
-            self.client.create_collection(
-                collection_name=collection_name,
-                vectors_config=models.VectorParams(size=1536, distance=models.Distance.COSINE)
-            )
-        return collection_name
-        
-    async def search(self, company_id: int, collection_type: str, vector, limit: int = 10, filter=None):
-        collection_name = self.get_collection_name(company_id, collection_type)
-        return self.client.search(
-            collection_name=collection_name,
-            query_vector=vector,
-            limit=limit,
-            query_filter=filter
-        )
-```
+2. **프롬프트 관리**:
+   - 티켓 요약, 사용자 질문, 검색된 컨텍스트(유사 티켓, 관련 문서) 등 다양한 정보를 조합하여 최적의 프롬프트 동적 구성
+   - 'LLM 호출 시 맥락 중심으로 프롬프트 구성' 원칙 준수
+
+3. **LLM 호출 제어**:
+   - 사용자의 명시적인 요청(예: 'AI로 답변 생성' 버튼 클릭)이 있을 때만 LLM 호출
+   - 불필요한 API 호출 방지 로직 구현
+
+4. **컨텍스트 최적화**:
+   - 자연어 요청의 의도 파악
+   - LLM이 고품질 응답을 생성할 수 있도록 컨텍스트 정보 최적화
+
+5. **응답 처리**:
+   - LLM 응답 검증 및 후처리
+   - 프론트엔드가 사용하기 쉬운 JSON 형식으로 변환
+
+6. **에러 핸들링**:
+   - LLM API 호출 실패, 타임아웃 등의 에러 상황에 대한 강력한 에러 처리
+   - 폴백 로직 구현
 
 # Test Strategy:
-1. Unit tests for vector store operations
-2. Test multi-tenant isolation with different company_ids
-3. Verify collection creation and management
-4. Test vector insertion with various metadata
-5. Validate search functionality with different filters
-6. Performance testing for batch operations
-7. Test error handling for database connection issues
+1. 각 LLM 제공자 API 연동 테스트 (모킹 활용)
+2. 프롬프트 구성 로직 단위 테스트
+3. 폴백 및 로드 밸런싱 기능 테스트
+4. 다양한 시나리오(예: 컨텍스트 부족, LLM 응답 오류)에 대한 통합 테스트
+5. 에러 처리 및 재시도 로직 테스트
+6. 응답 처리 및 JSON 변환 테스트
 
 # Subtasks:
-## 1. Implement Connection and Collection Management with Multi-tenant Isolation [pending]
+## 3.1. 다중 LLM 제공자 연동 구현 [pending]
 ### Dependencies: None
-### Description: Set up Qdrant connection and implement collection management with company_id prefixes for multi-tenant isolation
+### Description: Anthropic, OpenAI, Gemini 등 다양한 LLM 제공자 API 연동 구현
 ### Details:
-Create a connection manager class that handles authentication with Qdrant using API keys. Implement collection naming with company_id prefixes to ensure tenant isolation. Include methods for creating, listing, and deleting collections with proper error handling for connection failures and invalid configurations. Add functionality to validate collection existence before operations and implement proper connection pooling.
 
-## 2. Implement Vector Operations (CRUD and Search) [pending]
-### Dependencies: 3.1
-### Description: Develop core vector operations including create, read, update, delete and similarity search functionality
-### Details:
-Create methods for vector operations including upsert, get, delete, and search with filtering capabilities. Implement proper dimensionality validation for OpenAI embeddings (1536 dimensions). Add support for metadata storage alongside vectors. Implement similarity search with configurable parameters like limit and score threshold. Include comprehensive error handling for vector format issues, collection not found scenarios, and API failures.
 
-## 3. Implement Batch Processing and Optimization [pending]
-### Dependencies: 3.2
-### Description: Develop efficient batch operations for vectors with performance optimization and monitoring
+## 3.2. 자동 폴백 및 로드 밸런싱 구현 [pending]
+### Dependencies: None
+### Description: LLM 호출 실패 시 대체 제공자로 자동 전환하는 폴백 메커니즘과 부하 분산을 위한 로드 밸런싱 구현
 ### Details:
-Implement batch processing for vector operations to improve throughput. Add retry mechanisms with exponential backoff for failed operations. Create performance monitoring tools to track query latency and throughput. Implement connection pooling optimization for high-volume scenarios. Develop comprehensive testing strategies including unit tests for each operation, integration tests with a test Qdrant instance, and load testing for batch operations.
+
+
+## 3.3. 프롬프트 관리 시스템 개발 [pending]
+### Dependencies: None
+### Description: 다양한 컨텍스트 정보를 조합하여 최적의 프롬프트를 동적으로 구성하는 시스템 개발
+### Details:
+
+
+## 3.4. LLM 호출 제어 로직 구현 [pending]
+### Dependencies: None
+### Description: 사용자의 명시적 요청에만 LLM을 호출하도록 제어하는 로직 구현
+### Details:
+
+
+## 3.5. 응답 처리 및 변환 기능 개발 [pending]
+### Dependencies: None
+### Description: LLM 응답을 검증하고 프론트엔드용 JSON 형식으로 변환하는 기능 개발
+### Details:
+
+
+## 3.6. 에러 핸들링 및 재시도 로직 구현 [pending]
+### Dependencies: None
+### Description: API 호출 실패, 타임아웃 등의 에러 상황에 대한 처리 및 재시도 로직 구현
+### Details:
+
+
+## 3.7. LLM 성능 메트릭 수집 시스템 구현 [pending]
+### Dependencies: None
+### Description: 각 LLM 제공자의 응답 시간, 성공률, 품질 등을 모니터링하는 메트릭 수집 시스템 구현
+### Details:
+
 

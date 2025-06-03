@@ -1,111 +1,123 @@
 # Task ID: 6
-# Title: Implement LLM Router Pattern
-# Status: pending
+# Title: 백엔드 API 엔드포인트 기본 구조 구현
+# Status: completed
 # Dependencies: 1
 # Priority: high
-# Description: Create a router service that can dynamically select and use different LLM providers (Anthropic Claude, OpenAI GPT, Google Gemini) with fallback mechanisms.
+# Description: PRD에 정의된 핵심 API 엔드포인트인 `/init/{ticket_id}`와 `/query`를 FastAPI를 사용하여 구현합니다. 이 엔드포인트들은 백엔드 서비스의 주요 기능을 제공합니다.
 # Details:
-1. Create a unified interface for different LLM providers
-2. Implement provider-specific adapters for:
-   - Anthropic Claude
-   - OpenAI GPT models
-   - Google Gemini
-3. Create a router that can select the appropriate model based on:
-   - Availability
-   - Cost
-   - Performance requirements
-   - Specific capabilities
-4. Implement automatic fallback mechanisms
-5. Add monitoring and logging for model usage
-6. Implement caching for common requests
-7. Add rate limiting and quota management
-
-Example code:
-```python
-from abc import ABC, abstractmethod
-import asyncio
-from enum import Enum
-
-class ModelProvider(Enum):
-    ANTHROPIC = "anthropic"
-    OPENAI = "openai"
-    GOOGLE = "google"
-
-class LLMAdapter(ABC):
-    @abstractmethod
-    async def generate(self, prompt: str, max_tokens: int = 1000, temperature: float = 0.7):
-        pass
-        
-class AnthropicAdapter(LLMAdapter):
-    def __init__(self, api_key: str, model: str = "claude-3-opus-20240229"):
-        self.api_key = api_key
-        self.model = model
-        # Initialize Anthropic client
-        
-    async def generate(self, prompt: str, max_tokens: int = 1000, temperature: float = 0.7):
-        # Implement Anthropic API call
-        pass
-        
-class OpenAIAdapter(LLMAdapter):
-    # Similar implementation for OpenAI
-    pass
-    
-class GeminiAdapter(LLMAdapter):
-    # Similar implementation for Google Gemini
-    pass
-    
-class LLMRouter:
-    def __init__(self, adapters: dict[ModelProvider, LLMAdapter], default_provider: ModelProvider):
-        self.adapters = adapters
-        self.default_provider = default_provider
-        self.fallback_order = [default_provider] + [p for p in adapters.keys() if p != default_provider]
-        
-    async def generate(self, prompt: str, provider: ModelProvider = None, **kwargs):
-        if provider is not None and provider in self.adapters:
-            try:
-                return await self.adapters[provider].generate(prompt, **kwargs)
-            except Exception as e:
-                # Log error and fall back to default
-                pass
-                
-        # Try providers in fallback order
-        for fallback_provider in self.fallback_order:
-            try:
-                return await self.adapters[fallback_provider].generate(prompt, **kwargs)
-            except Exception as e:
-                # Log error and continue to next provider
-                continue
-                
-        # If all providers fail
-        raise Exception("All LLM providers failed to generate response")
-```
+- `api/endpoints/` 디렉토리 내에 라우터 파일을 생성하여 엔드포인트를 구현합니다. (예: `api/endpoints/rag_handler.py`)
+- **`/init/{ticket_id}` 엔드포인트**:
+    - 경로 매개변수로 `ticket_id` (문자열)를 받습니다.
+    - `company_id`는 헤더 또는 인증 토큰에서 추출하여 사용합니다.
+    - 기능: 해당 `ticket_id`의 요약 정보, 유사 티켓 목록, 추천 기술 자료 목록을 반환합니다.
+    - 내부적으로 Context Builder, Retriever, (필요시) LLM Orchestrator와 상호작용합니다.
+    - 응답 모델(Pydantic)은 티켓 요약, 유사 티켓(ID, 제목, 유사도 점수), 추천 솔루션(ID, 제목, 관련성 점수)을 포함해야 합니다.
+    - Freshdesk 티켓 원본 데이터는 제공하지 않고, 요약 및 분석 결과만 제공합니다.
+- **`/query` 엔드포인트**:
+    - 요청 본문(Pydantic 모델)으로 `ticket_id` (문자열), `query_text` (문자열), `context_type` (선택적, 예: 'similar_tickets', 'solutions', 'full_context')을 받습니다.
+    - `company_id`는 헤더 또는 인증 토큰에서 추출하여 사용합니다.
+    - 기능: 사용자의 `query_text`와 제공된 `ticket_id` 및 `context_type`을 기반으로 LLM에게 질의하고 답변을 생성하여 반환합니다.
+    - 내부적으로 Context Builder, Retriever, LLM Orchestrator와 상호작용합니다.
+    - 응답 모델(Pydantic)은 LLM이 생성한 답변(마크다운 형식)과 사용된 컨텍스트(참고 자료 목록 등)를 포함해야 합니다.
+- 모든 엔드포인트는 비동기(async/await)로 구현합니다.
+- Pydantic을 사용하여 요청 및 응답 모델을 명확히 정의하고 유효성 검사를 수행합니다.
+- 의존성 주입(FastAPI Depends)을 활용하여 서비스 모듈(Context Builder, Retriever, LLM Orchestrator 등)을 주입받습니다.
+- 상세한 에러 처리(HTTP 예외 반환) 및 구조화된 로깅을 구현합니다.
+- 모든 코드에는 상세한 한글 주석을 필수로 작성합니다.
+- CORS 설정 및 보안 헤더 구성.
+- Rate limiting 미들웨어 구현.
+- 헬스체크 엔드포인트 구현.
 
 # Test Strategy:
-1. Unit tests for each adapter
-2. Test fallback mechanisms with simulated failures
-3. Verify router correctly selects providers
-4. Test with various prompt types and lengths
-5. Measure response times across different providers
-6. Test rate limiting behavior
-7. Validate error handling
-8. Test caching effectiveness
+- `/init/{ticket_id}` 엔드포인트 테스트:
+    - 유효한 `ticket_id` 및 `company_id`로 호출 시 정상 응답(요약, 유사 티켓, 추천 솔루션) 확인.
+    - 존재하지 않는 `ticket_id` 또는 잘못된 `company_id`에 대한 에러 처리 검증.
+    - 응답 데이터 형식 및 내용의 정확성 검증.
+- `/query` 엔드포인트 테스트:
+    - 다양한 `ticket_id`, `query_text`, `context_type` 조합으로 호출 시 정상 응답(LLM 답변, 참고 자료) 확인.
+    - 필수 요청 필드 누락 시 에러 처리 검증.
+    - LLM 연동 실패 시의 에러 처리 및 폴백 로직(정의된 경우) 검증.
+    - 응답 데이터 형식(마크다운) 및 내용의 정확성 검증.
+- 두 엔드포인트 모두에 대한 인증 및 권한 부여 로직(구현된 경우) 테스트.
+- 성능 테스트: 응답 시간, 동시 요청 처리 능력 등.
+- Rate limiting 테스트, CORS 설정 검증, 로깅 기능 테스트.
 
 # Subtasks:
-## 1. Design Core Interface and Provider Adapters [pending]
+## 6.1. /init/{ticket_id} 및 /query 엔드포인트용 Pydantic 요청/응답 모델 정의 [pending]
 ### Dependencies: None
-### Description: Create the foundational interface for the LLM router and implement provider-specific adapters
+### Description: api/schemas/rag_schemas.py 또는 유사 파일에 두 핵심 엔드포인트에 필요한 모든 Pydantic 모델 정의
 ### Details:
-Design a unified interface that abstracts different LLM providers. Implement adapter classes for major providers (OpenAI, Anthropic, Mixtral, etc.) that conform to this interface. Include authentication handling, request formatting, and response parsing for each provider. Define clear interface contracts with method signatures for query processing, completion generation, and error handling.
 
-## 2. Implement Router Logic and Selection Mechanisms [pending]
-### Dependencies: 6.1
-### Description: Develop the core routing logic with selection criteria and fallback mechanisms
-### Details:
-Create the router component that dynamically selects the appropriate LLM based on query characteristics. Implement selection criteria including cost optimization, performance requirements, and specialized capabilities. Design fallback mechanisms for handling failures or timeouts. Create sequence diagrams showing the routing decision process and fallback flows. Implement a scoring system (1-5) to evaluate model suitability for different query types.
 
-## 3. Build Monitoring, Caching, and Rate Limiting [pending]
-### Dependencies: 6.1, 6.2
-### Description: Implement performance monitoring, response caching, and rate limiting functionality
+## 6.2. FastAPI 라우터 설정 및 /init/{ticket_id} 엔드포인트 기본 로직 구현 [pending]
+### Dependencies: None
+### Description: api/endpoints/rag_handler.py에 라우터 설정 및 /init/{ticket_id} 엔드포인트의 기본 구조와 로직 구현
 ### Details:
-Develop monitoring systems to track router performance, model selection accuracy, and cost metrics. Implement caching mechanisms to store and reuse responses for similar queries. Create rate limiting functionality to manage API quotas across different providers. Design interfaces for monitoring data collection and visualization. Implement configurable thresholds for automatic routing adjustments based on performance data.
+
+
+## 6.3. /init/{ticket_id} 엔드포인트 내 Context Builder, Retriever 연동 로직 구현 [pending]
+### Dependencies: None
+### Description: Context Builder와 Retriever 서비스를 /init/{ticket_id} 엔드포인트에 연동하여 티켓 요약, 유사 티켓, 추천 솔루션 정보 제공 기능 구현
+### Details:
+
+
+## 6.4. FastAPI 라우터 설정 및 /query 엔드포인트 기본 로직 구현 [pending]
+### Dependencies: None
+### Description: api/endpoints/rag_handler.py에 /query 엔드포인트의 기본 구조와 로직 구현
+### Details:
+
+
+## 6.5. /query 엔드포인트 내 Context Builder, Retriever, LLM Orchestrator 연동 로직 구현 [pending]
+### Dependencies: None
+### Description: Context Builder, Retriever, LLM Orchestrator 서비스를 /query 엔드포인트에 연동하여 사용자 질의에 대한 LLM 응답 생성 기능 구현
+### Details:
+
+
+## 6.6. 두 엔드포인트에 대한 의존성 주입 설정 [pending]
+### Dependencies: None
+### Description: FastAPI Depends를 활용하여 서비스 모듈(Context Builder, Retriever, LLM Orchestrator 등)을 엔드포인트에 주입하는 로직 구현
+### Details:
+
+
+## 6.7. 두 엔드포인트에 대한 상세한 에러 처리 및 구조화된 로깅 구현 [pending]
+### Dependencies: None
+### Description: FastAPI HTTP 예외를 사용한 상세한 에러 처리 및 구조화된 JSON 로깅 구현
+### Details:
+
+
+## 6.8. /init/{ticket_id} 엔드포인트 단위 테스트 및 통합 테스트 작성 [pending]
+### Dependencies: None
+### Description: tests/api/endpoints/ 디렉토리에 /init/{ticket_id} 엔드포인트에 대한 단위 테스트 및 통합 테스트 작성
+### Details:
+
+
+## 6.9. /query 엔드포인트 단위 테스트 및 통합 테스트 작성 [pending]
+### Dependencies: None
+### Description: tests/api/endpoints/ 디렉토리에 /query 엔드포인트에 대한 단위 테스트 및 통합 테스트 작성
+### Details:
+
+
+## 6.10. API 문서 자동 생성 확인 [pending]
+### Dependencies: None
+### Description: Swagger/OpenAPI를 통한 API 문서 자동 생성 확인 및 필요시 문서 개선
+### Details:
+
+
+## 6.11. CORS 설정 및 보안 헤더 구성 [pending]
+### Dependencies: None
+### Description: FastAPI 애플리케이션에 CORS 설정 및 보안 헤더 구성 구현
+### Details:
+
+
+## 6.12. Rate limiting 미들웨어 구현 [pending]
+### Dependencies: None
+### Description: API 요청에 대한 Rate limiting 미들웨어 구현 및 설정
+### Details:
+
+
+## 6.13. 헬스체크 엔드포인트 구현 [pending]
+### Dependencies: None
+### Description: 시스템 상태 확인을 위한 헬스체크 엔드포인트 구현
+### Details:
+
 

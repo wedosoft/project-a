@@ -1,141 +1,72 @@
 # Task ID: 9
-# Title: Implement API Endpoints for Reply Generation
-# Status: pending
-# Dependencies: 6, 7, 8
+# Title: /similar_tickets 엔드포인트 구현
+# Status: completed
+# Dependencies: 2, 3, 6
 # Priority: medium
-# Description: Create FastAPI endpoints for AI-powered reply generation and block-based content manipulation to support the BlockNote editor integration.
+# Description: LLM Router를 통해 실제 LLM 호출을 관리하고, Context Builder로부터 받은 컨텍스트를 사용하여 프롬프트를 생성하며, LLM 응답을 후처리하는 LLM Orchestrator 모듈을 `core/llm_orchestrator.py`에 구현합니다.
 # Details:
-1. Implement `/generate_reply` endpoint for full reply generation
-2. Create `/rewrite_block` endpoint for individual block improvement
-3. Design Pydantic models for BlockNote editor data structure
-4. Implement context preservation between requests
-5. Add support for different reply styles and tones
-6. Create response validation and quality checks
-7. Implement streaming responses for long-form content
+`core/llm_orchestrator.py`에 `LLMOrchestrator` 클래스 또는 관련 함수들을 구현합니다.
+주요 기능:
+- Context Builder가 생성한 컨텍스트와 사용자 질문을 기반으로 최종 LLM 프롬프트를 구성합니다.
+- LLM Router(`core/llm_router.py`)를 사용하여 선택된 LLM(Anthropic, OpenAI, Gemini 등)에 프롬프트를 전달하고 응답을 받습니다.
+- LLM 응답을 애플리케이션 요구사항에 맞게 후처리합니다 (예: JSON 형식 검증, 마크다운 형식 변환, 불필요한 내용 제거, 안전성 필터링).
+- LLM 호출 시 타임아웃 설정, 재시도 로직(필요시)을 관리합니다.
+- LLM 사용량(토큰 수, 비용 등)을 추적하고 로깅할 수 있는 기능을 제공합니다.
+- 스트리밍 응답을 지원해야 하는 경우, 해당 로직을 처리합니다 (구현 가능한 경우).
+- `company_id`를 로깅 및 모니터링 목적으로 활용할 수 있습니다.
 
-Example code:
-```python
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-from typing import List, Dict, Any, Optional
-
-router = APIRouter(prefix="/api/v1")
-
-class Block(BaseModel):
-    id: str
-    type: str
-    content: Dict[str, Any]
-
-class GenerateReplyRequest(BaseModel):
-    context_id: str
-    ticket_id: int
-    company_id: int
-    blocks: Optional[List[Block]] = None  # Existing blocks if any
-    style: Optional[str] = "professional"  # professional, friendly, technical
-    tone: Optional[str] = "helpful"  # helpful, empathetic, direct
-
-class GenerateReplyResponse(BaseModel):
-    blocks: List[Block]
-
-@router.post("/generate_reply", response_model=GenerateReplyResponse)
-async def generate_reply(request: GenerateReplyRequest, req: Request):
-    try:
-        # Get services from app state
-        freshdesk_client = req.app.state.freshdesk_client
-        context_manager = req.app.state.context_manager
-        llm_router = req.app.state.llm_router
-        embedding_service = req.app.state.embedding_service
-        
-        # Get ticket data
-        ticket = await freshdesk_client.get_ticket(request.ticket_id, request.company_id)
-        
-        # Get context from previous session or create new
-        # context = req.app.state.cache.get(request.context_id) or {}
-        
-        # Create prompt for reply generation
-        prompt = await context_manager.create_prompt(
-            "reply", ticket, request.company_id, embedding_service
-        )
-        
-        # Add style and tone instructions
-        prompt += f"\n\nPlease write in a {request.style} style with a {request.tone} tone."
-        
-        # Generate reply
-        reply_text = await llm_router.generate(prompt)
-        
-        # Convert to blocks format
-        # This would need a parser to convert text to BlockNote format
-        blocks = [
-            Block(id="1", type="paragraph", content={"text": "Hello,"}),
-            Block(id="2", type="paragraph", content={"text": reply_text}),
-            Block(id="3", type="paragraph", content={"text": "Best regards,"})
-        ]
-        
-        return GenerateReplyResponse(blocks=blocks)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-class RewriteBlockRequest(BaseModel):
-    context_id: str
-    block: Block
-    instruction: str  # e.g., "Make more concise", "Add more details"
-    company_id: int
-
-class RewriteBlockResponse(BaseModel):
-    block: Block
-
-@router.post("/rewrite_block", response_model=RewriteBlockResponse)
-async def rewrite_block(request: RewriteBlockRequest, req: Request):
-    try:
-        # Get LLM router
-        llm_router = req.app.state.llm_router
-        
-        # Create prompt for block rewriting
-        block_text = request.block.content.get("text", "")
-        prompt = f"Rewrite the following text according to this instruction: {request.instruction}\n\nOriginal text: {block_text}\n\nRewritten text:"
-        
-        # Generate rewritten text
-        rewritten_text = await llm_router.generate(prompt)
-        
-        # Create new block with same structure but updated text
-        new_block = Block(
-            id=request.block.id,
-            type=request.block.type,
-            content={**request.block.content, "text": rewritten_text}
-        )
-        
-        return RewriteBlockResponse(block=new_block)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-```
+Context Builder(`core/context_builder.py`) 및 LLM Router(`core/llm_router.py`)와 긴밀하게 협력합니다.
+모든 코드에는 상세한 한글 주석을 필수로 작성합니다.
 
 # Test Strategy:
-1. Test reply generation with different ticket types
-2. Verify block rewriting with various instructions
-3. Test different styles and tones
-4. Validate BlockNote format compatibility
-5. Test streaming responses for large replies
-6. Verify context preservation between requests
-7. Test error handling for malformed blocks
-8. Measure response quality with different prompts
+다양한 컨텍스트 및 질문에 대한 프롬프트 생성 결과 검증. LLM Router 연동 테스트 (각 LLM 제공자별 호출 성공 여부). LLM 응답 후처리 로직 테스트 (형식 변환, 내용 정제 등). 타임아웃 및 재시도 로직(구현된 경우) 검증. LLM 사용량 추적 및 로깅 기능 확인. 스트리밍 응답(구현된 경우) 테스트. LLM 호출 실패 시 에러 처리 및 폴백(LLM Router에서 처리) 확인.
 
 # Subtasks:
-## 1. Full Reply Generation Endpoint with BlockNote Integration [pending]
+## 9.1. LLMOrchestrator 클래스 또는 핵심 함수 기본 구조 설계 및 구현 [pending]
 ### Dependencies: None
-### Description: Implement the main endpoint for generating complete email replies with BlockNote editor integration
+### Description: `core/llm_orchestrator.py`에 LLMOrchestrator 클래스 또는 관련 함수들의 기본 구조를 설계하고 구현합니다.
 ### Details:
-Create an API endpoint that accepts email content and context, then generates a complete reply using AI. Integrate with BlockNote to structure the response in blocks. Define request/response models including parameters for tone, style, and length. Create sequence diagrams showing the flow from client request through AI processing to BlockNote-formatted response.
 
-## 2. Block-level Rewriting and Manipulation Functionality [pending]
-### Dependencies: 9.1
-### Description: Develop endpoints for manipulating and rewriting specific content blocks
-### Details:
-Implement functionality to rewrite, edit, or regenerate specific blocks of content rather than entire replies. Create endpoints for operations like tone adjustment, elaboration, summarization, and formatting changes on individual blocks. Define request/response models that maintain block IDs and relationships. Create sequence diagrams showing how block manipulations preserve surrounding context.
 
-## 3. Streaming Response Implementation with Context Preservation [pending]
-### Dependencies: 9.1, 9.2
-### Description: Implement streaming capabilities for real-time reply generation with context preservation
+## 9.2. 최종 LLM 프롬프트 생성 로직 구현 [pending]
+### Dependencies: None
+### Description: Context Builder가 생성한 컨텍스트와 사용자 질문을 기반으로 최종 LLM 프롬프트를 구성하는 로직을 구현합니다.
 ### Details:
-Develop streaming response functionality to deliver generated content in real-time chunks. Implement context preservation mechanisms to maintain coherence across streaming sessions. Define WebSocket or Server-Sent Events protocols for the streaming interface. Create sequence diagrams showing the streaming flow, including handling of interruptions and modifications during generation.
+
+
+## 9.3. LLM Router를 통한 LLM 호출 로직 구현 [pending]
+### Dependencies: None
+### Description: LLM Router(`core/llm_router.py`)를 사용하여 선택된 LLM(Anthropic, OpenAI, Gemini 등)에 프롬프트를 전달하고 응답을 받는 로직을 구현합니다.
+### Details:
+
+
+## 9.4. LLM 응답 후처리 로직 구현 [pending]
+### Dependencies: None
+### Description: LLM 응답을 애플리케이션 요구사항에 맞게 후처리하는 로직(JSON 검증, 마크다운 변환, 안전성 필터링 등)을 구현합니다.
+### Details:
+
+
+## 9.5. LLM 호출 타임아웃 및 재시도 로직 관리 기능 구현 [pending]
+### Dependencies: None
+### Description: LLM 호출 시 타임아웃 설정 및 필요시 재시도 로직을 관리하는 기능을 구현합니다.
+### Details:
+
+
+## 9.6. LLM 사용량 추적 및 로깅 기능 구현 [pending]
+### Dependencies: None
+### Description: LLM 사용량(토큰 수, 비용 등)을 추적하고 로깅할 수 있는 기능을 구현합니다.
+### Details:
+
+
+## 9.7. 스트리밍 응답 처리 로직 구현 [pending]
+### Dependencies: None
+### Description: 스트리밍 응답을 지원해야 하는 경우, 해당 로직을 처리하는 기능을 구현합니다.
+### Details:
+
+
+## 9.8. LLM Orchestrator 모듈 단위 테스트 작성 [pending]
+### Dependencies: None
+### Description: `tests/core/` 디렉토리에 LLM Orchestrator 모듈에 대한 단위 테스트를 작성합니다.
+### Details:
+
 

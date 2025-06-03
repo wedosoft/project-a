@@ -1,196 +1,190 @@
 # Task ID: 11
-# Title: Implement Image Gallery API
-# Status: deferred
-# Dependencies: 2, 8
-# Priority: low
-# Description: Create an API endpoint for retrieving and processing images from ticket attachments and knowledge base articles.
+# Title: Freshdesk FDK 프로젝트 초기 설정
+# Status: in-progress
+# Dependencies: None
+# Priority: high
+# Description: Freshdesk FDK를 사용하여 앱의 기본 UI 구조와 레이아웃을 PRD에 명시된 대로 구현합니다. 여기에는 티켓 요약 카드, 3개의 탭 영역(유사 티켓, 추천 솔루션, OO와 대화하기)이 포함됩니다.
 # Details:
-1. Implement `/image_gallery` endpoint for retrieving images
-2. Create image processing service for:
-   - Thumbnail generation
-   - EXIF data extraction
-   - Basic image analysis
-3. Implement caching for processed images
-4. Add filtering by image type, size, and date
-5. Create pagination support
-6. Implement secure URL generation for image access
-7. Add metadata extraction from images
+Freshdesk FDK의 `app/` 디렉토리 내에 HTML, CSS, JavaScript 파일들을 생성하여 UI를 구성합니다. (예: `app/template.html`, `app/styles/main.css`, `app/scripts/app.js` 등)
 
-Example code:
-```python
-from fastapi import APIRouter, Depends, HTTPException, Request, Query
-from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
-from datetime import datetime
-import io
-from PIL import Image, ExifTags
-import hashlib
+**티켓 요약 카드 (Ticket Summary Card)**:
+- `/init` API로부터 받은 티켓 요약 정보를 표시합니다.
+- 간결하고 명확한 정보 전달에 중점을 둡니다.
 
-router = APIRouter(prefix="/api/v1")
+**3개의 탭 영역 (Tabs Area)**:
+- **유사 티켓 (Similar Tickets) 탭**: `/init` API로부터 받은 유사 티켓 목록을 표시합니다. 각 티켓은 제목, ID, 유사도 점수 등을 포함할 수 있습니다.
+- **추천 솔루션 (Recommended Solutions) 탭**: `/init` API로부터 받은 추천 기술 자료(솔루션) 목록을 표시합니다. 각 솔루션은 제목, ID, 관련성 점수 등을 포함할 수 있습니다.
+- **OO와 대화하기 (Chat with OO) 탭**: 사용자가 현재 티켓 컨텍스트 내에서 LLM과 직접 대화할 수 있는 인터페이스를 제공합니다. 입력창과 대화 내용 표시 영역으로 구성됩니다. `/query` API를 호출하여 LLM 응답을 받아 표시합니다.
 
-class ImageMetadata(BaseModel):
-    width: int
-    height: int
-    format: str
-    size_bytes: int
-    exif: Optional[Dict[str, Any]] = None
+**기술 스택 및 구현 방식**:
+- 순수 JavaScript: 바닐라 JavaScript를 사용하여 DOM 조작 및 이벤트 처리를 구현합니다.
+- API 연동: XMLHttpRequest 또는 Fetch API를 사용하여 백엔드 API (`/init`, `/query`)를 호출하고 응답을 처리합니다.
+- 스타일링: CSS를 사용하여 UI를 스타일링합니다. 반응형 디자인을 고려합니다.
+- 모듈화: JavaScript 코드를 기능별로 모듈화하여 관리합니다.
+- 모든 코드에는 상세한 한글 주석을 필수로 작성합니다.
 
-class ImageItem(BaseModel):
-    id: str
-    ticket_id: int
-    filename: str
-    content_type: str
-    created_at: datetime
-    thumbnail_url: str
-    full_url: str
-    metadata: Optional[ImageMetadata] = None
-
-class ImageGalleryResponse(BaseModel):
-    images: List[ImageItem]
-    total: int
-    page: int
-    per_page: int
-
-class ImageProcessor:
-    def __init__(self, cache_dir: str = "/tmp/image_cache"):
-        self.cache_dir = cache_dir
-        os.makedirs(cache_dir, exist_ok=True)
-        
-    async def process_image(self, image_data: bytes, filename: str):
-        # Generate hash for caching
-        file_hash = hashlib.md5(image_data).hexdigest()
-        cache_path = os.path.join(self.cache_dir, f"{file_hash}.jpg")
-        
-        # Check cache
-        if os.path.exists(cache_path):
-            with open(cache_path, "rb") as f:
-                thumbnail_data = f.read()
-        else:
-            # Process image
-            img = Image.open(io.BytesIO(image_data))
-            
-            # Extract metadata
-            metadata = {
-                "width": img.width,
-                "height": img.height,
-                "format": img.format,
-                "size_bytes": len(image_data)
-            }
-            
-            # Extract EXIF if available
-            exif_data = {}
-            if hasattr(img, '_getexif') and img._getexif():
-                exif = {ExifTags.TAGS[k]: v for k, v in img._getexif().items() if k in ExifTags.TAGS}
-                exif_data = {k: str(v) for k, v in exif.items()}  # Convert to strings for JSON
-            metadata["exif"] = exif_data
-            
-            # Generate thumbnail
-            img.thumbnail((200, 200))
-            thumb_io = io.BytesIO()
-            img.save(thumb_io, format='JPEG')
-            thumbnail_data = thumb_io.getvalue()
-            
-            # Save to cache
-            with open(cache_path, "wb") as f:
-                f.write(thumbnail_data)
-                
-        return thumbnail_data, metadata
-
-@router.get("/image_gallery", response_model=ImageGalleryResponse)
-async def get_image_gallery(
-    ticket_id: int,
-    company_id: int,
-    page: int = Query(1, ge=1),
-    per_page: int = Query(20, ge=1, le=100),
-    req: Request
-):
-    try:
-        # Get services
-        freshdesk_client = req.app.state.freshdesk_client
-        image_processor = req.app.state.image_processor
-        
-        # Get ticket attachments
-        attachments = await freshdesk_client.get_ticket_attachments(ticket_id, company_id)
-        
-        # Filter image attachments
-        image_attachments = [a for a in attachments if a["content_type"].startswith("image/")]
-        
-        # Paginate
-        start_idx = (page - 1) * per_page
-        end_idx = start_idx + per_page
-        page_attachments = image_attachments[start_idx:end_idx]
-        
-        # Process images
-        images = []
-        for attachment in page_attachments:
-            # Download attachment
-            attachment_data = await freshdesk_client.download_attachment(
-                attachment["id"], ticket_id, company_id
-            )
-            
-            # Process image
-            thumbnail_data, metadata = await image_processor.process_image(
-                attachment_data, attachment["filename"]
-            )
-            
-            # Generate URLs (in a real app, these would be secure URLs)
-            base_url = f"/api/v1/attachments/{company_id}/{ticket_id}"
-            thumbnail_url = f"{base_url}/thumbnail/{attachment['id']}"
-            full_url = f"{base_url}/full/{attachment['id']}"
-            
-            images.append(ImageItem(
-                id=str(attachment["id"]),
-                ticket_id=ticket_id,
-                filename=attachment["filename"],
-                content_type=attachment["content_type"],
-                created_at=attachment["created_at"],
-                thumbnail_url=thumbnail_url,
-                full_url=full_url,
-                metadata=ImageMetadata(**metadata)
-            ))
-        
-        return ImageGalleryResponse(
-            images=images,
-            total=len(image_attachments),
-            page=page,
-            per_page=per_page
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-```
+**기본 설정 작업**:
+- Freshdesk CLI 설치 및 설정(fdk-cli)
+- FDK 프로젝트 생성 및 기본 구조 설정
+- 프로젝트 구조 설정: app/, assets/, config/, scripts/, styles/
+- 기본 스타일 및 테마 설정
+- 개발 환경 설정 및 로컬 테스트 환경 구성
+- 빌드 및 배포 스크립트 설정
+- manifest.json 구성(앱 메타데이터, 권한 등)
+- iparams.json 및 iparams.html 초기 설정
 
 # Test Strategy:
-1. Test image processing with different image types
-2. Verify thumbnail generation
-3. Test EXIF data extraction
-4. Validate caching mechanism
-5. Test pagination with large image sets
-6. Verify URL generation and security
-7. Test with various image sizes and formats
-8. Measure performance with different numbers of images
+- 티켓 요약 카드 UI 및 데이터 표시 정확성 검증
+- 각 탭(유사 티켓, 추천 솔루션, OO와 대화하기)의 UI 및 기능 정상 동작 확인
+- API 호출 및 응답 데이터 처리 로직 검증
+- 상태 관리 로직의 정확성 검증
+- 다양한 화면 크기에서의 반응형 UI 동작 확인
+- 사용자 인터랙션(탭 전환, 입력, 버튼 클릭 등)에 대한 UI 반응성 테스트
+- 프로젝트 구조 검증, 로컬 개발 환경 테스트, 빌드 프로세스 검증, manifest.json 유효성 검증
+- iparams.html 관리자 설정 화면 기능 검증
 
 # Subtasks:
-## 1. 이미지 검색 및 조회 API 엔드포인트 구현 [pending]
+## 11.1. 티켓 요약 카드 HTML/CSS/JS 기본 구조 및 UI 구현 [pending]
 ### Dependencies: None
-### Description: 티켓 및 지식베이스 문서 첨부 이미지를 조회하고 검색하기 위한 API 엔드포인트를 구현합니다.
+### Description: 
 ### Details:
-이미지 목록 조회 엔드포인트 설계 및 구현, 이미지 메타데이터 필터링 기능 개발, 페이징 처리 메커니즘 구현, 이미지 조회 보안 정책 적용, 메타데이터 기반 검색 기능 개발, 이미지 소스 출처 추적 기능, Pydantic 모델을 사용한 응답 스키마 정의, 캐싱 처리
 
-## 2. 이미지 썸네일 생성 및 메타데이터 처리 서비스 개발 [pending]
-### Dependencies: None
-### Description: 이미지 썸네일 및 전처리를 위한 서비스를 개발합니다.
-### Details:
-이미지 리사이징 및 썸네일 생성 로직 구현, 이미지 포맷 변환 기능 개발 (JPG, PNG, WebP 등), 메타데이터 추출 (EXIF, 크기, 해상도 등), 이미지 최적화 알고리즘 적용, 비동기 이미지 처리 파이프라인 구축, 이미지 품질 조정 기능, 캐시 무효화 전략 개발, Pillow 또는 OpenCV 라이브러리 활용
 
-## 3. 이미지 캐싱 및 성능 최적화 시스템 구현 [pending]
+## 11.2. 탭 영역 HTML/CSS/JS 및 3개 탭(유사 티켓, 추천 솔루션, OO와 대화하기) 기본 구조 구현 [pending]
 ### Dependencies: None
-### Description: 이미지 캐싱 및 성능 최적화를 위한 시스템을 구현합니다.
+### Description: 
 ### Details:
-이미지 캐싱 전략 설계, 로컬 및 분산 캐싱 구현, 이미지 해시 기반 중복 방지, 만료 정책 및 캐시 무효화 구현, 메모리 사용량 최적화, 병렬 이미지 처리를 위한 작업 큐 구현, 이미지 처리 속도 모니터링, 캐시 히트/미스 분석 도구 개발
 
-## 4. 이미지 URL 생성 및 보안 액세스 관리 [pending]
+
+## 11.3. 유사 티켓 탭 UI 및 데이터 표시 로직 구현 [pending]
 ### Dependencies: None
-### Description: 이미지 URL 생성 및 액세스 보안을 관리하는 시스템을 구현합니다.
+### Description: 
 ### Details:
-서명된 URL 생성 메커니즘 구현, 시간 제한 액세스 토큰 발급, 이미지 액세스 권한 검증, company_id 기반 액세스 제어, 이미지 워터마킹 옵션 구현, 이미지 다운로드 추적 및 기록, 악의적인 요청 탐지 및 차단, CORS 보안 설정 구현
+
+
+## 11.4. 추천 솔루션 탭 UI 및 데이터 표시 로직 구현 [pending]
+### Dependencies: None
+### Description: 
+### Details:
+
+
+## 11.5. OO와 대화하기 탭 UI (입력창, 대화 내용 표시 영역) 및 기본 인터랙션 로직 구현 [pending]
+### Dependencies: None
+### Description: 
+### Details:
+
+
+## 11.6. JavaScript 상태 관리 모듈 구현 (app/scripts/state.js) [pending]
+### Dependencies: None
+### Description: 
+### Details:
+
+
+## 11.7. 백엔드 API (/init, /query) 호출을 위한 서비스 모듈(Fetch API 사용) 구현 (app/scripts/api.js) [pending]
+### Dependencies: None
+### Description: 
+### Details:
+
+
+## 11.8. /init API 호출 및 응답 데이터를 티켓 요약 카드, 유사 티켓 탭, 추천 솔루션 탭에 바인딩하는 로직 구현 [pending]
+### Dependencies: None
+### Description: 
+### Details:
+
+
+## 11.9. /query API 호출 및 응답 데이터를 OO와 대화하기 탭에 표시하는 로직 구현 [pending]
+### Dependencies: None
+### Description: 
+### Details:
+
+
+## 11.10. 기본 CSS 스타일링 및 Freshdesk UI 가이드라인 준수 [pending]
+### Dependencies: None
+### Description: 
+### Details:
+
+
+## 11.11. 각 주요 UI 요소에 대한 단위 테스트 작성 (선택적) [pending]
+### Dependencies: None
+### Description: 
+### Details:
+
+
+## 11.12. iparams.html 관리자 설정 화면 구현 [pending]
+### Dependencies: None
+### Description: 
+### Details:
+앱 설치 시 필요한 설정 파라미터를 입력받는 관리자 설정 화면을 HTML/CSS/JavaScript로 구현합니다. 필요한 설정 항목들을 폼 요소로 구성하고, 유효성 검사 및 저장 기능을 구현합니다.
+
+## 12. Freshdesk FDK 프로젝트 초기화 [pending]
+### Dependencies: None
+### Description: Freshdesk FDK CLI를 사용하여 새 프로젝트를 생성하고 기본 구조 설정
+### Details:
+FDK CLI 설치, 'fdk create' 명령어로 프로젝트 생성, 필요한 기본 디렉토리 구조 확인 및 설정, package.json 초기 구성
+
+## 13. 개발환경 세팅 [pending]
+### Dependencies: 11.12
+### Description: 로컬 개발 환경 구성 및 필요한 도구 설치
+### Details:
+Node.js 환경 설정, 필요한 npm 패키지 설치, ESLint/Prettier 설정, 개발 서버 실행 및 테스트, 디버깅 환경 구성
+
+## 14. HTML/CSS/JS 구조 설계 [pending]
+### Dependencies: 11.12, 11.13
+### Description: 애플리케이션의 전체 구조와 계층 설계
+### Details:
+HTML 구조 설계, CSS 스타일 구조 설계, JavaScript 모듈 구조 설계, 파일 구조 최적화, 코드 조직화 방안 수립
+
+## 15. 상태 관리 전략 수립 [pending]
+### Dependencies: 11.14
+### Description: 애플리케이션의 상태 관리 방식 결정 및 구현
+### Details:
+바닐라 JavaScript 기반 상태 관리 패턴 설계, 이벤트 기반 상태 업데이트 구현, 비동기 상태 관리 전략, 상태 지속성 관리 방안
+
+## 16. 각 탭별 UI 구현 [pending]
+### Dependencies: 11.14, 11.15
+### Description: 애플리케이션의 각 탭에 필요한 UI 요소 개발
+### Details:
+각 탭별 HTML 구조 구현, CSS 스타일링, 필요한 UI 요소 개발, 사용자 인터랙션 요소 구현, 반응형 디자인 적용, 접근성 고려
+
+## 17. 탭별 비즈니스 로직 구현 [pending]
+### Dependencies: 11.15, 11.16
+### Description: 각 탭의 기능 및 비즈니스 로직 개발
+### Details:
+각 탭별 핵심 기능 구현, 이벤트 핸들러 작성, 유효성 검사 로직 구현, 에러 처리 로직 개발, 비즈니스 규칙 적용
+
+## 18. API 연동 구현 [pending]
+### Dependencies: 11.15, 11.17
+### Description: Freshdesk API 및 필요한 외부 API 연동
+### Details:
+Freshdesk Client SDK 활용, Fetch API 호출 함수 구현, 응답 데이터 처리 로직, 에러 핸들링, 캐싱 전략 수립, API 요청 최적화
+
+## 19. 스타일링 및 UI 개선 [pending]
+### Dependencies: 11.16, 11.17
+### Description: 애플리케이션 전체 스타일링 및 UI/UX 최적화
+### Details:
+CSS 스타일 적용, 디자인 시스템 구현, 테마 설정, 애니메이션 추가, 반응형 디자인 최적화, Freshdesk UI 가이드라인 준수
+
+## 20. manifest.json 및 iparams 구성 [pending]
+### Dependencies: 11.12
+### Description: 앱 설정을 위한 manifest 파일 및 설치 파라미터 구성
+### Details:
+manifest.json 파일 구성, 필요한 권한 설정, iparams.json 파일 작성, iparams.html 구현, 설치 시 필요한 파라미터 정의, 앱 아이콘 및 메타데이터 설정
+
+## 21. 테스트 코드 작성 및 실행 [pending]
+### Dependencies: 11.17, 11.18, 11.19
+### Description: 단위 테스트 및 통합 테스트 작성
+### Details:
+JavaScript 테스트 프레임워크 설정, 함수 단위 테스트 작성, API 모킹 및 테스트, 통합 테스트 시나리오 작성, 테스트 자동화 구성
+
+## 22. 코드 품질 개선 및 문서화 [pending]
+### Dependencies: 11.17, 11.18, 11.19, 11.21
+### Description: 코드 리팩토링, 주석 추가 및 문서화
+### Details:
+코드 리팩토링, 중복 코드 제거, 성능 최적화, JSDoc 형식 주석 추가, README 및 사용 설명서 작성, 코드 컨벤션 준수 확인
+
+## 23. 빌드 및 배포 프로세스 구성 [pending]
+### Dependencies: 11.20, 11.21, 11.22
+### Description: 프로덕션 빌드 설정 및 Freshdesk 마켓플레이스 배포 준비
+### Details:
+빌드 스크립트 최적화, 번들 크기 최소화, 환경별 설정 분리, FDK 패키징 명령어 구성, 배포 자동화 설정, 마켓플레이스 제출 요구사항 확인
 
