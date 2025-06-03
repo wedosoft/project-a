@@ -931,6 +931,136 @@ class QdrantAdapter(VectorDBInterface):
         except Exception as e:
             logger.error(f"Qdrant 전체 ID 목록 조회 실패: {e}")
             return []
+            
+    def backup_collection(self, collection_name: str = None, backup_path: str = None) -> bool:
+        """
+        Qdrant 컬렉션 데이터를 JSON 파일로 백업합니다.
+        
+        Args:
+            collection_name: 백업할 컬렉션 이름 (None이면 기본 컬렉션)
+            backup_path: 백업 파일 경로 (None이면 자동 생성)
+            
+        Returns:
+            성공 여부 (bool)
+        """
+        import json
+        from datetime import datetime
+        import os
+        
+        name = collection_name or self.collection_name
+        
+        # 백업 파일 경로 설정
+        if backup_path is None:
+            backup_dir = os.path.join(os.getcwd(), "backups")
+            os.makedirs(backup_dir, exist_ok=True)
+            backup_path = os.path.join(backup_dir, f"{name}_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+        
+        try:
+            # 컬렉션 정보 조회
+            collection_info = self.client.get_collection(collection_name=name)
+            points_count = getattr(collection_info, 'points_count', getattr(collection_info, 'vectors_count', 0))
+            
+            if points_count == 0:
+                logger.info(f"컬렉션 '{name}'에 백업할 데이터가 없습니다.")
+                return True
+                
+            # 컬렉션 데이터 조회 (청크 단위로 처리)
+            logger.info(f"컬렉션 '{name}' 백업 시작: 총 {points_count:,}개 포인트")
+            backup_data = []
+            offset = 0
+            limit = 1000
+            
+            while True:
+                points = self.client.scroll(
+                    collection_name=name,
+                    offset=offset,
+                    limit=limit,
+                    with_payload=True,
+                    with_vectors=True  # 벡터 데이터 포함
+                )
+                
+                if not points or len(points) == 0:
+                    break
+                    
+                # 각 포인트를 직렬화 가능한 형태로 변환
+                for point in points:
+                    point_data = {
+                        "id": point.id,
+                        "payload": point.payload
+                    }
+                    
+                    # 벡터 데이터가 있으면 추가
+                    if hasattr(point, 'vector') and point.vector:
+                        point_data["vector"] = point.vector
+                    
+                    backup_data.append(point_data)
+                
+                logger.info(f"컬렉션 '{name}' 백업 진행 중: {len(backup_data):,}/{points_count:,}개 포인트")
+                
+                if len(points) < limit:
+                    break
+                    
+                offset += len(points)
+            
+            # JSON 파일로 저장
+            with open(backup_path, 'w', encoding='utf-8') as f:
+                json.dump(backup_data, f, ensure_ascii=False)
+                
+            logger.info(f"컬렉션 '{name}' 백업 완료: {len(backup_data):,}개 포인트, 파일: {backup_path}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"컬렉션 '{name}' 백업 실패: {e}")
+            return False
+            
+    def reset_collection(self, collection_name: str = None, confirm: bool = False, create_backup: bool = True, backup_path: str = None) -> bool:
+        """
+        벡터DB 컬렉션을 초기화합니다 (삭제 후 재생성)
+        
+        Args:
+            collection_name: 초기화할 컬렉션 이름 (None이면 기본 컬렉션)
+            confirm: 초기화 확인 여부 (False면 예외 발생)
+            create_backup: 초기화 전 백업 생성 여부
+            backup_path: 백업 파일 경로 (None이면 자동 생성)
+            
+        Returns:
+            성공 여부 (bool)
+            
+        Raises:
+            ValueError: confirm이 False인 경우
+        """
+        name = collection_name or self.collection_name
+        
+        if not confirm:
+            raise ValueError("초기화 확인이 필요합니다. confirm=True로 설정하세요.")
+        
+        # 백업 생성
+        if create_backup:
+            logger.info(f"컬렉션 '{name}' 초기화 전 백업을 시작합니다.")
+            if not self.backup_collection(name, backup_path):
+                logger.error(f"컬렉션 '{name}' 백업 실패로 초기화를 중단합니다.")
+                return False
+        
+        # 컬렉션 삭제
+        if not self.drop_collection(name):
+            logger.error(f"컬렉션 '{name}' 삭제 실패로 초기화를 중단합니다.")
+            return False
+        
+        # 컬렉션 재생성
+        try:
+            if name == self.collection_name:
+                self._ensure_collection_exists()
+            elif name == FAQ_COLLECTION_NAME:
+                self._ensure_faq_collection_exists()
+            else:
+                logger.warning(f"알 수 없는 컬렉션 '{name}'은 자동 재생성되지 않습니다.")
+                return False
+            
+            logger.info(f"컬렉션 '{name}' 초기화 완료 (삭제 후 재생성)")
+            return True
+        except Exception as e:
+            logger.error(f"컬렉션 '{name}' 재생성 실패: {e}")
+            return False
 
 
 # 벡터 데이터베이스 팩토리
