@@ -94,7 +94,7 @@ jobs:
           GOOGLE_API_KEY=your-google-api-key
 
           # Application Settings
-          COMPANY_ID=kyexpert
+          COMPANY_ID=wedosoft
           PROCESS_ATTACHMENTS=true
           EMBEDDING_MODEL=text-embedding-3-small
           LOG_LEVEL=INFO
