@@ -10,7 +10,15 @@ import logging
 import math
 import os
 import re
+from pathlib import Path
 from typing import Any, Dict, List, Tuple
+
+from dotenv import load_dotenv
+
+# 환경변수 로드 - 상대 경로를 사용하여 backend/.env 파일을 찾습니다
+backend_dir = Path(__file__).parent.parent  # core 디렉토리의 상위(backend) 디렉토리
+dotenv_path = os.path.join(backend_dir, ".env")
+load_dotenv(dotenv_path=dotenv_path)
 
 import numpy as np
 import tiktoken
@@ -18,8 +26,10 @@ import tiktoken
 # 로깅 설정
 logger = logging.getLogger(__name__)
 
+# 환경 변수 로드 후 키 확인
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
+    logger.error("OPENAI_API_KEY 환경 변수가 설정되지 않았습니다. .env 파일을 확인하세요.")
     raise RuntimeError("OPENAI_API_KEY 환경 변수가 필요합니다. (임베딩용)")
 
 # OpenAI 임베딩 함수 설정 - 최신 임베딩 모델 사용
@@ -174,7 +184,7 @@ def embed_documents(docs: List[str]) -> List[List[float]]:
     processed_docs = []
     for i, doc in enumerate(docs):
         token_count = count_tokens(doc)
-        logger.error(f"문서 {i} 토큰 수: {token_count}")
+        logger.debug(f"문서 {i} 토큰 수: {token_count}")  # ERROR -> DEBUG로 수정
         
         if token_count > MAX_TOKENS_PER_CHUNK:
             # 토큰 수가 제한을 초과하는 경우 잘라서 처리
@@ -219,6 +229,8 @@ def embed_documents(docs: List[str]) -> List[List[float]]:
                 doc_tokens = count_tokens(doc)
                 if doc_tokens > 5000:  # 대용량 문서만 상세 로깅
                     logger.error(f"문서 {j} 토큰 수: {doc_tokens}")
+                else:
+                    logger.debug(f"문서 {j} 토큰 수: {doc_tokens}")  # 진단 정보는 debug로 출력
             raise
         
     return all_embeddings

@@ -24,7 +24,7 @@ from core import context_builder, llm_router, retriever
 from core.context_builder import build_optimized_context
 from core.embedder import embed_documents
 from core.llm_router import LLMResponse, generate_text
-from core.retriever import retrieve_faqs, retrieve_top_k_docs
+from core.retriever import retrieve_top_k_docs
 from core.vectordb import vector_db
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from freshdesk import fetcher
@@ -54,9 +54,7 @@ cache = TTLCache(maxsize=100, ttl=600)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# FAQ 검색 관련 상수
-FAQ_TOP_K = 2 # 검색할 최대 FAQ 개수
-FAQ_MIN_SCORE = 0.7 # FAQ 검색 시 최소 유사도 점수
+
 
 # 티켓 초기화 컨텍스트 캐시 (티켓 ID를 키로 사용)
 ticket_context_cache = TTLCache(maxsize=1000, ttl=3600)  # 1시간 유효
@@ -70,7 +68,6 @@ class QueryRequest(BaseModel):
     ticket_id: Optional[str] = None # 현재 처리 중인 티켓 ID (선택 사항)
     type: List[str] = Field(default_factory=lambda: ["tickets", "solutions", "images", "attachments"])  # 검색할 콘텐츠 타입
     intent: Optional[str] = "search"  # 검색 의도 (예: "search", "recommend", "answer")
-    # faq_top_k: int = FAQ_TOP_K # 요청별 FAQ top_k 설정 (필요시)
 
 
 # 회사 ID 의존성 함수
@@ -161,16 +158,7 @@ class QueryResponse(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
-class FAQEntry(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    question: str
-    answer: str
-    category: Optional[str] = None
-    source_doc_id: Optional[str] = None # 원본 문서 ID (있을 경우)
-    company_id: str # 데이터 격리를 위한 회사 ID
-    embedding: Optional[List[float]] = None # 질문 임베딩 벡터
-    last_updated: datetime = Field(default_factory=datetime.utcnow)
-    score: Optional[float] = None # 검색 시 유사도 점수
+# FAQ 기능은 제거되었습니다 (2025.06.03)
 
 
 def build_prompt(context: str, query: str, answer_instructions: Optional[str] = None) -> str:
@@ -329,42 +317,10 @@ async def query_endpoint(req: QueryRequest, company_id: str = Depends(get_compan
         )
         logger.info(f"솔루션 검색 결과: {len(kb_results.get('documents', []))} 건")
 
-    # FAQ 검색 (콘텐츠 타입에 "solutions"가 포함된 경우만)
-    faq_items = []
-    if "solutions" in content_types:
-        faq_items = retrieve_faqs(
-            query_embedding=query_embedding,
-            top_k=FAQ_TOP_K, # 전역 상수 사용
-            company_id=company_id,
-            min_score=FAQ_MIN_SCORE # 전역 상수 사용
-        )
-        logger.info(f"FAQ 검색 결과: {len(faq_items)} 건")
-
-    faq_docs_content = []
-    faq_metadatas_list = []
-    faq_distances = [] # FAQ 점수를 거리로 변환하여 저장
-
-    for faq in faq_items:
-        # doc_content = f"FAQ 질문: {faq.get('question', '')}\\\nFAQ 답변: {faq.get('answer', '')}"
-        faq_question = faq.get('question', '')
-        faq_answer = faq.get('answer', '')
-        doc_content = f"FAQ 질문: {faq_question}\\nFAQ 답변: {faq_answer}"
-        meta = {
-            "source_type": "faq", 
-            "id": faq.get("id"), 
-            "category": faq.get("category"), 
-            "original_score": faq.get("score", 0.0),
-            "title": f"FAQ: {faq.get('question', '')[:50]}..." # DocumentInfo용 임시 제목
-        }
-        faq_docs_content.append(doc_content)
-        faq_metadatas_list.append(meta)
-        # FAQ 점수(유사도)를 거리로 변환 (1 - score), 점수가 없을 경우 최대 거리(1.0) 부여
-        faq_distances.append(1.0 - faq.get("score", 0.0))
-
     # 검색 결과를 병합합니다.
-    all_docs_content = ticket_results["documents"] + kb_results["documents"] + faq_docs_content
-    all_metadatas = ticket_results["metadatas"] + kb_results["metadatas"] + faq_metadatas_list
-    all_distances = ticket_results["distances"] + kb_results["distances"] + faq_distances
+    all_docs_content = ticket_results["documents"] + kb_results["documents"]
+    all_metadatas = ticket_results["metadatas"] + kb_results["metadatas"]
+    all_distances = ticket_results["distances"] + kb_results["distances"]
     
     # 통합된 결과를 유사도 기준으로 재정렬합니다 (거리가 작을수록 유사도가 높음).
     # 각 메타데이터에 doc_type을 명시적으로 추가합니다.
@@ -372,17 +328,13 @@ async def query_endpoint(req: QueryRequest, company_id: str = Depends(get_compan
         meta["source_type"] = "ticket"
     for meta in kb_results["metadatas"]:
         meta["source_type"] = "kb"
-    # FAQ 메타데이터에는 이미 source_type="faq"가 설정되어 있습니다.
+    # 문서 타입별 메타데이터 설정 완료
 
     combined = list(zip(all_docs_content, all_metadatas, all_distances))
     combined.sort(key=lambda x: x[2]) # 거리(distance) 기준으로 오름차순 정렬
     
-    # 최대 top_k 개수만큼 잘라냅니다. (FAQ가 추가되었으므로, 전체 top_k를 고려)
-    # req.top_k는 원래 문서에 대한 것이므로, FAQ를 포함한 전체 개수를 어떻게 할지 결정 필요.
-    # 여기서는 단순 합산 후 req.top_k + FAQ_TOP_K 만큼 자르거나, 혹은 기존 req.top_k를 유지.
-    # 우선은 req.top_k를 유지하고, FAQ는 추가적인 정보로 활용될 수 있도록 합니다.
-    # 만약 FAQ가 매우 관련 높으면 우선적으로 포함되도록 정렬은 이미 처리됨.
-    final_top_k = req.top_k # 필요시 이 값을 조정 (예: req.top_k + len(faq_items))
+    # 최대 top_k 개수만큼 잘라냅니다.
+    final_top_k = req.top_k
     combined = combined[:final_top_k]
     
     # 다시 분리합니다.
@@ -405,32 +357,26 @@ async def query_endpoint(req: QueryRequest, company_id: str = Depends(get_compan
     
     structured_docs = []
     for i, (doc_content_item, metadata_item, distance_or_score_metric) in enumerate(zip(docs, metadatas, distances)):
-        title = metadata_item.get("title", "") # FAQ의 경우 임시 제목 사용, 다른 경우 기존 로직 따름
+        title = metadata_item.get("title", "")
         content = doc_content_item
         doc_type = metadata_item.get("source_type", "unknown")
 
-        if doc_type != "faq":
-            lines = doc_content_item.split("\\n", 2)
-            if len(lines) > 0 and lines[0].startswith("제목:"):
-                title = lines[0].replace("제목:", "").strip()
-                if len(lines) > 1:
-                    content = "\\n".join(lines[1:]).strip()
-                    if content.startswith("설명:"):
-                        content = content.replace("설명:", "", 1).strip()
+        lines = doc_content_item.split("\\n", 2)
+        if len(lines) > 0 and lines[0].startswith("제목:"):
+            title = lines[0].replace("제목:", "").strip()
+            if len(lines) > 1:
+                content = "\\n".join(lines[1:]).strip()
+                if content.startswith("설명:"):
+                    content = content.replace("설명:", "", 1).strip()
         
-        relevance_score = 0.0
-        if doc_type == "faq":
-            # FAQ의 경우 original_score (0~1)를 백분율로 변환
-            relevance_score = round(metadata_item.get("original_score", 0.0) * 100, 1)
-        else:
-            # 기존 문서의 경우 코사인 거리 (0~2)를 백분율로 변환
-            relevance_score = round(((2 - distance_or_score_metric) / 2) * 100, 1)
+        # 코사인 거리 (0~2)를 백분율로 변환
+        relevance_score = round(((2 - distance_or_score_metric) / 2) * 100, 1)
 
 
         doc_info = DocumentInfo(
             title=title,
             content=content,
-            source_id=metadata_item.get("source_id", metadata_item.get("id", "")), # FAQ는 id 사용
+            source_id=metadata_item.get("source_id", metadata_item.get("id", "")),
             source_url=metadata_item.get("source_url", ""),
             relevance_score=relevance_score,
             doc_type=doc_type
@@ -559,7 +505,7 @@ class RelatedDocumentItem(BaseModel):
     title: Optional[str] = Field(default=None, description="관련 문서의 제목")
     doc_summary: Optional[str] = Field(default=None, description="관련 문서의 내용 요약")  # summary → doc_summary로 필드명 변경 (일관성)
     url: Optional[str] = Field(default=None, description="관련 문서의 URL (해당하는 경우)")
-    source_type: Optional[str] = Field(default=None, description="문서 출처 유형 (예: 'kb', 'faq')")
+    source_type: Optional[str] = Field(default=None, description="문서 출처 유형 (예: 'kb')")
     similarity_score: Optional[float] = Field(default=None, description="유사도 점수 (0.0 ~ 1.0)")
 
 class RelatedDocsResponse(BaseModel):
@@ -574,7 +520,7 @@ class QueryRequest(BaseModel):
     query: str = Field(description="사용자의 자연어 검색 질문")
     top_k: int = Field(default=5, description="반환할 최대 결과 수")
     company_id: Optional[str] = Field(default=None, description="회사 ID (헤더에서 자동 추출 시 생략 가능)")
-    search_types: Optional[List[str]] = Field(default=["all"], description="검색할 문서 유형 (ticket, kb, faq, all)")
+    search_types: Optional[List[str]] = Field(default=["all"], description="검색할 문서 유형 (ticket, kb, all)")
     min_similarity: float = Field(default=0.5, description="최소 유사도 임계값")
 
 
@@ -584,7 +530,7 @@ class QueryResultItem(BaseModel):
     id: str = Field(description="문서 고유 ID")
     title: Optional[str] = Field(default=None, description="문서 제목")
     content_summary: str = Field(description="문서 내용 요약")
-    source_type: str = Field(description="문서 유형 (ticket, kb, faq)")
+    source_type: str = Field(description="문서 유형 (ticket, kb)")
     url: Optional[str] = Field(default=None, description="문서 URL")
     similarity_score: float = Field(description="유사도 점수 (0.0 ~ 1.0)")
     created_at: Optional[str] = Field(default=None, description="문서 생성일")
@@ -1155,18 +1101,7 @@ async def get_related_documents(ticket_id: str, company_id: str = Depends(get_co
                 "ids": []
             }
         
-        # 5. FAQ 검색도 수행
-        faq_results = []
-        try:
-            faq_results = vector_db.search_faqs(
-                query_embedding=query_embedding,
-                top_k=5,
-                company_id=company_id,
-                min_score=0.5  # 유사도 임계값을 50%로 낮춤 (원래 0.6)
-            )
-            logger.info(f"FAQ 검색 결과: {len(faq_results)}건")
-        except Exception as e:
-            logger.warning(f"FAQ 검색 실패: {e}")
+        # FAQ 기능은 제거되었으므로 FAQ 검색 코드도 제거됨 (2025.06.03)
         
         # 6. 검색 결과 처리 및 병합
         related_docs_list = []
@@ -1226,19 +1161,7 @@ async def get_related_documents(ticket_id: str, company_id: str = Depends(get_co
                     similarity_score=round(similarity_score, 3)
                 ))
         
-        # FAQ 결과 처리
-        for faq in faq_results:
-            title = f"FAQ: {faq.get('question', '질문 없음')}"
-            summary = faq.get('answer', '답변 없음')
-            
-            # FAQ 답변이 너무 길면 자르기
-            if len(summary) > 200:
-                summary = summary[:200] + "..."
-                
-            # FAQ URL 생성 (가능한 경우)
-            faq_url = None
-            faq_id = faq.get('id')
-            if faq_id:
+        # FAQ 기능이 제거되었습니다 (2025.06.03)
                 # FAQ ID로 URL 생성 (가능한 경우)
                 if isinstance(faq_id, str) and faq_id.startswith("faq-"):
                     faq_number = faq_id.replace("faq-", "")
@@ -1250,20 +1173,7 @@ async def get_related_documents(ticket_id: str, company_id: str = Depends(get_co
                         else:
                             domain_base = f"{freshdesk_domain}.freshdesk.com"
                             
-                        # FAQ URL 생성
-                        faq_url = f"https://{domain_base}/support/solutions/faqs/{faq_number}"
-            
-            # FAQ 점수 계산
-            score = faq.get('score', 0.5)
-            
-            related_docs_list.append(RelatedDocumentItem(
-                id=str(faq.get('id', 'faq_unknown')),
-                title=title,
-                doc_summary=summary,
-                url=faq_url,
-                source_type="faq",
-                similarity_score=round(score, 3)
-            ))
+                        # FAQ 기능이 제거되었습니다 (2025.06.03)
         
         # 유사도 점수 기준으로 정렬하고 상위 결과만 반환
         related_docs_list.sort(key=lambda x: x.similarity_score, reverse=True)
@@ -1531,39 +1441,14 @@ async def search_query(req: QueryRequest, company_id: str = Depends(get_company_
             query_embedding = [0.1] * 1536  # OpenAI embedding 차원에 맞춤
         
         # 2. 검색할 문서 유형 결정
-        search_types = req.search_types if req.search_types and req.search_types != ["all"] else ["ticket", "kb", "faq"]
+        search_types = req.search_types if req.search_types and req.search_types != ["all"] else ["ticket", "kb"]
         
         all_results = []
         
         # 3. 각 문서 유형별로 검색 수행
         for doc_type in search_types:
             try:
-                if doc_type == "faq":
-                    # FAQ 검색
-                    faq_results = vector_db.search_faqs(
-                        query_embedding=query_embedding,
-                        top_k=req.top_k,
-                        company_id=company_id,
-                        min_score=req.min_similarity
-                    )
-                    
-                    # FAQ 결과 변환
-                    for faq_item in faq_results:
-                        similarity_score = faq_item.get("score", 0.0)
-                        if similarity_score >= req.min_similarity:
-                            all_results.append(QueryResultItem(
-                                id=faq_item.get("id", ""),
-                                title=f"FAQ: {faq_item.get('question', '')[:80]}...",
-                                content_summary=faq_item.get("answer", "")[:300] + ("..." if len(faq_item.get("answer", "")) > 300 else ""),
-                                source_type="faq",
-                                url=faq_item.get("url"),
-                                similarity_score=round(similarity_score, 3),
-                                created_at=faq_item.get("created_at"),
-                                metadata=faq_item
-                            ))
-                
-                else:
-                    # 티켓 또는 KB 문서 검색
+                # 티켓 또는 KB 문서 검색
                     search_result = retriever.retrieve_top_k_docs(
                         query_embedding=query_embedding,
                         top_k=req.top_k,

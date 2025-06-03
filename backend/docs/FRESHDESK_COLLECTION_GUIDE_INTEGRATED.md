@@ -22,14 +22,40 @@ chmod +x scripts/run_full_collection.sh scripts/monitor_collection.sh
 # 백그라운드에서 실행
 ./scripts/run_full_collection.sh
 
+# Raw 데이터도 함께 수집하기 (임베딩 실패 시 재수집 방지)
+./scripts/run_full_collection.sh --raw-all
+
 # 진행 상황 모니터링
 ./scripts/monitor_collection.sh -w
 ```
 
 #### B. 직접 실행
 ```bash
+# 기본 실행
 python run_collection.py
 # 메뉴에서 '1. 전체 수집 (무제한)' 선택
+
+# 명령행 옵션으로 직접 실행 (Raw 데이터 수집 포함)
+python run_collection.py --full-collection --raw-all
+
+# 티켓 상세정보만 Raw 데이터로 수집
+python run_collection.py --full-collection --raw-details
+
+# 대화내역만 Raw 데이터로 수집
+python run_collection.py --full-collection --raw-conversations
+
+# 지식베이스만 Raw 데이터로 수집
+python run_collection.py --full-collection --raw-kb
+```
+
+#### C. 기존 티켓 데이터에서 Raw 데이터만 추가 수집
+```python
+# 이미 수집된 티켓 기본정보를 사용하여 raw 데이터만 추가 수집
+from freshdesk.optimized_fetcher import collect_only_raw_data
+import asyncio
+
+# 실행
+asyncio.run(collect_only_raw_data())
 ```
 
 ### 2. 소규모 수집 (10만건 이하)
@@ -57,6 +83,17 @@ asyncio.run(collect_tickets())
 python run_collection.py
 # 메뉴에서 '2. 빠른 테스트 (100건)' 선택
 ```
+
+#### 명령행 테스트 옵션
+```bash
+# 기본 테스트 (티켓 100건, 지식베이스 100건)
+python run_collection.py --quick-test
+
+# Raw 데이터도 함께 수집 (티켓 100건, 지식베이스 100건)
+python run_collection.py --quick-test --raw-all
+```
+
+> 참고: 테스트 수집은 티켓 100건과 지식베이스 100건으로 제한하여 빠르게 전체 워크플로우를 테스트합니다.
 
 ## 주요 최적화 전략
 
@@ -137,7 +174,17 @@ freshdesk_full_data/
 ├── collection_stats.json        # 수집 통계
 ├── all_tickets.json            # 병합된 전체 데이터
 ├── tickets_export.csv          # CSV 내보내기
-└── summary_report.json         # 요약 리포트
+├── summary_report.json         # 요약 리포트
+└── raw_data/                   # 원본 데이터 저장 디렉토리 (선택사항)
+    ├── ticket_details/         # 티켓 상세정보 원본 데이터
+    │   ├── chunk_0000.json     # 티켓 상세정보 청크
+    │   └── ...
+    ├── conversations/          # 티켓 대화내역 원본 데이터
+    │   ├── chunk_0000.json     # 대화내역 청크
+    │   └── ...
+    └── knowledge_base/         # 지식베이스 원본 데이터
+        ├── chunk_0000.json     # 지식베이스 청크
+        └── ...
 ```
 
 ### 소규모 수집
@@ -215,6 +262,15 @@ A: 다음을 확인하세요:
    2. 네트워크 안정성 - 유선 연결 권장
    3. Freshdesk 서버 응답 시간 - 피크 시간 피하기
    4. 대화내역과 첨부파일 수집 - 비활성화하면 빨라짐
+
+**Q: Raw 데이터 수집은 무엇이고 왜 필요한가요?**
+A: Raw 데이터 수집은 티켓 상세정보, 대화내역, 지식베이스의 원본 데이터를 JSON 형태로 저장합니다. 임베딩 처리 실패 시 원본 데이터 재수집 없이 다시 시도할 수 있습니다. 대용량 데이터에서는 특히 유용합니다.
+
+**Q: Raw 데이터 수집은 저장 공간이 얼마나 더 필요한가요?**
+A: 원본 데이터의 크기에 따라 다르지만, 일반적으로 기본 수집 크기의 2-3배 정도의 추가 저장 공간이 필요합니다. 전체 500만 티켓에서는 약 200-300GB 추가 공간이 필요할 수 있습니다.
+
+**Q: 이미 수집된 티켓에 대해 나중에 Raw 데이터만 수집할 수 있나요?**
+A: 네, `collect_only_raw_data()` 함수를 사용하여 이미 수집된 티켓 기본정보를 바탕으로 Raw 데이터만 추가로 수집할 수 있습니다.
 
 ## 첨부파일/이미지 저장 정책
 - 벡터DB에는 pre-signed URL(attachment_url)을 저장하지 않고, attachment_id, name, content_type, size, updated_at 등 메타데이터만 저장합니다.

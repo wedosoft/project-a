@@ -13,12 +13,16 @@ from pathlib import Path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
-from dotenv import load_dotenv
-from core.vectordb import QdrantAdapter
 import logging
 
-# 환경변수 로드
-load_dotenv()
+from dotenv import load_dotenv
+
+# 환경변수 로드 - 명시적으로 .env 파일 경로를 지정
+dotenv_path = os.path.join(project_root, ".env")
+load_dotenv(dotenv_path=dotenv_path)
+
+# .env가 로드된 후 QdrantAdapter 임포트
+from core.vectordb import QdrantAdapter
 
 # 로깅 설정
 logging.basicConfig(
@@ -53,7 +57,7 @@ def main():
     print()
     
     # 각 컬렉션 확인
-    collections = ["documents", "faqs"]
+    collections = ["documents"]
     
     total_points = 0
     

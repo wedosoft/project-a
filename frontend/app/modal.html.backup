@@ -6,11 +6,6 @@
   <title>프롬프트 캔버스</title>
   <script async src="{{{appclient}}}"></script>
   <link rel="stylesheet" type="text/css" href="https://static.freshdev.io/fdk/2.0/assets/freshworks.css">
-  
-  <!-- React 라이브러리 미리 로드 (jsDelivr CDN 사용) -->
-  <script crossorigin src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js"></script>
-  <script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
-  
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
@@ -217,123 +212,68 @@
       rootElement.innerHTML = '<div style="text-align: center; padding: 20px;">CopilotKit 로딩 중...</div>';
       
       try {
-        // 먼저 개발 환경인지 프로덕션 환경인지 확인
-        const isDevelopment = window.location.hostname === 'localhost' || 
-                            window.location.hostname === '127.0.0.1' ||
-                            window.location.protocol === 'file:';
-        
-        let scriptPath;
-        
-        if (isDevelopment) {
-          // 개발 환경: 파일 시스템 기준 상대 경로
-          scriptPath = 'scripts/copilot-bundle.js';
-          console.log('개발 환경 감지, 로컬 경로 사용:', scriptPath);
-        } else {
-          // 프로덕션 환경: FDK 정적 파일 경로
-          scriptPath = 'scripts/copilot-bundle.js';
-          console.log('프로덕션 환경 감지, FDK 경로 사용:', scriptPath);
-        }
-        
         // 스크립트 로드
         const script = document.createElement('script');
-        script.src = scriptPath;
+        script.src = 'scripts/copilot-bundle.js';
         
-        // 로드 실패 시 인라인 스크립트로 대체
+        // 로드 실패 시
         script.onerror = function() {
-          console.error('외부 스크립트 로드 실패, 인라인 버전 사용');
-          
-          // 인라인으로 기본 CopilotKit 기능 제공
-          rootElement.innerHTML = '<div style="padding: 20px; background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 4px; color: #856404;">' +
-            '⚠️ 외부 스크립트를 로드할 수 없어 기본 모드로 실행됩니다.<br>' +
-            '<small>app/scripts/copilot-bundle.js 파일이 존재하는지 확인해주세요.</small>' +
-            '</div>' +
-            '<div class="copilot-container" style="margin-top: 20px;">' +
-            '<textarea id="simple-reply" class="copilot-textarea" placeholder="고객 응답을 작성하세요..."></textarea>' +
-            '<button class="copilot-submit-button" onclick="handleSimpleReply()">응답 전송</button>' +
-            '</div>';
-          
-          // 간단한 응답 처리 함수
-          window.handleSimpleReply = function() {
-            const textarea = document.getElementById('simple-reply');
-            const replyText = textarea.value.trim();
-            if (replyText) {
-              console.log('응답 전송:', replyText);
-              log('응답이 전송되었습니다: ' + replyText.substring(0, 50) + '...');
-              updateTestStatus('테스트 완료 (기본 모드)', false);
-              textarea.value = '';
-            }
-          };
-          
-          window.copilotScriptLoaded = true;
-          log('기본 모드로 초기화되었습니다');
-          updateTestStatus('기본 모드로 실행 중', false);
+          rootElement.innerHTML = '<div style="color: #c62828; padding: 20px; text-align: center;">' +
+            '스크립트 로드 실패: scripts/copilot-bundle.js<br>' +
+            '<button onclick="loadCopilotBundle()" style="margin-top: 10px; padding: 5px 10px; ' +
+            'background: #1E88E5; color: white; border: none; border-radius: 4px; cursor: pointer;">' +
+            '다시 시도</button></div>';
         };
         
         // 로드 성공 시
         script.onload = function() {
           window.copilotScriptLoaded = true;
           console.log('CopilotKit 번들 로드 완료');
-          log('CopilotKit 번들 로드 완료');
           
-          // API 키 설정 (원래 copilot-app.js에서 설정되는 값)
+          // API 키 설정
           window.COPILOT_API_KEY = 'ck_pub_2048e6d9442c1571c2edba0e4fff8415';
-          
-          // 테스트 데이터
-          const testTicketData = {
-            id: 'TEST-001',
-            subject: '테스트 티켓',
-            priority: '중간',
-            requester: { name: '테스트 사용자' }
-          };
-          
-          // 응답 핸들러 함수
-          const handleTestReply = (replyText) => {
-            console.log('응답 텍스트 생성:', replyText.substring(0, 50) + '...');
-            log('응답이 성공적으로 생성되었습니다.');
-            updateTestStatus('자동완성 테스트 성공!', false);
-          };
-          
-          // React 앱 초기화를 위한 지연 설정
-          setTimeout(function() {
-            try {
-              // CopilotTicketReply 컴포넌트 로드
-              if (typeof React !== 'undefined' && 
-                  typeof ReactDOM !== 'undefined' && 
-                  typeof CopilotTicketReply !== 'undefined') {
-                
-                // React 앱 렌더링
-                const root = ReactDOM.createRoot(document.getElementById('copilot-root'));
-                root.render(
-                  React.createElement(CopilotTicketReply.default, {
-                    onSubmit: handleTestReply,
-                    ticketDetails: testTicketData
-                  })
-                );
-                
-                log('CopilotKit 컴포넌트 렌더링 완료');
-                updateTestStatus('텍스트를 입력하여 자동완성을 테스트해 보세요', false);
-              } else {
-                throw new Error('필요한 React/CopilotKit 컴포넌트가 로드되지 않았습니다');
-              }
-            } catch (error) {
-              log('컴포넌트 렌더링 오류: ' + error.message);
-              updateTestStatus('컴포넌트 렌더링에 실패했습니다', true);
-            }
-          }, 500);
-        };
         
-        document.body.appendChild(script);
-      } catch (error) {
-        console.error('CopilotKit 번들 로드 오류:', error);
+        // 임시로 iframe을 표시하기 전에 로딩 메시지 보여줌
+        rootElement.appendChild(iframe);
         
+      } catch (e) {
+        console.error('CopilotKit iframe 초기화 실패:', e);
         rootElement.innerHTML = '<div style="color: #c62828; padding: 20px; text-align: center;">' +
-          `오류 발생: ${error.message}<br>` +
-          '<small>app/scripts/ 디렉토리에 copilot-bundle.js 파일을 생성해주세요.</small><br>' +
+          'iframe 초기화 실패: ' + e.message + '<br>' +
           '<button onclick="loadCopilotBundle()" style="margin-top: 10px; padding: 5px 10px; ' +
           'background: #1E88E5; color: white; border: none; border-radius: 4px; cursor: pointer;">' +
           '다시 시도</button></div>';
       }
     }
+    
+    // iframe 통신 함수
+    function sendMessageToIframe(message) {
+      try {
+        const iframe = document.getElementById('copilot-iframe');
+        if (iframe && iframe.contentWindow) {
+          iframe.contentWindow.postMessage(message, '*');
+          return true;
+        }
+        return false;
+      } catch (error) {
+        console.error('iframe 메시지 전송 오류:', error);
+        return false;
+      }
+    }
+    
+    // iframe으로부터 메시지 수신
+    window.addEventListener('message', function(event) {
+      // 보안: 메시지 출처 확인 (실제 구현 시 적절한 origin 검증 필요)
+      try {
+        const data = event.data;
+        if (data && data.type === 'copilot-response') {
+          log('iframe으로부터 응답 받음: ' + data.message);
+          updateTestStatus('자동완성 응답 생성됨');
+        }
+      } catch (e) {
+        console.error('iframe 메시지 처리 오류:', e);
+      }
+    });
     
     // 테스트 로그 함수
     function log(message) {
@@ -370,11 +310,56 @@
           if (!window.copilotScriptLoaded) {
             log('CopilotKit 번들 로딩 중...');
             loadCopilotBundle();
+            
+            // 로드 완료 시 테스트 실행
+            const checkInterval = setInterval(() => {
+              if (window.copilotScriptLoaded) {
+                clearInterval(checkInterval);
+                setTimeout(() => {
+                  log('CopilotKit 번들 로드 완료. 테스트 시작...');
+                  runTest();
+                }, 500);
+              }
+            }, 100);
           } else {
-            log('이미 로드된 CopilotKit 사용');
-            // 이미 로드되었다면 필요한 로직 실행
+            runTest();
           }
         });
+      }
+      
+      // 테스트 실행 함수 - iframe 방식으로 변경
+      function runTest() {
+        try {
+          updateTestStatus('테스트 실행 중...');
+          
+          // iframe이 이미 로드되었는지 확인
+          const existingIframe = document.getElementById('copilot-iframe');
+          if (existingIframe) {
+            log('이미 로드된 iframe 사용');
+            
+            // iframe에 테스트 시작 메시지 전송
+            const success = sendMessageToIframe({
+              type: 'start-test',
+              message: '부모 창에서 테스트 시작 요청'
+            });
+            
+            if (success) {
+              log('iframe에 테스트 시작 메시지 전송 성공');
+              updateTestStatus('텍스트를 입력하여 자동완성을 테스트하세요');
+              log('안내: iframe 내에서 텍스트 영역에 "안녕하세요"라고 입력해보세요. 자동완성이 제안되는지 확인해보세요.');
+            } else {
+              log('iframe에 메시지 전송 실패');
+              updateTestStatus('iframe 통신 실패', true);
+            }
+          } else {
+            log('CopilotKit iframe 로드 중...');
+            loadCopilotBundle();
+            log('안내: iframe이 로드되면 텍스트 영역에 "안녕하세요"라고 입력해보세요. 자동완성이 제안되는지 확인해보세요.');
+          }
+        } catch (error) {
+          log(`오류 발생: ${error.message}`);
+          updateTestStatus('테스트 실패', true);
+        }
       }
       
       // Freshdesk 환경인 경우 정상 초기화

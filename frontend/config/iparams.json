@@ -1,3 +1,10 @@
 {
-  
+  "COPILOT_API_KEY": {
+    "display_name": "CopilotKit API Key",
+    "description": "CopilotKit Cloud에서 발급받은 API 키",
+    "type": "text",
+    "required": true,
+    "secure": true,
+    "default_value": "ck_pub_2048e6d9442c1571c2edba0e4fff8415"
+  }
 }

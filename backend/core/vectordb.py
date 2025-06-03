@@ -24,7 +24,7 @@ from qdrant_client.http.models import (
     MatchAny,
     MatchValue,
 )
-from qdrant_client.models import Distance, VectorParams
+from qdrant_client.models import Distance, PointStruct, VectorParams
 
 # 로깅 설정
 logger = logging.getLogger(__name__)
@@ -34,7 +34,6 @@ QDRANT_URL = os.getenv("QDRANT_URL")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 VECTOR_SIZE = 1536  # OpenAI/Anthropic 임베딩 차원 수, 모델에 따라 조정 필요
 COLLECTION_NAME = "documents"  # 기본 컬렉션명
-FAQ_COLLECTION_NAME = "faqs" # FAQ 컬렉션명 추가
 
 
 class VectorDBInterface(ABC):
@@ -79,9 +78,14 @@ class QdrantAdapter(VectorDBInterface):
     def __init__(self, collection_name: str = COLLECTION_NAME):
         """Qdrant 클라이언트 초기화"""
         self.collection_name = collection_name
-        self.client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+        # 타임아웃 설정 추가 (기본값: 60초)
+        self.client = QdrantClient(
+            url=QDRANT_URL,
+            api_key=QDRANT_API_KEY,
+            timeout=120,  # 타임아웃을 120초로 설정
+            prefer_grpc=False  # HTTP/REST 사용 (더 안정적)
+        )
         self._ensure_collection_exists() # 기본 문서 컬렉션 확인 (인덱스 생성 포함)
-        self._ensure_faq_collection_exists() # FAQ 컬렉션 확인
 
     def _ensure_collection_exists(self) -> None:
         """컬렉션이 없으면 생성"""
@@ -128,216 +132,10 @@ class QdrantAdapter(VectorDBInterface):
                 
             logger.info(f"컬렉션 '{self.collection_name}' 생성 완료")
 
-    def _ensure_faq_collection_exists(self) -> None:
-        """FAQ 컬렉션이 없으면 생성"""
-        collections = self.client.get_collections()
-        collection_names = [collection.name for collection in collections.collections]
-        
-        if FAQ_COLLECTION_NAME not in collection_names:
-            logger.info(f"FAQ 컬렉션 '{FAQ_COLLECTION_NAME}' 생성 시작")
-            self.client.create_collection(
-                collection_name=FAQ_COLLECTION_NAME,
-                vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
-            )
-            # 페이로드 인덱스 생성 (검색 성능 향상)
-            self.client.create_payload_index(collection_name=FAQ_COLLECTION_NAME, field_name="company_id", field_schema="keyword")
-            self.client.create_payload_index(collection_name=FAQ_COLLECTION_NAME, field_name="category", field_schema="keyword")
-            logger.info(f"FAQ 컬렉션 '{FAQ_COLLECTION_NAME}' 생성 완료 및 페이로드 인덱스 설정")
 
 
-    def add_faq_entry(self, faq_entry: Dict[str, Any]) -> bool:
-        """
-        단일 FAQ 항목을 FAQ 컬렉션에 추가/업데이트합니다.
-        faq_entry 딕셔너리는 FAQEntry Pydantic 모델의 필드를 따라야 합니다.
-        특히 'embedding' 필드가 포함되어야 합니다.
-        """
-        if "embedding" not in faq_entry or not faq_entry["embedding"]:
-            logger.error("FAQ 항목 추가 실패: 임베딩이 없습니다.")
-            return False
-        if "company_id" not in faq_entry:
-            logger.error("FAQ 항목 추가 실패: company_id가 없습니다.")
-            return False
 
-        try:
-            # FAQ ID가 제공되지 않으면 UUID 생성
-            faq_id = faq_entry.get("id") or str(uuid.uuid4())
-            
-            payload = {
-                "question": faq_entry["question"],
-                "answer": faq_entry["answer"],
-                "category": faq_entry.get("category"),
-                "source_doc_id": faq_entry.get("source_doc_id"),
-                "company_id": faq_entry["company_id"],
-                "last_updated": faq_entry.get("last_updated", datetime.utcnow().isoformat())
-            }
-            # None 값은 payload에서 제외
-            payload = {k: v for k, v in payload.items() if v is not None}
 
-            point = PointStruct(
-                id=faq_id,
-                vector=faq_entry["embedding"],
-                payload=payload
-            )
-            
-            self.client.upsert(
-                collection_name=FAQ_COLLECTION_NAME,
-                points=[point]
-            )
-            logger.info(f"FAQ 항목 ID '{faq_id}' 추가/업데이트 완료.")
-            return True
-        except Exception as e:
-            logger.error(f"FAQ 항목 ID '{faq_entry.get('id', 'N/A')}' 추가/업데이트 실패: {e}")
-            return False
-
-    def add_faq_entries(self, faq_entries: List[Dict[str, Any]]) -> bool:
-        """
-        여러 FAQ 항목을 FAQ 컬렉션에 배치로 추가/업데이트합니다.
-        각 faq_entry 딕셔너리는 FAQEntry Pydantic 모델의 필드를 따라야 합니다.
-        """
-        points_to_upsert = []
-        for entry in faq_entries:
-            if "embedding" not in entry or not entry["embedding"]:
-                logger.warning(f"FAQ 항목 건너뜀 (ID: {entry.get('id', 'N/A')}): 임베딩 없음.")
-                continue
-            if "company_id" not in entry:
-                logger.warning(f"FAQ 항목 건너뜀 (ID: {entry.get('id', 'N/A')}): company_id 없음.")
-                continue
-
-            faq_id = entry.get("id") or str(uuid.uuid4())
-            payload = {
-                "question": entry["question"],
-                "answer": entry["answer"],
-                "category": entry.get("category"),
-                "source_doc_id": entry.get("source_doc_id"),
-                "company_id": entry["company_id"],
-                "last_updated": entry.get("last_updated", datetime.utcnow().isoformat())
-            }
-            payload = {k: v for k, v in payload.items() if v is not None}
-
-            points_to_upsert.append(PointStruct(
-                id=faq_id,
-                vector=entry["embedding"],
-                payload=payload
-            ))
-
-        if not points_to_upsert:
-            logger.info("추가/업데이트할 유효한 FAQ 항목이 없습니다.")
-            return False
-
-        try:
-            self.client.upsert(
-                collection_name=FAQ_COLLECTION_NAME,
-                points=points_to_upsert
-            )
-            logger.info(f"{len(points_to_upsert)}개의 FAQ 항목 배치 추가/업데이트 완료.")
-            return True
-        except Exception as e:
-            logger.error(f"FAQ 항목 배치 추가/업데이트 실패: {e}")
-            return False
-
-    def search_faqs(
-        self,
-        query_embedding: List[float],
-        top_k: int,
-        company_id: str,
-        category: Optional[str] = None,
-        min_score: Optional[float] = None, # 최소 유사도 점수 필터
-    ) -> List[Dict[str, Any]]:
-        """
-        FAQ 컬렉션에서 쿼리 임베딩과 유사한 FAQ를 검색합니다.
-        company_id로 필터링하고, 선택적으로 category로 추가 필터링합니다.
-        """
-        if not company_id:
-            raise ValueError("FAQ 검색 시 company_id는 필수입니다.")
-
-        # 컬렉션이 존재하는지 확인
-        try:
-            collections = self.client.get_collections()
-            collection_names = [collection.name for collection in collections.collections]
-            if FAQ_COLLECTION_NAME not in collection_names:
-                logger.warning(f"FAQ 컬렉션 '{FAQ_COLLECTION_NAME}'이 존재하지 않아 빈 결과 반환")
-                return []
-        except Exception as e:
-            logger.error(f"FAQ 컬렉션 확인 실패: {e}")
-            return []
-        
-        try:
-            logger.info(f"FAQ 검색 시작 (company_id: {company_id}, category: {category}, min_score: {min_score})")
-            
-            # payload 기반 필터링을 위한 필터 조건 구성
-            filter_conditions = [
-                FieldCondition(key="company_id", match=MatchValue(value=company_id))
-            ]
-            if category:
-                filter_conditions.append(
-                    FieldCondition(key="category", match=MatchValue(value=category))
-                )
-            
-            faq_filter = Filter(must=filter_conditions)
-
-            try:
-                # query_filter 매개변수로 검색 시도
-                search_results = self.client.search(
-                    collection_name=FAQ_COLLECTION_NAME,
-                    query_vector=query_embedding,
-                    query_filter=faq_filter, # query_filter 사용
-                    limit=top_k,
-                    with_payload=True,
-                    score_threshold=min_score # 최소 점수 임계값 설정
-                )
-            except Exception as filter_err:
-                logger.warning(f"query_filter를 사용한 FAQ 검색 실패: {filter_err}, filter로 다시 시도")
-                # filter 매개변수로 다시 시도
-                try:
-                    search_results = self.client.search(
-                        collection_name=FAQ_COLLECTION_NAME,
-                        query_vector=query_embedding,
-                        filter=faq_filter, # filter 사용
-                        limit=top_k,
-                        with_payload=True,
-                        score_threshold=min_score
-                    )
-                except Exception as e:
-                    logger.warning(f"filter를 사용한 FAQ 검색 실패: {e}, 필터링 없이 검색 후 메모리에서 처리")
-                    
-                    # 필터링 없이 검색 후 메모리에서 처리
-                    raw_results = self.client.search(
-                        collection_name=FAQ_COLLECTION_NAME,
-                        query_vector=query_embedding,
-                        limit=top_k * 3, # 더 많은 결과를 가져와서 필터링
-                        with_payload=True,
-                        score_threshold=min_score
-                    )
-                    
-                    # 메모리에서 company_id 필터링
-                    search_results = []
-                    for result in raw_results:
-                        if result.payload.get("company_id") == company_id:
-                            # 카테고리 필터링 (설정된 경우)
-                            if not category or result.payload.get("category") == category:
-                                search_results.append(result)
-                    
-                    # 최대 개수 제한
-                    search_results = search_results[:top_k]
-            
-            faqs = []
-            for hit in search_results:
-                # score가 min_score보다 낮으면 제외 (추가 안전 장치)
-                if min_score and hit.score < min_score:
-                    continue
-                    
-                faq_data = {
-                    "id": hit.id,
-                    "score": hit.score,
-                    **hit.payload, # payload 내용을 faq_data에 직접 추가
-                }
-                faqs.append(faq_data)
-            
-            logger.info(f"FAQ 검색 완료: {len(faqs)}개 결과 (company_id: {company_id}, category: {category})")
-            return faqs
-        except Exception as e:
-            logger.error(f"FAQ 검색 실패: {e}")
-            return []
 
     def add_documents(
         self, 
@@ -347,7 +145,7 @@ class QdrantAdapter(VectorDBInterface):
         ids: List[str]
     ) -> bool:
         """
-        문서 추가
+        문서 추가 (배치 단위로 처리)
         
         Args:
             texts: 문서 텍스트 목록
@@ -367,34 +165,45 @@ class QdrantAdapter(VectorDBInterface):
                 raise ValueError(f"메타데이터 #{i}에 company_id가 없습니다")
         
         try:
+            # 배치 크기 설정 (25개씩 처리)
+            BATCH_SIZE = 25
+            success = True
             points = []
+            
             for i, (text, embedding, metadata, id) in enumerate(zip(texts, embeddings, metadatas, ids)):
                 # 원본 ID를 메타데이터에 저장
                 payload = {**metadata, "text": text, "original_id": id}
                 
-                # 문자열 ID를 Qdrant 호환 형식으로 변환 (UUID)
+                # 일관된 UUID 생성
                 import uuid
                 from hashlib import md5
-                
-                # 일관된 UUID 생성을 위해 문자열 ID를 해시하여 변환
-                # 이 방식은 동일한 ID가 항상 동일한 UUID를 생성하도록 보장함
                 uuid_id = uuid.UUID(md5(id.encode()).hexdigest())
                 
                 # Qdrant 포인트 생성
                 point = PointStruct(
-                    id=str(uuid_id),  # UUID 형식의 문자열로 변환
+                    id=str(uuid_id),
                     vector=embedding,
                     payload=payload
                 )
                 points.append(point)
+                
+                # 배치 크기에 도달하거나 마지막 항목이면 저장
+                if len(points) >= BATCH_SIZE or i == len(texts) - 1:
+                    try:
+                        logger.info(f"배치 저장 시도 (크기: {len(points)})")
+                        self.client.upsert(
+                            collection_name=self.collection_name,
+                            points=points,
+                            wait=True  # 저장 완료 대기
+                        )
+                        logger.info(f"배치 저장 성공 (크기: {len(points)})")
+                        points = []  # 배치 초기화
+                    except Exception as batch_error:
+                        logger.error(f"배치 저장 실패: {batch_error}")
+                        success = False
+                        break
             
-            # 배치로 추가
-            self.client.upsert(
-                collection_name=self.collection_name,
-                points=points
-            )
-            
-            return True
+            return success
         except Exception as e:
             logger.error(f"문서 추가 실패: {e}")
             return False
@@ -482,7 +291,7 @@ class QdrantAdapter(VectorDBInterface):
         query_embedding: List[float], 
         top_k: int, 
         company_id: str,
-        doc_type: str = None  # 새로운 매개변수 추가 - 문서 타입 필터링 (ticket, kb)
+        doc_type: str = None  # 문서 타입 필터링 (ticket, kb)
     ) -> Dict[str, Any]:
         """
         벡터 검색
@@ -498,159 +307,61 @@ class QdrantAdapter(VectorDBInterface):
         """
         if not company_id:
             raise ValueError("company_id는 필수 매개변수입니다.")
-        
-        start_time = time.time()
-        
-        # 회사 ID 필터 기본 설정
+            
+        # 필터 조건 구성
         filter_conditions = [
-            FieldCondition(
-                key="company_id",
-                match=MatchValue(value=company_id)
-            )
+            FieldCondition(key="company_id", match=MatchValue(value=company_id))
         ]
         
-        # 문서 타입 필터 추가 (있는 경우)
+        # 문서 타입 필터 추가
         if doc_type:
-            logger.info(f"문서 타입 필터 적용: {doc_type}")
-            if doc_type == "ticket":
-                # 티켓 타입의 경우 Freshdesk 티켓 유형들을 포함
-                ticket_types = ["Problem", "Incident", "Question", "Task", "Change"]
-                filter_conditions.append(
-                    FieldCondition(
-                        key="type",
-                        match=MatchAny(any=ticket_types)
-                    )
-                )
-            elif doc_type == "kb":
-                # KB 문서의 경우 type이 "1" 또는 숫자 1, 또는 "kb" 값을 갖는 문서를 포함
-                # type 필드에 "1"이나 "kb" 값이 없을 경우를 대비하여 source_type도 확인
-                try:
-                    # 필터를 리스트로 수정하여 Filter 생성 오류 방지
-                    filter_conditions.append(
-                        Filter(
-                            should=[
-                                FieldCondition(key="type", match=MatchValue(value="1")),
-                                FieldCondition(key="type", match=MatchValue(value=1)),  # 숫자 값도 시도
-                                FieldCondition(key="type", match=MatchValue(value="kb")),
-                                FieldCondition(key="source_type", match=MatchValue(value="kb"))
-                            ]
-                        )
-                    )
-                    logger.info(f"KB 문서 복합 필터 성공적으로 생성됨")
-                except Exception as e:
-                    # 복합 필터 생성에 실패한 경우 메모리 내 필터링을 위한 플래그 설정
-                    logger.warning(f"KB 복합 필터 생성 실패: {e}, 메모리 내 필터링 적용")
-                    # 메모리 내 필터링을 위해 doc_type만 설정하고 필터에는 추가하지 않음
-            else:
-                # 기타 타입은 그대로 매칭
-                filter_conditions.append(
-                    FieldCondition(
-                        key="type",
-                        match=MatchValue(value=doc_type)
-                    )
-                )
+            filter_conditions.append(
+                FieldCondition(key="type", match=MatchValue(value=doc_type))
+            )
         
-        company_filter = Filter(must=filter_conditions)
+        # 필터 객체 생성
+        search_filter = Filter(must=filter_conditions)
         
-        # 검색 실행
         try:
-            # Qdrant 2.x 버전에서는 filter 매개변수를 지원함
+            # query_filter 사용 시도 (최신 API)
             search_results = self.client.search(
                 collection_name=self.collection_name,
                 query_vector=query_embedding,
-                limit=top_k * 3,  # 더 많은 결과를 가져와서 필터링 (KB 문서 확보)
-                query_filter=company_filter,  # filter 대신 query_filter 사용
-                with_payload=True
+                query_filter=search_filter,  # 최신 API: query_filter 사용
+                limit=top_k,
+                with_payload=True,
+                with_vectors=False  # 성능 최적화: 벡터 반환 비활성화
             )
-            logger.info(f"query_filter를 사용한 검색 성공: {len(search_results)}개 결과")
         except Exception as e:
-            # 'filter' 또는 'query_filter' 매개변수가 지원되지 않는 경우 대체 방법 사용
-            logger.warning(f"필터를 사용한 검색 실패: {str(e)}\nRaw response content:\n{getattr(e, 'response', None) and e.response.content.decode('utf-8', errors='replace')[:200]} ...", exc_info=False)
+            logger.warning(f"query_filter를 사용한 검색 실패: {e}, filter로 재시도...")
             
-            # 전체 검색 후 메모리에서 필터링
-            logger.info(f"필터 없이 검색 후 메모리에서 필터링 시도")
-            search_results = self.client.search(
-                collection_name=self.collection_name,
-                query_vector=query_embedding,
-                limit=top_k * 20,  # 훨씬 더 많은 결과를 가져와서 필터링
-                with_payload=True
-            )
-            
-            # KB 문서를 찾기 위해 모든 결과 확인을 위한 로깅
-            all_types = set()
-            kb_types = set()
-            for result in search_results:
-                result_type = result.payload.get("type", "")
-                result_source_type = result.payload.get("source_type", "")
-                all_types.add(f"type:{result_type}")
-                all_types.add(f"source_type:{result_source_type}")
-                if result_type == "1" or result_type == "kb" or result_source_type == "kb":
-                    kb_types.add(f"type:{result_type},source_type:{result_source_type}")
-            
-            logger.info(f"검색된 총 결과 {len(search_results)}개, 발견된 문서 타입들: {all_types}")
-            if doc_type == "kb":
-                logger.info(f"KB 문서로 판단되는 타입: {kb_types}")
-            
-            # 메모리 내 필터링 (company_id 및 선택적 doc_type)
-            filtered_results = []
-            for result in search_results:
-                # company_id 필터링
-                if result.payload.get("company_id") != company_id:
-                    continue
-                    
-                # 문서 타입 필터링 (필요한 경우)
-                if doc_type:
-                    result_type = result.payload.get("type", "")
-                    result_source_type = result.payload.get("source_type", "")
-                    
-                    if doc_type == "ticket":
-                        # 티켓 타입의 경우 Freshdesk 티켓 유형들을 허용
-                        ticket_types = ["Problem", "Incident", "Question", "Task", "Change"]
-                        if result_type not in ticket_types:
-                            continue
-                    elif doc_type == "kb":
-                        # KB 문서의 경우 type이 "1" 또는 숫자 1이거나 "kb", 또는 source_type이 "kb"인 경우 포함
-                        # 문자열과 숫자 모두 처리할 수 있도록 함
-                        if (result_type != "1" and result_type != 1 and result_type != "kb" and 
-                            result_source_type != "kb"):
-                            continue
-                    else:
-                        # 기타 타입은 정확히 매칭
-                        if result_type != doc_type and result_source_type != doc_type:
-                            continue
-                    
-                filtered_results.append(result)
-            
-            # 필터링된 결과 잘라내기
-            search_results = filtered_results[:top_k]
-            logger.info(f"메모리 내 필터링 후 결과: {len(search_results)}개 {'('+ doc_type + ')' if doc_type else ''}")
+            try:
+                # 이전 API 방식 (filter)으로 재시도
+                search_results = self.client.search(
+                    collection_name=self.collection_name,
+                    query_vector=query_embedding,
+                    filter=search_filter,  # 이전 API: filter 사용
+                    limit=top_k,
+                    with_payload=True,
+                    with_vectors=False
+                )
+            except Exception as filter_error:
+                logger.error(f"검색 실패: {filter_error}")
+                raise
         
-        # ChromaDB 형식과 호환되는 결과 포맷으로 변환
-        documents = []
-        metadatas = []
-        distances = []
-        ids = []
-        
-        for result in search_results:
-            # 텍스트 추출
-            text = result.payload.pop("text", "")  # 텍스트 추출 후 메타데이터에서 제거
-            documents.append(text)
+        # 검색 결과 변환
+        results = []
+        for hit in search_results:
+            result = {
+                "id": hit.id,
+                "score": hit.score,
+                **hit.payload  # 페이로드 필드 확장
+            }
+            results.append(result)
             
-            # 메타데이터 추출 (text 제외한 나머지 payload)
-            metadatas.append(result.payload)
-            
-            # 거리 및 ID 추출
-            distances.append(result.score)
-            ids.append(result.id)
-        
-        search_time = time.time() - start_time
-        logger.info(f"벡터 검색 완료: {len(documents)}개 결과, {search_time:.2f}초 소요")
-        
         return {
-            "documents": documents,
-            "metadatas": metadatas,
-            "distances": distances,
-            "ids": ids,
+            "results": results,
+            "total": len(results)
         }
 
     def count(self, company_id: Optional[str] = None) -> int:
@@ -944,8 +655,8 @@ class QdrantAdapter(VectorDBInterface):
             성공 여부 (bool)
         """
         import json
-        from datetime import datetime
         import os
+        from datetime import datetime
         
         name = collection_name or self.collection_name
         
@@ -1050,8 +761,6 @@ class QdrantAdapter(VectorDBInterface):
         try:
             if name == self.collection_name:
                 self._ensure_collection_exists()
-            elif name == FAQ_COLLECTION_NAME:
-                self._ensure_faq_collection_exists()
             else:
                 logger.warning(f"알 수 없는 컬렉션 '{name}'은 자동 재생성되지 않습니다.")
                 return False
@@ -1087,3 +796,9 @@ class VectorDBFactory:
 
 # 싱글톤 벡터 DB 인스턴스
 vector_db = VectorDBFactory.get_vector_db()
+
+# 로깅 설정
+logger = logging.getLogger(__name__)
+
+# 참고: `freshdesk_client` 관련 함수들은 freshdesk/optimized_fetcher.py 파일에 위치해야 합니다.
+# 이 파일은 벡터 데이터베이스 관련 기능만 포함합니다.
