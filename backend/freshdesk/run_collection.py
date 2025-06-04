@@ -226,12 +226,13 @@ async def full_collection_workflow(
             # 이미 import된 ingest_main 함수 사용
             logger.info(f"수집된 데이터를 Qdrant에 저장 중... (디렉토리: {OUTPUT_DIR})")
             
-            # ingest 함수 호출 (기본값으로 incremental=True, purge=False 사용)
+            # ingest 함수 호출 - local_data_dir을 전달하여 수집된 데이터 사용
             await ingest_main(
-                incremental=True, 
-                purge=False, 
+                incremental=False,  # 테스트 모드에서는 증분 처리하지 않음
+                purge=True,  # 테스트 데이터 초기화
                 process_attachments=True, 
-                force_rebuild=False
+                force_rebuild=False,
+                local_data_dir=OUTPUT_DIR  # 수집된 로컬 데이터 디렉토리 전달
             )
             
             logger.info("임베딩 및 Qdrant 저장 완료")

@@ -87,6 +87,7 @@ def process_documents(docs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     문서 리스트를 처리하여 필요한 경우 청크로 분할합니다.
     각 문서는 'id', 'text', 'metadata'를 포함한 딕셔너리여야 합니다.
     문서를 청크로 분할할 경우 원본 메타데이터를 유지하고 청크 번호를 추가합니다.
+    모든 문서와 청크의 metadata에 doc_type 필수 보정(없으면 id 기반 자동 보정, 그래도 없으면 예외)
     """
     processed_docs = []
     
@@ -94,42 +95,46 @@ def process_documents(docs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         doc_id = doc.get('id', f"doc_{i}")
         doc_text = doc.get('text', '')
         doc_metadata = doc.get('metadata', {})
-        
+        # doc_type 필수 보정: 없으면 id 기반 자동 보정, 그래도 없으면 예외
+        if "doc_type" not in doc_metadata or not doc_metadata["doc_type"]:
+            if str(doc_id).startswith("ticket-"):
+                doc_metadata["doc_type"] = "ticket"
+            elif str(doc_id).startswith("kb-"):
+                doc_metadata["doc_type"] = "kb"
+        if "doc_type" not in doc_metadata or not doc_metadata["doc_type"]:
+            raise ValueError(f"문서 {i}의 metadata에 doc_type이 없습니다. id={doc_id}, metadata={doc_metadata}")
         token_count = count_tokens(doc_text)
-        
         if token_count <= MAX_TOKENS_PER_CHUNK:
-            # 토큰 수가 제한 이내인 경우 그대로 사용
             processed_docs.append(doc)
         else:
-            # 토큰 수가 제한을 초과하는 경우 청크로 분할
             logger.warning(f"문서 '{doc_id}'가 토큰 제한을 초과합니다 ({token_count} > {MAX_TOKENS_PER_CHUNK}). 청크로 분할합니다.")
             chunks = split_into_chunks(doc_text, MAX_TOKENS_PER_CHUNK, CHUNK_OVERLAP)
-            
             for chunk_idx, chunk_text in enumerate(chunks):
-                # 필수 메타데이터 필드가 모든 청크에 유지되도록 함
-                chunk_metadata = doc_metadata.copy()  # 원본 메타데이터 복사
-                
-                # 청크 관련 메타데이터 추가
+                chunk_metadata = doc_metadata.copy()
                 chunk_metadata.update({
                     'chunk_index': chunk_idx,
                     'total_chunks': len(chunks),
                     'original_id': doc_id,
-                    'is_chunk': True  # 이 문서가 청크임을 표시
+                    'is_chunk': True
                 })
-                
-                # source_id, type, updated_at 등 필수 필드가 있는지 확인
+                # 청크의 doc_type 필수 보정
+                if "doc_type" not in chunk_metadata or not chunk_metadata["doc_type"]:
+                    if str(doc_id).startswith("ticket-"):
+                        chunk_metadata["doc_type"] = "ticket"
+                    elif str(doc_id).startswith("kb-"):
+                        chunk_metadata["doc_type"] = "kb"
+                if "doc_type" not in chunk_metadata or not chunk_metadata["doc_type"]:
+                    raise ValueError(f"청크 {chunk_idx}의 metadata에 doc_type이 없습니다. id={doc_id}, metadata={chunk_metadata}")
                 required_fields = ['type', 'source_id', 'updated_at', 'status', 'priority']
                 for field in required_fields:
                     if field not in chunk_metadata and field in doc_metadata:
                         chunk_metadata[field] = doc_metadata[field]
-                
                 chunk_doc = {
                     'id': f"{doc_id}_chunk_{chunk_idx}",
                     'text': chunk_text,
                     'metadata': chunk_metadata
                 }
                 processed_docs.append(chunk_doc)
-    
     return processed_docs
 
 def create_optimal_batches(docs: List[str]) -> List[List[str]]:

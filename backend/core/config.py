@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional
 
 # 환경변수 로드 - 명시적으로 .env 파일 경로를 지정
 from dotenv import load_dotenv
-from pydantic import Field, validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # 환경변수 로드
@@ -84,7 +84,7 @@ class Settings(BaseSettings):
     # 애플리케이션 경로 설정
     APP_ROOT_PATH: str = Field("", description="API 루트 경로")
     
-    @validator("FRESHDESK_DOMAIN")
+    @field_validator("FRESHDESK_DOMAIN")
     def validate_freshdesk_domain(cls, v):
         """Freshdesk 도메인에 'https://' 또는 'http://'가 포함되어 있으면 제거합니다."""
         if v.startswith(("http://", "https://")):

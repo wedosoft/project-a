@@ -7,15 +7,26 @@
             "request": "launch",
             "program": "${workspaceFolder}/backend/api/main.py",
             "args": [
-                "--debug"
+                "--debug",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "8000"
             ],
             "console": "integratedTerminal",
             "justMyCode": false,
             "cwd": "${workspaceFolder}/backend",
             "env": {
-                "PYTHONPATH": "${workspaceFolder}/backend"
+                "PYTHONPATH": "${workspaceFolder}/backend:${workspaceFolder}/backend/api",
+                "VIRTUAL_ENV": "${workspaceFolder}/backend/venv",
+                "PATH": "${workspaceFolder}/backend/venv/bin:${env:PATH}",
+                "PS1": "(venv) $ ",
+                "PROMPT": "(venv) $ "
             },
-            "envFile": "${workspaceFolder}/backend/.env"
+            "envFile": "${workspaceFolder}/backend/.env",
+            "stopOnEntry": false,
+            "python": "${workspaceFolder}/backend/venv/bin/python",
+            "preLaunchTask": "Activate Virtual Environment"
         },
         {
             "name": "Python: ingest.py",
@@ -29,9 +40,14 @@
             "justMyCode": false,
             "cwd": "${workspaceFolder}/backend",
             "env": {
-                "PYTHONPATH": "${workspaceFolder}/backend"
+                "PYTHONPATH": "${workspaceFolder}/backend",
+                "VIRTUAL_ENV": "${workspaceFolder}/backend/venv",
+                "PATH": "${workspaceFolder}/backend/venv/bin:${env:PATH}",
+                "PS1": "(venv) ${env:PS1}"
             },
-            "envFile": "${workspaceFolder}/backend/.env"
+            "envFile": "${workspaceFolder}/backend/.env",
+            "python": "${workspaceFolder}/backend/venv/bin/python",
+            "preLaunchTask": "Activate Virtual Environment"
         },
         {
             "name": "Freshdesk Collection Script",
@@ -42,9 +58,14 @@
             "justMyCode": false,
             "cwd": "${workspaceFolder}/backend",
             "env": {
-                "PYTHONPATH": "${workspaceFolder}/backend"
+                "PYTHONPATH": "${workspaceFolder}/backend",
+                "VIRTUAL_ENV": "${workspaceFolder}/backend/venv",
+                "PATH": "${workspaceFolder}/backend/venv/bin:${env:PATH}",
+                "PS1": "(venv) ${env:PS1}"
             },
-            "envFile": "${workspaceFolder}/backend/.env"
+            "envFile": "${workspaceFolder}/backend/.env",
+            "python": "${workspaceFolder}/backend/venv/bin/python",
+            "preLaunchTask": "Activate Virtual Environment"
         },
         {
             "name": "Test LLM Router",
@@ -55,9 +76,14 @@
             "justMyCode": false,
             "cwd": "${workspaceFolder}/backend",
             "env": {
-                "PYTHONPATH": "${workspaceFolder}/backend"
+                "PYTHONPATH": "${workspaceFolder}/backend",
+                "VIRTUAL_ENV": "${workspaceFolder}/backend/venv",
+                "PATH": "${workspaceFolder}/backend/venv/bin:${env:PATH}",
+                "PS1": "(venv) ${env:PS1}"
             },
-            "envFile": "${workspaceFolder}/backend/.env"
+            "envFile": "${workspaceFolder}/backend/.env",
+            "python": "${workspaceFolder}/backend/venv/bin/python",
+            "preLaunchTask": "Activate Virtual Environment"
         },
         {
             "name": "Python: Current File",
@@ -66,9 +92,15 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "justMyCode": false,
+            "cwd": "${workspaceFolder}/backend",
             "env": {
-                "PYTHONPATH": "${workspaceFolder}/backend"
-            }
+                "PYTHONPATH": "${workspaceFolder}/backend",
+                "VIRTUAL_ENV": "${workspaceFolder}/backend/venv",
+                "PATH": "${workspaceFolder}/backend/venv/bin:${env:PATH}",
+                "PS1": "(venv) ${env:PS1}"
+            },
+            "python": "${workspaceFolder}/backend/venv/bin/python",
+            "preLaunchTask": "Activate Virtual Environment"
         }
     ]
 }
