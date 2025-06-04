@@ -162,3 +162,10 @@ backend/attachment_cache
 
 backend/freshdesk_full_data*/
 backend/freshdesk_test_data*/
+
+# Task files
+tasks.json
+tasks/
+frontend/.fdk
+frontend/coverage
+frontend/.report.json
