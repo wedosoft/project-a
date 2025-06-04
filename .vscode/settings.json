@@ -3,14 +3,6 @@
     "editor.rulers": [
         100
     ],
-    "python.linting.enabled": true,
-    "python.linting.pylintEnabled": true,
-    "python.linting.flake8Enabled": true,
-    "python.formatting.provider": "black",
-    "python.formatting.blackArgs": [
-        "--line-length",
-        "100"
-    ],
     "workbench.startupEditor": "welcomePage",
     "explorer.fileNesting.enabled": true,
     "explorer.fileNesting.patterns": {
@@ -26,6 +18,18 @@
         "${workspaceFolder}/backend"
     ],
     "python.terminal.activateEnvironment": true,
+    "python.terminal.activateEnvInCurrentTerminal": true,
+    "python.terminal.executeInFileDir": false,
+    "python.terminal.launchArgs": [
+        "-c",
+        "import os; os.chdir('${workspaceFolder}/backend')"
+    ],
+    "terminal.integrated.cwd": "${workspaceFolder}",
+    "terminal.integrated.env.osx": {
+        "PYTHONPATH": "${workspaceFolder}/backend",
+        "VIRTUAL_ENV": "${workspaceFolder}/backend/venv",
+        "PATH": "${workspaceFolder}/backend/venv/bin:${env:PATH}"
+    },
     "files.exclude": {
         "**/__pycache__": true,
         "**/*.pyc": true
@@ -78,8 +82,5 @@
         "PYTHONPATH": "${workspaceFolder}/backend"
     },
     // MCP 설정 추가
-    "chat.mcp.enabled": true,
-    "chat.mcp.keysFile": "${workspaceFolder}/.vscode/mcp.json",
-    // MCP 서버 및 Taskmaster가 동일한 .env 파일을 참조하도록 설정
-    "dotenv.enableAutocloaking": false
+    "chat.mcp.enabled": true
 }

@@ -110,17 +110,12 @@ class QdrantAdapter(VectorDBInterface):
                     logger.info(f"original_id 인덱스(keyword) 생성 완료")
                 except Exception as original_id_err:
                     logger.warning(f"original_id 인덱스 생성 실패: {original_id_err}")
-                # 문서 타입 인덱스 생성 - 키워드 및 정수 타입 모두 시도
+                # 문서 타입 인덱스 생성 - 키워드 타입만 사용
                 try:
-                    self.client.create_payload_index(collection_name=self.collection_name, field_name="type", field_schema="keyword")
-                    logger.info(f"type 인덱스(keyword) 생성 완료")
-                except Exception as type_err:
-                    logger.warning(f"type 키워드 인덱스 생성 실패: {type_err}, 정수 인덱스 시도...")
-                    try:
-                        self.client.create_payload_index(collection_name=self.collection_name, field_name="type", field_schema="integer")
-                        logger.info(f"type 인덱스(integer) 생성 완료")
-                    except Exception as int_err:
-                        logger.warning(f"type 정수 인덱스 생성 실패: {int_err}")
+                    self.client.create_payload_index(collection_name=self.collection_name, field_name="doc_type", field_schema="keyword")
+                    logger.info(f"doc_type 인덱스(keyword) 생성 완료")
+                except Exception as doc_type_err:
+                    logger.warning(f"doc_type 키워드 인덱스 생성 실패: {doc_type_err}")
                 
                 # 소스 타입 인덱스 생성
                 self.client.create_payload_index(collection_name=self.collection_name, field_name="source_type", field_schema="keyword")
@@ -156,63 +151,61 @@ class QdrantAdapter(VectorDBInterface):
         Args:
             texts: 문서 텍스트 목록
             embeddings: 문서 임베딩 목록
-            metadatas: 문서 메타데이터 목록 (company_id 필수 포함)
-            ids: 문서 ID 목록 (문자열, 변환되어 저장됨)
+            metadatas: 문서 메타데이터 목록 (company_id, doc_type, id 필수)
+            ids: 문서 ID 목록 (원본 숫자 ID, 문자열)
             
         Returns:
             성공 여부
         """
         if len(texts) != len(embeddings) or len(texts) != len(metadatas) or len(texts) != len(ids):
             raise ValueError("텍스트, 임베딩, 메타데이터, ID 목록의 길이가 일치해야 합니다")
-        
-        # 모든 메타데이터에 company_id가 포함되어 있는지 확인
-        for i, metadata in enumerate(metadatas):
+        # 모든 메타데이터에 company_id, doc_type, id, original_id가 포함되어 있는지 확인 및 보정
+        for i, (metadata, id) in enumerate(zip(metadatas, ids)):
             if "company_id" not in metadata:
                 raise ValueError(f"메타데이터 #{i}에 company_id가 없습니다")
-        
+            # doc_type 필수 보정: 없으면 예외
+            if "doc_type" not in metadata or not metadata["doc_type"]:
+                raise ValueError(f"메타데이터 #{i}에 doc_type이 없습니다. id={id}, metadata={metadata}")
+            # id, original_id 필수 보정: 접두어 제거, 숫자 ID(문자열)만 사용
+            # id가 ticket-xxxx, kb-xxxx 등 접두어가 붙어 있으면 제거
+            id_str = str(id)
+            if id_str.startswith("ticket-"):
+                id_str = id_str[7:]
+            elif id_str.startswith("kb-"):
+                id_str = id_str[3:]
+            metadata["id"] = id_str
+            metadata["original_id"] = id_str
         try:
             # 배치 크기 설정 (25개씩 처리)
             BATCH_SIZE = 25
             success = True
             points = []
-            
             for i, (text, embedding, metadata, id) in enumerate(zip(texts, embeddings, metadatas, ids)):
-                # 원본 ID를 메타데이터에 저장 (ID 체계 개선: 문자열 형태로 저장, 접두어 없음)
-                # id는 Freshdesk의 원본 ID (예: "ticket-12345" 형태)에서 접두어를 제거해야 함
-                original_id = id
-                if original_id.startswith("ticket-"):
-                    original_id = original_id[7:]  # "ticket-" 접두어 제거
-                elif original_id.startswith("kb-"):
-                    original_id = original_id[3:]  # "kb-" 접두어 제거
-                
-                # 문서 타입 결정
-                doc_type = None
-                if id.startswith("ticket-"):
-                    doc_type = "ticket"
-                elif id.startswith("kb-"):
-                    doc_type = "kb"
-                
-                # 메타데이터에 원본 ID(문자열)와 문서 타입 저장
+                # id, original_id는 항상 접두어 없는 숫자 ID(문자열)만 사용
+                id_str = str(id)
+                if id_str.startswith("ticket-"):
+                    id_str = id_str[7:]
+                elif id_str.startswith("kb-"):
+                    id_str = id_str[3:]
+                # doc_type은 별도 필드로만 사용
+                doc_type = metadata.get("doc_type")
+                # 메타데이터에 id, original_id, doc_type 저장
                 payload = {
-                    **metadata, 
-                    "text": text, 
-                    "original_id": str(original_id),  # 문자열 형태로 저장
-                    "doc_type": doc_type  # 명시적 문서 타입 저장
+                    **metadata,
+                    "text": text,
+                    "id": id_str,
+                    "original_id": id_str,
+                    "doc_type": doc_type
                 }
-                
-                # 일관된 UUID 생성
-                import uuid
+                # Qdrant 포인트의 UUID는 id_str 기준으로 생성
                 from hashlib import md5
-                uuid_id = uuid.UUID(md5(id.encode()).hexdigest())
-                
-                # Qdrant 포인트 생성
+                uuid_id = uuid.UUID(md5(id_str.encode()).hexdigest())
                 point = PointStruct(
                     id=str(uuid_id),
                     vector=embedding,
                     payload=payload
                 )
                 points.append(point)
-                
                 # 배치 크기에 도달하거나 마지막 항목이면 저장
                 if len(points) >= BATCH_SIZE or i == len(texts) - 1:
                     try:
@@ -220,15 +213,14 @@ class QdrantAdapter(VectorDBInterface):
                         self.client.upsert(
                             collection_name=self.collection_name,
                             points=points,
-                            wait=True  # 저장 완료 대기
+                            wait=True
                         )
                         logger.info(f"배치 저장 성공 (크기: {len(points)})")
-                        points = []  # 배치 초기화
+                        points = []
                     except Exception as batch_error:
                         logger.error(f"배치 저장 실패: {batch_error}")
                         success = False
                         break
-            
             return success
         except Exception as e:
             logger.error(f"문서 추가 실패: {e}")
@@ -335,30 +327,32 @@ class QdrantAdapter(VectorDBInterface):
         if not company_id:
             raise ValueError("company_id는 필수 매개변수입니다.")
             
-        # 필터 조건 구성
+        # 필터 조건 구성 - 인덱스 문제로 초기에는 company_id만 사용
         filter_conditions = [
             FieldCondition(key="company_id", match=MatchValue(value=company_id))
         ]
         
-        # 문서 타입 필터 추가
-        if doc_type:
-            filter_conditions.append(
-                FieldCondition(key="type", match=MatchValue(value=doc_type))
-            )
+        # doc_type 필드의 인덱스 문제를 해결하기 위해 메모리에서 필터링 수행
+        use_doc_type_filter = doc_type is not None
+        logger.info(f"검색 요청: company_id={company_id}, doc_type={doc_type}, top_k={top_k}")
         
-        # 필터 객체 생성
+        # 기본 검색은 company_id만 사용하여 수행
         search_filter = Filter(must=filter_conditions)
         
         try:
-            # query_filter 사용 시도 (최신 API)
+            # doc_type 필터링이 필요한 경우 더 많은 결과를 요청하여 메모리 내 필터링 수행
+            fetch_limit = top_k * 5 if use_doc_type_filter else top_k
+            logger.info(f"Qdrant 검색 시도 (company_id={company_id}, 검색 크기={fetch_limit})")
+            
             search_results = self.client.search(
                 collection_name=self.collection_name,
                 query_vector=query_embedding,
                 query_filter=search_filter,  # 최신 API: query_filter 사용
-                limit=top_k,
+                limit=fetch_limit,  # doc_type 필터링이 필요하면 더 많은 결과 요청
                 with_payload=True,
                 with_vectors=False  # 성능 최적화: 벡터 반환 비활성화
             )
+            logger.info(f"Qdrant 검색 성공: {len(search_results)}개 결과 (메모리 내 필터링 전)")
         except Exception as e:
             logger.warning(f"query_filter를 사용한 검색 실패: {e}, filter로 재시도...")
             
@@ -368,27 +362,60 @@ class QdrantAdapter(VectorDBInterface):
                     collection_name=self.collection_name,
                     query_vector=query_embedding,
                     filter=search_filter,  # 이전 API: filter 사용
-                    limit=top_k,
+                    limit=fetch_limit,
                     with_payload=True,
                     with_vectors=False
                 )
+                logger.info(f"filter 방식으로 검색 성공: {len(search_results)}개 결과 (메모리 내 필터링 전)")
             except Exception as filter_error:
                 logger.error(f"검색 실패: {filter_error}")
-                raise
+                # 오류 발생 시 빈 결과 반환
+                return {
+                    "results": [],
+                    "total": 0,
+                    "error": str(filter_error)
+                }
         
-        # 검색 결과 변환
-        results = []
+        # 메모리에서 doc_type 필터링 수행
+        filtered_results = []
+        skipped_count = 0
+        
         for hit in search_results:
+            if use_doc_type_filter:
+                # 다양한 필드에서 문서 타입 확인 (호환성)
+                hit_doc_type = hit.payload.get("doc_type") or hit.payload.get("type")
+                
+                # 타입이 일치하지 않으면 건너뛰기
+                if hit_doc_type != doc_type:
+                    skipped_count += 1
+                    continue
+            
+            # 결과 변환
             result = {
                 "id": hit.id,
                 "score": hit.score,
-                **hit.payload  # 페이로드 필드 확장
+                **hit.payload
             }
-            results.append(result)
+            filtered_results.append(result)
+            
+            # top_k개 결과를 얻으면 중단
+            if len(filtered_results) >= top_k:
+                break
+        
+        # 필터링 결과 로깅
+        if use_doc_type_filter:
+            logger.info(f"메모리 내 필터링 후 결과: {len(filtered_results)}개 유효, {skipped_count}개 제외 (doc_type={doc_type})")
+        
+        # 호환성을 위해 doc_type 필드가 없는 경우 추가
+        for result in filtered_results:
+            if "doc_type" not in result and "type" in result:
+                result["doc_type"] = result["type"]
             
         return {
-            "results": results,
-            "total": len(results)
+            "results": filtered_results,
+            "total": len(filtered_results),
+            "filtered_by_doc_type": use_doc_type_filter,
+            "skipped_count": skipped_count if use_doc_type_filter else 0
         }
 
     def count(self, company_id: Optional[str] = None) -> int:
@@ -470,74 +497,65 @@ class QdrantAdapter(VectorDBInterface):
 
         Args:
             original_id_value: 조회할 문서의 원본 ID (Freshdesk 원본 숫자 ID의 문자열 형태, 예: "12345")
-            doc_type: 문서 타입 필터 ("ticket" 또는 "kb", None이면 필터링하지 않음)
+            doc_type: 문서 타입 필터 ("ticket" 또는 "kb", None이거나 빈 문자열이면 예외 발생)
             company_id: 회사 ID 필터 (선택 사항, None이면 "default" 사용)
 
         Returns:
             조회된 문서 정보 (메타데이터와 임베딩 포함)
+
+        Raises:
+            ValueError: doc_type이 None 또는 빈 문자열인 경우
         """
+        # doc_type이 반드시 명시되어야 함을 강제
+        if not doc_type or not str(doc_type).strip():
+            logger.error("get_by_id 호출 시 doc_type이 반드시 명시되어야 합니다. (ticket 또는 kb)")
+            raise ValueError("get_by_id 호출 시 doc_type 파라미터는 필수입니다. (예: doc_type='ticket' 또는 doc_type='kb')")
         try:
             # company_id가 None이면 "default"로 설정
             search_company_id = company_id if company_id else "default"
             logger.info(f"문서 조회 시작 (original_id: {original_id_value}, doc_type: {doc_type}, company_id: {search_company_id})")
             
-            # 기본 필터 조건 설정
-            filter_conditions = []
-            
-            # company_id 필터 추가
-            filter_conditions.append(
+            # 필터 조건: company_id, original_id, doc_type 모두 필수
+            filter_conditions = [
                 FieldCondition(
                     key="company_id",
                     match=MatchValue(value=search_company_id)
-                )
-            )
-            
-            # 원본 ID 필터 추가 (문자열로 변환하여 일관성 유지)
-            filter_conditions.append(
+                ),
                 FieldCondition(
                     key="original_id",
                     match=MatchValue(value=str(original_id_value))
+                ),
+                FieldCondition(
+                    key="doc_type",
+                    match=MatchValue(value=doc_type)
                 )
+            ]
+            filter_log_str = ", ".join([f"{c.key}='{c.match.value}'" for c in filter_conditions])
+            logger.info(f"원본 ID '{original_id_value}'로 문서 검색 시도 (필터 조건: {filter_log_str})")
+            
+            # Qdrant에서 검색
+            scroll_result = self.client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=Filter(must=filter_conditions),
+                limit=1,
+                with_payload=True,
+                with_vectors=True
             )
-            
-            # 문서 타입 필터 추가 (지정된 경우)
-            if doc_type:
-                filter_conditions.append(
-                    FieldCondition(
-                        key="doc_type",
-                        match=MatchValue(value=doc_type)
-                    )
-                )
-            
-            logger.info(f"원본 ID '{original_id_value}'로 문서 검색 시도")
-            
-            try:
-                # scroll로 필터링된 결과 검색
-                scroll_result = self.client.scroll(
-                    collection_name=self.collection_name,
-                    scroll_filter=Filter(must=filter_conditions),
-                    limit=1,
-                    with_payload=True,
-                    with_vectors=True
-                )
-                
-                if scroll_result[0]:  # 결과가 있으면
-                    point = scroll_result[0][0]
-                    logger.info(f"원본 ID '{original_id_value}' 문서를 찾았습니다.")
-                    return {
-                        "id": point.payload.get("original_id", ""),
-                        "doc_type": point.payload.get("doc_type", ""),
-                        "metadata": point.payload,
-                        "embedding": point.vector
-                    }
-            
-            except Exception as search_error:
-                logger.error(f"원본 ID '{original_id_value}' 검색 실패: {search_error}")
-            
-            # 문서를 찾지 못한 경우
-            logger.warning(f"원본 ID '{original_id_value}', 타입 '{doc_type}'으로 문서를 찾을 수 없습니다.")
-            return {}
-                
+            if scroll_result and scroll_result[0]:
+                point = scroll_result[0][0]
+                payload = point.payload if hasattr(point, 'payload') else {}
+                logger.info(f"검색 결과 - ID: {point.id}, original_id='{payload.get('original_id')}', doc_type='{payload.get('doc_type')}', type='{payload.get('type')}', company_id='{payload.get('company_id')}'")
+                document_type = payload.get("doc_type", "") or payload.get("type", "")
+                return {
+                    "id": payload.get("original_id", ""),
+                    "doc_type": document_type,
+                    "metadata": payload,
+                    "embedding": point.vector if hasattr(point, 'vector') else None
+                }
+            else:
+                logger.warning(f"원본 ID '{original_id_value}', 타입 '{doc_type}', company_id '{search_company_id}'으로 문서를 찾을 수 없습니다.")
+                logger.warning(f"적용된 필터 조건 (문자열): {filter_log_str}")
+                return {}
         except Exception as e:
             logger.error(f"ID '{original_id_value}'로 문서 조회 중 오류 발생: {e}")
             return {}
@@ -772,3 +790,83 @@ logger = logging.getLogger(__name__)
 
 # 참고: `freshdesk_client` 관련 함수들은 freshdesk/optimized_fetcher.py 파일에 위치해야 합니다.
 # 이 파일은 벡터 데이터베이스 관련 기능만 포함합니다.
+
+def migrate_type_to_doc_type():
+    """
+    기존 'type' 필드를 사용하는 문서들을 'doc_type' 필드로 마이그레이션하는 유틸리티 함수
+    
+    이 함수는 관리자가 필요한 경우 직접 호출하여 기존 데이터를 마이그레이션할 수 있습니다.
+    """
+    try:
+        logger.info("기존 'type' 필드를 사용하는 데이터를 'doc_type' 필드로 마이그레이션 시작")
+        
+        # 기존 벡터 DB 인스턴스 사용
+        db = vector_db
+        
+        # 전체 컬렉션을 배치 단위로 스캔
+        offset = 0
+        batch_size = 100
+        migrated_count = 0
+        total_processed = 0
+        
+        while True:
+            # 배치 조회
+            scroll_result = db.client.scroll(
+                collection_name=db.collection_name,
+                offset=offset,
+                limit=batch_size,
+                with_payload=True,
+                with_vectors=False
+            )
+            
+            points = scroll_result[0]
+            if not points:
+                break  # 더 이상 문서가 없음
+            
+            total_processed += len(points)
+            
+            # 마이그레이션이 필요한 문서 필터링
+            points_to_update = []
+            
+            for point in points:
+                payload = point.payload
+                if "type" in payload and ("doc_type" not in payload or not payload["doc_type"]):
+                    # 'type' 필드가 있고 'doc_type' 필드가 없는 경우 마이그레이션
+                    doc_type_value = payload["type"]
+                    
+                    # doc_type 값이 유효한지 확인
+                    if doc_type_value in ["ticket", "kb"]:
+                        # 원본 페이로드에 'doc_type' 필드 추가
+                        updated_payload = {**payload, "doc_type": doc_type_value}
+                        
+                        points_to_update.append(
+                            PointStruct(
+                                id=point.id,
+                                payload=updated_payload,
+                                vector=None  # 벡터는 업데이트하지 않음
+                            )
+                        )
+            
+            # 마이그레이션할 문서가 있으면 업데이트
+            if points_to_update:
+                db.client.upsert(
+                    collection_name=db.collection_name,
+                    points=points_to_update,
+                    wait=True
+                )
+                migrated_count += len(points_to_update)
+                logger.info(f"마이그레이션 진행: {len(points_to_update)}개 문서 업데이트 완료")
+            
+            # 다음 배치
+            offset += batch_size
+        
+        logger.info(f"마이그레이션 완료: 총 {total_processed}개 중 {migrated_count}개 문서 마이그레이션됨")
+        return {
+            "total_processed": total_processed,
+            "migrated_count": migrated_count
+        }
+    except Exception as e:
+        logger.error(f"마이그레이션 중 오류 발생: {e}")
+        return {
+            "error": str(e)
+        }

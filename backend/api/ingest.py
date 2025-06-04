@@ -484,29 +484,28 @@ async def ingest(
         ids = [doc["id"] for doc in processed_docs]
         
         # 모든 메타데이터에 company_id 추가 및 ID 체계 확인 (FRESHDESK_DOMAIN에서 추출된 company_id 사용)
-        for metadata in metadatas:
+        for metadata, id_val in zip(metadatas, ids):
             metadata["company_id"] = DEFAULT_COMPANY_ID
-            
             # ID 체계 표준화: 모든 메타데이터에 original_id와 doc_type이 올바르게 설정되었는지 확인
             if "original_id" not in metadata:
                 if "id" in metadata and isinstance(metadata["id"], str):
                     if metadata["id"].startswith("ticket-"):
-                        metadata["original_id"] = metadata["id"][7:]  # "ticket-" 접두어 제거
+                        metadata["original_id"] = metadata["id"][7:]
                         metadata["doc_type"] = "ticket"
                     elif metadata["id"].startswith("kb-"):
-                        metadata["original_id"] = metadata["id"][3:]  # "kb-" 접두어 제거
+                        metadata["original_id"] = metadata["id"][3:]
                         metadata["doc_type"] = "kb"
                     else:
                         metadata["original_id"] = str(metadata["id"])
-            
-            # doc_type 필드 확인
-            if "doc_type" not in metadata:
-                id_str = metadata.get("id", "")
-                if isinstance(id_str, str):
-                    if id_str.startswith("ticket-"):
+            # doc_type 필드 확인 및 보정
+            if "doc_type" not in metadata or not metadata["doc_type"]:
+                if isinstance(id_val, str):
+                    if id_val.startswith("ticket-"):
                         metadata["doc_type"] = "ticket"
-                    elif id_str.startswith("kb-"):
+                    elif id_val.startswith("kb-"):
                         metadata["doc_type"] = "kb"
+            if "doc_type" not in metadata or not metadata["doc_type"]:
+                raise ValueError(f"add_documents 호출 전 metadata에 doc_type이 없습니다. id={id_val}, metadata={metadata}")
 
         # 6. 임베딩
         logger.info(f"총 {len(docs)}개 문서 임베딩 시작...")

@@ -29,7 +29,7 @@ from core.vectordb import vector_db
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from freshdesk import fetcher
 from prometheus_client import Counter, Histogram
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 # Prometheus 메트릭 정의
 # LLM 관련 메트릭은 llm_router.py에서 정의되어 있으므로 중복 방지를 위해 여기서는 HTTP 요청 관련 메트릭만 정의
@@ -94,7 +94,7 @@ class DocumentInfo(BaseModel):
     relevance_score: float = 0.0
     doc_type: Optional[str] = None # 문서 타입을 명시 (예: "ticket", "kb", "faq")
     
-    @validator('source_url')
+    @field_validator('source_url')
     def ensure_source_url_is_str(cls, v):
         """URL이 None이면 빈 문자열로 변환"""
         return v or ""
@@ -244,8 +244,8 @@ async def query_endpoint(req: QueryRequest, company_id: str = Depends(get_compan
 
     if req.ticket_id:
         logger.info(f"티켓 ID {req.ticket_id}에 대한 정보 조회를 시도합니다.")
-        # VectorDB 메서드는 동기식이므로 await을 사용하지 않음
-        ticket_data = vector_db.get_by_id(original_id_value=req.ticket_id, company_id=company_id)
+        # doc_type='ticket'을 명시적으로 지정하여 예외 방지 및 일관성 확보
+        ticket_data = vector_db.get_by_id(original_id_value=req.ticket_id, company_id=company_id, doc_type="ticket")
         
         if ticket_data and ticket_data.get("metadata"):
             metadata = ticket_data["metadata"]
@@ -590,8 +590,8 @@ async def get_initial_context(
     
     # 티켓 데이터 조회
     try:
-        # 동기 메서드 호출로 수정 - original_id_value 매개변수 명 사용
-        ticket_data = vector_db.get_by_id(original_id_value=ticket_id, company_id=search_company_id)
+        # doc_type='ticket'을 명시적으로 지정하여 예외 방지 및 일관성 확보
+        ticket_data = vector_db.get_by_id(original_id_value=ticket_id, company_id=search_company_id, doc_type="ticket")
         if not ticket_data:
             # Freshdesk API에서 직접 조회 시도
             try:
@@ -841,7 +841,8 @@ async def get_similar_tickets(ticket_id: str, company_id: str = Depends(get_comp
         logger.info(f"유사 티켓 검색 시작 (ticket_id: {ticket_id}, company_id: {company_id})")
         
         # 1. 현재 티켓 데이터를 Qdrant에서 가져오기 시도
-        current_ticket_data = vector_db.get_by_id(original_id_value=ticket_id, company_id=company_id)
+        # doc_type='ticket'을 명시적으로 지정하여 예외 방지 및 일관성 확보
+        current_ticket_data = vector_db.get_by_id(original_id_value=ticket_id, company_id=company_id, doc_type="ticket")
         
         if not current_ticket_data or not current_ticket_data.get("metadata"):
             # Qdrant에서 찾을 수 없으면 Freshdesk API에서 가져오기
@@ -974,11 +975,8 @@ async def get_related_documents(ticket_id: str, company_id: str = Depends(get_co
         logger.info(f"관련 문서 검색 시작 (ticket_id: {ticket_id}, company_id: {company_id})")
         
         # 1. 현재 티켓 데이터를 Qdrant에서 가져오기 시도
-        current_ticket_data = None
-        try:
-            current_ticket_data = vector_db.get_by_id(original_id_value=ticket_id, company_id=company_id)
-        except Exception as e:
-            logger.warning(f"Qdrant에서 티켓 {ticket_id} 조회 실패: {e}")
+        # doc_type='ticket'을 명시적으로 지정하여 예외 방지 및 일관성 확보
+        current_ticket_data = vector_db.get_by_id(original_id_value=ticket_id, company_id=company_id, doc_type="ticket")
         
         if not current_ticket_data or not current_ticket_data.get("metadata"):
             # Qdrant에서 찾을 수 없으면 Freshdesk API에서 가져오기
@@ -1537,8 +1535,9 @@ if __name__ == "__main__":
     logger.info(f"FastAPI 백엔드 서버를 시작합니다 - http://{args.host}:{args.port}")
     
     # uvicorn 서버 실행
+    # 디버거에서 실행할 때는 app 객체를 직접 전달
     uvicorn.run(
-        "api.main:app",  # 모듈 경로
+        app,  # FastAPI 앱 객체 직접 전달 (디버거 호환성)
         host=args.host,
         port=args.port,
         reload=args.reload,
