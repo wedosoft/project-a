@@ -171,7 +171,7 @@ class SearchResultItem(BaseModel):
     """
     검색 결과의 개별 항목을 나타내는 모델입니다.
     """
-    id: str
+    id: str  # Freshdesk 원본 ID의 문자열 형태 (original_id에서 가져옴)
     title: str
     content: str
     score: float

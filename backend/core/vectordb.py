@@ -67,8 +67,8 @@ class VectorDBInterface(ABC):
         pass
     
     @abstractmethod
-    def get_by_id(self, id: str, company_id: Optional[str] = None) -> Dict[str, Any]:
-        """ID로 단일 문서 조회"""
+    def get_by_id(self, original_id_value: str, doc_type: Optional[str] = None, company_id: Optional[str] = None) -> Dict[str, Any]:
+        """원본 ID로 단일 문서 조회"""
         pass
 
 
@@ -104,6 +104,12 @@ class QdrantAdapter(VectorDBInterface):
                 logger.info(f"필수 필드에 대한 인덱스 생성 중...")
                 # 회사 ID 인덱스 생성
                 self.client.create_payload_index(collection_name=self.collection_name, field_name="company_id", field_schema="keyword")
+                # 원본 ID 인덱스 생성
+                try:
+                    self.client.create_payload_index(collection_name=self.collection_name, field_name="original_id", field_schema="keyword")
+                    logger.info(f"original_id 인덱스(keyword) 생성 완료")
+                except Exception as original_id_err:
+                    logger.warning(f"original_id 인덱스 생성 실패: {original_id_err}")
                 # 문서 타입 인덱스 생성 - 키워드 및 정수 타입 모두 시도
                 try:
                     self.client.create_payload_index(collection_name=self.collection_name, field_name="type", field_schema="keyword")
@@ -171,8 +177,28 @@ class QdrantAdapter(VectorDBInterface):
             points = []
             
             for i, (text, embedding, metadata, id) in enumerate(zip(texts, embeddings, metadatas, ids)):
-                # 원본 ID를 메타데이터에 저장
-                payload = {**metadata, "text": text, "original_id": id}
+                # 원본 ID를 메타데이터에 저장 (ID 체계 개선: 문자열 형태로 저장, 접두어 없음)
+                # id는 Freshdesk의 원본 ID (예: "ticket-12345" 형태)에서 접두어를 제거해야 함
+                original_id = id
+                if original_id.startswith("ticket-"):
+                    original_id = original_id[7:]  # "ticket-" 접두어 제거
+                elif original_id.startswith("kb-"):
+                    original_id = original_id[3:]  # "kb-" 접두어 제거
+                
+                # 문서 타입 결정
+                doc_type = None
+                if id.startswith("ticket-"):
+                    doc_type = "ticket"
+                elif id.startswith("kb-"):
+                    doc_type = "kb"
+                
+                # 메타데이터에 원본 ID(문자열)와 문서 타입 저장
+                payload = {
+                    **metadata, 
+                    "text": text, 
+                    "original_id": str(original_id),  # 문자열 형태로 저장
+                    "doc_type": doc_type  # 명시적 문서 타입 저장
+                }
                 
                 # 일관된 UUID 생성
                 import uuid
@@ -213,7 +239,7 @@ class QdrantAdapter(VectorDBInterface):
         문서 삭제
         
         Args:
-            ids: 삭제할 문서 ID 목록 (원본 문자열 ID)
+            ids: 삭제할 문서 ID 목록 (접두어가 포함된 문자열 ID, 예: "ticket-12345")
             company_id: 회사 ID (보안 검증용)
             
         Returns:
@@ -226,6 +252,7 @@ class QdrantAdapter(VectorDBInterface):
             
             uuid_ids = []
             for id in ids:
+                # 접두어가 포함된 ID 그대로 사용하여 UUID 생성 (일관성 유지)
                 uuid_id = uuid.UUID(md5(id.encode()).hexdigest())
                 uuid_ids.append(str(uuid_id))
             
@@ -437,12 +464,13 @@ class QdrantAdapter(VectorDBInterface):
             logger.error(f"문서 수 카운트 실패: {e}")
             return 0
 
-    def get_by_id(self, id: str, company_id: Optional[str] = None) -> Dict[str, Any]:
+    def get_by_id(self, original_id_value: str, doc_type: Optional[str] = None, company_id: Optional[str] = None) -> Dict[str, Any]:
         """
-        ID로 단일 문서 조회
+        원본 ID로 단일 문서 조회
 
         Args:
-            id: 조회할 문서의 ID (원본 티켓 ID, 예: "4243")
+            original_id_value: 조회할 문서의 원본 ID (Freshdesk 원본 숫자 ID의 문자열 형태, 예: "12345")
+            doc_type: 문서 타입 필터 ("ticket" 또는 "kb", None이면 필터링하지 않음)
             company_id: 회사 ID 필터 (선택 사항, None이면 "default" 사용)
 
         Returns:
@@ -451,125 +479,67 @@ class QdrantAdapter(VectorDBInterface):
         try:
             # company_id가 None이면 "default"로 설정
             search_company_id = company_id if company_id else "default"
-            logger.info(f"문서 조회 시작 (id: {id}, company_id: {search_company_id})")
+            logger.info(f"문서 조회 시작 (original_id: {original_id_value}, doc_type: {doc_type}, company_id: {search_company_id})")
             
-            # 검색할 ID 값들 준비
-            search_values = []
+            # 기본 필터 조건 설정
+            filter_conditions = []
             
-            # 1. 입력된 ID 그대로 (문자열)
-            search_values.append(id)
+            # company_id 필터 추가
+            filter_conditions.append(
+                FieldCondition(
+                    key="company_id",
+                    match=MatchValue(value=search_company_id)
+                )
+            )
             
-            # 2. 숫자형 ID 변환 시도
+            # 원본 ID 필터 추가 (문자열로 변환하여 일관성 유지)
+            filter_conditions.append(
+                FieldCondition(
+                    key="original_id",
+                    match=MatchValue(value=str(original_id_value))
+                )
+            )
+            
+            # 문서 타입 필터 추가 (지정된 경우)
+            if doc_type:
+                filter_conditions.append(
+                    FieldCondition(
+                        key="doc_type",
+                        match=MatchValue(value=doc_type)
+                    )
+                )
+            
+            logger.info(f"원본 ID '{original_id_value}'로 문서 검색 시도")
+            
             try:
-                numeric_id = int(id)
-                search_values.append(numeric_id)
-            except ValueError:
-                pass
-            
-            # 3. "ticket-" 접두사가 없다면 추가
-            if not id.startswith("ticket-"):
-                search_values.append(f"ticket-{id}")
-            
-            # 4. "ticket-" 접두사가 있다면 제거
-            if id.startswith("ticket-"):
-                search_values.append(id.replace("ticket-", ""))
-                try:
-                    clean_numeric = int(id.replace("ticket-", ""))
-                    search_values.append(clean_numeric)
-                except ValueError:
-                    pass
-            
-            logger.info(f"ID '{id}' 검색 시도값들: {search_values}")
-            
-            # 각 검색값으로 payload 필터링 시도
-            for search_value in search_values:
-                # id 필드로 검색
-                filter_conditions = []
-                
-                # company_id 필터 추가 (수정된 company_id 사용)
-                filter_conditions.append(
-                    FieldCondition(
-                        key="company_id",
-                        match=MatchValue(value=search_company_id)
-                    )
+                # scroll로 필터링된 결과 검색
+                scroll_result = self.client.scroll(
+                    collection_name=self.collection_name,
+                    scroll_filter=Filter(must=filter_conditions),
+                    limit=1,
+                    with_payload=True,
+                    with_vectors=True
                 )
                 
-                # ID 필터 추가 (id 필드)
-                filter_conditions.append(
-                    FieldCondition(
-                        key="id",
-                        match=MatchValue(value=search_value)
-                    )
-                )
-                
-                try:
-                    # scroll로 필터링된 결과 검색
-                    scroll_result = self.client.scroll(
-                        collection_name=self.collection_name,
-                        scroll_filter=Filter(must=filter_conditions),
-                        limit=1,
-                        with_payload=True,
-                        with_vectors=True
-                    )
-                    
-                    if scroll_result[0]:  # 결과가 있으면
-                        point = scroll_result[0][0]
-                        logger.info(f"ID '{id}' 문서를 찾았습니다 (검색값: {search_value})")
-                        return {
-                            "id": point.payload.get("original_id", point.payload.get("id", id)),
-                            "metadata": point.payload,
-                            "embedding": point.vector
-                        }
-                        
-                except Exception as search_error:
-                    logger.debug(f"ID 필드 '{search_value}' 검색 실패: {search_error}")
-                
-                # original_id 필드로도 검색 시도
-                try:
-                    filter_conditions_orig = []
-                    
-                    # company_id 필터 추가 (수정된 company_id 사용)
-                    filter_conditions_orig.append(
-                        FieldCondition(
-                            key="company_id",
-                            match=MatchValue(value=search_company_id)
-                        )
-                    )
-                    
-                    # original_id 필터 추가
-                    filter_conditions_orig.append(
-                        FieldCondition(
-                            key="original_id",
-                            match=MatchValue(value=str(search_value))
-                        )
-                    )
-                    
-                    scroll_result_orig = self.client.scroll(
-                        collection_name=self.collection_name,
-                        scroll_filter=Filter(must=filter_conditions_orig),
-                        limit=1,
-                        with_payload=True,
-                        with_vectors=True
-                    )
-                    
-                    if scroll_result_orig[0]:  # 결과가 있으면
-                        point = scroll_result_orig[0][0]
-                        logger.info(f"ID '{id}' 문서를 찾았습니다 (original_id 검색값: {search_value})")
-                        return {
-                            "id": point.payload.get("original_id", point.payload.get("id", id)),
-                            "metadata": point.payload,
-                            "embedding": point.vector
-                        }
-                        
-                except Exception as search_error:
-                    logger.debug(f"original_id 필드 '{search_value}' 검색 실패: {search_error}")
+                if scroll_result[0]:  # 결과가 있으면
+                    point = scroll_result[0][0]
+                    logger.info(f"원본 ID '{original_id_value}' 문서를 찾았습니다.")
+                    return {
+                        "id": point.payload.get("original_id", ""),
+                        "doc_type": point.payload.get("doc_type", ""),
+                        "metadata": point.payload,
+                        "embedding": point.vector
+                    }
             
-            # 모든 방법으로 찾지 못한 경우
-            logger.warning(f"ID '{id}'로 문서를 찾을 수 없습니다. 시도한 검색값들: {search_values}")
+            except Exception as search_error:
+                logger.error(f"원본 ID '{original_id_value}' 검색 실패: {search_error}")
+            
+            # 문서를 찾지 못한 경우
+            logger.warning(f"원본 ID '{original_id_value}', 타입 '{doc_type}'으로 문서를 찾을 수 없습니다.")
             return {}
                 
         except Exception as e:
-            logger.error(f"ID '{id}'로 문서 조회 중 오류 발생: {e}")
+            logger.error(f"ID '{original_id_value}'로 문서 조회 중 오류 발생: {e}")
             return {}
 
     def get_collection_info(self) -> Dict[str, Any]:
