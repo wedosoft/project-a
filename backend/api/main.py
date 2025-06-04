@@ -32,16 +32,9 @@ from prometheus_client import Counter, Histogram
 from pydantic import BaseModel, Field, validator
 
 # Prometheus 메트릭 정의
-# LLM 라우터에서 정의된 메트릭을 여기서도 사용할 수 있도록 공유하거나,
-# 애플리케이션 레벨의 메트릭을 정의합니다.
-# 예시: HTTP 요청 관련 메트릭
-http_requests_total = Counter('http_requests_total', 'Total HTTP Requests', ['method', 'endpoint', 'http_status'])
-http_request_duration_seconds = Histogram('http_request_duration_seconds', 'HTTP request duration, in seconds', ['method', 'endpoint'])
-# LLM 관련 메트릭 (llm_router.py와 공유 또는 여기서 직접 정의)
-# llm_router.py에서 직접 Prometheus 클라이언트를 사용하도록 수정했으므로 여기서는 중복 정의하지 않음.
-# 대신, llm_router에서 사용할 메트릭 객체들을 여기서 생성하고 라우터에 전달하는 방식을 고려할 수 있으나,
-# 현재 llm_router.py에서 직접 메트릭을 정의하고 업데이트하도록 되어 있음.
-# 따라서 main.py에서는 /metrics 엔드포인트만 제공.
+# LLM 관련 메트릭은 llm_router.py에서 정의되어 있으므로 중복 방지를 위해 여기서는 HTTP 요청 관련 메트릭만 정의
+# HTTP 요청 관련 메트릭은 필요시 추후 추가 가능
+# 현재는 /metrics 엔드포인트만 제공하여 llm_router에서 수집된 메트릭을 노출
 
 # FastAPI 앱 생성
 app = FastAPI()
@@ -251,8 +244,8 @@ async def query_endpoint(req: QueryRequest, company_id: str = Depends(get_compan
 
     if req.ticket_id:
         logger.info(f"티켓 ID {req.ticket_id}에 대한 정보 조회를 시도합니다.")
-        # 비동기 메서드 호출로 수정
-        ticket_data = await vector_db.get_by_id(id=req.ticket_id, company_id=company_id)
+        # VectorDB 메서드는 동기식이므로 await을 사용하지 않음
+        ticket_data = vector_db.get_by_id(original_id_value=req.ticket_id, company_id=company_id)
         
         if ticket_data and ticket_data.get("metadata"):
             metadata = ticket_data["metadata"]
@@ -597,8 +590,8 @@ async def get_initial_context(
     
     # 티켓 데이터 조회
     try:
-        # 동기 메서드 호출로 수정
-        ticket_data = vector_db.get_by_id(id=ticket_id, company_id=search_company_id)
+        # 동기 메서드 호출로 수정 - original_id_value 매개변수 명 사용
+        ticket_data = vector_db.get_by_id(original_id_value=ticket_id, company_id=search_company_id)
         if not ticket_data:
             # Freshdesk API에서 직접 조회 시도
             try:
@@ -848,7 +841,7 @@ async def get_similar_tickets(ticket_id: str, company_id: str = Depends(get_comp
         logger.info(f"유사 티켓 검색 시작 (ticket_id: {ticket_id}, company_id: {company_id})")
         
         # 1. 현재 티켓 데이터를 Qdrant에서 가져오기 시도
-        current_ticket_data = vector_db.get_by_id(ticket_id, company_id)
+        current_ticket_data = vector_db.get_by_id(original_id_value=ticket_id, company_id=company_id)
         
         if not current_ticket_data or not current_ticket_data.get("metadata"):
             # Qdrant에서 찾을 수 없으면 Freshdesk API에서 가져오기
@@ -983,7 +976,7 @@ async def get_related_documents(ticket_id: str, company_id: str = Depends(get_co
         # 1. 현재 티켓 데이터를 Qdrant에서 가져오기 시도
         current_ticket_data = None
         try:
-            current_ticket_data = vector_db.get_by_id(ticket_id, company_id)
+            current_ticket_data = vector_db.get_by_id(original_id_value=ticket_id, company_id=company_id)
         except Exception as e:
             logger.warning(f"Qdrant에서 티켓 {ticket_id} 조회 실패: {e}")
         
@@ -1519,3 +1512,35 @@ async def search_query(req: QueryRequest, company_id: str = Depends(get_company_
     except Exception as e:
         logger.error(f"자연어 검색 중 예상치 못한 오류 발생: {e}")
         raise HTTPException(status_code=500, detail=f"검색 중 오류가 발생했습니다: {str(e)}")
+
+
+if __name__ == "__main__":
+    import argparse
+
+    import uvicorn
+    
+    # 명령행 인자 처리
+    parser = argparse.ArgumentParser(description="Freshdesk Custom App 백엔드 서버")
+    parser.add_argument("--host", default="0.0.0.0", help="서버 호스트 주소 (기본값: 0.0.0.0)")
+    parser.add_argument("--port", type=int, default=8000, help="서버 포트 (기본값: 8000)")
+    parser.add_argument("--reload", action="store_true", help="개발 모드 - 파일 변경 시 자동 재시작")
+    parser.add_argument("--debug", action="store_true", help="디버그 모드 활성화")
+    args = parser.parse_args()
+    
+    # 로그 레벨 설정
+    if args.debug:
+        logging.basicConfig(level=logging.DEBUG)
+        logger.info("디버그 모드로 서버를 시작합니다")
+    else:
+        logging.basicConfig(level=logging.INFO)
+    
+    logger.info(f"FastAPI 백엔드 서버를 시작합니다 - http://{args.host}:{args.port}")
+    
+    # uvicorn 서버 실행
+    uvicorn.run(
+        "api.main:app",  # 모듈 경로
+        host=args.host,
+        port=args.port,
+        reload=args.reload,
+        log_level="info" if not args.debug else "debug"
+    )

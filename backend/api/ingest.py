@@ -336,7 +336,8 @@ async def ingest(
             current_ids = set()
             for t in tickets:
                 # 티켓 ID와 청크 ID 모두 포함
-                base_id = f"ticket-{t.get('id')}"
+                original_id = str(t.get('id'))
+                base_id = f"ticket-{original_id}"
                 current_ids.add(base_id)
 
                 # 기존에 청킹된 문서도 고려
@@ -346,7 +347,8 @@ async def ingest(
 
             for a in articles:
                 # 지식베이스 ID와 청크 ID 모두 포함
-                base_id = f"kb-{a.get('id')}"
+                original_id = str(a.get('id'))
+                base_id = f"kb-{original_id}"
                 current_ids.add(base_id)
 
                 # 기존에 청킹된 문서도 고려
@@ -395,19 +397,24 @@ async def ingest(
 
         logger.info("티켓 데이터 처리 중...")
         for t in tickets:
-            doc_id = f"ticket-{t.get('id')}"
+            # ID 체계 개선: ID 생성 방식 수정
+            original_id = str(t.get('id'))  # 원본 ID를 문자열로 변환
+            doc_id = f"ticket-{original_id}"  # Qdrant 포인트 ID 생성용 (접두어 포함)
             ticket_id = t.get("id")
             updated_at = t.get("updated_at")
+            
             # 증분 업데이트 모드에서 기존 문서가 있으면 건너뜀
             if incremental:
                 if doc_id in existing_ids:
                     continue
+                    
             # description, description_text 등 주요 필드 보완
             if not t.get("description") or not t.get("description_text"):
                 from freshdesk.fetcher import fetch_ticket_details
                 detail = await fetch_ticket_details(ticket_id)
                 if detail:
                     t.update({k: v for k, v in detail.items() if k not in t or not t[k]})
+                    
             # 첨부파일(이미지 등) 메타데이터만 저장
             attachments = t.get("attachments") or t.get("all_attachments")
             attachment_meta = []
@@ -426,12 +433,15 @@ async def ingest(
                         "conversation_id": att.get("conversation_id")
                     }
                     attachment_meta.append(meta)  # 실제로 리스트에 추가
+                    
             # Qdrant에 저장할 문서 구조 생성
             doc = {
-                "id": doc_id,
+                "id": doc_id,  # 내부 처리용 ID (접두어 포함)
                 "text": t.get("description_text") or t.get("description") or "",
                 "metadata": {
                     **t,
+                    "original_id": original_id,  # 원본 ID를 문자열로 저장 (접두어 없음)
+                    "doc_type": "ticket",  # 문서 타입 명시적 저장
                     "attachments": attachment_meta
                 }
             }
@@ -439,11 +449,17 @@ async def ingest(
 
         logger.info("지식베이스 문서 처리 중...")
         for a in articles:
-            doc_id = f"kb-{a.get('id')}"
+            # ID 체계 개선: ID 생성 방식 수정
+            original_id = str(a.get('id'))  # 원본 ID를 문자열로 변환
+            doc_id = f"kb-{original_id}"  # Qdrant 포인트 ID 생성용 (접두어 포함)
             doc = {
-                "id": doc_id,
+                "id": doc_id,  # 내부 처리용 ID (접두어 포함)
                 "text": a.get("description_text") or a.get("description") or "",
-                "metadata": {**a}
+                "metadata": {
+                    **a,
+                    "original_id": original_id,  # 원본 ID를 문자열로 저장 (접두어 없음)
+                    "doc_type": "kb"  # 문서 타입 명시적 저장
+                }
             }
             all_documents.append(doc)
 
@@ -467,9 +483,30 @@ async def ingest(
         metadatas = [doc["metadata"] for doc in processed_docs]
         ids = [doc["id"] for doc in processed_docs]
         
-        # 모든 메타데이터에 company_id 추가 (FRESHDESK_DOMAIN에서 추출된 company_id 사용)
+        # 모든 메타데이터에 company_id 추가 및 ID 체계 확인 (FRESHDESK_DOMAIN에서 추출된 company_id 사용)
         for metadata in metadatas:
             metadata["company_id"] = DEFAULT_COMPANY_ID
+            
+            # ID 체계 표준화: 모든 메타데이터에 original_id와 doc_type이 올바르게 설정되었는지 확인
+            if "original_id" not in metadata:
+                if "id" in metadata and isinstance(metadata["id"], str):
+                    if metadata["id"].startswith("ticket-"):
+                        metadata["original_id"] = metadata["id"][7:]  # "ticket-" 접두어 제거
+                        metadata["doc_type"] = "ticket"
+                    elif metadata["id"].startswith("kb-"):
+                        metadata["original_id"] = metadata["id"][3:]  # "kb-" 접두어 제거
+                        metadata["doc_type"] = "kb"
+                    else:
+                        metadata["original_id"] = str(metadata["id"])
+            
+            # doc_type 필드 확인
+            if "doc_type" not in metadata:
+                id_str = metadata.get("id", "")
+                if isinstance(id_str, str):
+                    if id_str.startswith("ticket-"):
+                        metadata["doc_type"] = "ticket"
+                    elif id_str.startswith("kb-"):
+                        metadata["doc_type"] = "kb"
 
         # 6. 임베딩
         logger.info(f"총 {len(docs)}개 문서 임베딩 시작...")

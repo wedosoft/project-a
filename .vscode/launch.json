@@ -5,7 +5,10 @@
             "name": "FastAPI Backend Server",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/backend/main.py",
+            "program": "${workspaceFolder}/backend/api/main.py",
+            "args": [
+                "--debug"
+            ],
             "console": "integratedTerminal",
             "justMyCode": false,
             "cwd": "${workspaceFolder}/backend",
