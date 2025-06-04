@@ -160,4 +160,5 @@ backend/qdrant_data/
 backend/qdrant_storage/
 backend/attachment_cache
 
- 
+backend/freshdesk_full_data*/
+backend/freshdesk_test_data*/
