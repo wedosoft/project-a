@@ -14,7 +14,21 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseSettings, Field, validator
+# 환경변수 로드 - 명시적으로 .env 파일 경로를 지정
+from dotenv import load_dotenv
+from pydantic import Field, validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# 환경변수 로드
+backend_dir = Path(__file__).parent.parent  # core 디렉토리의 상위(backend) 디렉토리
+dotenv_path = os.path.join(backend_dir, ".env")
+load_dotenv(dotenv_path=dotenv_path)
+
+# 환경변수 로드 후 디버그 메시지
+if os.getenv("DEBUG") == "true":
+    print(f".env 파일 로드: {dotenv_path}")
+    print(f"QDRANT_URL: {'설정됨' if os.getenv('QDRANT_URL') else '미설정'}")
+    print(f"OPENAI_API_KEY: {'설정됨' if os.getenv('OPENAI_API_KEY') else '미설정'}")
 
 
 class Settings(BaseSettings):
@@ -24,6 +38,12 @@ class Settings(BaseSettings):
     모든 설정은 환경변수 또는 .env 파일에서 로드되며, 
     타입 힌트와 기본값을 통해 안전한 설정 관리를 제공합니다.
     """
+    # Pydantic V2 스타일의 설정
+    model_config = SettingsConfigDict(
+        env_file=dotenv_path,
+        env_file_encoding="utf-8",
+        extra="ignore"  # 추가 환경변수 무시
+    )
     # Freshdesk API 설정
     FRESHDESK_API_KEY: str = Field(..., description="Freshdesk API 키")
     FRESHDESK_DOMAIN: str = Field(..., description="Freshdesk 도메인 (예: company.freshdesk.com)")
@@ -39,15 +59,22 @@ class Settings(BaseSettings):
     PERPLEXITY_API_KEY: Optional[str] = Field(None, description="Perplexity API 키")
     
     # 애플리케이션 설정
-    COMPANY_ID: str = Field(..., description="기본 회사 ID")
+    COMPANY_ID: str = Field("kyexpert", description="기본 회사 ID")
     PROCESS_ATTACHMENTS: bool = Field(True, description="첨부 파일 처리 여부")
     EMBEDDING_MODEL: str = Field("text-embedding-3-small", description="임베딩 모델 이름")
     LOG_LEVEL: str = Field("INFO", description="로깅 레벨")
     MAX_TOKENS: int = Field(4096, description="LLM 최대 토큰 수")
     
+    # 개발 환경 설정
+    DEBUG: bool = Field(False, description="디버그 모드 활성화 여부")
+    HOST: str = Field("0.0.0.0", description="서버 호스트")
+    PORT: int = Field(8000, description="서버 포트")
+    
     # 캐싱 설정
     CACHE_TTL: int = Field(600, description="캐시 TTL (초)")
     CACHE_SIZE: int = Field(100, description="캐시 최대 항목 수")
+    
+    # Pydantic V2에서는 위의 model_config를 사용합니다
     
     # CORS 설정
     CORS_ORIGINS: List[str] = Field(
@@ -67,11 +94,45 @@ class Settings(BaseSettings):
             return parsed_url.netloc
         return v
 
-    class Config:
-        """Pydantic 설정 클래스"""
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = True
+    @property
+    def extracted_company_id(self) -> str:
+        """
+        FRESHDESK_DOMAIN에서 company_id를 자동으로 추출합니다.
+        
+        Returns:
+            str: 추출된 company_id
+        """
+        domain = self.FRESHDESK_DOMAIN
+        
+        # .freshdesk.com이 포함된 경우 제거
+        if ".freshdesk.com" in domain:
+            company_id = domain.replace(".freshdesk.com", "")
+        else:
+            company_id = domain
+        
+        # https:// 또는 http://가 포함된 경우 제거 (validator에서 이미 처리되지만 안전장치)
+        if company_id.startswith(("https://", "http://")):
+            from urllib.parse import urlparse
+            parsed_url = urlparse(company_id)
+            company_id = parsed_url.netloc.replace(".freshdesk.com", "")
+        
+        return company_id
+
+    @property
+    def freshdesk_api_headers(self) -> Dict[str, str]:
+        """
+        Freshdesk API 호출에 사용할 헤더를 반환합니다.
+        X-Company-ID가 자동으로 포함됩니다.
+        
+        Returns:
+            Dict[str, str]: API 호출용 헤더
+        """
+        return {
+            "Content-Type": "application/json",
+            "X-Company-ID": self.extracted_company_id
+        }
+
+    # Pydantic V2에서는 model_config를 사용하며, Config 클래스는 더 이상 사용하지 않습니다.
 
 
 @lru_cache()

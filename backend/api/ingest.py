@@ -8,15 +8,20 @@ Qdrant 벡터 데이터베이스에 저장하는 기능을 제공합니다.
 """
 
 import asyncio
-import logging
-import time
-import sys
-import os
 import json
-from freshdesk.fetcher import fetch_tickets, fetch_kb_articles
+import logging
+import os
+import sys
+import time
+from typing import Any, Dict, Union
+
 from core.embedder import embed_documents, process_documents
 from core.vectordb import vector_db
-from typing import Dict, Any, Union
+from freshdesk.fetcher import (
+    extract_company_id_from_domain,
+    fetch_kb_articles,
+    fetch_tickets,
+)
 
 # 로깅 설정
 logging.basicConfig(
@@ -25,6 +30,15 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 COLLECTION_NAME = "documents"  # Qdrant 컬렉션 이름
+
+# FRESHDESK_DOMAIN에서 company_id 자동 추출
+FRESHDESK_DOMAIN = os.getenv("FRESHDESK_DOMAIN")
+if FRESHDESK_DOMAIN:
+    DEFAULT_COMPANY_ID = extract_company_id_from_domain(FRESHDESK_DOMAIN)
+    logger.info(f"FRESHDESK_DOMAIN '{FRESHDESK_DOMAIN}'에서 추출된 company_id: '{DEFAULT_COMPANY_ID}'")
+else:
+    DEFAULT_COMPANY_ID = "default"
+    logger.warning("FRESHDESK_DOMAIN 환경변수가 설정되지 않아 기본값 'default'를 사용합니다.")
 PROCESS_ATTACHMENTS = True  # 첨부파일 처리 여부 설정
 STATUS_MAPPINGS_FILE = "status_mappings.json"  # 상태 매핑 정보 파일
 
@@ -127,45 +141,116 @@ def sanitize_metadata(
 
 def load_local_data(data_dir: str):
     """
-    로컬 디렉토리에서 이미 수집된 데이터를 로드합니다.
+    로컬에 저장된 Freshdesk 데이터를 로드합니다.
+    Enhanced Fetcher로 수집된 상세 데이터를 우선적으로 로드합니다.
     
     Args:
-        data_dir: 데이터가 저장된 디렉토리 경로
-        
+        data_dir: 데이터 디렉토리 경로
+    
     Returns:
-        tuple: (tickets, articles) - 티켓 리스트와 문서 리스트
+        tuple: (tickets, articles) - 티켓 리스트와 지식베이스 문서 리스트
     """
-    import json
     from pathlib import Path
     
     data_path = Path(data_dir)
     tickets = []
     articles = []
     
-    # all_tickets.json 파일 확인
-    all_tickets_file = data_path / "all_tickets.json"
-    if all_tickets_file.exists():
-        logger.info(f"통합 티켓 파일에서 로드 중: {all_tickets_file}")
-        with open(all_tickets_file, 'r', encoding='utf-8') as f:
-            tickets = json.load(f)
-        logger.info(f"로컬에서 {len(tickets)}개 티켓 로드 완료")
+    if not data_path.exists():
+        logger.warning(f"데이터 디렉토리가 존재하지 않습니다: {data_dir}")
+        return tickets, articles
+    
+    logger.info(f"로컬 데이터 로드 시작: {data_dir}")
+    
+    # Enhanced Fetcher 구조 확인 (tickets/, knowledge_base/ 디렉토리)
+    tickets_dir = data_path / "tickets"
+    kb_dir = data_path / "knowledge_base"
+    raw_data_dir = data_path / "raw_data"
+    
+    if tickets_dir.exists() or kb_dir.exists() or raw_data_dir.exists():
+        logger.info("Enhanced Fetcher 구조 감지됨, 원본 데이터 로드...")
+        
+        # 1. 상세 티켓 정보 우선 로드
+        if tickets_dir.exists():
+            # 상세정보 파일 우선 확인
+            details_files = sorted(tickets_dir.glob("details_chunk_*.json"))
+            if details_files:
+                logger.info(f"{len(details_files)}개 상세 티켓 청크 파일 로드 중...")
+                for details_file in details_files:
+                    with open(details_file, 'r', encoding='utf-8') as f:
+                        chunk_details = json.load(f)
+                        tickets.extend(chunk_details)
+                        logger.info(f"{details_file.name}: {len(chunk_details)}개 상세 티켓 로드")
+                logger.info(f"상세 티켓 데이터 로드 완료: 총 {len(tickets)}개")
+            else:
+                # 상세정보가 없으면 기본 정보 로드
+                basic_files = sorted(tickets_dir.glob("basic_chunk_*.json"))
+                if basic_files:
+                    logger.info(f"{len(basic_files)}개 기본 티켓 청크 파일 로드 중...")
+                    for basic_file in basic_files:
+                        with open(basic_file, 'r', encoding='utf-8') as f:
+                            chunk_basic = json.load(f)
+                            tickets.extend(chunk_basic)
+                            logger.info(f"{basic_file.name}: {len(chunk_basic)}개 기본 티켓 로드")
+                    logger.info(f"기본 티켓 데이터 로드 완료: 총 {len(tickets)}개")
+        
+        # 2. 지식베이스 문서 로드
+        if kb_dir.exists():
+            # 다양한 파일명 패턴 지원 (articles_chunk_*.json과 knowledge_base_chunk_*.json)
+            kb_files = sorted(list(kb_dir.glob("articles_chunk_*.json")) + list(kb_dir.glob("knowledge_base_chunk_*.json")))
+            if kb_files:
+                logger.info(f"{len(kb_files)}개 지식베이스 청크 파일 로드 중...")
+                for kb_file in kb_files:
+                    with open(kb_file, 'r', encoding='utf-8') as f:
+                        chunk_articles = json.load(f)
+                        articles.extend(chunk_articles)
+                        logger.info(f"{kb_file.name}: {len(chunk_articles)}개 지식베이스 문서 로드")
+                logger.info(f"지식베이스 데이터 로드 완료: 총 {len(articles)}개")
+            else:
+                logger.info("지식베이스 청크 파일이 없음")
+        
+        # 3. raw_data 디렉토리에서 지식베이스 데이터 확인
+        raw_kb_dir = raw_data_dir / "knowledge_base"
+        if raw_kb_dir.exists() and len(articles) == 0:  # 기존에 로드된 지식베이스 문서가 없을 경우에만
+            kb_files = sorted(raw_kb_dir.glob("knowledge_base_chunk_*.json"))
+            if kb_files:
+                logger.info(f"{len(kb_files)}개 raw 지식베이스 청크 파일 로드 중...")
+                for kb_file in kb_files:
+                    with open(kb_file, 'r', encoding='utf-8') as f:
+                        chunk_articles = json.load(f)
+                        articles.extend(chunk_articles)
+                        logger.info(f"{kb_file.name}: {len(chunk_articles)}개 지식베이스 문서 로드")
+                logger.info(f"Raw 지식베이스 데이터 로드 완료: 총 {len(articles)}개")
+    
     else:
-        # 청크 파일들 확인
-        chunk_files = sorted(data_path.glob("tickets_chunk_*.json"))
-        if chunk_files:
-            logger.info(f"{len(chunk_files)}개 청크 파일에서 로드 중...")
-            for chunk_file in chunk_files:
-                with open(chunk_file, 'r', encoding='utf-8') as f:
-                    chunk_tickets = json.load(f)
-                    tickets.extend(chunk_tickets)
-                    logger.info(f"{chunk_file.name}: {len(chunk_tickets)}개 티켓 로드")
-            logger.info(f"청크 파일에서 총 {len(tickets)}개 티켓 로드 완료")
+        # 기존 구조 처리 (하위 호환성)
+        logger.info("기존 구조 감지됨, 레거시 방식으로 로드...")
+        
+        # 통합 파일 우선 확인
+        all_tickets_file = data_path / "all_tickets.json"
+        if all_tickets_file.exists():
+            logger.info(f"통합 티켓 파일에서 로드 중: {all_tickets_file}")
+            with open(all_tickets_file, 'r', encoding='utf-8') as f:
+                tickets = json.load(f)
+            logger.info(f"로컬에서 {len(tickets)}개 티켓 로드 완료")
         else:
-            logger.warning(f"로컬 데이터 디렉토리에서 티켓 파일을 찾을 수 없습니다: {data_dir}")
+            # 청크 파일들 확인
+            chunk_files = sorted(data_path.glob("tickets_chunk_*.json"))
+            if chunk_files:
+                logger.info(f"{len(chunk_files)}개 청크 파일에서 로드 중...")
+                for chunk_file in chunk_files:
+                    with open(chunk_file, 'r', encoding='utf-8') as f:
+                        chunk_tickets = json.load(f)
+                        tickets.extend(chunk_tickets)
+                        logger.info(f"{chunk_file.name}: {len(chunk_tickets)}개 티켓 로드")
+                logger.info(f"청크 파일에서 총 {len(tickets)}개 티켓 로드 완료")
+            else:
+                logger.warning(f"로컬 데이터 디렉토리에서 티켓 파일을 찾을 수 없습니다: {data_dir}")
+        
+        # 지식베이스는 기존 구조에서는 별도 수집
+        logger.info("지식베이스 문서는 기존 구조에서는 실시간 수집됩니다.")
     
-    # 지식베이스 문서는 현재 OptimizedFreshdeskFetcher에서 수집하지 않으므로 빈 리스트 반환
-    logger.info("지식베이스 문서는 로컬 데이터에 없으므로 빈 리스트 반환")
-    
+    logger.info(f"최종 로드 결과: 티켓 {len(tickets):,}개, 지식베이스 {len(articles):,}개")
     return tickets, articles
 
 
@@ -186,6 +271,16 @@ async def ingest(
         local_data_dir: 로컬 데이터 디렉토리 경로 (None이면 Freshdesk API에서 직접 수집)
     """
     start_time = time.time()
+    
+    # FRESHDESK_DOMAIN에서 company_id 자동 추출
+    FRESHDESK_DOMAIN = os.getenv("FRESHDESK_DOMAIN")
+    if FRESHDESK_DOMAIN:
+        DEFAULT_COMPANY_ID = extract_company_id_from_domain(FRESHDESK_DOMAIN)
+        logger.info(f"ingest: FRESHDESK_DOMAIN '{FRESHDESK_DOMAIN}'에서 추출된 company_id: '{DEFAULT_COMPANY_ID}'")
+    else:
+        DEFAULT_COMPANY_ID = "default"
+        logger.warning("ingest: FRESHDESK_DOMAIN 환경변수가 설정되지 않아 기본값 'default'를 사용합니다.")
+    
     logger.info("데이터 수집 프로세스 시작")
 
     try:
@@ -195,7 +290,6 @@ async def ingest(
             incremental = False
             purge = True
         
-        DEFAULT_COMPANY_ID = "kyexpert"
         existing_count = vector_db.count(company_id=DEFAULT_COMPANY_ID)
         logger.info(f"기존 컬렉션에 {existing_count}개 문서가 있습니다 (company_id={DEFAULT_COMPANY_ID})")
 
@@ -225,7 +319,6 @@ async def ingest(
         # 2. 삭제된 문서 감지 및 처리 (증분 업데이트 모드에서만)
         if incremental:
             # 회사 문서 수 확인 (상세 ID 목록은 Qdrant에서는 직접 조회가 어려움)
-            DEFAULT_COMPANY_ID = "kyexpert"
             existing_count = vector_db.count(company_id=DEFAULT_COMPANY_ID)
             logger.info(f"기존 문서 {existing_count}개 확인됨 (company_id={DEFAULT_COMPANY_ID})")
             
@@ -290,7 +383,6 @@ async def ingest(
         existing_ids = set()
         if incremental:
             # Qdrant에서는 전체 ID 목록을 직접 가져올 수 없어 검색으로 추정
-            DEFAULT_COMPANY_ID = "default"
             dummy_embedding = embed_documents(["get all documents"])[0]
             result = vector_db.search(
                 query_embedding=dummy_embedding,
@@ -375,8 +467,7 @@ async def ingest(
         metadatas = [doc["metadata"] for doc in processed_docs]
         ids = [doc["id"] for doc in processed_docs]
         
-        # 모든 메타데이터에 company_id 추가 (실제 환경에서는 인증된 사용자의 company_id 사용)
-        DEFAULT_COMPANY_ID = "default"
+        # 모든 메타데이터에 company_id 추가 (FRESHDESK_DOMAIN에서 추출된 company_id 사용)
         for metadata in metadatas:
             metadata["company_id"] = DEFAULT_COMPANY_ID
 

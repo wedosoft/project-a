@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>프롬프트 캔버스</title>
+  <script async src="{{{appclient}}}"></script>
+  <link rel="stylesheet" type="text/css" href="https://static.freshdev.io/fdk/2.0/assets/freshworks.css">
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+      margin: 0;
+      padding: 0;
+    }
+    
+    .modal-content {
+      padding: 20px;
+    }
+    
+    .modal-title {
+      font-size: 18px;
+      font-weight: bold;
+      margin-bottom: 15px;
+      color: #333;
+    }
+    
+    .modal-text {
+      font-size: 14px;
+      line-height: 1.6;
+      color: #555;
+      margin-bottom: 20px;
+    }
+    
+    .modal-image {
+      width: 100%;
+      max-height: 180px;
+      object-fit: cover;
+      margin-top: 15px;
+      margin-bottom: 15px;
+      border-radius: 4px;
+    }
+    
+    /* 코파일럿 스타일 */
+    .copilot-container {
+      padding: 20px;
+      background-color: #f9f9f9;
+      border-radius: 4px;
+      margin-top: 20px;
+      border: 1px solid #eaeaea;
+    }
+    
+    .copilot-textarea {
+      width: 100%;
+      min-height: 200px;
+      padding: 12px;
+      margin-bottom: 15px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+      resize: vertical;
+    }
+    
+    .copilot-submit-button {
+      padding: 10px 16px;
+      background-color: #1E88E5;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      float: right;
+      transition: background-color 0.2s;
+    }
+    
+    .copilot-submit-button:hover {
+      background-color: #1976D2;
+    }
+    
+    .copilot-submit-button:disabled {
+      background-color: #B0BEC5;
+      cursor: not-allowed;
+    }
+    
+    .ai-section-title {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 15px;
+      color: #333;
+    }
+    
+    #copilot-root {
+      min-height: 300px;
+    }
+    
+    .tab-container {
+      display: flex;
+      margin-top: 20px;
+    }
+    
+    .tab {
+      padding: 8px 16px;
+      cursor: pointer;
+      background-color: #f5f5f5;
+      border: 1px solid #ddd;
+      border-bottom: none;
+      margin-right: 5px;
+      border-radius: 4px 4px 0 0;
+    }
+    
+    .tab.active {
+      background-color: white;
+      border-bottom: 1px solid white;
+      margin-bottom: -1px;
+      font-weight: 500;
+    }
+    
+    .tab-content {
+      display: none;
+      border: 1px solid #ddd;
+      padding: 15px;
+      border-radius: 0 4px 4px 4px;
+    }
+    
+    .tab-content.active {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div class="modal-content">
+    <div class="modal-title">🤖 프롬프트 캔버스</div>
+    <div class="modal-text">
+      프롬프트 캔버스는 Freshdesk에서 효과적인 LLM 프롬프트를 작성하고 관리하는 도구입니다.
+    </div>
+    
+    <!-- 탭 네비게이션 -->
+    <div class="tab-container">
+      <div class="tab active" onclick="showTab('info-tab')">기본 정보</div>
+      <div class="tab" onclick="showTab('ai-tab')">AI 응답 작성</div>
+    </div>
+    
+    <!-- 기본 정보 탭 (기존 내용) -->
+    <div id="info-tab" class="tab-content active">
+      <img src="styles/images/image.png" alt="Project Image" class="modal-image">
+      <p>이 도구를 사용하여 LLM 프롬프트를 효과적으로 관리하고 응답을 생성할 수 있습니다.</p>
+    </div>
+    
+    <!-- AI 응답 작성 탭 (코파일럿 기능) -->
+    <div id="ai-tab" class="tab-content">
+      <div class="ai-section-title">AI 티켓 응답 작성</div>
+      <div class="modal-text">
+        AI가 고객 문의에 대한 응답을 작성하는 것을 도와드립니다. 제안된 텍스트를 수정하거나 탭 키를 눌러 제안을 수락할 수 있습니다.
+      </div>
+      
+      <!-- 테스트 컨트롤 영역 -->
+      <div style="margin-bottom: 15px; padding: 10px; border: 1px solid #e0e0e0; border-radius: 4px; background-color: #f5f5f5;">
+        <div style="margin-bottom: 10px; font-weight: 500;">🔍 자동완성 테스트</div>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <button id="test-copilot" style="padding: 8px 12px; background: #1E88E5; color: white; border: none; border-radius: 4px; cursor: pointer;">
+            자동완성 테스트하기
+          </button>
+          <div id="test-status" style="font-size: 14px; color: #555;"></div>
+        </div>
+      </div>
+      
+      <div id="copilot-root"></div>
+      
+      <!-- 테스트 결과 표시 영역 -->
+      <div id="test-result" style="margin-top: 15px; padding: 10px; border-radius: 4px; background-color: #f8f9fa; border: 1px solid #e9ecef; display: none;">
+        <div style="font-weight: 500; margin-bottom: 5px;">테스트 결과:</div>
+        <div id="test-log" style="font-family: monospace; font-size: 13px;"></div>
+      </div>
+    </div>
+  </div>
+  
+  <script async src="{{{appclient}}}"></script>
+  <script>
+    // 탭 전환 함수
+    function showTab(tabId) {
+      // 모든 탭 컨텐츠 숨기기
+      document.querySelectorAll('.tab-content').forEach(tab => {
+        tab.classList.remove('active');
+      });
+      
+      // 모든 탭 버튼 비활성화
+      document.querySelectorAll('.tab').forEach(tab => {
+        tab.classList.remove('active');
+      });
+      
+      // 선택된 탭 표시
+      document.getElementById(tabId).classList.add('active');
+      
+      // 선택된 탭 버튼 활성화
+      Array.from(document.querySelectorAll('.tab')).find(tab => 
+        tab.getAttribute('onclick').includes(tabId)
+      ).classList.add('active');
+      
+      // AI 탭 선택시 copilot-bundle.js 동적 로드
+      if (tabId === 'ai-tab' && !window.copilotScriptLoaded) {
+        loadCopilotBundle();
+      }
+    }
+    
+    // CopilotKit 번들 로드 함수
+    function loadCopilotBundle() {
+      // 이미 로드된 경우 다시 로드하지 않음
+      if (window.copilotScriptLoaded) return;
+      
+      // 로딩 상태 표시
+      const rootElement = document.getElementById('copilot-root');
+      rootElement.innerHTML = '<div style="text-align: center; padding: 20px;">CopilotKit 로딩 중...</div>';
+      
+      try {
+        // 스크립트 로드
+        const script = document.createElement('script');
+        script.src = 'scripts/copilot-bundle.js';
+        
+        // 로드 실패 시
+        script.onerror = function() {
+          rootElement.innerHTML = '<div style="color: #c62828; padding: 20px; text-align: center;">' +
+            '스크립트 로드 실패: scripts/copilot-bundle.js<br>' +
+            '<button onclick="loadCopilotBundle()" style="margin-top: 10px; padding: 5px 10px; ' +
+            'background: #1E88E5; color: white; border: none; border-radius: 4px; cursor: pointer;">' +
+            '다시 시도</button></div>';
+        };
+        
+        // 로드 성공 시
+        script.onload = function() {
+          window.copilotScriptLoaded = true;
+          console.log('CopilotKit 번들 로드 완료');
+          
+          // API 키 설정
+          window.COPILOT_API_KEY = 'ck_pub_2048e6d9442c1571c2edba0e4fff8415';
+        
+        // 임시로 iframe을 표시하기 전에 로딩 메시지 보여줌
+        rootElement.appendChild(iframe);
+        
+      } catch (e) {
+        console.error('CopilotKit iframe 초기화 실패:', e);
+        rootElement.innerHTML = '<div style="color: #c62828; padding: 20px; text-align: center;">' +
+          'iframe 초기화 실패: ' + e.message + '<br>' +
+          '<button onclick="loadCopilotBundle()" style="margin-top: 10px; padding: 5px 10px; ' +
+          'background: #1E88E5; color: white; border: none; border-radius: 4px; cursor: pointer;">' +
+          '다시 시도</button></div>';
+      }
+    }
+    
+    // iframe 통신 함수
+    function sendMessageToIframe(message) {
+      try {
+        const iframe = document.getElementById('copilot-iframe');
+        if (iframe && iframe.contentWindow) {
+          iframe.contentWindow.postMessage(message, '*');
+          return true;
+        }
+        return false;
+      } catch (error) {
+        console.error('iframe 메시지 전송 오류:', error);
+        return false;
+      }
+    }
+    
+    // iframe으로부터 메시지 수신
+    window.addEventListener('message', function(event) {
+      // 보안: 메시지 출처 확인 (실제 구현 시 적절한 origin 검증 필요)
+      try {
+        const data = event.data;
+        if (data && data.type === 'copilot-response') {
+          log('iframe으로부터 응답 받음: ' + data.message);
+          updateTestStatus('자동완성 응답 생성됨');
+        }
+      } catch (e) {
+        console.error('iframe 메시지 처리 오류:', e);
+      }
+    });
+    
+    // 테스트 로그 함수
+    function log(message) {
+      const logElement = document.getElementById('test-log');
+      const resultElement = document.getElementById('test-result');
+      
+      if (logElement) {
+        const timestamp = new Date().toLocaleTimeString();
+        logElement.innerHTML += `<div>[${timestamp}] ${message}</div>`;
+        resultElement.style.display = 'block';
+      }
+      
+      console.log(message);
+    }
+    
+    // 테스트 상태 업데이트 함수
+    function updateTestStatus(message, isError = false) {
+      const statusElement = document.getElementById('test-status');
+      if (statusElement) {
+        statusElement.textContent = message;
+        statusElement.style.color = isError ? '#c62828' : '#2e7d32';
+      }
+    }
+    
+    // 모달 초기화 (데이터에 따른 탭 표시)
+    document.addEventListener('DOMContentLoaded', function() {
+      // 테스트 버튼 이벤트 리스너 설정
+      const testButton = document.getElementById('test-copilot');
+      if (testButton) {
+        testButton.addEventListener('click', function() {
+          document.getElementById('test-result').style.display = 'block';
+          log('자동완성 테스트 시작...');
+          
+          if (!window.copilotScriptLoaded) {
+            log('CopilotKit 번들 로딩 중...');
+            loadCopilotBundle();
+            
+            // 로드 완료 시 테스트 실행
+            const checkInterval = setInterval(() => {
+              if (window.copilotScriptLoaded) {
+                clearInterval(checkInterval);
+                setTimeout(() => {
+                  log('CopilotKit 번들 로드 완료. 테스트 시작...');
+                  runTest();
+                }, 500);
+              }
+            }, 100);
+          } else {
+            runTest();
+          }
+        });
+      }
+      
+      // 테스트 실행 함수 - iframe 방식으로 변경
+      function runTest() {
+        try {
+          updateTestStatus('테스트 실행 중...');
+          
+          // iframe이 이미 로드되었는지 확인
+          const existingIframe = document.getElementById('copilot-iframe');
+          if (existingIframe) {
+            log('이미 로드된 iframe 사용');
+            
+            // iframe에 테스트 시작 메시지 전송
+            const success = sendMessageToIframe({
+              type: 'start-test',
+              message: '부모 창에서 테스트 시작 요청'
+            });
+            
+            if (success) {
+              log('iframe에 테스트 시작 메시지 전송 성공');
+              updateTestStatus('텍스트를 입력하여 자동완성을 테스트하세요');
+              log('안내: iframe 내에서 텍스트 영역에 "안녕하세요"라고 입력해보세요. 자동완성이 제안되는지 확인해보세요.');
+            } else {
+              log('iframe에 메시지 전송 실패');
+              updateTestStatus('iframe 통신 실패', true);
+            }
+          } else {
+            log('CopilotKit iframe 로드 중...');
+            loadCopilotBundle();
+            log('안내: iframe이 로드되면 텍스트 영역에 "안녕하세요"라고 입력해보세요. 자동완성이 제안되는지 확인해보세요.');
+          }
+        } catch (error) {
+          log(`오류 발생: ${error.message}`);
+          updateTestStatus('테스트 실패', true);
+        }
+      }
+      
+      // Freshdesk 환경인 경우 정상 초기화
+      if (typeof app !== 'undefined') {
+        app.initialized().then(function(client) {
+          client.instance.context().then(function(context) {
+            const data = context.data || {};
+            // AI 탭을 표시해야 하는 경우
+            if (data.showAiTab) {
+              showTab('ai-tab');
+            }
+          });
+        }).catch(function(error) {
+          console.error('Freshdesk 초기화 오류:', error);
+        });
+      } else {
+        console.log('Freshdesk 환경 외부에서 실행 중입니다. 테스트 모드로 초기화합니다.');
+        log('테스트 모드로 초기화합니다.');
+        // 테스트 환경인 경우 AI 탭 자동 활성화
+        setTimeout(() => {
+          showTab('ai-tab');
+        }, 100);
+      }
+    });
+  </script>
+</body>
+</html>

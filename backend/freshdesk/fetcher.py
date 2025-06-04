@@ -6,11 +6,12 @@ Freshdesk 데이터 가져오기 모듈
 
 프로젝트 규칙 및 가이드라인: /PROJECT_RULES.md 참조
 """
-import os
-import httpx
 import asyncio
 import logging
-from typing import List, Dict, Any
+import os
+from typing import Any, Dict, List
+
+import httpx
 from dotenv import load_dotenv
 
 # .env 파일 로드
@@ -26,8 +27,45 @@ FRESHDESK_API_KEY = os.getenv("FRESHDESK_API_KEY")
 if not FRESHDESK_DOMAIN or not FRESHDESK_API_KEY:
     raise RuntimeError("FRESHDESK_DOMAIN, FRESHDESK_API_KEY 환경 변수가 필요합니다.")
 
-BASE_URL = f"https://{FRESHDESK_DOMAIN}.freshdesk.com/api/v2"
-HEADERS = {"Content-Type": "application/json"}
+def extract_company_id_from_domain(domain: str) -> str:
+    """
+    FRESHDESK_DOMAIN에서 company_id를 추출합니다.
+    
+    Args:
+        domain: Freshdesk 도메인 (예: "your-company.freshdesk.com" 또는 "your-company")
+        
+    Returns:
+        str: 추출된 company_id
+    """
+    if not domain:
+        raise ValueError("도메인이 비어있습니다.")
+    
+    # .freshdesk.com이 포함된 경우 제거
+    if ".freshdesk.com" in domain:
+        company_id = domain.replace(".freshdesk.com", "")
+    else:
+        company_id = domain
+    
+    # https:// 또는 http://가 포함된 경우 제거
+    if company_id.startswith(("https://", "http://")):
+        from urllib.parse import urlparse
+        parsed_url = urlparse(company_id)
+        company_id = parsed_url.netloc.replace(".freshdesk.com", "")
+    
+    return company_id
+
+# company_id 자동 추출
+COMPANY_ID = extract_company_id_from_domain(FRESHDESK_DOMAIN)
+logger.info(f"FRESHDESK_DOMAIN '{FRESHDESK_DOMAIN}'에서 추출된 company_id: '{COMPANY_ID}'")
+
+BASE_URL = f"https://{FRESHDESK_DOMAIN}" if ".freshdesk.com" in FRESHDESK_DOMAIN else f"https://{FRESHDESK_DOMAIN}.freshdesk.com"
+BASE_URL += "/api/v2"
+
+# X-Company-ID 헤더를 포함한 기본 헤더 설정
+HEADERS = {
+    "Content-Type": "application/json",
+    "X-Company-ID": COMPANY_ID
+}
 AUTH = (FRESHDESK_API_KEY, "X")
 
 # API 호출 시 사용할 재시도 횟수 및 대기 시간
@@ -112,7 +150,8 @@ async def fetch_ticket_attachments(client: httpx.AsyncClient, ticket_id: int) ->
         # 대화 내역의 첨부파일도 확인
         conversations = await fetch_ticket_conversations(client, ticket_id)
         for conv in conversations:
-            if "attachments" in conv and conv["attachments"]:
+            # conv가 None이 아니고 딕셔너리 타입인지 확인
+            if conv is not None and isinstance(conv, dict) and "attachments" in conv and conv["attachments"]:
                 for attachment in conv["attachments"]:
                     attachments.append({
                         "id": attachment.get("id"),
@@ -135,11 +174,22 @@ async def fetch_ticket_attachments(client: httpx.AsyncClient, ticket_id: int) ->
 async def fetch_article_attachments(client: httpx.AsyncClient, article_id: int) -> List[Dict[str, Any]]:
     """
     지식베이스 문서의 첨부파일 정보를 가져옵니다.
+    Freshdesk API 문서에 따라 folder_id가 필요한 경우를 처리합니다.
+    
+    Args:
+        client: httpx 클라이언트 객체
+        article_id: 아티클 ID
+        
+    Returns:
+        List[Dict[str, Any]]: 첨부파일 정보 목록
     """
     try:
         logger.info(f"지식베이스 문서 {article_id}의 상세 정보 요청 중...")
+        
+        # 아티클 상세 정보를 가져옴
         article_detail = await fetch_with_retry(client, f"{BASE_URL}/solutions/articles/{article_id}")
         
+        # 첨부파일 추출
         attachments = []
         if "attachments" in article_detail and article_detail["attachments"]:
             for attachment in article_detail["attachments"]:
@@ -151,7 +201,9 @@ async def fetch_article_attachments(client: httpx.AsyncClient, article_id: int) 
                     "attachment_url": attachment.get("attachment_url"),
                     "created_at": attachment.get("created_at"),
                     "updated_at": attachment.get("updated_at"),
-                    "article_id": article_id
+                    "article_id": article_id,
+                    "folder_id": article_detail.get("folder_id"),  # 폴더 ID 추가
+                    "category_id": article_detail.get("category_id")  # 카테고리 ID 추가
                 })
         
         logger.info(f"지식베이스 문서 {article_id}의 첨부파일 {len(attachments)}개 수신 완료")
@@ -309,9 +361,15 @@ async def fetch_kb_articles() -> List[Dict[str, Any]]:
                         if not folder_articles:
                             break
                             
-                        # 각 문서에 대한 첨부파일 정보 가져오기
-                        if include_attachments:
-                            for article in folder_articles:
+                        # 카테고리 및 폴더 정보 추가
+                        for article in folder_articles:
+                            article["category_id"] = cat_id
+                            article["category_name"] = cat_name
+                            article["folder_id"] = folder_id
+                            article["folder_name"] = folder_name
+                            
+                            # 각 문서에 대한 첨부파일 정보 가져오기
+                            if include_attachments:
                                 article_id = article.get("id")
                                 attachments = await fetch_article_attachments(client, article_id)
                                 article["attachments"] = attachments

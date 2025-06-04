@@ -83,7 +83,8 @@ def retrieve_faqs(
     min_score: Optional[float] = 0.7 # FAQ 검색 시 최소 유사도 기본값 설정
 ) -> List[Dict[str, Any]]:
     """
-    쿼리 임베딩을 이용해 FAQ 컬렉션에서 유사한 FAQ를 검색합니다.
+    FAQ 컬렉션이 제거되어 이 함수는 항상 빈 배열을 반환합니다.
+    호환성을 위해 함수 시그니처는 유지합니다.
 
     Args:
         query_embedding: 검색에 사용할 쿼리 임베딩 벡터.
@@ -93,27 +94,7 @@ def retrieve_faqs(
         min_score: 반환할 FAQ의 최소 유사도 점수 (선택 사항).
 
     Returns:
-        검색된 FAQ 목록. 각 FAQ는 id, question, answer, category, score 등을 포함하는 딕셔너리입니다.
+        빈 배열을 반환합니다.
     """
-    # company_id가 None이면 "default"로 설정
-    search_company_id = company_id if company_id else "default"
-    logger.info(f"FAQ 검색 시작 (company_id: {search_company_id}, category: {category})")
-
-    try:
-        # vector_db는 QdrantAdapter 인스턴스여야 함
-        # QdrantAdapter에는 search_faqs 메서드가 구현되어 있음
-        faq_results = vector_db.search_faqs(
-            query_embedding=query_embedding,
-            top_k=top_k,
-            company_id=search_company_id,  # 수정된 company_id 사용
-            category=category,
-            min_score=min_score
-        )
-        logger.info(f"{len(faq_results)}개의 FAQ 검색 완료 (company_id: {search_company_id}, category: {category}, min_score: {min_score}).")
-        return faq_results
-    except AttributeError as e:
-        logger.error(f"vector_db 객체에 search_faqs 메서드가 없습니다: {e}. QdrantAdapter를 사용하고 있는지 확인하세요.")
-        return []
-    except Exception as e:
-        logger.error(f"FAQ 검색 중 오류 발생: {e}")
-        return []
+    logger.info("FAQ 기능은 더 이상 사용되지 않습니다.")
+    return []

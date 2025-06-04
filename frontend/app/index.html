@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Custom App</title>
+  <script async src="{{{appclient}}}"></script>
+  <link rel="stylesheet" type="text/css" href="https://static.freshdev.io/fdk/2.0/assets/freshworks.css">
+  <script type="module" src="https://cdn.jsdelivr.net/npm/@freshworks/crayons@3/dist/crayons/crayons.esm.js"></script>
+  <script nomodule src="https://cdn.jsdelivr.net/npm/@freshworks/crayons@3/dist/crayons/crayons.js"></script>
+</head>
+<body>
+  <div class="fw-widget-wrapper">
+    <div style="display: flex; flex-direction: column; gap: 10px;">
+      <!-- 기존 사이드바 버튼 -->
+      <fw-button id="openModalBtn" color="primary">Open Modal</fw-button>
+      
+      <!-- AI 응답 버튼 -->
+      <fw-button id="openCopilotBtn" color="secondary" style="--color: #1976d2;">
+        <fw-icon name="robot" slot="start"></fw-icon>
+        AI 응답 작성
+      </fw-button>
+    </div>
+  </div>
+  <script src="scripts/app.js"></script>
+</body>
+</html>

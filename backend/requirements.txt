@@ -5,6 +5,7 @@ qdrant-client>=1.5.0  # Qdrant Vector DB
 anthropic>=0.51.0
 httpx==0.25.2
 pydantic==2.5.2
+pydantic-settings>=2.0.0  # Pydantic v2 설정 관리 패키지
 openai==1.3.7
 python-dotenv==1.0.0
 Pillow==10.1.0
@@ -17,5 +18,6 @@ google-generativeai>=0.3.0 # Gemini API
 cachetools>=4.2.0 # For in-memory caching
 prometheus-client>=0.14.1 # Prometheus metrics client
 pandas>=1.5.0
+psutil>=5.8.0  # 시스템 리소스 모니터링을 위한 패키지
 # 성능 모니터링을 위한 추가 패키지
 # logging==0.4.9.6 - 제거됨, Python 내장 모듈과 충돌
