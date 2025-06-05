@@ -607,22 +607,29 @@ async def get_initial_context(
         ticket_title = ticket_metadata.get("subject", f"티켓 ID {ticket_id}")
         ticket_body = ticket_metadata.get("text", ticket_metadata.get("description_text", "티켓 본문 정보 없음"))
         
-        # 대화 내용 처리
+        # 대화 내용 처리 - 전체 대화 내역 보존하여 요약 품질 개선
         raw_conversations = ticket_metadata.get("conversations", [])
         ticket_conversations = []
         
         if isinstance(raw_conversations, list):
-            ticket_conversations = [str(conv) for conv in raw_conversations]
+            # 원본 형식 보존 (가능한 경우 딕셔너리 형태 유지)
+            ticket_conversations = raw_conversations
         elif isinstance(raw_conversations, str):
             try:
                 parsed_convs = json.loads(raw_conversations)
                 if isinstance(parsed_convs, list):
-                    ticket_conversations = [str(conv) for conv in parsed_convs]
+                    ticket_conversations = parsed_convs  # 딕셔너리 형태 유지
+                else:
+                    ticket_conversations = [{"body_text": str(parsed_convs), "created_at": datetime.now().timestamp()}]
             except json.JSONDecodeError:
-                ticket_conversations = [raw_conversations]
+                ticket_conversations = [{"body_text": raw_conversations, "created_at": datetime.now().timestamp()}]
         
+        # 대화 내역이 없는 경우 대화 요약 사용 (최후의 대안)
         if not ticket_conversations and ticket_metadata.get("conversation_summary"):
-            ticket_conversations = [str(ticket_metadata.get("conversation_summary"))]
+            ticket_conversations = [{"body_text": str(ticket_metadata.get("conversation_summary")), 
+                                    "created_at": datetime.now().timestamp()}]
+            
+        logger.info(f"티켓 ID {ticket_id} 대화 내역 {len(ticket_conversations)}개 로드됨")
             
         logger.info(f"티켓 ID {ticket_id} 정보 조회 완료: 제목='{ticket_title[:50]}...'")
     except HTTPException as http_exc:
@@ -635,7 +642,21 @@ async def get_initial_context(
     context_id = f"ctx_{ticket_id}_{int(time.time())}"
     
     # 티켓 정보 구성을 위한 모든 텍스트
-    ticket_full_text = f"{ticket_title}\n\n{ticket_body}\n\n" + "\n\n".join(ticket_conversations)
+    # 대화 내용이 딕셔너리 목록인 경우 각 대화에서 본문을 추출하여 문자열로 변환
+    conversation_texts = []
+    for conv in ticket_conversations:
+        if isinstance(conv, dict):
+            # body_text, body, text 등의 필드를 순서대로 시도
+            for field in ["body_text", "body", "text", "content", "message"]:
+                if field in conv and conv[field]:
+                    conversation_texts.append(str(conv[field]))
+                    break
+            else:  # for-else: for 루프가 break 없이 완료되면 실행
+                conversation_texts.append(str(conv)[:300])  # 필드를 못 찾은 경우 전체 딕셔너리
+        else:
+            conversation_texts.append(str(conv))
+    
+    ticket_full_text = f"{ticket_title}\n\n{ticket_body}\n\n" + "\n\n".join(conversation_texts)
     
     # 작업 병렬 처리를 위한 태스크 준비
     tasks = []
@@ -740,6 +761,7 @@ async def get_initial_context(
                 
                 # 티켓 정보 수집
                 ticket_info = {
+                    "id": ticket_id,  # ticket_id 추가
                     "subject": ticket_title,
                     "description": ticket_body,
                     "conversations": conversations,
@@ -798,6 +820,10 @@ async def get_initial_context(
     context_time = time.time() - context_start_time
     
     # 결과 구성
+    # 티켓 메타데이터에 id가 없으면 ticket_id로 추가
+    if isinstance(ticket_metadata, dict) and "id" not in ticket_metadata:
+        ticket_metadata["id"] = ticket_id
+        
     result = InitResponse(
         ticket_id=ticket_id,
         ticket_data=ticket_metadata,
@@ -1049,31 +1075,48 @@ async def get_related_documents(ticket_id: str, company_id: str = Depends(get_co
                 ids = []
                 
                 # 결과가 있는 경우 필터링
-                if all_results and all_results.get("metadatas"):
-                    for i, metadata in enumerate(all_results.get("metadatas", [])):
-                        # KB 문서 타입 (published=1 또는 draft=2)
-                        doc_type = metadata.get("type")
-                        source_type = metadata.get("source_type")
-                        status = metadata.get("status")
+                if all_results and all_results.get("results"):
+                    logger.info(f"벡터DB에서 반환된 전체 결과: {len(all_results['results'])}개")
+                    for i, result in enumerate(all_results.get("results", [])):
+                        # KB 문서 타입 필드들 (여러 필드 확인)
+                        doc_type = result.get("doc_type")
+                        result_type = result.get("type")
+                        source_type = result.get("source_type")
+                        status = result.get("status")
                         
-                        # KB 문서 조건: 
-                        # 1. type이 "1" 또는 숫자 1인 경우
-                        # 2. type이 "kb"인 경우
-                        # 3. source_type이 "kb"인 경우
-                        # 4. status가 1(published)인 경우
-                        if (doc_type == "1" or doc_type == 1 or 
-                            doc_type == "kb" or source_type == "kb" or 
-                            status == 1 or status == "1"):
+                        # KB 문서 판별 조건 확장:
+                        # 1. doc_type이 "kb"인 경우
+                        # 2. type이 "kb", "1" 또는 1인 경우
+                        # 3. source_type이 "kb", "1" 또는 1인 경우
+                        # 4. status가 1(published) 또는 "1"인 경우
+                        if (doc_type == "kb" or 
+                            result_type in ["kb", "1", 1] or 
+                            source_type in ["kb", "1", 1] or 
+                            status in [1, "1"]):
                             
-                            if i < len(all_results.get("documents", [])):
+                            # 문서 텍스트 추가
+                            if "documents" in all_results and i < len(all_results.get("documents", [])):
                                 documents.append(all_results["documents"][i])
-                                metadatas.append(metadata)
-                                
-                                if "distances" in all_results and i < len(all_results["distances"]):
-                                    distances.append(all_results["distances"][i])
-                                
-                                if "ids" in all_results and i < len(all_results["ids"]):
-                                    ids.append(all_results["ids"][i])
+                            else:
+                                # 문서 텍스트가 없으면 description 또는 빈 문자열 사용
+                                documents.append(result.get("description", ""))
+                            
+                            # 메타데이터 추가 (결과 전체를 메타데이터로 사용)
+                            metadatas.append(result)
+                            
+                            # 거리(유사도) 추가
+                            if "distances" in all_results and i < len(all_results.get("distances", [])):
+                                distances.append(all_results["distances"][i])
+                            else:
+                                # 거리 정보가 없으면 score 사용
+                                distances.append(1.0 - result.get("score", 0))
+                            
+                            # ID 추가
+                            if "ids" in all_results and i < len(all_results.get("ids", [])):
+                                ids.append(all_results["ids"][i])
+                            else:
+                                # ID 정보가 없으면 result의 id 필드 사용
+                                ids.append(result.get("id", f"unknown-{i}"))
                 
                 # 필터링된 결과 구성
                 related_docs_result = {
@@ -1098,24 +1141,85 @@ async def get_related_documents(ticket_id: str, company_id: str = Depends(get_co
         related_docs_list = []
         
         # KB 문서 처리
-        if related_docs_result and related_docs_result.get("ids"):
-            for i, doc_id in enumerate(related_docs_result["ids"]):
-                metadata = related_docs_result["metadatas"][i] if i < len(related_docs_result.get("metadatas", [])) else {}
-                
-                title = metadata.get("title", f"문서 {doc_id}")
-                url = metadata.get("url", None)
-                
-                # 문서 요약 생성
-                summary_text = related_docs_result["documents"][i] if i < len(related_docs_result.get("documents", [])) else ""
-                if not summary_text:
-                    summary_text = metadata.get("description", "요약 정보 없음")
-                
-                summary = summary_text[:200] + "..." if len(summary_text) > 200 else summary_text
-                source_type = metadata.get("source_type", metadata.get("type", "kb"))
-                
-                # 거리/점수 정보 추가
-                distance = related_docs_result.get("distances", [0])[i] if i < len(related_docs_result.get("distances", [])) else 0
-                similarity_score = max(0, 1 - distance)  # 거리를 유사도로 변환
+        if related_docs_result and (related_docs_result.get("ids") or related_docs_result.get("results")):
+            # 결과 목록 확인
+            doc_ids = related_docs_result.get("ids", [])
+            metadatas = related_docs_result.get("metadatas", [])
+            documents = related_docs_result.get("documents", [])
+            distances = related_docs_result.get("distances", [])
+            results = related_docs_result.get("results", [])
+            
+            # 결과가 results 목록에 있는 경우
+            if not doc_ids and results:
+                logger.info("결과가 results 목록에 있습니다. results 기준으로 처리합니다.")
+                for i, result in enumerate(results):
+                    metadata = result  # result 자체가 메타데이터
+                    doc_id = result.get("id", f"unknown-{i}")
+                    
+                    title = metadata.get("title", f"문서 {doc_id}")
+                    url = metadata.get("url", None)
+                    
+                    # 문서 텍스트/내용 가져오기
+                    summary_text = ""
+                    if i < len(documents):
+                        summary_text = documents[i]
+                    elif "description" in metadata:
+                        summary_text = metadata.get("description", "")
+                    elif "content" in metadata:
+                        summary_text = metadata.get("content", "")
+                    
+                    if not summary_text:
+                        summary_text = "요약 정보 없음"
+                    
+                    summary = summary_text[:200] + "..." if len(summary_text) > 200 else summary_text
+                    
+                    # 문서 타입 정보 확인 (여러 필드 확인)
+                    source_type = "kb"  # 기본값은 KB
+                    if "source_type" in metadata:
+                        source_type = metadata["source_type"]
+                    elif "type" in metadata:
+                        if metadata["type"] in ["kb", "1", 1]:
+                            source_type = "kb"
+                    
+                    # 거리/점수 정보 추가
+                    distance = 0
+                    if i < len(distances):
+                        distance = distances[i]
+                    elif "score" in result:
+                        # score가 있으면 1-score를 거리로 사용
+                        distance = 1 - result["score"]
+                    
+                    similarity_score = max(0, 1 - distance)  # 거리를 유사도로 변환
+                    
+                    # 관련 문서 목록에 추가
+                    related_docs_list.append(RelatedDocumentItem(
+                        id=str(doc_id),
+                        title=title,
+                        doc_summary=summary,
+                        url=url,
+                        source_type="kb",  # 명시적으로 'kb'로 설정
+                        similarity_score=round(similarity_score, 3)
+                    ))
+            
+            # 기존 방식 (ids 기반)
+            else:
+                for i, doc_id in enumerate(doc_ids):
+                    metadata = metadatas[i] if i < len(metadatas) else {}
+                    
+                    title = metadata.get("title", f"문서 {doc_id}")
+                    url = metadata.get("url", None)
+                    
+                    # 문서 요약 생성
+                    summary_text = documents[i] if i < len(documents) else ""
+                    if not summary_text:
+                        summary_text = metadata.get("description", "요약 정보 없음")
+                    
+                    summary = summary_text[:200] + "..." if len(summary_text) > 200 else summary_text
+                    source_type = metadata.get("source_type", metadata.get("type", "kb"))
+                    
+                    # 거리/점수 정보 추가
+                    distance = distances[i] if i < len(distances) else 0
+                    similarity_score = max(0, 1 - distance)  # 거리를 유사도로 변환
                 
                 # KB 문서 URL 생성 또는 개선
                 if not url and (source_type == "kb" or source_type == "1"):
@@ -1153,18 +1257,7 @@ async def get_related_documents(ticket_id: str, company_id: str = Depends(get_co
                 ))
         
         # FAQ 기능이 제거되었습니다 (2025.06.03)
-                # FAQ ID로 URL 생성 (가능한 경우)
-                if isinstance(faq_id, str) and faq_id.startswith("faq-"):
-                    faq_number = faq_id.replace("faq-", "")
-                    freshdesk_domain = os.getenv("FRESHDESK_DOMAIN", "")
-                    if freshdesk_domain:
-                        # 도메인 값에 이미 .freshdesk.com이 포함되어 있는지 확인
-                        if ".freshdesk.com" in freshdesk_domain:
-                            domain_base = freshdesk_domain
-                        else:
-                            domain_base = f"{freshdesk_domain}.freshdesk.com"
-                            
-                        # FAQ 기능이 제거되었습니다 (2025.06.03)
+        # 아래 FAQ 관련 코드는 더 이상 사용되지 않으므로 주석 처리
         
         # 유사도 점수 기준으로 정렬하고 상위 결과만 반환
         related_docs_list.sort(key=lambda x: x.similarity_score, reverse=True)

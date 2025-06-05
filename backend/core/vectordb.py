@@ -71,6 +71,21 @@ class VectorDBInterface(ABC):
         """원본 ID로 단일 문서 조회"""
         pass
 
+    @abstractmethod
+    def collection_exists(self) -> bool:
+        """컬렉션 존재 여부 확인"""
+        pass
+
+    @abstractmethod
+    def get_collection_info(self) -> Dict[str, Any]:
+        """컬렉션 정보 조회"""
+        pass
+
+    @abstractmethod
+    def drop_collection(self, collection_name: Optional[str] = None) -> bool:
+        """컬렉션 삭제"""
+        pass
+
 
 class QdrantAdapter(VectorDBInterface):
     """Qdrant 벡터 DB 어댑터 구현"""
@@ -341,7 +356,8 @@ class QdrantAdapter(VectorDBInterface):
         
         try:
             # doc_type 필터링이 필요한 경우 더 많은 결과를 요청하여 메모리 내 필터링 수행
-            fetch_limit = top_k * 5 if use_doc_type_filter else top_k
+            # 더 많은 결과를 가져와 필터링하기 위해 배수를 10으로 설정
+            fetch_limit = top_k * 10 if use_doc_type_filter else top_k
             logger.info(f"Qdrant 검색 시도 (company_id={company_id}, 검색 크기={fetch_limit})")
             
             search_results = self.client.search(
@@ -382,11 +398,33 @@ class QdrantAdapter(VectorDBInterface):
         
         for hit in search_results:
             if use_doc_type_filter:
-                # 다양한 필드에서 문서 타입 확인 (호환성)
-                hit_doc_type = hit.payload.get("doc_type") or hit.payload.get("type")
+                # 문서 관련 필드 추출 (다양한 메타데이터 필드 지원)
+                hit_doc_type = hit.payload.get("doc_type")
+                hit_type = hit.payload.get("type")
+                hit_source_type = hit.payload.get("source_type")
+                hit_status = hit.payload.get("status")
                 
-                # 타입이 일치하지 않으면 건너뛰기
-                if hit_doc_type != doc_type:
+                # 문서 타입 일치 여부
+                match_found = False
+                
+                # 필터링 조건 간소화
+                # 티켓에서 "type"은 문의 유형, 지식베이스에서 "type"은 게시:1, 임시저장:2 의미
+                if doc_type == "kb":
+                    # 지식베이스 문서 확인 - KB 문서 조건을 명확하게 정의
+                    # 1) doc_type="kb"인 경우
+                    # 2) type=1 또는 type="1"인 경우 (게시된 KB 문서)
+                    # 3) status=1 또는 status="1"인 경우 (게시 상태)
+                    if hit_doc_type == "kb" or hit_type in [1, "1"] or hit_status in [1, "1"]:
+                        match_found = True
+                elif doc_type == "ticket":
+                    # 티켓 문서 확인 - 티켓 조건을 명확하게 정의
+                    # 1) doc_type="ticket"인 경우
+                    # 2) source_type="ticket"인 경우
+                    if hit_doc_type == "ticket" or hit_source_type == "ticket":
+                        match_found = True
+                
+                # 일치하지 않으면 건너뛰기
+                if not match_found:
                     skipped_count += 1
                     continue
             
@@ -405,14 +443,92 @@ class QdrantAdapter(VectorDBInterface):
         # 필터링 결과 로깅
         if use_doc_type_filter:
             logger.info(f"메모리 내 필터링 후 결과: {len(filtered_results)}개 유효, {skipped_count}개 제외 (doc_type={doc_type})")
+            if len(filtered_results) == 0:
+                logger.warning("검색 결과가 0개입니다. 필터링 로직을 확인하세요.")
+                if len(search_results) > 0:
+                    # 디버깅을 위해 첫 번째 결과의 메타데이터 출력
+                    sample = search_results[0].payload
+                    logger.info(f"필터링 실패한 샘플 문서: doc_type={sample.get('doc_type')}, type={sample.get('type')}, source_type={sample.get('source_type')}, status={sample.get('status')}")
         
-        # 호환성을 위해 doc_type 필드가 없는 경우 추가
+        # 호환성을 위해 필드 보정 처리
         for result in filtered_results:
-            if "doc_type" not in result and "type" in result:
-                result["doc_type"] = result["type"]
+            # 1. 문서 타입 일관성 확보
+            if "doc_type" not in result:
+                # KB 문서인 경우
+                if result.get("type") == 1 or result.get("type") == "1" or result.get("status") == 1 or result.get("status") == "1":
+                    result["doc_type"] = "kb"
+                # 티켓인 경우
+                elif result.get("type") == "ticket" or result.get("source_type") == "ticket":
+                    result["doc_type"] = "ticket"
+                # 기본값은 원본 type 값 사용
+                elif "type" in result:
+                    result["doc_type"] = str(result["type"])
+                    
+            # 2. KB 문서의 경우 status와 source_type 일관성 확보
+            if result.get("doc_type") == "kb" or result.get("type") == 1 or result.get("type") == "1":
+                # KB 문서로 확인된 경우 부가 정보 표준화
+                result["doc_type"] = "kb"  # 확실하게 설정
+                
+                # 게시 상태 표준화
+                if "status" not in result:
+                    result["status"] = 1  # 기본적으로 published 상태로 설정
+                    
+                # source_type 표준화
+                if "source_type" not in result:
+                    result["source_type"] = "kb"
             
+            # 3. 티켓의 경우 source_type 일관성 확보
+            if result.get("doc_type") == "ticket":
+                if "source_type" not in result:
+                    result["source_type"] = "ticket"
+                    
+            # 4. id 필드 일관성 확보
+            if "original_id" in result and "id" not in result:
+                result["id"] = result["original_id"]
+            
+        # 검색 결과를 retriever.py에서 기대하는 형식으로 변환
+        # 이전에는 "results"에만 저장했으나, 결과를 "documents", "metadatas", "ids", "distances" 형식으로도 추가
+        documents = []
+        metadatas = []
+        ids = []
+        distances = []
+        
+        for result in filtered_results:
+            # 문서 텍스트 (내용)
+            if "text" in result:
+                documents.append(result["text"])
+            elif "description" in result:
+                documents.append(result["description"])
+            elif "content" in result:
+                documents.append(result["content"])
+            else:
+                # 적절한 텍스트 필드가 없으면 빈 문자열 사용
+                documents.append("")
+                
+            # 메타데이터 (전체 결과)
+            metadatas.append(result)
+            
+            # ID
+            if "id" in result:
+                ids.append(result["id"])
+            elif "original_id" in result:
+                ids.append(result["original_id"])
+            else:
+                ids.append(str(uuid.uuid4()))  # 임의 ID 생성
+                
+            # 거리/점수 (1 - 유사도)
+            if "score" in result:
+                distances.append(1.0 - result["score"])
+            else:
+                distances.append(0.0)  # 기본 거리 0 (최대 유사도)
+        
+        # 검색 결과 반환 (원래 형식 + 호환성을 위한 추가 필드)
         return {
-            "results": filtered_results,
+            "results": filtered_results,  # 기존 형식 (main.py에서 사용)
+            "documents": documents,       # 호환성 형식 (retriever.py에서 사용)
+            "metadatas": metadatas,       # 호환성 형식
+            "ids": ids,                   # 호환성 형식
+            "distances": distances,       # 호환성 형식
             "total": len(filtered_results),
             "filtered_by_doc_type": use_doc_type_filter,
             "skipped_count": skipped_count if use_doc_type_filter else 0
@@ -581,7 +697,21 @@ class QdrantAdapter(VectorDBInterface):
             logger.error(f"컬렉션 정보 조회 중 오류 발생: {e}")
             return {"error": str(e)}
 
-    def drop_collection(self, collection_name: str = None) -> bool:
+    def collection_exists(self) -> bool:
+        """
+        컬렉션 존재 여부 확인
+        
+        Returns:
+            bool: 컬렉션 존재 여부
+        """
+        try:
+            self.client.get_collection(collection_name=self.collection_name)
+            return True
+        except Exception as e:
+            logger.debug(f"컬렉션 존재 확인 중 오류 (정상적일 수 있음): {e}")
+            return False
+
+    def drop_collection(self, collection_name: Optional[str] = None) -> bool:
         """
         지정한 Qdrant 컬렉션을 완전히 삭제(drop)합니다.
         Args:
@@ -794,11 +924,13 @@ logger = logging.getLogger(__name__)
 def migrate_type_to_doc_type():
     """
     기존 'type' 필드를 사용하는 문서들을 'doc_type' 필드로 마이그레이션하는 유틸리티 함수
+    또한 doc_type과 source_type 필드의 일관성을 확보합니다.
     
     이 함수는 관리자가 필요한 경우 직접 호출하여 기존 데이터를 마이그레이션할 수 있습니다.
     """
     try:
         logger.info("기존 'type' 필드를 사용하는 데이터를 'doc_type' 필드로 마이그레이션 시작")
+        logger.info("또한 doc_type과 source_type 필드의 일관성을 확보합니다")
         
         # 기존 벡터 DB 인스턴스 사용
         db = vector_db
@@ -807,6 +939,7 @@ def migrate_type_to_doc_type():
         offset = 0
         batch_size = 100
         migrated_count = 0
+        source_type_fixed = 0
         total_processed = 0
         
         while True:
@@ -830,22 +963,48 @@ def migrate_type_to_doc_type():
             
             for point in points:
                 payload = point.payload
+                update_needed = False
+                updated_payload = dict(payload)
+                
+                # 1. type -> doc_type 마이그레이션
                 if "type" in payload and ("doc_type" not in payload or not payload["doc_type"]):
-                    # 'type' 필드가 있고 'doc_type' 필드가 없는 경우 마이그레이션
                     doc_type_value = payload["type"]
                     
                     # doc_type 값이 유효한지 확인
                     if doc_type_value in ["ticket", "kb"]:
                         # 원본 페이로드에 'doc_type' 필드 추가
-                        updated_payload = {**payload, "doc_type": doc_type_value}
-                        
-                        points_to_update.append(
-                            PointStruct(
-                                id=point.id,
-                                payload=updated_payload,
-                                vector=None  # 벡터는 업데이트하지 않음
-                            )
+                        updated_payload["doc_type"] = doc_type_value
+                        update_needed = True
+                
+                # 2. source_type 일관성 확보
+                current_doc_type = updated_payload.get("doc_type") or payload.get("type")
+                
+                if current_doc_type == "kb" and "source_type" not in updated_payload:
+                    # KB 문서에 source_type 추가
+                    updated_payload["source_type"] = "1"  # KB 문서의 표준 source_type
+                    update_needed = True
+                    source_type_fixed += 1
+                
+                elif current_doc_type == "ticket" and "source_type" not in updated_payload:
+                    # 티켓 문서에 source_type 추가
+                    updated_payload["source_type"] = "ticket"
+                    update_needed = True
+                    source_type_fixed += 1
+                
+                # 3. id 일관성 확보
+                if "original_id" in updated_payload and "id" not in updated_payload:
+                    updated_payload["id"] = updated_payload["original_id"]
+                    update_needed = True
+                
+                # 변경이 필요한 경우 포인트 추가
+                if update_needed:
+                    points_to_update.append(
+                        PointStruct(
+                            id=point.id,
+                            payload=updated_payload,
+                            vector=None  # 벡터는 업데이트하지 않음
                         )
+                    )
             
             # 마이그레이션할 문서가 있으면 업데이트
             if points_to_update:
@@ -861,9 +1020,11 @@ def migrate_type_to_doc_type():
             offset += batch_size
         
         logger.info(f"마이그레이션 완료: 총 {total_processed}개 중 {migrated_count}개 문서 마이그레이션됨")
+        logger.info(f"source_type 필드 고정된 문서: {source_type_fixed}개")
         return {
             "total_processed": total_processed,
-            "migrated_count": migrated_count
+            "migrated_count": migrated_count,
+            "source_type_fixed": source_type_fixed
         }
     except Exception as e:
         logger.error(f"마이그레이션 중 오류 발생: {e}")

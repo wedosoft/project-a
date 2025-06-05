@@ -1,27 +1,198 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8">
+  <title>Ticket Assistant</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Custom App</title>
-  <script async src="{{{appclient}}}"></script>
   <link rel="stylesheet" type="text/css" href="https://static.freshdev.io/fdk/2.0/assets/freshworks.css">
-  <script type="module" src="https://cdn.jsdelivr.net/npm/@freshworks/crayons@3/dist/crayons/crayons.esm.js"></script>
-  <script nomodule src="https://cdn.jsdelivr.net/npm/@freshworks/crayons@3/dist/crayons/crayons.js"></script>
+  <script src="{{{appclient}}}"></script>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    .container {
+      padding: 8px;
+    }
+    .ticket-summary {
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      padding: 10px;
+      margin-bottom: 15px;
+      background-color: #f9f9f9;
+    }
+    .ticket-info {
+      display: flex;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+    .info-item {
+      flex: 0 0 50%;
+      margin-bottom: 5px;
+    }
+    .label {
+      font-weight: bold;
+      color: #555;
+      font-size: 12px;
+    }
+    .value {
+      font-size: 14px;
+    }
+    .tags {
+      margin: 10px 0;
+    }
+    .tag {
+      display: inline-block;
+      background-color: #e0e0e0;
+      border-radius: 10px;
+      padding: 2px 8px;
+      margin: 2px;
+      font-size: 12px;
+    }
+    .description {
+      margin-top: 10px;
+      border-top: 1px solid #eee;
+      padding-top: 10px;
+    }
+    .actions {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 10px;
+    }
+    .btn {
+      background-color: #1E88E5;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      padding: 6px 12px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .btn:hover {
+      background-color: #1976D2;
+    }
+    /* Tabs */
+    .tab-container {
+      margin-top: 15px;
+    }
+    .tab-header {
+      display: flex;
+      border-bottom: 1px solid #ddd;
+    }
+    .tab {
+      padding: 8px 15px;
+      cursor: pointer;
+      border: 1px solid transparent;
+      border-bottom: none;
+      margin-bottom: -1px;
+      background-color: #f1f1f1;
+    }
+    .tab.active {
+      background-color: white;
+      border-color: #ddd;
+      border-bottom-color: white;
+    }
+    .tab-content {
+      display: none;
+      padding: 15px;
+      border: 1px solid #ddd;
+      border-top: none;
+    }
+    .tab-content.active {
+      display: block;
+    }
+    .search-box {
+      display: flex;
+      margin-bottom: 10px;
+    }
+    .search-box input {
+      flex: 1;
+      padding: 6px;
+      border: 1px solid #ddd;
+      border-radius: 4px 0 0 4px;
+    }
+    .search-btn {
+      border-radius: 0 4px 4px 0;
+    }
+    .results-list {
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    .result-card {
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      padding: 10px;
+      margin-bottom: 10px;
+      cursor: pointer;
+    }
+    .result-card:hover {
+      background-color: #f5f5f5;
+    }
+  </style>
 </head>
 <body>
-  <div class="fw-widget-wrapper">
-    <div style="display: flex; flex-direction: column; gap: 10px;">
-      <!-- 기존 사이드바 버튼 -->
-      <fw-button id="openModalBtn" color="primary">Open Modal</fw-button>
+  <div class="container">
+    <div class="ticket-summary">
+      <h3>Ticket Summary</h3>
+      <div class="ticket-info">
+        <div class="info-item">
+          <div class="label">Subject</div>
+          <div class="value" id="ticket-subject">Loading...</div>
+        </div>
+        <div class="info-item">
+          <div class="label">Status</div>
+          <div class="value" id="ticket-status">Loading...</div>
+        </div>
+        <div class="info-item">
+          <div class="label">Priority</div>
+          <div class="value" id="ticket-priority">Loading...</div>
+        </div>
+        <div class="info-item">
+          <div class="label">Assignee</div>
+          <div class="value" id="ticket-assignee">Loading...</div>
+        </div>
+      </div>
+      <div class="tags" id="ticket-tags">
+        <!-- Tags will be populated here -->
+      </div>
+      <div class="description">
+        <div class="label">Description</div>
+        <div class="value" id="ticket-description">Loading...</div>
+      </div>
+      <div class="actions">
+        <button class="btn" id="view-details-btn">View Details</button>
+      </div>
+    </div>
+
+    <div class="tab-container">
+      <div class="tab-header">
+        <div class="tab active" data-tab="similar-tickets">Similar Tickets</div>
+        <div class="tab" data-tab="solutions">Suggested Solutions</div>
+        <div class="tab" data-tab="copilot">Copilot Search</div>
+      </div>
       
-      <!-- AI 응답 버튼 -->
-      <fw-button id="openCopilotBtn" color="secondary" style="--color: #1976d2;">
-        <fw-icon name="robot" slot="start"></fw-icon>
-        AI 응답 작성
-      </fw-button>
+      <div class="tab-content active" id="similar-tickets">
+        <div class="results-list" id="similar-tickets-list">
+          <p>Loading similar tickets...</p>
+        </div>
+      </div>
+      
+      <div class="tab-content" id="solutions">
+        <div class="results-list" id="solutions-list">
+          <p>Loading suggested solutions...</p>
+        </div>
+      </div>
+      
+      <div class="tab-content" id="copilot">
+        <div class="search-box">
+          <input type="text" placeholder="Ask Copilot..." id="copilot-query">
+          <button class="btn search-btn" id="copilot-search-btn">Search</button>
+        </div>
+        <div class="results-list" id="copilot-results">
+          <p>Use the search box to find help with your tickets</p>
+        </div>
+      </div>
     </div>
   </div>
+
   <script src="scripts/app.js"></script>
 </body>
 </html>

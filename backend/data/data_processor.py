@@ -4,10 +4,11 @@
 청크로 분할 저장된 Freshdesk 데이터를 병합하고 분석하는 도구
 """
 import json
-import pandas as pd
-from pathlib import Path
-from typing import List, Dict, Any
 import logging
+from pathlib import Path
+from typing import Dict, List, Optional
+
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -19,31 +20,44 @@ class DataProcessor:
         self.data_dir = Path(data_dir)
         
     def merge_chunks(self, output_file: str = "all_tickets.json") -> List[Dict]:
-        """모든 청크 파일을 하나로 병합"""
+        """
+        청크 파일들을 메모리에서만 병합하여 반환 (대용량 파일 생성 금지)
+        대용량 시스템에서는 청크 단위로만 작업해야 하므로 전체 파일은 생성하지 않음
+        """
         all_tickets = []
-        chunk_files = sorted(self.data_dir.glob("tickets_chunk_*.json"))
         
-        logger.info(f"{len(chunk_files)}개 청크 파일 병합 시작")
+        # raw_data/tickets/ 디렉토리에서 청크 파일 검색
+        tickets_dir = self.data_dir / "raw_data" / "tickets"
+        if tickets_dir.exists():
+            chunk_files = sorted(tickets_dir.glob("tickets_chunk_*.json"))
+            logger.info(f"raw_data/tickets에서 {len(chunk_files)}개 청크 파일 발견")
+        else:
+            # 기존 구조 지원 (하위 호환성)
+            chunk_files = sorted(self.data_dir.glob("tickets_chunk_*.json"))
+            logger.info(f"기존 구조에서 {len(chunk_files)}개 청크 파일 발견")
+        
+        logger.info(f"{len(chunk_files)}개 청크 파일을 메모리에서 병합 중...")
         
         for chunk_file in chunk_files:
-            with open(chunk_file, 'r', encoding='utf-8') as f:
-                tickets = json.load(f)
-                all_tickets.extend(tickets)
-                logger.info(f"{chunk_file.name}: {len(tickets)}개 티켓 추가")
+            try:
+                with open(chunk_file, 'r', encoding='utf-8') as f:
+                    tickets = json.load(f)
+                    all_tickets.extend(tickets)
+                    logger.info(f"{chunk_file.name}: {len(tickets)}개 티켓 로드")
+            except Exception as e:
+                logger.error(f"청크 파일 읽기 실패 {chunk_file}: {e}")
         
-        # 병합된 데이터 저장
-        output_path = self.data_dir / output_file
-        with open(output_path, 'w', encoding='utf-8') as f:
-            json.dump(all_tickets, f, ensure_ascii=False, indent=2)
-        
-        logger.info(f"병합 완료: 총 {len(all_tickets)}개 티켓 → {output_file}")
+        # 대용량 파일 생성 금지 - 메모리에서만 반환
+        logger.info(f"메모리 병합 완료: 총 {len(all_tickets)}개 티켓 (파일 생성하지 않음)")
         return all_tickets
     
-    def create_csv_export(self, tickets: List[Dict] = None) -> str:
-        """티켓 데이터를 CSV로 변환"""
-        if tickets is None:
-            with open(self.data_dir / "all_tickets.json", 'r', encoding='utf-8') as f:
-                tickets = json.load(f)
+    def create_csv_export(self, tickets: Optional[List[Dict]] = None) -> str:
+        """
+        티켓 데이터를 CSV로 변환 (대용량 파일 생성 금지)
+        CSV 내보내기 기능은 소규모 데이터셋에서만 사용하며, 대용량 시스템에서는 비활성화
+        """
+        logger.warning("CSV 내보내기는 대용량 시스템에서 비활성화되었습니다. 청크 단위로 작업하세요.")
+        return ""
         
         # 기본 티켓 정보 추출
         csv_data = []
@@ -75,11 +89,31 @@ class DataProcessor:
         logger.info(f"CSV 내보내기 완료: {csv_file}")
         return str(csv_file)
     
-    def generate_summary_report(self, tickets: List[Dict] = None) -> Dict:
+    def generate_summary_report(self, tickets: Optional[List[Dict]] = None) -> Dict:
         """수집된 데이터의 요약 리포트 생성"""
         if tickets is None:
             with open(self.data_dir / "all_tickets.json", 'r', encoding='utf-8') as f:
                 tickets = json.load(f)
+        
+        # tickets가 None이거나 빈 리스트인 경우 처리
+        if not tickets:
+            return {
+                'total_tickets': 0,
+                'status_distribution': {},
+                'priority_distribution': {},
+                'type_distribution': {},
+                'source_distribution': {},
+                'conversation_stats': {
+                    'avg_conversations_per_ticket': 0,
+                    'max_conversations': 0,
+                    'total_conversations': 0
+                },
+                'attachment_stats': {
+                    'avg_attachments_per_ticket': 0,
+                    'max_attachments': 0,
+                    'total_attachments': 0
+                }
+            }
         
         # 기본 통계
         total_tickets = len(tickets)
@@ -172,7 +206,7 @@ async def process_collected_data(data_dir: str):
     # 3. 요약 리포트 생성
     summary = processor.generate_summary_report(tickets)
     
-    print(f"처리 완료:")
+    print("처리 완료:")
     print(f"- 총 티켓 수: {summary['total_tickets']:,}개")
     print(f"- CSV 파일: {csv_file}")
     print(f"- 평균 대화 수: {summary['conversation_stats']['avg_conversations_per_ticket']:.1f}")

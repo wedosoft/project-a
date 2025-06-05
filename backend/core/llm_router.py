@@ -625,7 +625,41 @@ class LLMRouter:
         logger.info(f"시도할 제공자 순서: {ordered_list}")
         return ordered_list
 
-    async def generate_ticket_summary(self, ticket_data: Dict[str, Any], max_tokens: int = 500) -> Dict[str, Any]:
+    def _extract_conversation_body(self, conv: Dict[str, Any]) -> str:
+        """
+        대화 딕셔너리에서 본문 텍스트를 안전하게 추출합니다.
+        여러 가능한 필드를 순서대로 시도합니다.
+        
+        Args:
+            conv: 대화 항목 딕셔너리
+            
+        Returns:
+            추출된 본문 텍스트
+        """
+        if not isinstance(conv, dict):
+            return str(conv)[:300]
+            
+        # 가능한 필드들을 우선순위대로 시도
+        for field in ["body_text", "body", "text", "content", "message"]:
+            if field in conv and conv[field]:
+                content = conv[field]
+                # HTML 태그 제거 시도
+                if isinstance(content, str) and "<" in content and ">" in content:
+                    try:
+                        # 간단한 HTML 태그 제거 (실패하면 원본 사용)
+                        content = re.sub(r'<[^>]+>', ' ', content)
+                    except:
+                        pass
+                return str(content)
+        
+        # 필드를 찾지 못한 경우 전체 딕셔너리를 문자열로 변환
+        try:
+            # 너무 길면 잘라내기
+            return str(conv)[:300]
+        except:
+            return "내용을 추출할 수 없음"
+    
+    async def generate_ticket_summary(self, ticket_data: Dict[str, Any], max_tokens: int = 1000) -> Dict[str, Any]:
         """
         티켓 데이터를 기반으로 LLM을 사용하여 요약문과 주요 정보를 생성합니다.
         
@@ -659,14 +693,53 @@ class LLMRouter:
             # conversations의 타입에 따라 적절히 처리
             if isinstance(conversations, list):
                 try:
-                    # 마지막 3개의 사용자 및 상담원 메시지만 포함
+                    # 대화 항목들을 필터링하고 시간 순서대로 정렬
                     # 정렬하기 전에 리스트 내 항목이 모두 딕셔너리인지 확인
                     valid_conversations = [c for c in conversations if isinstance(c, dict)]
+                    
                     if valid_conversations:
-                        for conv in sorted(valid_conversations, key=lambda c: c.get("created_at", 0), reverse=True)[:3]:
-                            sender = "사용자" if conv.get("user_id") else "상담원"
-                            body = conv.get("body_text", "내용 없음")
-                            prompt_context += f"- {sender}: {body[:200]}...\n"
+                        # 시간순으로 정렬 (오래된 순 -> 최신순)
+                        sorted_conversations = sorted(valid_conversations, key=lambda c: c.get("created_at", 0))
+                        
+                        # 대화의 양이 많은 경우(10개 초과)에는 더 많은 컨텍스트를 포함하고 중요 대화에 집중
+                        if len(sorted_conversations) > 10:
+                            # 처음 30%의 대화 포함 (초기 상황 파악 개선)
+                            early_conv_count = max(3, int(len(sorted_conversations) * 0.3))
+                            early_conversations = sorted_conversations[:early_conv_count]
+                            
+                            # 마지막 70%의 대화 (최근 상황 집중)
+                            # 중간 대화도 일부 포함하여 맥락 유지
+                            late_start_idx = max(early_conv_count, len(sorted_conversations) - 20)
+                            late_conversations = sorted_conversations[late_start_idx:]
+                            
+                            # 처음 대화 추가 (문제 상황 파악)
+                            prompt_context += "초기 대화 내용:\n"
+                            for conv in early_conversations:
+                                sender = "사용자" if conv.get("user_id") else "상담원"
+                                body = self._extract_conversation_body(conv)
+                                # 초기 대화는 더 많은 내용 포함 (300자)
+                                prompt_context += f"- {sender}: {body[:300]}...\n"
+                            
+                            # 중간 생략 표시
+                            if late_start_idx > early_conv_count:
+                                skipped = late_start_idx - early_conv_count
+                                prompt_context += f"\n... (중간 {skipped}개 대화 생략) ...\n\n"
+                            
+                            # 최근 대화 추가 (더 자세한 내용 포함)
+                            prompt_context += "최근 대화 내용:\n"
+                            for conv in late_conversations:
+                                sender = "사용자" if conv.get("user_id") else "상담원"
+                                body = self._extract_conversation_body(conv)
+                                # 최근 대화는 더 많은 내용 포함 (500자)
+                                prompt_context += f"- {sender}: {body[:500]}...\n"
+                        else:
+                            # 대화가 적은 경우 전체 내용 포함 (10개 이하)
+                            prompt_context += "대화 내용:\n"
+                            for conv in sorted_conversations:
+                                sender = "사용자" if conv.get("user_id") else "상담원"
+                                body = self._extract_conversation_body(conv)
+                                # 적은 대화일 경우 대화당 최대 1000자까지 포함
+                                prompt_context += f"- {sender}: {body[:1000]}...\n"
                     else:
                         # 유효한 대화 항목이 없는 경우
                         prompt_context += f"- 대화 내용: {str(conversations)[:200]}\n"
@@ -682,26 +755,42 @@ class LLMRouter:
                 
         system_prompt = (
             "당신은 AI 지원 에이전트입니다. 제공된 티켓 정보를 바탕으로 다음 정보를 추출하세요:\n"
-            "1. 티켓의 핵심 내용 요약 (주요 문제점, 고객의 요청, 현재 상태 포함)\n"
+            "1. 티켓의 핵심 내용 요약 (주요 문제점, 고객의 요청, 현재 상태, 해결 과정 포함)\n"
+            "   - 초기 대화와 최근 대화의 맥락을 모두 고려하여 전체 상황을 포괄적으로 요약\n"
+            "   - 대화 흐름에 따른 문제 진행 상황과 해결 과정을 상세히 포함\n"
+            "   - 문제의 원인, 조치 사항, 결과를 명확하게 언급\n"
+            "   - 티켓이 해결되었다면 최종 해결책과 결과를 반드시 포함\n"
             "2. 3-5개의 핵심 포인트 (반드시 배열로 제공)\n"
+            "   - 초기 및 최근 대화에서 나타난 중요한 정보 모두 포함\n"
+            "   - 기술적 문제점, 해결 방법, 고객 요구사항을 균형있게 포함\n"
             "3. 티켓의 전반적인 감정 상태 (긍정적, 중립적, 부정적)\n"
             "4. 추천 우선순위 (높음, 보통, 낮음)\n"
             "5. 긴급도 수준 (높음, 보통, 낮음)\n\n"
             "반드시 아래 형식의 유효한 JSON으로만 응답해주세요:\n"
             "{\n"
-            "  \"summary\": \"티켓 요약 텍스트\",\n"
+            "  \"summary\": \"티켓 요약 텍스트 - 가능한 상세하게 작성\",\n"
             "  \"key_points\": [\"핵심 포인트 1\", \"핵심 포인트 2\", \"핵심 포인트 3\"],\n"
             "  \"sentiment\": \"감정 상태\",\n"
             "  \"priority_recommendation\": \"우선순위\",\n"
             "  \"urgency_level\": \"긴급도\"\n"
             "}\n\n"
             "주의: key_points는 반드시 배열 형태로 제공해야 합니다. 문자열이나 다른 형식은 허용되지 않습니다.\n"
+            "요약은 가능한 자세하게 작성하고, 대화의 전체 맥락을 포함해야 합니다.\n"
             "한국어로 답변해주세요."
         )
         
         prompt = f"다음 티켓 정보를 분석해주세요:\n\n{prompt_context}"
         
-        logger.info(f"티켓 요약 생성 요청 (ticket_id: {ticket_data.get('id')}, prompt_length: {len(prompt)} chars)")
+        # 로깅 개선 - 대화 수와 처리된 정보량 기록
+        conv_count = 0
+        if isinstance(conversations, list):
+            conv_count = len(conversations)
+        
+        logger.info(f"티켓 요약 생성 요청 (ticket_id: {ticket_data.get('id')}, 대화 수: {conv_count}, prompt_length: {len(prompt)} chars)")
+        
+        # 프롬프트가 너무 길어질 경우 경고 로그
+        if len(prompt) > 15000:
+            logger.warning(f"티켓 {ticket_data.get('id')}의 프롬프트가 매우 깁니다 ({len(prompt)} chars). 일부 정보가 생략될 수 있습니다.")
         
         try:
             # self.generate를 사용하여 텍스트 생성
@@ -711,6 +800,18 @@ class LLMRouter:
                 max_tokens=max_tokens,
                 temperature=0.3
             )
+            
+            if not response or not hasattr(response, 'text') or not response.text:
+                # 응답이 비어있거나 유효하지 않은 경우
+                logger.error(f"티켓 요약 생성 오류: LLM에서 유효한 응답을 받지 못했습니다 (ticket_id: {ticket_data.get('id')})")
+                return {
+                    "summary": f"티켓 제목: {subject}\n\n내용 요약을 생성할 수 없습니다.",
+                    "key_points": ["요약 생성 실패", "원본 티켓 확인 필요"],
+                    "sentiment": "중립적",
+                    "priority_recommendation": "확인 필요",
+                    "urgency_level": "보통"
+                }
+                
             logger.info(f"티켓 요약 생성 완료 (ticket_id: {ticket_data.get('id')}, model: {response.model_used}, duration: {response.duration_ms}ms)")
             
             # LLM 응답을 파싱하여 구조화된 형식으로 변환
@@ -967,43 +1068,54 @@ class LLMRouter:
         Raises:
             RuntimeError: 모든 LLM 제공자 호출이 실패한 경우
         """
-        # 티켓 정보 추출
+        # 티켓 정보 추출 및 최적화
         subject = ticket_data.get("subject", "제목 없음")
+        
+        # 설명 텍스트 최적화 (너무 긴 경우 잘라내기)
         description = ticket_data.get("description_text", "설명 없음")
+        if len(description) > 1500:  # 너무 긴 설명은 앞뒤 부분만 사용
+            description = description[:1000] + "...[중략]..." + description[-300:]
+            
         status = ticket_data.get("status", "")
         priority = ticket_data.get("priority", "")
         
-        # 대화 내용 포함 (해결 과정이 있다면)
+        # 대화 내용 최적화 (필수 정보만 포함)
         conversations = ticket_data.get("conversations", [])
         conversation_text = ""
         if conversations:
+            # 최대 2개의 최근 대화만 포함
             conversation_text = "\n대화 내용:\n"
-            for conv in sorted(conversations, key=lambda c: c.get("created_at", ""), reverse=True)[:3]:
+            conv_count = 0
+            for conv in sorted(conversations, key=lambda c: c.get("created_at", ""), reverse=True):
+                if conv_count >= 2:
+                    break
+                    
                 sender = "고객" if conv.get("user_id") else "상담원"
                 body = conv.get("body_text", "내용 없음")
-                conversation_text += f"- {sender}: {body[:150]}...\n"
+                
+                # 대화 내용도 적절히 잘라내기
+                body_preview = body[:100] + "..." if len(body) > 100 else body
+                conversation_text += f"- {sender}: {body_preview}\n"
+                conv_count += 1
         
+        # 보다 명확한 시스템 프롬프트로 정확한 형식 지정
         system_prompt = (
             "당신은 고객 지원 티켓을 분석하는 AI입니다. "
-            "제공된 티켓 정보를 바탕으로 문제 상황(Issue)과 해결책(Solution)을 명확하게 구분해서 분석해주세요. "
-            "반드시 다음 JSON 형식으로만 응답하세요:\n"
-            '{"issue": "구체적인 문제 상황 설명", "solution": "해결책 또는 조치사항"}\n'
-            "- Issue는 고객이 겪고 있는 문제나 요청사항을 명확히 설명\n"
-            "- Solution은 해결 방법, 조치사항, 또는 권장사항을 설명\n"
-            "- 각 항목은 2-3문장으로 간결하게 작성\n"
-            "- 한국어로 응답"
+            "제공된 티켓 정보를 바탕으로 문제 상황(Issue)과 해결책(Solution)을 구분해서 분석해주세요. "
+            "정확히 다음 JSON 형식으로만 응답하세요:\n\n"
+            '{"issue": "구체적인 문제 상황", "solution": "해결책 또는 조치사항"}\n\n'
+            "다른 설명이나 텍스트를 추가하지 말고 오직 위의 JSON 형식만 반환하세요."
         )
         
-        prompt = f"""다음 티켓을 분석해주세요:
+        # 간결한 프롬프트 구성
+        prompt = f"""다음 티켓 정보를 분석하여 문제 상황(Issue)과 해결책(Solution)을 JSON 형식으로 제공해주세요:
 
 제목: {subject}
 설명: {description}
 상태: {status}
-우선순위: {priority}{conversation_text}
-
-위 정보를 바탕으로 Issue와 Solution을 JSON 형식으로 분석해주세요."""
+우선순위: {priority}{conversation_text}"""
         
-        logger.info(f"티켓 Issue/Solution 분석 요청 (ticket_id: {ticket_data.get('id')}, prompt_length: {len(prompt)} chars)")
+        logger.info(f"티켓 Issue/Solution 분석 요청 (ticket_id: {ticket_data.get('id')}, 제목: '{subject[:30]}...')")
         
         try:
             # LLM을 사용하여 분석 수행
@@ -1016,21 +1128,79 @@ class LLMRouter:
             
             # JSON 파싱 시도
             import json
+            import re
             try:
-                result = json.loads(response.text.strip())
+                # 응답 전처리: 제어 문자 제거 및 이스케이프
+                cleaned_text = response.text.strip()
+                
+                # JSON 추출 시도 (다양한 패턴 지원)
+                # 1. 중괄호로 둘러싸인 JSON 객체 (가장 일반적인 패턴)
+                json_match = re.search(r'(\{.*\})', cleaned_text, re.DOTALL)
+                if json_match:
+                    json_text = json_match.group(1)
+                    logger.info(f"JSON 추출 성공 (중괄호 패턴): {json_text[:50]}...")
+                else:
+                    # 2. 전체 텍스트가 중괄호로 둘러싸여 있는지 확인
+                    if cleaned_text.strip().startswith('{') and cleaned_text.strip().endswith('}'):
+                        json_text = cleaned_text
+                        logger.info(f"JSON 추출 성공 (전체 텍스트): {json_text[:50]}...")
+                    else:
+                        # 3. 코드 블록 내 JSON 검색 시도 (```json {...} ``` 패턴)
+                        json_match = re.search(r'```(?:json)?(.*?)```', cleaned_text, re.DOTALL)
+                        if json_match:
+                            json_text = json_match.group(1).strip()
+                            logger.info(f"JSON 추출 성공 (코드 블록): {json_text[:50]}...")
+                        else:
+                            # 4. 더 공격적으로 중괄호 내용만 추출 시도
+                            json_match = re.search(r'\{[^{]*"issue"[^}]*"solution"[^}]*\}', cleaned_text, re.DOTALL)
+                            if json_match:
+                                json_text = json_match.group(0)
+                                logger.info(f"JSON 추출 성공 (패턴 매칭): {json_text[:50]}...")
+                            else:
+                                # 5. 마지막 시도: 전체 텍스트 사용
+                                json_text = cleaned_text
+                                logger.info(f"JSON 구조 찾지 못함, 전체 텍스트 사용: {json_text[:50]}...")
+                
+                # 제어 문자 포괄적 처리
+                # 1. 줄바꿈, 탭 등을 공백으로 변환 (JSON 구조 내부 제외)
+                json_text = re.sub(r'[\n\r\t\f\v]', ' ', json_text)
+                
+                # 2. JSON 문자열 내에서 이미 이스케이프된 제어 문자는 이중 이스케이프 처리
+                json_text = re.sub(r'(?<=")\\n(?=")', '\\\\n', json_text)
+                json_text = re.sub(r'(?<=")\\r(?=")', '\\\\r', json_text)
+                json_text = re.sub(r'(?<=")\\t(?=")', '\\\\t', json_text)
+                
+                # 3. 불필요한 백슬래시 제거 (JSON 형식을 깨뜨릴 수 있는 경우)
+                json_text = re.sub(r'\\([^"\\/bfnrtu])', r'\1', json_text)
+                
+                # 4. 닫히지 않은 따옴표 처리 시도
+                # 문자열 마지막이 백슬래시로 끝나는 경우 제거
+                json_text = re.sub(r'\\+(?=")', '', json_text)
+                
+                # 5. 추가 정리: 불필요한 공백 제거
+                json_text = re.sub(r'\s+(?=[:,])', '', json_text)
+                json_text = re.sub(r'(?<=[:,])\s+', ' ', json_text)
+                                
+                result = json.loads(json_text)
                 if "issue" in result and "solution" in result:
                     logger.info(f"티켓 Issue/Solution 분석 완료 (ticket_id: {ticket_data.get('id')}, model: {response.model_used})")
                     return result
                 else:
-                    logger.warning(f"LLM 응답에 필수 필드가 없음: {response.text}")
+                    logger.warning(f"LLM 응답에 필수 필드가 없음: {json_text}")
                     raise ValueError("Invalid response format")
             except (json.JSONDecodeError, ValueError) as e:
-                logger.warning(f"LLM 응답 JSON 파싱 실패: {e}, 응답: {response.text}")
+                logger.warning(f"LLM 응답 JSON 파싱 실패: {e}, 응답: {response.text[:200]}...")
                 # 파싱 실패 시 텍스트에서 Issue/Solution 추출 시도
                 text = response.text.strip()
+                
+                # 정규식을 사용하여 issue와 solution 부분 추출
+                issue = self._extract_section_from_text(text, "issue", "문제 상황을 분석할 수 없습니다.")
+                solution = self._extract_section_from_text(text, "solution", "해결책을 찾을 수 없습니다.")
+                
+                logger.info(f"정규식 추출 결과 - issue: {issue[:50]}..., solution: {solution[:50]}...")
                 return {
-                    "issue": self._extract_section_from_text(text, "issue", "문제 상황을 분석할 수 없습니다."),
-                    "solution": self._extract_section_from_text(text, "solution", "해결책을 찾을 수 없습니다.")
+                    "issue": issue,
+                    "solution": solution
                 }
                 
         except Exception as e:
@@ -1042,27 +1212,168 @@ class LLMRouter:
             }
     
     def _extract_section_from_text(self, text: str, section: str, default: str) -> str:
-        """텍스트에서 특정 섹션을 추출하는 헬퍼 함수"""
+        """
+        텍스트에서 특정 섹션을 추출하는 헬퍼 함수 (확장 버전)
+        다양한 형식의 응답에서 문제(issue)와 해결책(solution) 섹션을 정확히 추출합니다.
+        """
         import re
         
-        # 다양한 패턴으로 섹션 찾기 시도
-        patterns = [
-            rf'"{section}":\s*"([^"]+)"',  # JSON 형태
-            rf'{section}:\s*([^\n]+)',     # 콜론 형태
-            rf'{section.upper()}:\s*([^\n]+)',  # 대문자 형태
-        ]
+        # 섹션명을 표준화 (대소문자 무시)
+        section_lower = section.lower()
+        text_lower = text.lower()
         
-        for pattern in patterns:
-            match = re.search(pattern, text, re.IGNORECASE)
+        # 한국어/영어 섹션명 매핑
+        section_names = {
+            'issue': ['issue', '문제', '이슈', '상황', 'problem', '질문'],
+            'solution': ['solution', '해결책', '솔루션', '해결 방법', '조치', '대응', '답변', '해결']
+        }
+
+        # 현재 섹션에 해당하는 이름들
+        current_section_names = section_names.get(section_lower, [section_lower])
+        
+        # 1. 마크다운 스타일 섹션 찾기 시도 (## Issue, ## Solution 등)
+        for name in current_section_names:
+            markdown_pattern = rf'(?:#+\s*{name}[\s:]*)|((?<=\n){name}[\s:]+)|(^{name}[\s:]+)'
+            section_matches = list(re.finditer(markdown_pattern, text_lower, re.IGNORECASE | re.MULTILINE))
+            
+            if section_matches:
+                start_pos = section_matches[0].end()
+                
+                # 다음 섹션 찾기 (현재 섹션이 아닌 다른 섹션) - 종료 위치 결정
+                end_pos = len(text)
+                for next_section in section_names.get('solution' if section_lower == 'issue' else 'issue', []):
+                    next_section_pattern = rf'(?:#+\s*{next_section}[\s:]*)|((?<=\n){next_section}[\s:]+)|(^{next_section}[\s:]+)'
+                    next_matches = list(re.finditer(next_section_pattern, text_lower[start_pos:], re.IGNORECASE | re.MULTILINE))
+                    if next_matches:
+                        end_pos = start_pos + next_matches[0].start()
+                        break
+                
+                extracted = text[start_pos:end_pos].strip()
+                if extracted:
+                    return extracted[:500] if len(extracted) > 500 else extracted
+        
+        # 2. JSON 형식 패턴 (다양한 따옴표 스타일 처리) - 강화된 버전
+        json_patterns = []
+        for name in current_section_names:
+            # 큰 따옴표로 둘러싸인 JSON 키-값
+            json_patterns.append(rf'"{name}"[\s:]*"(.*?)(?:"|\n)')
+            # 작은 따옴표로 둘러싸인 JSON 키-값
+            json_patterns.append(rf"'{name}'[\s:]*'(.*?)(?:'|\n)")
+            # 따옴표 혼합 버전
+            json_patterns.append(rf'"{name}"[\s:]*\'(.*?)(?:\'|\n)')
+            json_patterns.append(rf"'{name}'[\s:]*\"(.*?)(?:\"|\n)")
+            # 큰 따옴표 키, 값은 없음
+            json_patterns.append(rf'"{name}"[\s:]*([^",\}}\]]+)')
+            # 작은 따옴표 키, 값은 없음
+            json_patterns.append(rf"'{name}'[\s:]*([^',\}}\]]+)")
+            # 따옴표 없는 JSON 스타일
+            json_patterns.append(rf"{name}[\s:]*([^,\}}\]]+)")
+        
+        for pattern in json_patterns:
+            match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
             if match:
-                return match.group(1).strip()
+                extracted = match.group(1).strip()
+                if extracted:
+                    # 따옴표 제거 (시작/끝에 있는 경우)
+                    extracted = re.sub(r'^["\']+|["\']+$', '', extracted)
+                    return extracted[:500] if len(extracted) > 500 else extracted
         
+        # 3. 콜론 형식 (다양한 변형) - 강화된 버전
+        colon_patterns = []
+        for name in current_section_names:
+            # 기본 콜론 형식 (다음 섹션까지)
+            colon_patterns.append(rf'{name}[\s:]+([^\n].*?)(?=\n\s*\w+:|\Z)')
+            # 대문자 섹션명
+            colon_patterns.append(rf'{name.upper()}[\s:]+([^\n].*?)(?=\n\s*\w+:|\Z)')
+            # 콜론+대시 형식
+            colon_patterns.append(rf'{name}[\s:]+-\s*([^\n].*?)(?=\n\s*\w+:|\Z)')
+            # 섹션명 다음에 줄바꿈이 있는 경우
+            colon_patterns.append(rf'{name}[\s:]*\n+\s*([^\n].*?)(?=\n\s*\w+:|\Z)')
+            # 번호형 목록 항목
+            colon_patterns.append(rf'\d+[\s.]*{name}[\s:]*([^\n].*?)(?=\n\s*\d+[\s.]*\w+:|\Z)')
+        
+        for pattern in colon_patterns:
+            match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+            if match:
+                extracted = match.group(1).strip()
+                if extracted:
+                    return extracted[:500] if len(extracted) > 500 else extracted
+        
+        # 4. 단락 기반 키워드 검색 - 강화된 버전
+        if section_lower in section_names:
+            keywords = '|'.join(current_section_names)
+            other_keywords = '|'.join(section_names.get('solution' if section_lower == 'issue' else 'issue', []))
+            
+            # 키워드로 시작하는 단락 찾기
+            keyword_paragraph_pattern = rf'(?:^|\n|\s)(?:{keywords})[\s:]+(.*?)(?=(?:^|\n|\s)(?:{other_keywords})[\s:]|$)'
+            match = re.search(keyword_paragraph_pattern, text, re.IGNORECASE | re.DOTALL)
+            if match:
+                extracted = match.group(1).strip()
+                if extracted:
+                    return extracted[:500] if len(extracted) > 500 else extracted
+                    
+            # 키워드 기반 세분화된 검색
+            if section_lower == 'issue':
+                issue_indicators = ['고객이', '문제는', '상황은', '이슈는', '오류', 'error', 'problem is']
+                for indicator in issue_indicators:
+                    indicator_match = re.search(rf'{indicator}[^\n]*', text, re.IGNORECASE)
+                    if indicator_match:
+                        return indicator_match.group(0)[:500]
+            elif section_lower == 'solution':
+                solution_indicators = ['해결 방법', '해결하려면', '권장', '제안', '다음과 같이', '조치', '대응']
+                for indicator in solution_indicators:
+                    indicator_match = re.search(rf'{indicator}[^\n]*', text, re.IGNORECASE)
+                    if indicator_match:
+                        # 해당 문장부터 이후 200자 추출
+                        start = indicator_match.start()
+                        return text[start:start+300].strip()[:500]
+        
+        # 5. 위치 기반 추출 (강화된 휴리스틱) - 텍스트 분석 기반 추출
+        if section_lower == "issue":
+            # issue는 주로 앞쪽에 나타남
+            # 텍스트 길이에 따라 적응적으로 추출 비율 조정
+            if len(text) < 200:
+                return text[:len(text)].strip() if text else default
+            elif len(text) < 500:
+                return text[:len(text)//2].strip() if text else default
+            else:
+                # 첫 문단이나 처음 25% 텍스트 반환
+                first_paragraph_match = re.search(r'^.*?\n\s*\n', text, re.DOTALL)
+                if first_paragraph_match and len(first_paragraph_match.group(0)) > 20:
+                    return first_paragraph_match.group(0).strip()
+                return text[:len(text)//4].strip()[:500]
+                
+        elif section_lower == "solution":
+            # solution은 주로 뒤쪽에 나타남
+            if len(text) < 200:
+                return text.strip() if text else default
+                
+            # 텍스트 길이에 따라 적응적으로 추출 비율 조정
+            if len(text) < 500:
+                return text[len(text)//2:].strip()
+            else:
+                # 마지막 문단이나 마지막 30% 텍스트 반환
+                last_paragraphs = text[int(len(text)*0.7):].strip()
+                if last_paragraphs:
+                    return last_paragraphs[:500]
+                    
+                # 마지막 두 문단 찾기 시도
+                paragraphs = re.split(r'\n\s*\n', text)
+                if len(paragraphs) >= 2:
+                    return '\n\n'.join(paragraphs[-2:])[:500]
+            
         return default
 
 
 # 싱글톤 인스턴스 제공
 # 타임아웃 값은 환경변수나 설정 파일에서 읽어오는 것이 좋음
-llm_router = LLMRouter(timeout=15.0, gemini_timeout=25.0) # 타임아웃 값 조정
+# 복잡한 응답 생성을 위해 충분한 시간 제공 (특히 issue/solution 분석)
+# 환경 변수로부터 타임아웃 설정 가져오기 (없으면 기본값 사용)
+LLM_TIMEOUT = float(os.getenv("LLM_TIMEOUT", "30.0"))  # 기본 30초
+LLM_GEMINI_TIMEOUT = float(os.getenv("LLM_GEMINI_TIMEOUT", "40.0"))  # 기본 40초 (Gemini는 더 긴 타임아웃 필요)
+
+# 싱글톤 인스턴스 생성
+llm_router = LLMRouter(timeout=LLM_TIMEOUT, gemini_timeout=LLM_GEMINI_TIMEOUT)
 
 async def generate_text(prompt: str, system_prompt: str = None, max_tokens: int = 1024, temperature: float = 0.2) -> LLMResponse:
     """텍스트 생성 편의 함수"""
