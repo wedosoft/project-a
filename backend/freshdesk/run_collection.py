@@ -404,9 +404,20 @@ if __name__ == "__main__":
     # 명령행 인자가 지정된 경우
     if args.full_collection or args.quick_test or args.resume:
         # raw 데이터 수집 옵션 처리
-        collect_raw_details = args.raw_details or args.raw_all
-        collect_raw_conversations = args.raw_conversations or args.raw_all
-        collect_raw_kb = args.raw_kb or args.raw_all
+        # 명시적으로 raw 데이터 플래그가 지정되지 않은 경우 기본값 True 사용
+        raw_flags_specified = any([args.raw_details, args.raw_conversations, args.raw_kb, args.raw_all])
+        
+        if raw_flags_specified:
+            # 명시적 플래그가 있는 경우 기존 로직 사용
+            collect_raw_details = args.raw_details or args.raw_all
+            collect_raw_conversations = args.raw_conversations or args.raw_all
+            collect_raw_kb = args.raw_kb or args.raw_all
+        else:
+            # 명시적 플래그가 없는 경우 기본값 True 사용 (함수 기본값과 일치)
+            collect_raw_details = True
+            collect_raw_conversations = True
+            collect_raw_kb = True
+            logger.info("RAW 데이터 수집 플래그가 지정되지 않아 기본값(모두 활성화)을 사용합니다.")
         
         if args.full_collection:
             asyncio.run(full_collection_workflow(
