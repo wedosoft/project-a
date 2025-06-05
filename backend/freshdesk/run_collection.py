@@ -26,31 +26,26 @@ from dotenv import load_dotenv
 
 load_dotenv(dotenv_path=Path(BACKEND_ROOT) / '.env')
 
+# 공통 로깅 모듈 사용
 from api.ingest import ingest as ingest_main
+from core.logger import get_logger, setup_logging
 from data.data_processor import process_collected_data
 
 from freshdesk.optimized_fetcher import OptimizedFreshdeskFetcher
 
-# 로깅 설정
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(str(Path(__file__).parent / 'freshdesk_collection.log')),
-        logging.StreamHandler()
-    ]
-)
+# 로깅 설정 초기화 (이미 core/logger.py에서 설정됨)
+setup_logging()
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 async def full_collection_workflow(
     reset_vectordb: bool = False, 
     create_backup: bool = True, 
     skip_confirmation: bool = False,
-    collect_raw_details: bool = False,
-    collect_raw_conversations: bool = False,
-    collect_raw_kb: bool = False
+    collect_raw_details: bool = True,  # 기본값을 True로 변경
+    collect_raw_conversations: bool = True,  # 기본값을 True로 변경
+    collect_raw_kb: bool = True  # 기본값을 True로 변경
 ):
     """전체 수집 워크플로우"""
     
@@ -76,6 +71,14 @@ async def full_collection_workflow(
         # 날짜 범위 청크 크기도 설정 파일에서 가져오기 시도
         from large_scale_config import DAYS_PER_CHUNK as CONFIG_DAYS_PER_CHUNK
         DAYS_PER_CHUNK = CONFIG_DAYS_PER_CHUNK  # 설정 파일 값으로 덮어쓰기
+        
+        # 적응형 속도 조절 설정도 가져오기 시도
+        try:
+            from large_scale_config import ADAPTIVE_RATE as CONFIG_ADAPTIVE_RATE
+            ADAPTIVE_RATE = CONFIG_ADAPTIVE_RATE
+        except (ImportError, AttributeError):
+            pass  # 기본값 사용
+            
         logger.info("대용량 설정 파일 로드 완료")
         
         # 벡터DB 초기화 설정 가져오기
@@ -183,32 +186,16 @@ async def full_collection_workflow(
         
         # 1단계: 티켓 데이터 수집
         logger.info("\n1단계: 티켓 데이터 수집 시작")
+        
+        # 테스트 로직과 동일하게 단순화
         async with OptimizedFreshdeskFetcher(OUTPUT_DIR) as fetcher:
-            # 대용량 설정 적용
-            if 'CHUNK_SIZE' in locals():
-                fetcher.CHUNK_SIZE = CHUNK_SIZE
-                logger.info(f"청크 크기 조정: {CHUNK_SIZE}")
-            if 'REQUEST_DELAY' in locals():
-                fetcher.REQUEST_DELAY = REQUEST_DELAY
-                logger.info(f"요청 간격 조정: {REQUEST_DELAY}초")
-            if 'MAX_RETRIES' in locals():
-                fetcher.MAX_RETRIES = MAX_RETRIES
-                logger.info(f"최대 재시도 횟수 조정: {MAX_RETRIES}회")
-            if 'SAVE_INTERVAL' in locals():
-                fetcher.SAVE_INTERVAL = SAVE_INTERVAL
-                logger.info(f"저장 간격 조정: {SAVE_INTERVAL}개")
-            
-            # 무제한 수집 시작
             stats = await fetcher.collect_all_tickets(
                 start_date=START_DATE,
                 end_date=None,  # 현재까지
                 include_conversations=INCLUDE_CONVERSATIONS,
                 include_attachments=INCLUDE_ATTACHMENTS,
                 max_tickets=MAX_TICKETS,  # None = 무제한
-                resource_check_func=resource_check_func,
-                resource_check_interval=resource_check_interval,
-                days_per_chunk=DAYS_PER_CHUNK,  # 날짜 범위 청크 크기
-                adaptive_rate=ADAPTIVE_RATE,    # 적응형 속도 조절
+                max_kb_articles=MAX_TICKETS,  # 지식베이스도 동일하게 제한(무제한)
                 collect_raw_details=collect_raw_details,  # 티켓 상세정보 raw 데이터 수집
                 collect_raw_conversations=collect_raw_conversations,  # 대화내역 raw 데이터 수집
                 collect_raw_kb=collect_raw_kb  # 지식베이스 raw 데이터 수집
@@ -231,8 +218,9 @@ async def full_collection_workflow(
                 incremental=False,  # 테스트 모드에서는 증분 처리하지 않음
                 purge=True,  # 테스트 데이터 초기화
                 process_attachments=True, 
-                force_rebuild=False,
-                local_data_dir=OUTPUT_DIR  # 수집된 로컬 데이터 디렉토리 전달
+                force_rebuild=True,  # 임베딩 데이터 새로 생성
+                local_data_dir=OUTPUT_DIR,  # 수집된 로컬 데이터 디렉토리 전달
+                include_kb=collect_raw_kb  # 지식베이스 데이터도 함께 처리
             )
             
             logger.info("임베딩 및 Qdrant 저장 완료")
@@ -288,8 +276,8 @@ async def full_collection_workflow(
 
 
 async def quick_test(
-    collect_raw_details: bool = False,
-    collect_raw_conversations: bool = False,
+    collect_raw_details: bool = True,  # 기본값을 True로 변경
+    collect_raw_conversations: bool = True,  # 기본값을 True로 변경
     collect_raw_kb: bool = True  # 기본값을 True로 변경하여 지식베이스 데이터도 수집
 ):
     """빠른 테스트 (100개 티켓만 수집, 후처리 및 Qdrant 저장까지 전체 워크플로우 실행)"""
@@ -367,14 +355,14 @@ async def resume_collection():
     
     # RAW 데이터 수집 옵션 묻기
     print("\nRAW 데이터 수집 옵션 (수집 재개)")
-    collect_raw_details_input = input("티켓 상세정보 원본 데이터를 수집하시겠습니까? (yes/no, 기본값: no): ").strip().lower()
-    collect_raw_details = collect_raw_details_input in ["yes", "y"]
+    collect_raw_details_input = input("티켓 상세정보 원본 데이터를 수집하시겠습니까? (yes/no, 기본값: yes): ").strip().lower()
+    collect_raw_details = collect_raw_details_input not in ["no", "n"]  # 기본값 yes로 변경
     
-    collect_raw_conversations_input = input("티켓 대화내역 원본 데이터를 수집하시겠습니까? (yes/no, 기본값: no): ").strip().lower()
-    collect_raw_conversations = collect_raw_conversations_input in ["yes", "y"]
+    collect_raw_conversations_input = input("티켓 대화내역 원본 데이터를 수집하시겠습니까? (yes/no, 기본값: yes): ").strip().lower()
+    collect_raw_conversations = collect_raw_conversations_input not in ["no", "n"]  # 기본값 yes로 변경
     
-    collect_raw_kb_input = input("지식베이스 원본 데이터를 수집하시겠습니까? (yes/no, 기본값: no): ").strip().lower()
-    collect_raw_kb = collect_raw_kb_input in ["yes", "y"]
+    collect_raw_kb_input = input("지식베이스 원본 데이터를 수집하시겠습니까? (yes/no, 기본값: yes): ").strip().lower()
+    collect_raw_kb = collect_raw_kb_input not in ["no", "n"]  # 기본값 yes로 변경
     
     # 수집 재개 - raw 데이터 수집 옵션 전달
     await full_collection_workflow(
@@ -468,11 +456,11 @@ if __name__ == "__main__":
                     collect_raw_details_input = input("티켓 상세정보 원본 데이터를 수집하시겠습니까? (yes/no, 기본값: no): ").strip().lower()
                     collect_raw_details = collect_raw_details_input in ["yes", "y"]
                     
-                    collect_raw_conversations_input = input("티켓 대화내역 원본 데이터를 수집하시겠습니까? (yes/no, 기본값: no): ").strip().lower()
-                    collect_raw_conversations = collect_raw_conversations_input in ["yes", "y"]
+                    collect_raw_conversations_input = input("티켓 대화내역 원본 데이터를 수집하시겠습니까? (yes/no, 기본값: yes): ").strip().lower()
+                    collect_raw_conversations = collect_raw_conversations_input not in ["no", "n"]  # 기본값 yes로 변경
                     
-                    collect_raw_kb_input = input("지식베이스 원본 데이터를 수집하시겠습니까? (yes/no, 기본값: no): ").strip().lower()
-                    collect_raw_kb = collect_raw_kb_input in ["yes", "y"]
+                    collect_raw_kb_input = input("지식베이스 원본 데이터를 수집하시겠습니까? (yes/no, 기본값: yes): ").strip().lower()
+                    collect_raw_kb = collect_raw_kb_input not in ["no", "n"]  # 기본값 yes로 변경
                     
                     # 모든 옵션이 no인데 확인 메시지
                     if not any([collect_raw_details, collect_raw_conversations, collect_raw_kb]):
@@ -497,11 +485,11 @@ if __name__ == "__main__":
                 elif choice == "2":
                     # 빠른 테스트에도 RAW 데이터 수집 옵션 묻기
                     print("\nRAW 데이터 수집 옵션 (테스트용)")
-                    collect_raw_details_input = input("티켓 상세정보 원본 데이터를 수집하시겠습니까? (yes/no, 기본값: no): ").strip().lower()
-                    collect_raw_details = collect_raw_details_input in ["yes", "y"]
+                    collect_raw_details_input = input("티켓 상세정보 원본 데이터를 수집하시겠습니까? (yes/no, 기본값: yes): ").strip().lower()
+                    collect_raw_details = collect_raw_details_input not in ["no", "n"]  # 기본값 yes로 변경
                     
-                    collect_raw_conversations_input = input("티켓 대화내역 원본 데이터를 수집하시겠습니까? (yes/no, 기본값: no): ").strip().lower()
-                    collect_raw_conversations = collect_raw_conversations_input in ["yes", "y"]
+                    collect_raw_conversations_input = input("티켓 대화내역 원본 데이터를 수집하시겠습니까? (yes/no, 기본값: yes): ").strip().lower()
+                    collect_raw_conversations = collect_raw_conversations_input not in ["no", "n"]  # 기본값 yes로 변경
                     
                     collect_raw_kb_input = input("지식베이스 원본 데이터를 수집하시겠습니까? (yes/no, 기본값: yes): ").strip().lower()
                     collect_raw_kb = collect_raw_kb_input not in ["no", "n"]  # 기본값을 yes로 변경

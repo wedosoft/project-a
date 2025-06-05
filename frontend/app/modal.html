@@ -4,6 +4,8 @@
   <meta charset="utf-8">
   <title>Ticket Details</title>
   <script src="{{{appclient}}}"></script>
+  <!-- CopilotKit 관련 스타일 로드 -->
+  <link rel="stylesheet" href="styles/copilot-chat.css">
   <style>
     body {
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -262,17 +264,12 @@
     </div>
   </div>
   <div class="tab-content" id="tab-copilot" style="display:none;">
-    <form class="copilot-content" onsubmit="return false;">
-      <input class="copilot-input" type="text" placeholder="Type your question here..." />
-      <div class="copilot-options">
-        <label><input type="checkbox" checked /> Tickets</label>
-        <label><input type="checkbox" /> Solutions</label>
-        <label><input type="checkbox" /> Images</label>
-        <label><input type="checkbox" /> Attachments</label>
-      </div>
-      <button class="copilot-btn">Search</button>
-    </form>
+    <!-- React CopilotKit 컴포넌트가 마운트될 컨테이너 -->
+    <div id="copilot-react-root"></div>
   </div>
+
+  <!-- CopilotKit 관련 JavaScript 번들 로드 -->
+  <script src="scripts/copilot-bundle.js"></script>
 
   <script>
     // 탭 전환
@@ -282,11 +279,141 @@
         tab.classList.add('active');
         ['similar','solutions','copilot'].forEach(function(name) {
           document.getElementById('tab-' + name).style.display = (tab.dataset.tab === name) ? '' : 'none';
-        });
-      });
+        });        });
     });
 
+    // React 컴포넌트 초기화 함수
+    function initializeCopilotReact() {
+      // CopilotApp이 전역 변수로 등록되어 있는지 확인
+      if (typeof window.CopilotApp !== 'undefined') {
+        const rootElement = document.getElementById('copilot-react-root');
+        if (rootElement && !rootElement.hasChildNodes()) {
+          // React 컴포넌트를 마운트
+          const element = window.React.createElement(window.CopilotApp);
+          window.ReactDOM.render(element, rootElement);
+          console.log('CopilotKit React 컴포넌트가 성공적으로 마운트되었습니다.');
+        }
+      } else {
+        // CopilotApp이 아직 로드되지 않은 경우 100ms 후 재시도
+        setTimeout(initializeCopilotReact, 100);
+      }
+    }
+
     document.addEventListener('DOMContentLoaded', function() {
+      app.initialized()
+        .then(function(client) {
+          window.client = client;
+          
+          // React CopilotKit 컴포넌트 초기화
+          initializeCopilotComponent();
+          
+          client.instance.context()
+            .then(function(context) {
+              const ticket = context.data.ticket;
+              // 기존 티켓 상세 정보 로딩 로직...
+              const ticketDetails = document.getElementById('ticket-details');
+              ticketDetails.innerHTML = `
+                <div><span class="summary-label">Title</span><span class="summary-value">${ticket.subject || 'N/A'}</span></div>
+                <div><span class="summary-label">Status</span><span class="summary-value">${ticket.status_name || 'N/A'}</span></div>
+                <div><span class="summary-label">Priority</span><span class="summary-value">${ticket.priority_name || 'N/A'}</span></div>
+                <div><span class="summary-label">Assignee</span><span class="summary-value">${ticket.agent_name || 'Unassigned'}</span></div>
+                <div><span class="summary-label">Tags</span></div>
+                <div><span class="summary-label">Channel</span><span class="summary-value">${ticket.channel || 'N/A'}</span></div>
+                <div><span class="summary-label">Created</span><span class="summary-value">${new Date(ticket.created_at).toLocaleString()}</span></div>
+                <div><span class="summary-label">Requester</span><span class="summary-value">${ticket.requester_name || 'N/A'}</span></div>
+              `;
+              // Tags
+              const tagsContainer = document.getElementById('ticket-tags');
+              if (ticket.tags && ticket.tags.length > 0) {
+                ticket.tags.forEach(function(tag, idx) {
+                  const tagEl = document.createElement('span');
+                  tagEl.classList.add('tag');
+                  tagEl.textContent = tag;
+                  tagsContainer.appendChild(tagEl);
+                });
+              } else {
+                tagsContainer.textContent = 'No tags';
+              }
+              // Problem, Cause, Result (임시 데이터)
+              const problemList = document.getElementById('problem-list');
+              problemList.innerHTML = '<li>Error message is displayed when user attempts to log in.</li>';
+              const causeList = document.getElementById('cause-list');
+              causeList.innerHTML = '<li>Authentication token expired due to browser cache issue.</li>';
+              const resultList = document.getElementById('result-list');
+              resultList.innerHTML = '<li>Verified successful login is now possible.</li>';
+              // Attachment (임시)
+              const attachmentRow = document.getElementById('attachment-row');
+              const attachmentName = document.getElementById('attachment-name');
+              if (ticket.attachments && ticket.attachments.length > 0) {
+                attachmentRow.style.display = '';
+                attachmentName.textContent = ticket.attachments[0].name || 'error_screenshot.png';
+              } else {
+                // 예시 첨부파일
+                attachmentRow.style.display = '';
+                attachmentName.textContent = 'error_screenshot.png';
+              }
+              // View Details 버튼
+              document.getElementById('view-details-btn').onclick = function() {
+                // 상세 페이지 이동 또는 모달 닫기 등
+                client.instance.close();
+              };
+            })
+            .catch(function(error) {
+              document.body.innerHTML = '<p>Error loading ticket details. Please try again.</p>';
+            });
+
+          // React CopilotKit 컴포넌트 초기화
+          initializeCopilotReact();
+        })
+        .catch(function(error) {
+          document.body.innerHTML = '<p>Error initializing app. Please try again.</p>';
+        });
+    });
+
+    // React 및 CopilotKit 번들 로드
+    function loadReactBundles() {
+      return new Promise(function(resolve, reject) {
+        var scriptsToLoad = [
+          'scripts/copilot-bundle.js'  // CopilotKit과 우리의 컴포넌트가 모두 포함된 번들
+        ];
+        
+        var loadedScripts = 0;
+        
+        scriptsToLoad.forEach(function(scriptSrc) {
+          var script = document.createElement('script');
+          script.src = scriptSrc;
+          script.onload = function() {
+            loadedScripts++;
+            console.log('로드된 스크립트:', scriptSrc);
+            if (loadedScripts === scriptsToLoad.length) {
+              resolve();
+            }
+          };
+          script.onerror = function() {
+            console.error('스크립트 로드 실패:', scriptSrc);
+            reject(new Error('Failed to load ' + scriptSrc));
+          };
+          document.head.appendChild(script);
+        });
+      });
+    }
+
+    // React 번들 로드 후 초기화
+    loadReactBundles()
+      .then(function() {
+        console.log('모든 React 번들이 로드되었습니다.');
+        // DOM이 로드된 후 또는 이미 로드되었다면 즉시 초기화
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', initializeApp);
+        } else {
+          initializeApp();
+        }
+      })
+      .catch(function(error) {
+        console.error('React 번들 로드 오류:', error);
+      });
+
+    function initializeApp() {
       app.initialized()
         .then(function(client) {
           window.client = client;
@@ -340,6 +467,9 @@
                 // 상세 페이지 이동 또는 모달 닫기 등
                 client.instance.close();
               };
+
+              // React CopilotKit 컴포넌트 초기화
+              initializeCopilotReact();
             })
             .catch(function(error) {
               document.body.innerHTML = '<p>Error loading ticket details. Please try again.</p>';
@@ -348,7 +478,7 @@
         .catch(function(error) {
           document.body.innerHTML = '<p>Error initializing app. Please try again.</p>';
         });
-    });
+    }
   </script>
 </body>
 </html>

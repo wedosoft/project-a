@@ -331,6 +331,7 @@ async def ingest(
     process_attachments: bool = PROCESS_ATTACHMENTS,
     force_rebuild: bool = False,
     local_data_dir: Optional[str] = None,
+    include_kb: bool = True,
 ) -> None:
     """
     Freshdesk 티켓과 지식베이스 문서를 임베딩 후 Qdrant에 저장합니다.
@@ -340,6 +341,7 @@ async def ingest(
         process_attachments: 첨부파일 처리 여부 (기본값: True)
         force_rebuild: 데이터베이스 강제 재구축 여부 (기본값: False)
         local_data_dir: 로컬 데이터 디렉토리 경로 (None이면 Freshdesk API에서 직접 수집)
+        include_kb: 지식베이스 데이터 포함 여부 (기본값: True)
     """
     start_time = time.time()
     
@@ -411,6 +413,11 @@ async def ingest(
             
             # 체크포인트가 없거나 force_rebuild인 경우 일반 로드
             tickets, articles = load_local_data(local_data_dir)
+            
+            # 지식베이스 문서 포함 여부에 따라 처리
+            if not include_kb:
+                logger.info("include_kb=False 설정으로 지식베이스 문서는 제외됩니다.")
+                articles = []
             
             # 데이터 로드 체크포인트 저장
             checkpoint_data = {
@@ -1065,6 +1072,7 @@ if __name__ == "__main__":
         if args.local_data:
             logger.info(f"로컬 데이터 모드: {args.local_data}")
         
+        # include_kb 매개변수 추가
         asyncio.run(
             ingest(
                 incremental=incremental_mode,
@@ -1072,6 +1080,7 @@ if __name__ == "__main__":
                 process_attachments=process_attachments,
                 force_rebuild=rebuild_mode,
                 local_data_dir=args.local_data,
+                include_kb=True,  # 기본적으로 지식베이스 데이터 포함
             )
         )
     except KeyboardInterrupt:

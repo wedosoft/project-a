@@ -28,13 +28,12 @@ class DataProcessor:
         
         # raw_data/tickets/ 디렉토리에서 청크 파일 검색
         tickets_dir = self.data_dir / "raw_data" / "tickets"
-        if tickets_dir.exists():
-            chunk_files = sorted(tickets_dir.glob("tickets_chunk_*.json"))
-            logger.info(f"raw_data/tickets에서 {len(chunk_files)}개 청크 파일 발견")
-        else:
-            # 기존 구조 지원 (하위 호환성)
-            chunk_files = sorted(self.data_dir.glob("tickets_chunk_*.json"))
-            logger.info(f"기존 구조에서 {len(chunk_files)}개 청크 파일 발견")
+        if not tickets_dir.exists():
+            logger.error(f"디렉토리를 찾을 수 없음: {tickets_dir}")
+            return []
+            
+        chunk_files = sorted(tickets_dir.glob("tickets_chunk_*.json"))
+        logger.info(f"raw_data/tickets에서 {len(chunk_files)}개 청크 파일 발견")
         
         logger.info(f"{len(chunk_files)}개 청크 파일을 메모리에서 병합 중...")
         
