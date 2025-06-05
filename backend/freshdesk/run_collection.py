@@ -366,14 +366,14 @@ async def resume_collection():
     
     # RAW 데이터 수집 옵션 묻기
     print("\nRAW 데이터 수집 옵션 (수집 재개)")
-    collect_raw_details_input = input("티켓 상세정보 원본 데이터를 수집하시겠습니까? (yes/no, 기본값: no): ").strip().lower()
-    collect_raw_details = collect_raw_details_input in ["yes", "y"]
+    collect_raw_details_input = input("티켓 상세정보 원본 데이터를 수집하시겠습니까? (yes/no, 기본값: yes): ").strip().lower()
+    collect_raw_details = collect_raw_details_input not in ["no", "n"]  # 기본값 yes
     
-    collect_raw_conversations_input = input("티켓 대화내역 원본 데이터를 수집하시겠습니까? (yes/no, 기본값: no): ").strip().lower()
-    collect_raw_conversations = collect_raw_conversations_input in ["yes", "y"]
+    collect_raw_conversations_input = input("티켓 대화내역 원본 데이터를 수집하시겠습니까? (yes/no, 기본값: yes): ").strip().lower()
+    collect_raw_conversations = collect_raw_conversations_input not in ["no", "n"]  # 기본값 yes
     
-    collect_raw_kb_input = input("지식베이스 원본 데이터를 수집하시겠습니까? (yes/no, 기본값: no): ").strip().lower()
-    collect_raw_kb = collect_raw_kb_input in ["yes", "y"]
+    collect_raw_kb_input = input("지식베이스 원본 데이터를 수집하시겠습니까? (yes/no, 기본값: yes): ").strip().lower()
+    collect_raw_kb = collect_raw_kb_input not in ["no", "n"]  # 기본값 yes
     
     # 수집 재개 - raw 데이터 수집 옵션 전달
     await full_collection_workflow(
@@ -418,6 +418,17 @@ if __name__ == "__main__":
         collect_raw_details = args.raw_details or args.raw_all
         collect_raw_conversations = args.raw_conversations or args.raw_all
         collect_raw_kb = args.raw_kb or args.raw_all
+        
+        # full-collection 모드에서 raw 플래그가 명시적으로 제공되지 않은 경우 기본값을 True로 설정
+        if args.full_collection:
+            # 사용자가 명시적으로 raw 관련 플래그를 제공했는지 확인
+            raw_flags_provided = any([args.raw_details, args.raw_conversations, args.raw_kb, args.raw_all])
+            if not raw_flags_provided:
+                # 명시적인 raw 플래그가 없으면 모든 raw 데이터 수집을 기본적으로 활성화
+                collect_raw_details = True
+                collect_raw_conversations = True
+                collect_raw_kb = True
+                logger.info("전체 수집 모드: 명시적 raw 플래그가 없어 모든 raw 데이터 수집을 기본 활성화합니다.")
         
         if args.full_collection:
             asyncio.run(full_collection_workflow(
@@ -464,22 +475,22 @@ if __name__ == "__main__":
                     
                     # RAW 데이터 수집 옵션 묻기
                     print("\nRAW 데이터 수집 옵션 (임베딩 실패 시 재수집 방지)")
-                    collect_raw_details_input = input("티켓 상세정보 원본 데이터를 수집하시겠습니까? (yes/no, 기본값: no): ").strip().lower()
-                    collect_raw_details = collect_raw_details_input in ["yes", "y"]
+                    collect_raw_details_input = input("티켓 상세정보 원본 데이터를 수집하시겠습니까? (yes/no, 기본값: yes): ").strip().lower()
+                    collect_raw_details = collect_raw_details_input not in ["no", "n"]  # 기본값 yes
                     
-                    collect_raw_conversations_input = input("티켓 대화내역 원본 데이터를 수집하시겠습니까? (yes/no, 기본값: no): ").strip().lower()
-                    collect_raw_conversations = collect_raw_conversations_input in ["yes", "y"]
+                    collect_raw_conversations_input = input("티켓 대화내역 원본 데이터를 수집하시겠습니까? (yes/no, 기본값: yes): ").strip().lower()
+                    collect_raw_conversations = collect_raw_conversations_input not in ["no", "n"]  # 기본값 yes
                     
-                    collect_raw_kb_input = input("지식베이스 원본 데이터를 수집하시겠습니까? (yes/no, 기본값: no): ").strip().lower()
-                    collect_raw_kb = collect_raw_kb_input in ["yes", "y"]
+                    collect_raw_kb_input = input("지식베이스 원본 데이터를 수집하시겠습니까? (yes/no, 기본값: yes): ").strip().lower()
+                    collect_raw_kb = collect_raw_kb_input not in ["no", "n"]  # 기본값 yes
                     
-                    # 모든 옵션이 no인데 확인 메시지
+                    # 모든 옵션이 no인 경우 확인 메시지
                     if not any([collect_raw_details, collect_raw_conversations, collect_raw_kb]):
-                        confirm = input("모든 RAW 데이터 수집이 비활성화됩니다. 이대로 진행하시겠습니까? (yes/no, 기본값: yes): ").strip().lower()
-                        if confirm in ["no", "n"]:
+                        confirm = input("모든 RAW 데이터 수집이 비활성화됩니다. 이대로 진행하시겠습니까? (yes/no, 기본값: no): ").strip().lower()
+                        if confirm not in ["yes", "y"]:
                             # 모든 옵션 활성화
-                            all_raw = input("모든 RAW 데이터 수집을 활성화하시겠습니까? (yes/no, 기본값: no): ").strip().lower()
-                            if all_raw in ["yes", "y"]:
+                            all_raw = input("모든 RAW 데이터 수집을 활성화하시겠습니까? (yes/no, 기본값: yes): ").strip().lower()
+                            if all_raw not in ["no", "n"]:
                                 collect_raw_details = True
                                 collect_raw_conversations = True
                                 collect_raw_kb = True
