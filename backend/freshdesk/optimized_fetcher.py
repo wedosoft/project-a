@@ -18,9 +18,10 @@ from dotenv import load_dotenv
 # .env 파일 로드
 load_dotenv()
 
-# 로깅 설정
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+# 공통 로깅 모듈 사용 (core/logger.py)
+from core.logger import get_logger
+
+logger = get_logger(__name__)
 
 FRESHDESK_DOMAIN = os.getenv("FRESHDESK_DOMAIN")
 FRESHDESK_API_KEY = os.getenv("FRESHDESK_API_KEY")
@@ -792,17 +793,19 @@ class OptimizedFreshdeskFetcher:
 
     def save_tickets_chunk(self, tickets: List[Dict], chunk_id: str):
         """
-        티켓 청크를 raw_data 구조로 저장
-        모든 데이터를 일관된 raw_data/ 구조 하위에 저장하여 대용량 파일 생성을 방지
+        티켓 청크를 저장 - raw_data/tickets/ 디렉토리에만 저장
+        현재 구조만 지원하도록 수정
         """
-        # raw_data/tickets/ 디렉토리에 청크 파일로만 저장
+        # raw_data/tickets/ 디렉토리에 청크 파일 저장
         tickets_dir = self.raw_data_dir / "tickets"
         tickets_dir.mkdir(parents=True, exist_ok=True)  # 디렉토리 생성 보장
-        chunk_file = tickets_dir / f"tickets_chunk_{chunk_id}.json"
+        raw_chunk_file = tickets_dir / f"tickets_chunk_{chunk_id}.json"
         
-        with open(chunk_file, 'w', encoding='utf-8') as f:
+        with open(raw_chunk_file, 'w', encoding='utf-8') as f:
             json.dump(tickets, f, ensure_ascii=False, indent=2)
-        logger.info(f"티켓 청크 {chunk_id} 저장 완료: {len(tickets)}개 티켓 → {chunk_file}")
+        
+        logger.info(f"티켓 청크 {chunk_id} 저장 완료: {len(tickets)}개 티켓")
+        logger.info(f"  → 저장 경로: {raw_chunk_file}")
 
     async def collect_all_tickets(
         self,
@@ -816,9 +819,9 @@ class OptimizedFreshdeskFetcher:
         resource_check_interval: int = 1000,
         days_per_chunk: int = 30,  # 날짜 범위 청크 크기 (일)
         adaptive_rate: bool = True,   # 적응형 속도 조절 활성화 여부
-        collect_raw_details: bool = False,  # 티켓 상세정보 raw 데이터 수집 여부
-        collect_raw_conversations: bool = False,  # 대화내역 raw 데이터 수집 여부
-        collect_raw_kb: bool = False  # 지식베이스 raw 데이터 수집 여부
+        collect_raw_details: bool = True,  # 티켓 상세정보 raw 데이터 수집 여부
+        collect_raw_conversations: bool = True,  # 대화내역 raw 데이터 수집 여부
+        collect_raw_kb: bool = True  # 지식베이스 raw 데이터 수집 여부
     ) -> Dict:
         """
         모든 티켓을 효율적으로 수집
@@ -1123,7 +1126,8 @@ async def collect_only_raw_data():
         logger.info(f"기존 {len(chunks_completed)}개 청크에서 티켓 ID 추출 중...")
         
         for chunk_id in chunks_completed:
-            chunk_file = fetcher.output_dir / f"tickets_chunk_{chunk_id}.json"
+            # raw_data/tickets/ 디렉토리에서만 청크 파일 찾기 (현재 구조만 지원)
+            chunk_file = fetcher.raw_data_dir / "tickets" / f"tickets_chunk_{chunk_id}.json"
             if chunk_file.exists():
                 try:
                     with open(chunk_file, 'r', encoding='utf-8') as f:
@@ -1133,6 +1137,9 @@ async def collect_only_raw_data():
                         logger.info(f"청크 {chunk_id}에서 {len(chunk_ticket_ids)}개 티켓 ID 추출")
                 except Exception as e:
                     logger.error(f"청크 {chunk_id} 읽기 실패: {e}")
+            else:
+                logger.warning(f"청크 파일을 찾을 수 없음: {chunk_file}")
+                logger.warning("모든 청크 파일은 raw_data/tickets/ 디렉토리에 있어야 합니다")
         
         logger.info(f"총 {len(ticket_ids)}개 티켓 ID 추출 완료")
         
@@ -1143,8 +1150,8 @@ async def collect_only_raw_data():
             # 대화내역 수집
             await fetcher.collect_raw_conversations(ticket_ids, progress)
             
-            # 지식베이스 수집
-            await fetcher.collect_raw_knowledge_base(progress)
+            # 지식베이스 수집 (max_articles=None으로 전달하여 모든 문서 수집)
+            await fetcher.collect_raw_knowledge_base(progress, max_articles=None)
             
             logger.info("RAW 데이터 수집 완료")
         else:

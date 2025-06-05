@@ -17,9 +17,9 @@ async function showSampleModal() {
         height: "600px",
       },
     });
-    console.log("Modal 열림");
-  } catch (err) {
-    console.error("Modal 오류", err);
+    // Modal이 성공적으로 열림
+  } catch (error) {
+    console.error("Modal 오류:", error);
   }
 }
 
@@ -40,7 +40,7 @@ async function showCopilotModal() {
         height: "600px",
       },
     });
-    console.log("AI 응답 모달 열림");
+    // AI 응답 모달이 성공적으로 열림
   } catch (err) {
     console.error("코파일럿 모달 오류", err);
   }
@@ -190,7 +190,7 @@ async function fetchSimilarTickets() {
     const ticket = data.ticket;
 
     // Create search query based on subject and description
-    let searchTerms = [];
+    const searchTerms = [];
     if (ticket.subject) {
       searchTerms.push(ticket.subject.trim());
     }
@@ -308,6 +308,8 @@ async function fetchSimilarTickets() {
   }
 }
 
+// fetchSuggestedSolutions 함수는 /init/{ticket_id} 엔드포인트에서 처리되므로 제거됨
+
 // Set up tab switching functionality
 function setupTabs() {
   const tabs = document.querySelectorAll(".tab");
@@ -332,8 +334,8 @@ function setupTabs() {
         // Fetch similar tickets when the tab is clicked
         fetchSimilarTickets();
       } else if (tabId === "solutions") {
-        // Fetch suggested solutions when the tab is clicked
-        fetchSuggestedSolutions();
+        // 추천 솔루션은 /init/{ticket_id} 엔드포인트에서 이미 로드됨
+        // 별도 함수 호출 불필요
       } else if (tabId === "copilot") {
         // Set up search button
         document
@@ -368,12 +370,11 @@ app
     client.events.on("app.activated", async () => {
       try {
         const ctx = await client.instance.context();
-        if (ctx.location === "ticket_top_navigation") {
-          console.log("앱 아이콘 클릭 → 활성화됨");
-          await showSampleModal();
+        if (ctx.location === "ticket_top_navigation") {        // 앱 아이콘 클릭으로 모달 활성화
+        await showSampleModal();
         }
-      } catch (err) {
-        console.error("onAppActivated 오류", err);
+      } catch (error) {
+        console.error("onAppActivated 오류:", error);
       }
     });
 
@@ -381,7 +382,7 @@ app
     const sidebarButton = document.getElementById("openModalBtn");
     if (sidebarButton) {
       sidebarButton.addEventListener("click", () => {
-        console.log("사이드바 버튼 클릭 → 모달 열림");
+        // 사이드바 버튼으로 모달 열기
         showSampleModal();
       });
     }
@@ -390,92 +391,102 @@ app
     const copilotButton = document.getElementById("openCopilotBtn");
     if (copilotButton) {
       copilotButton.addEventListener("click", () => {
-        console.log("AI 응답 버튼 클릭 → 코파일럿 모달 열림");
+        // AI 응답 버튼으로 코파일럿 모달 열기
         showCopilotModal();
       });
     }
   })
-  .catch((err) => console.error("SDK 초기화 실패", err));
+  .catch((error) => {
+    // SDK 초기화 실패 처리
+    console.error("SDK 초기화 실패:", error);
+  });
 
 // modal.html 전용 초기화
 function initModalPage() {
   // Freshdesk 앱 SDK 로드 후 실행
-  app.initialized().then(function(client) {
+  app.initialized().then(function (client) {
     window.client = client;
-    client.instance.context().then(function(context) {
+    client.instance.context().then(function (context) {
       const ticket = context.data.ticket || {};
       // Ticket Summary
-      const ticketDetails = document.getElementById('ticket-details');
+      const ticketDetails = document.getElementById("ticket-details");
       if (ticketDetails) {
         ticketDetails.innerHTML = `
-          <div><span class="summary-label">Title</span><span class="summary-value">${ticket.subject || 'N/A'}</span></div>
-          <div><span class="summary-label">Status</span><span class="summary-value">${ticket.status_name || 'N/A'}</span></div>
-          <div><span class="summary-label">Priority</span><span class="summary-value">${ticket.priority_name || 'N/A'}</span></div>
-          <div><span class="summary-label">Assignee</span><span class="summary-value">${ticket.agent_name || 'Unassigned'}</span></div>
+          <div><span class="summary-label">Title</span><span class="summary-value">${ticket.subject || "N/A"}</span></div>
+          <div><span class="summary-label">Status</span><span class="summary-value">${ticket.status_name || "N/A"}</span></div>
+          <div><span class="summary-label">Priority</span><span class="summary-value">${ticket.priority_name || "N/A"}</span></div>
+          <div><span class="summary-label">Assignee</span><span class="summary-value">${ticket.agent_name || "Unassigned"}</span></div>
           <div><span class="summary-label">Tags</span></div>
-          <div><span class="summary-label">Channel</span><span class="summary-value">${ticket.channel || 'N/A'}</span></div>
-          <div><span class="summary-label">Created</span><span class="summary-value">${ticket.created_at ? new Date(ticket.created_at).toLocaleString() : 'N/A'}</span></div>
-          <div><span class="summary-label">Requester</span><span class="summary-value">${ticket.requester_name || 'N/A'}</span></div>
+          <div><span class="summary-label">Channel</span><span class="summary-value">${ticket.channel || "N/A"}</span></div>
+          <div><span class="summary-label">Created</span><span class="summary-value">${ticket.created_at ? new Date(ticket.created_at).toLocaleString() : "N/A"}</span></div>
+          <div><span class="summary-label">Requester</span><span class="summary-value">${ticket.requester_name || "N/A"}</span></div>
         `;
       }
       // Tags
-      const tagsContainer = document.getElementById('ticket-tags');
+      const tagsContainer = document.getElementById("ticket-tags");
       if (tagsContainer) {
-        tagsContainer.innerHTML = '';
+        tagsContainer.innerHTML = "";
         if (ticket.tags && ticket.tags.length > 0) {
-          ticket.tags.forEach(function(tag) {
-            const tagEl = document.createElement('span');
-            tagEl.classList.add('tag');
+          ticket.tags.forEach(function (tag) {
+            const tagEl = document.createElement("span");
+            tagEl.classList.add("tag");
             tagEl.textContent = tag;
             tagsContainer.appendChild(tagEl);
           });
         } else {
-          tagsContainer.textContent = 'No tags';
+          tagsContainer.textContent = "No tags";
         }
       }
       // Problem, Cause, Result (샘플)
-      const problemList = document.getElementById('problem-list');
-      if (problemList) problemList.innerHTML = '<li>Error message is displayed when user attempts to log in.</li>';
-      const causeList = document.getElementById('cause-list');
-      if (causeList) causeList.innerHTML = '<li>Authentication token expired due to browser cache issue.</li>';
-      const resultList = document.getElementById('result-list');
-      if (resultList) resultList.innerHTML = '<li>Verified successful login is now possible.</li>';
+      const problemList = document.getElementById("problem-list");
+      if (problemList)
+        problemList.innerHTML =
+          "<li>Error message is displayed when user attempts to log in.</li>";
+      const causeList = document.getElementById("cause-list");
+      if (causeList)
+        causeList.innerHTML =
+          "<li>Authentication token expired due to browser cache issue.</li>";
+      const resultList = document.getElementById("result-list");
+      if (resultList)
+        resultList.innerHTML =
+          "<li>Verified successful login is now possible.</li>";
       // Attachment (샘플)
-      const attachmentRow = document.getElementById('attachment-row');
-      const attachmentName = document.getElementById('attachment-name');
+      const attachmentRow = document.getElementById("attachment-row");
+      const attachmentName = document.getElementById("attachment-name");
       if (attachmentRow && attachmentName) {
         if (ticket.attachments && ticket.attachments.length > 0) {
-          attachmentRow.style.display = '';
-          attachmentName.textContent = ticket.attachments[0].name || 'error_screenshot.png';
+          attachmentRow.style.display = "";
+          attachmentName.textContent =
+            ticket.attachments[0].name || "error_screenshot.png";
         } else {
-          attachmentRow.style.display = '';
-          attachmentName.textContent = 'error_screenshot.png';
+          attachmentRow.style.display = "";
+          attachmentName.textContent = "error_screenshot.png";
         }
       }
       // View Details 버튼
-      const viewDetailsBtn = document.getElementById('view-details-btn');
+      const viewDetailsBtn = document.getElementById("view-details-btn");
       if (viewDetailsBtn) {
-        viewDetailsBtn.onclick = function() {
+        viewDetailsBtn.onclick = function () {
           client.instance.close();
         };
       }
       // 탭 전환
-      document.querySelectorAll('.tab').forEach(function(tab) {
-        tab.addEventListener('click', function() {
-          document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-          tab.classList.add('active');
-          ['similar','solutions','copilot'].forEach(function(name) {
-            const el = document.getElementById('tab-' + name);
-            if (el) el.style.display = (tab.dataset.tab === name) ? '' : 'none';
+      document.querySelectorAll(".tab").forEach(function (tab) {
+        tab.addEventListener("click", function () {
+          document.querySelectorAll(".tab").forEach((t) => t.classList.remove("active"));
+          tab.classList.add("active");
+          ["similar", "solutions", "copilot"].forEach(function (name) {
+            const el = document.getElementById("tab-" + name);
+            if (el) el.style.display = tab.dataset.tab === name ? "" : "none";
           });
         });
       });
       // Copilot 검색 버튼(샘플)
-      const copilotForm = document.querySelector('#tab-copilot form');
+      const copilotForm = document.querySelector("#tab-copilot form");
       if (copilotForm) {
-        copilotForm.addEventListener('submit', function(e) {
+        copilotForm.addEventListener("submit", function (e) {
           e.preventDefault();
-         console.log('Copilot 검색 기능은 샘플입니다.');
+          // Copilot 검색 기능 (샘플 구현)
         });
       }
     });
@@ -483,7 +494,7 @@ function initModalPage() {
 }
 
 // 페이지가 modal.html일 때만 실행
-if (window.location.pathname.includes('modal.html')) {
+if (window.location.pathname.includes("modal.html")) {
   initModalPage();
 }
 

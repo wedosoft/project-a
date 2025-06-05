@@ -1,0 +1,28 @@
+# FDK 검증에서 제외할 파일들
+# 외부 라이브러리 번들 (React, CopilotKit 등)
+app/scripts/vendors.js
+app/scripts/copilot-bundle.js
+scripts/vendors.js
+scripts/copilot-bundle.js
+
+# Node modules 및 빌드 산출물
+node_modules/
+coverage/
+log/
+.DS_Store
+.report.json
+
+# 개발 관련 파일
+webpack.config.js
+babel.config.js
+package-lock.json
+
+# 번들 파일들 (다양한 경로로 시도)
+**/vendors.js
+**/copilot-bundle.js
+*.bundle.js
+
+# JSHint 제외 설정
+# JSHint가 특정 파일을 건너뛰도록 설정
+app/scripts/*bundle*.js
+app/scripts/*vendor*.js

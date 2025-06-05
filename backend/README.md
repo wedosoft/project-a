@@ -28,7 +28,8 @@ backend/
 │   ├── llm_router.py       # LLM 호출 및 라우팅
 │   ├── embedder.py         # 임베딩 기능
 │   ├── retriever.py        # 벡터 검색
-│   └── vectordb.py         # 벡터 DB 연동
+│   ├── vectordb.py         # 벡터 DB 연동
+│   └── logger.py           # 공통 로깅 모듈
 │
 ├── data/            # 데이터 처리 관련
 │   ├── data_processor.py      # 데이터 전처리/후처리
@@ -91,3 +92,14 @@ backend/
 - `docs/FRESHDESK_COLLECTION_GUIDE_INTEGRATED.md`: 티켓 수집 통합 가이드
 - `docs/UNLIMITED_COLLECTION_GUIDE.md`: 무제한 수집 상세 가이드
 - `docs/response_format_design.md`: 응답 포맷 설계 문서
+- `docs/LOGGING_GUIDE.md`: 로깅 시스템 가이드
+
+## 로깅 시스템
+
+자동 로그 분할(회전) 시스템이 적용되어 있습니다:
+
+- 로그 파일: `backend/freshdesk_collection.log`
+- 최대 파일 크기: 5MB (초과 시 자동 분할)
+- 백업 파일: 최대 10개 (`freshdesk_collection.log.1`, `freshdesk_collection.log.2`, ...)
+
+로그 시스템에 대한 자세한 내용은 `docs/LOGGING_GUIDE.md`를 참조하세요.
