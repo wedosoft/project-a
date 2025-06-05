@@ -13,7 +13,9 @@ import logging
 import os
 import sys
 import time
-from typing import Any, Dict, Union
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, Optional, Union
 
 from core.embedder import embed_documents, process_documents
 from core.vectordb import vector_db
@@ -150,8 +152,6 @@ def load_local_data(data_dir: str):
     Returns:
         tuple: (tickets, articles) - 티켓 리스트와 지식베이스 문서 리스트
     """
-    from pathlib import Path
-    
     data_path = Path(data_dir)
     tickets = []
     articles = []
@@ -162,96 +162,167 @@ def load_local_data(data_dir: str):
     
     logger.info(f"로컬 데이터 로드 시작: {data_dir}")
     
-    # Enhanced Fetcher 구조 확인 (tickets/, knowledge_base/ 디렉토리)
-    tickets_dir = data_path / "tickets"
-    kb_dir = data_path / "knowledge_base"
+    # 새로운 raw_data 구조 확인
     raw_data_dir = data_path / "raw_data"
     
-    if tickets_dir.exists() or kb_dir.exists() or raw_data_dir.exists():
-        logger.info("Enhanced Fetcher 구조 감지됨, 원본 데이터 로드...")
+    if raw_data_dir.exists():
+        logger.info("새로운 raw_data 구조 감지됨, 청크 데이터 로드...")
         
-        # 1. 상세 티켓 정보 우선 로드
-        if tickets_dir.exists():
-            # 상세정보 파일 우선 확인
-            details_files = sorted(tickets_dir.glob("details_chunk_*.json"))
-            if details_files:
-                logger.info(f"{len(details_files)}개 상세 티켓 청크 파일 로드 중...")
-                for details_file in details_files:
-                    with open(details_file, 'r', encoding='utf-8') as f:
-                        chunk_details = json.load(f)
-                        tickets.extend(chunk_details)
-                        logger.info(f"{details_file.name}: {len(chunk_details)}개 상세 티켓 로드")
-                logger.info(f"상세 티켓 데이터 로드 완료: 총 {len(tickets)}개")
+        # 1. 티켓 데이터 로드 (raw_data/tickets/tickets_chunk_*.json)
+        raw_tickets_dir = raw_data_dir / "tickets"
+        if raw_tickets_dir.exists():
+            ticket_files = sorted(raw_tickets_dir.glob("tickets_chunk_*.json"))
+            if ticket_files:
+                logger.info(f"{len(ticket_files)}개 티켓 청크 파일 로드 중...")
+                for ticket_file in ticket_files:
+                    try:
+                        with open(ticket_file, 'r', encoding='utf-8') as f:
+                            chunk_tickets = json.load(f)
+                            tickets.extend(chunk_tickets)
+                            logger.info(f"{ticket_file.name}: {len(chunk_tickets)}개 티켓 로드")
+                    except Exception as e:
+                        logger.error(f"티켓 파일 로드 실패 {ticket_file.name}: {e}")
+                logger.info(f"티켓 데이터 로드 완료: 총 {len(tickets)}개")
             else:
-                # 상세정보가 없으면 기본 정보 로드
-                basic_files = sorted(tickets_dir.glob("basic_chunk_*.json"))
-                if basic_files:
-                    logger.info(f"{len(basic_files)}개 기본 티켓 청크 파일 로드 중...")
-                    for basic_file in basic_files:
-                        with open(basic_file, 'r', encoding='utf-8') as f:
-                            chunk_basic = json.load(f)
-                            tickets.extend(chunk_basic)
-                            logger.info(f"{basic_file.name}: {len(chunk_basic)}개 기본 티켓 로드")
-                    logger.info(f"기본 티켓 데이터 로드 완료: 총 {len(tickets)}개")
+                logger.info("티켓 청크 파일이 없음")
         
-        # 2. 지식베이스 문서 로드
-        if kb_dir.exists():
-            # 다양한 파일명 패턴 지원 (articles_chunk_*.json과 knowledge_base_chunk_*.json)
-            kb_files = sorted(list(kb_dir.glob("articles_chunk_*.json")) + list(kb_dir.glob("knowledge_base_chunk_*.json")))
+        # 2. 지식베이스 데이터 로드 (raw_data/knowledge_base/knowledge_base_chunk_*.json)
+        raw_kb_dir = raw_data_dir / "knowledge_base"
+        if raw_kb_dir.exists():
+            kb_files = sorted(raw_kb_dir.glob("knowledge_base_chunk_*.json"))
             if kb_files:
                 logger.info(f"{len(kb_files)}개 지식베이스 청크 파일 로드 중...")
                 for kb_file in kb_files:
-                    with open(kb_file, 'r', encoding='utf-8') as f:
-                        chunk_articles = json.load(f)
-                        articles.extend(chunk_articles)
-                        logger.info(f"{kb_file.name}: {len(chunk_articles)}개 지식베이스 문서 로드")
+                    try:
+                        with open(kb_file, 'r', encoding='utf-8') as f:
+                            chunk_articles = json.load(f)
+                            articles.extend(chunk_articles)
+                            logger.info(f"{kb_file.name}: {len(chunk_articles)}개 지식베이스 문서 로드")
+                    except Exception as e:
+                        logger.error(f"지식베이스 파일 로드 실패 {kb_file.name}: {e}")
                 logger.info(f"지식베이스 데이터 로드 완료: 총 {len(articles)}개")
             else:
                 logger.info("지식베이스 청크 파일이 없음")
-        
-        # 3. raw_data 디렉토리에서 지식베이스 데이터 확인
-        raw_kb_dir = raw_data_dir / "knowledge_base"
-        if raw_kb_dir.exists() and len(articles) == 0:  # 기존에 로드된 지식베이스 문서가 없을 경우에만
-            kb_files = sorted(raw_kb_dir.glob("knowledge_base_chunk_*.json"))
-            if kb_files:
-                logger.info(f"{len(kb_files)}개 raw 지식베이스 청크 파일 로드 중...")
-                for kb_file in kb_files:
-                    with open(kb_file, 'r', encoding='utf-8') as f:
-                        chunk_articles = json.load(f)
-                        articles.extend(chunk_articles)
-                        logger.info(f"{kb_file.name}: {len(chunk_articles)}개 지식베이스 문서 로드")
-                logger.info(f"Raw 지식베이스 데이터 로드 완료: 총 {len(articles)}개")
     
     else:
-        # 기존 구조 처리 (하위 호환성)
-        logger.info("기존 구조 감지됨, 레거시 방식으로 로드...")
-        
-        # 통합 파일 우선 확인
-        all_tickets_file = data_path / "all_tickets.json"
-        if all_tickets_file.exists():
-            logger.info(f"통합 티켓 파일에서 로드 중: {all_tickets_file}")
-            with open(all_tickets_file, 'r', encoding='utf-8') as f:
-                tickets = json.load(f)
-            logger.info(f"로컬에서 {len(tickets)}개 티켓 로드 완료")
-        else:
-            # 청크 파일들 확인
-            chunk_files = sorted(data_path.glob("tickets_chunk_*.json"))
-            if chunk_files:
-                logger.info(f"{len(chunk_files)}개 청크 파일에서 로드 중...")
-                for chunk_file in chunk_files:
-                    with open(chunk_file, 'r', encoding='utf-8') as f:
-                        chunk_tickets = json.load(f)
-                        tickets.extend(chunk_tickets)
-                        logger.info(f"{chunk_file.name}: {len(chunk_tickets)}개 티켓 로드")
-                logger.info(f"청크 파일에서 총 {len(tickets)}개 티켓 로드 완료")
-            else:
-                logger.warning(f"로컬 데이터 디렉토리에서 티켓 파일을 찾을 수 없습니다: {data_dir}")
-        
-        # 지식베이스는 기존 구조에서는 별도 수집
-        logger.info("지식베이스 문서는 기존 구조에서는 실시간 수집됩니다.")
+        # raw_data 구조가 없는 경우 오류 메시지 출력
+        logger.error(f"지원되는 데이터 구조를 찾을 수 없습니다: {data_dir}")
+        logger.error("필요한 구조: raw_data/")
+        logger.error("  - raw_data/tickets/tickets_chunk_*.json")
+        logger.error("  - raw_data/knowledge_base/knowledge_base_chunk_*.json")
+        raise ValueError(f"지원되지 않는 데이터 구조: {data_dir}")
     
     logger.info(f"최종 로드 결과: 티켓 {len(tickets):,}개, 지식베이스 {len(articles):,}개")
     return tickets, articles
+
+
+def save_checkpoint(data_dir: str, stage: str, data: Dict[str, Any]) -> None:
+    """
+    처리 진행 상황을 체크포인트로 저장합니다.
+    임베딩이나 DB 저장 실패 시 재수집을 방지하기 위해 사용됩니다.
+    
+    Args:
+        data_dir: 데이터 디렉토리 경로
+        stage: 현재 처리 단계 ('data_loaded', 'embedded', 'stored')
+        data: 저장할 데이터 (문서, 임베딩 등)
+    """
+    try:
+        data_path = Path(data_dir)
+        checkpoint_dir = data_path / "checkpoints"
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)  # parents=True 추가로 중첩 폴더 자동 생성
+        
+        checkpoint_file = checkpoint_dir / f"{stage}_checkpoint.json"
+        
+        # 체크포인트 메타데이터
+        checkpoint_data = {
+            "timestamp": datetime.now().isoformat(),
+            "stage": stage,
+            "doc_count": len(data.get("docs", [])),
+            "embedding_count": len(data.get("embeddings", [])),
+            "metadata_count": len(data.get("metadatas", [])),
+            "ids_count": len(data.get("ids", []))
+        }
+        
+        with open(checkpoint_file, 'w', encoding='utf-8') as f:
+            json.dump(checkpoint_data, f, ensure_ascii=False, indent=2)
+        
+        # 실제 데이터는 별도 파일에 저장 (큰 데이터는 피클 사용)
+        if stage == "embedded":
+            import pickle
+            data_file = checkpoint_dir / f"{stage}_data.pkl"
+            with open(data_file, 'wb') as f:
+                pickle.dump(data, f)
+        else:
+            data_file = checkpoint_dir / f"{stage}_data.json"
+            with open(data_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, default=str)
+                
+        logger.info(f"체크포인트 저장 완료: {stage} - {checkpoint_file}")
+        
+    except Exception as e:
+        logger.warning(f"체크포인트 저장 실패 (계속 진행): {e}")
+
+
+def load_checkpoint(data_dir: str, stage: str) -> Optional[Dict[str, Any]]:
+    """
+    저장된 체크포인트에서 데이터를 로드합니다.
+    
+    Args:
+        data_dir: 데이터 디렉토리 경로
+        stage: 로드할 처리 단계
+        
+    Returns:
+        체크포인트 데이터 또는 None (존재하지 않는 경우)
+    """
+    try:
+        data_path = Path(data_dir)
+        checkpoint_dir = data_path / "checkpoints"
+        
+        checkpoint_file = checkpoint_dir / f"{stage}_checkpoint.json"
+        if not checkpoint_file.exists():
+            return None
+            
+        with open(checkpoint_file, 'r', encoding='utf-8') as f:
+            checkpoint_meta = json.load(f)
+        
+        # 실제 데이터 로드
+        if stage == "embedded":
+            import pickle
+            data_file = checkpoint_dir / f"{stage}_data.pkl"
+            if data_file.exists():
+                with open(data_file, 'rb') as f:
+                    data = pickle.load(f)
+        else:
+            data_file = checkpoint_dir / f"{stage}_data.json"
+            if data_file.exists():
+                with open(data_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+            else:
+                return None
+                
+        logger.info(f"체크포인트 로드 완료: {stage} - {checkpoint_meta['doc_count']}개 문서")
+        return data
+        
+    except Exception as e:
+        logger.warning(f"체크포인트 로드 실패: {e}")
+        return None
+
+
+def clear_checkpoints(data_dir: str) -> None:
+    """
+    성공적으로 완료된 후 체크포인트 파일들을 정리합니다.
+    """
+    try:
+        data_path = Path(data_dir)
+        checkpoint_dir = data_path / "checkpoints"
+        
+        if checkpoint_dir.exists():
+            import shutil
+            shutil.rmtree(checkpoint_dir)
+            logger.info("체크포인트 디렉토리 정리 완료")
+            
+    except Exception as e:
+        logger.warning(f"체크포인트 정리 실패 (무시): {e}")
 
 
 async def ingest(
@@ -259,7 +330,7 @@ async def ingest(
     purge: bool = False,
     process_attachments: bool = PROCESS_ATTACHMENTS,
     force_rebuild: bool = False,
-    local_data_dir: str = None,
+    local_data_dir: Optional[str] = None,
 ) -> None:
     """
     Freshdesk 티켓과 지식베이스 문서를 임베딩 후 Qdrant에 저장합니다.
@@ -282,6 +353,7 @@ async def ingest(
         logger.warning("ingest: FRESHDESK_DOMAIN 환경변수가 설정되지 않아 기본값 'default'를 사용합니다.")
     
     logger.info("데이터 수집 프로세스 시작")
+    start_time = time.time()
 
     try:
         # Qdrant 클라우드만 사용하므로, 로컬 DB 백업/무결성 검사 등은 제거됨
@@ -304,7 +376,53 @@ async def ingest(
         if local_data_dir:
             # 로컬에서 이미 수집된 데이터 읽기
             logger.info(f"로컬 데이터 디렉토리에서 데이터 로드 중: {local_data_dir}")
+            
+            # 체크포인트 확인 - 이미 임베딩이 완료된 데이터가 있는지 확인
+            embedded_checkpoint = load_checkpoint(local_data_dir, "embedded")
+            if embedded_checkpoint and not force_rebuild:
+                logger.info("임베딩 완료된 체크포인트 발견됨, 벡터 DB 저장 단계부터 재개...")
+                docs = embedded_checkpoint["docs"]
+                all_embeddings = embedded_checkpoint["embeddings"]
+                metadatas = embedded_checkpoint["metadatas"]
+                ids = embedded_checkpoint["ids"]
+                
+                # 벡터 DB 저장으로 바로 이동
+                logger.info("Qdrant 벡터 DB에 문서 저장 중...")
+                batch_size = 50
+                for i in range(0, len(docs), batch_size):
+                    end_idx = min(i + batch_size, len(docs))
+                    batch_docs = docs[i:end_idx]
+                    batch_embeddings = all_embeddings[i:end_idx]
+                    batch_metadatas = metadatas[i:end_idx]
+                    batch_ids = ids[i:end_idx]
+
+                    logger.info(f"문서 배치 저장 중... ({i+1}~{end_idx}/{len(docs)})")
+                    vector_db.add_documents(
+                        texts=batch_docs,
+                        embeddings=batch_embeddings,
+                        metadatas=batch_metadatas,
+                        ids=batch_ids,
+                    )
+                
+                # 성공적으로 완료되면 체크포인트 정리
+                clear_checkpoints(local_data_dir)
+                logger.info("✅ 체크포인트에서 벡터 DB 저장 완료")
+                return
+            
+            # 체크포인트가 없거나 force_rebuild인 경우 일반 로드
             tickets, articles = load_local_data(local_data_dir)
+            
+            # 데이터 로드 체크포인트 저장
+            checkpoint_data = {
+                "tickets": tickets,
+                "articles": articles,
+                "docs": [],
+                "embeddings": [],
+                "metadatas": [],
+                "ids": []
+            }
+            save_checkpoint(local_data_dir, "data_loaded", checkpoint_data)
+            
         else:
             # 기존 방식: Freshdesk API에서 직접 수집
             logger.info("Freshdesk 데이터 수집 중...")
@@ -411,9 +529,10 @@ async def ingest(
             # description, description_text 등 주요 필드 보완
             if not t.get("description") or not t.get("description_text"):
                 from freshdesk.fetcher import fetch_ticket_details
-                detail = await fetch_ticket_details(ticket_id)
-                if detail:
-                    t.update({k: v for k, v in detail.items() if k not in t or not t[k]})
+                if ticket_id:  # ticket_id가 None이 아닌 경우에만 호출
+                    detail = await fetch_ticket_details(ticket_id)
+                    if detail:
+                        t.update({k: v for k, v in detail.items() if k not in t or not t[k]})
                     
             # 첨부파일(이미지 등) 메타데이터만 저장
             attachments = t.get("attachments") or t.get("all_attachments")
@@ -510,36 +629,133 @@ async def ingest(
         # 6. 임베딩
         logger.info(f"총 {len(docs)}개 문서 임베딩 시작...")
 
-        # 대량의 문서를 적절한 크기로 나누어 임베딩 - 메모리 효율성 향상
-        batch_size = 50
-        all_embeddings = []
+        try:
+            # 대량의 문서를 적절한 크기로 나누어 임베딩 - 메모리 효율성 향상
+            batch_size = 50
+            all_embeddings = []
 
-        for i in range(0, len(docs), batch_size):
-            batch_docs = docs[i : i + batch_size]
-            logger.info(
-                f"문서 배치 임베딩 중... ({i+1}~{i+len(batch_docs)}/{len(docs)})"
-            )
-            batch_embeddings = embed_documents(batch_docs)
-            all_embeddings.extend(batch_embeddings)
+            for i in range(0, len(docs), batch_size):
+                batch_docs = docs[i : i + batch_size]
+                logger.info(
+                    f"문서 배치 임베딩 중... ({i+1}~{i+len(batch_docs)}/{len(docs)})"
+                )
+                try:
+                    batch_embeddings = embed_documents(batch_docs)
+                    all_embeddings.extend(batch_embeddings)
+                except Exception as e:
+                    logger.error(f"임베딩 배치 처리 실패 (배치 {i//batch_size + 1}): {e}")
+                    # 실패한 배치에 대해 개별 문서 처리 시도
+                    for j, doc in enumerate(batch_docs):
+                        try:
+                            single_embedding = embed_documents([doc])
+                            all_embeddings.extend(single_embedding)
+                            logger.info(f"개별 문서 임베딩 성공: {i+j+1}/{len(docs)}")
+                        except Exception as doc_e:
+                            logger.error(f"개별 문서 임베딩 실패 (문서 {i+j+1}): {doc_e}")
+                            # 빈 임베딩으로 대체하여 인덱스 일치 유지
+                            dummy_embedding = [0.0] * 1536  # text-embedding-3-small 차원
+                            all_embeddings.append(dummy_embedding)
+                            
+            # 임베딩 완료 체크포인트 저장 (로컬 데이터인 경우만)
+            if local_data_dir:
+                checkpoint_data = {
+                    "docs": docs,
+                    "embeddings": all_embeddings,
+                    "metadatas": metadatas,
+                    "ids": ids
+                }
+                save_checkpoint(local_data_dir, "embedded", checkpoint_data)
+                logger.info("임베딩 완료 체크포인트 저장됨")
+                
+        except Exception as e:
+            logger.error(f"임베딩 처리 중 치명적 오류 발생: {e}")
+            # 로컬 데이터인 경우 부분 체크포인트라도 저장 시도
+            if local_data_dir and 'all_embeddings' in locals() and all_embeddings:
+                try:
+                    partial_checkpoint = {
+                        "docs": docs[:len(all_embeddings)],
+                        "embeddings": all_embeddings,
+                        "metadatas": metadatas[:len(all_embeddings)],
+                        "ids": ids[:len(all_embeddings)]
+                    }
+                    save_checkpoint(local_data_dir, "partial_embedded", partial_checkpoint)
+                    logger.info(f"부분 임베딩 체크포인트 저장됨: {len(all_embeddings)}개 문서")
+                except Exception as cp_e:
+                    logger.warning(f"부분 체크포인트 저장 실패: {cp_e}")
+            raise
 
         # 7. Qdrant 저장
         logger.info("Qdrant 벡터 DB에 문서 저장 중...")
 
-        # 배치 단위로 upsert 수행 - 메모리 효율성 향상
-        for i in range(0, len(docs), batch_size):
-            end_idx = min(i + batch_size, len(docs))
-            batch_docs = docs[i:end_idx]
-            batch_embeddings = all_embeddings[i:end_idx]
-            batch_metadatas = metadatas[i:end_idx]
-            batch_ids = ids[i:end_idx]
+        try:
+            # 배치 단위로 upsert 수행 - 메모리 효율성 향상
+            successful_batches = 0
+            failed_batches = []
+            
+            for i in range(0, len(docs), batch_size):
+                end_idx = min(i + batch_size, len(docs))
+                batch_docs = docs[i:end_idx]
+                batch_embeddings = all_embeddings[i:end_idx]
+                batch_metadatas = metadatas[i:end_idx]
+                batch_ids = ids[i:end_idx]
 
-            logger.info(f"문서 배치 저장 중... ({i+1}~{end_idx}/{len(docs)})")
-            vector_db.add_documents(
-                texts=batch_docs,
-                embeddings=batch_embeddings,
-                metadatas=batch_metadatas,
-                ids=batch_ids,
-            )
+                logger.info(f"문서 배치 저장 중... ({i+1}~{end_idx}/{len(docs)})")
+                
+                # 배치 저장 시도 (재시도 포함)
+                max_retries = 3
+                retry_count = 0
+                batch_success = False
+                
+                while retry_count < max_retries and not batch_success:
+                    try:
+                        vector_db.add_documents(
+                            texts=batch_docs,
+                            embeddings=batch_embeddings,
+                            metadatas=batch_metadatas,
+                            ids=batch_ids,
+                        )
+                        successful_batches += 1
+                        batch_success = True
+                        
+                    except Exception as batch_e:
+                        retry_count += 1
+                        logger.warning(f"배치 저장 실패 (시도 {retry_count}/{max_retries}): {batch_e}")
+                        
+                        if retry_count < max_retries:
+                            time.sleep(2 ** retry_count)  # 지수 백오프
+                        else:
+                            # 최종 실패 시 개별 문서 저장 시도
+                            logger.error(f"배치 저장 최종 실패, 개별 문서 저장 시도: 배치 {i//batch_size + 1}")
+                            failed_batches.append((i, end_idx, batch_docs, batch_embeddings, batch_metadatas, batch_ids))
+                            
+                            # 개별 문서 저장 시도
+                            for j in range(len(batch_docs)):
+                                try:
+                                    vector_db.add_documents(
+                                        texts=[batch_docs[j]],
+                                        embeddings=[batch_embeddings[j]],
+                                        metadatas=[batch_metadatas[j]],
+                                        ids=[batch_ids[j]],
+                                    )
+                                    logger.info(f"개별 문서 저장 성공: {i+j+1}/{len(docs)}")
+                                except Exception as doc_e:
+                                    logger.error(f"개별 문서 저장 실패 (문서 {i+j+1}): {doc_e}")
+            
+            if failed_batches:
+                logger.warning(f"실패한 배치: {len(failed_batches)}개")
+                # 실패한 배치 정보를 체크포인트로 저장 (수동 복구용)
+                if local_data_dir:
+                    failed_data = {
+                        "failed_batches": failed_batches,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    save_checkpoint(local_data_dir, "failed_storage", failed_data)
+                    
+            logger.info(f"벡터 DB 저장 완료: 성공 배치 {successful_batches}개")
+            
+        except Exception as e:
+            logger.error(f"벡터 DB 저장 중 치명적 오류 발생: {e}")
+            raise
 
         elapsed_time = time.time() - start_time
         deleted_count = len(deleted_ids) if "deleted_ids" in locals() else 0
@@ -559,8 +775,15 @@ async def ingest(
                 # 저장된 데이터 수와 처리된 문서 수 비교 안내
                 if points_count >= len(docs):
                     logger.info("✅ 저장 검증 성공: 모든 문서가 Qdrant에 정상 저장되었습니다.")
+                    
+                    # 성공적으로 완료되면 체크포인트 정리
+                    if local_data_dir:
+                        clear_checkpoints(local_data_dir)
+                        logger.info("체크포인트 정리 완료")
+                        
                 else:
                     logger.warning(f"⚠️  저장 검증 주의: 처리된 문서 수({len(docs)})와 저장된 포인트 수({points_count})에 차이가 있습니다.")
+                    # 부분 성공인 경우 체크포인트는 유지 (수동 복구 가능)
             else:
                 logger.error(f"❌ Qdrant 저장 검증 실패: {collection_info['error']}")
         except Exception as e:

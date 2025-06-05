@@ -10,7 +10,7 @@ import logging
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional
 
 import httpx
 from dotenv import load_dotenv
@@ -105,6 +105,7 @@ class OptimizedFreshdeskFetcher:
         self.raw_data_dir.mkdir(exist_ok=True)
         
         # 세부 raw 데이터 디렉토리 생성
+        (self.raw_data_dir / "tickets").mkdir(exist_ok=True)
         (self.raw_data_dir / "ticket_details").mkdir(exist_ok=True)
         (self.raw_data_dir / "conversations").mkdir(exist_ok=True)
         (self.raw_data_dir / "attachments").mkdir(exist_ok=True)
@@ -163,7 +164,7 @@ class OptimizedFreshdeskFetcher:
             }
         }
 
-    async def fetch_with_retry(self, url: str, params: Dict = None) -> Dict:
+    async def fetch_with_retry(self, url: str, params: Optional[Dict] = None) -> Dict:
         """재시도 로직이 포함된 API 호출"""
         retries = 0
         while retries < self.MAX_RETRIES:
@@ -219,7 +220,7 @@ class OptimizedFreshdeskFetcher:
         # 최대 재시도 횟수 초과
         raise Exception(f"최대 재시도 횟수({self.MAX_RETRIES})에 도달했습니다: {url}")
 
-    def get_date_ranges(self, start_date: str = "2015-01-01", end_date: str = None, days_per_chunk: int = 30) -> List[tuple]:
+    def get_date_ranges(self, start_date: str = "2015-01-01", end_date: Optional[str] = None, days_per_chunk: int = 30) -> List[tuple]:
         """
         날짜 범위를 분할하여 반환
         
@@ -289,6 +290,9 @@ class OptimizedFreshdeskFetcher:
         try:
             conversations = await self.fetch_with_retry(f"{BASE_URL}/tickets/{ticket_id}/conversations")
             await asyncio.sleep(self.REQUEST_DELAY)
+            # API 응답이 dict인 경우 빈 리스트 반환, list인 경우 그대로 반환
+            if isinstance(conversations, dict):
+                return []
             return conversations if conversations else []
         except Exception as e:
             logger.error(f"티켓 {ticket_id} 대화내역 수집 실패: {e}")
@@ -315,7 +319,7 @@ class OptimizedFreshdeskFetcher:
             logger.error(f"티켓 {ticket_id} 첨부파일 정보 수집 실패: {e}")
             return []
     
-    async def fetch_knowledge_base_raw(self, category_id: str = None, max_articles: int = None) -> List[Dict]:
+    async def fetch_knowledge_base_raw(self, category_id: Optional[str] = None, max_articles: Optional[int] = None) -> List[Dict]:
         """
         지식베이스 문서 수집 (raw 데이터 형태)
         Freshdesk API 문서에 맞게 카테고리 → 폴더 → 아티클 계층 구조로 접근
@@ -331,7 +335,7 @@ class OptimizedFreshdeskFetcher:
         articles_count = 0
         
         try:
-            logger.info(f"지식베이스 수집 시작" + (f" (최대 {max_articles}개)" if max_articles else ""))
+            logger.info("지식베이스 수집 시작" + (f" (최대 {max_articles}개)" if max_articles else ""))
             
             # 1. 카테고리 목록 가져오기
             categories = []
@@ -441,6 +445,7 @@ class OptimizedFreshdeskFetcher:
             chunk_id: 청크 식별자
         """
         target_dir = self.raw_data_dir / data_type
+        target_dir.mkdir(parents=True, exist_ok=True)  # 디렉토리 생성 보장
         chunk_file = target_dir / f"{data_type}_chunk_{chunk_id}.json"
         
         with open(chunk_file, 'w', encoding='utf-8') as f:
@@ -486,7 +491,7 @@ class OptimizedFreshdeskFetcher:
             self.save_raw_data_chunk(current_chunk, "ticket_details", chunk_id)
             progress.setdefault("raw_data_progress", {}).setdefault("ticket_details_chunks", []).append(chunk_id)
         
-        logger.info(f"티켓 상세정보 raw 데이터 수집 완료")
+        logger.info("티켓 상세정보 raw 데이터 수집 완료")
     
     async def collect_raw_conversations(self, ticket_ids: List[str], progress: Dict) -> None:
         """
@@ -529,9 +534,9 @@ class OptimizedFreshdeskFetcher:
             self.save_raw_data_chunk(current_chunk, "conversations", chunk_id)
             progress.setdefault("raw_data_progress", {}).setdefault("conversations_chunks", []).append(chunk_id)
         
-        logger.info(f"티켓 대화내역 raw 데이터 수집 완료")
+        logger.info("티켓 대화내역 raw 데이터 수집 완료")
     
-    async def collect_raw_knowledge_base(self, progress: Dict, max_articles: int = None) -> None:
+    async def collect_raw_knowledge_base(self, progress: Dict, max_articles: Optional[int] = None) -> None:
         """
         지식베이스를 raw 데이터로 수집하여 저장
         
@@ -539,7 +544,7 @@ class OptimizedFreshdeskFetcher:
             progress: 진행 상황 딕셔너리
             max_articles: 최대 수집 항목 수 (None이면 제한 없음)
         """
-        logger.info(f"지식베이스 raw 데이터 수집 시작" + (f" (최대 {max_articles}개)" if max_articles else ""))
+        logger.info("지식베이스 raw 데이터 수집 시작" + (f" (최대 {max_articles}개)" if max_articles else ""))
         
         try:
             # 이미 수집된 지식베이스가 있는지 확인
@@ -582,6 +587,79 @@ class OptimizedFreshdeskFetcher:
         except Exception as e:
             logger.error(f"지식베이스 raw 데이터 수집 중 오류 발생: {e}")
             raise
+    
+    async def collect_raw_attachments(self, ticket_ids: List[str], progress: Dict) -> None:
+        """
+        티켓 첨부파일을 raw 데이터로 수집하여 저장
+        
+        Args:
+            ticket_ids: 첨부파일을 수집할 티켓 ID 목록
+            progress: 진행 상황 딕셔너리
+        """
+        logger.info(f"티켓 첨부파일 raw 데이터 수집 시작: {len(ticket_ids)}개 티켓")
+        
+        try:
+            # 이미 수집된 첨부파일 청크가 있는지 확인
+            attachment_chunks = progress.get("raw_data_progress", {}).get("attachments_chunks", [])
+            if attachment_chunks:
+                logger.info(f"이미 수집된 첨부파일 청크가 있습니다: {len(attachment_chunks)}개")
+                logger.info("기존 수집 데이터를 유지하고 새로운 데이터를 추가합니다")
+            
+            chunk_counter = len(attachment_chunks)
+            current_chunk = []
+            
+            for ticket_id in ticket_ids:
+                try:
+                    # 개별 티켓의 첨부파일 정보 수집
+                    attachments_data = await self.fetch_attachments_raw(ticket_id)
+                    
+                    if attachments_data:
+                        # 티켓 ID와 함께 첨부파일 데이터 저장
+                        ticket_attachment_data = {
+                            "ticket_id": ticket_id,
+                            "attachments": attachments_data,
+                            "collected_at": datetime.now().isoformat()
+                        }
+                        current_chunk.append(ticket_attachment_data)
+                        
+                        # 청크 크기 도달 시 저장
+                        if len(current_chunk) >= self.RAW_DATA_CHUNK_SIZE:
+                            chunk_id = f"{chunk_counter:04d}"
+                            self.save_raw_data_chunk(current_chunk, "attachments", chunk_id)
+                            progress.setdefault("raw_data_progress", {}).setdefault("attachments_chunks", []).append(chunk_id)
+                            
+                            logger.info(f"첨부파일 청크 {chunk_id} 저장 완료: {len(current_chunk)}개 티켓")
+                            current_chunk = []
+                            chunk_counter += 1
+                            
+                            # 진행 상황 저장
+                            self.save_progress(progress)
+                    
+                    # API 호출 간격 조절
+                    await asyncio.sleep(self.REQUEST_DELAY)
+                    
+                except Exception as e:
+                    logger.error(f"티켓 {ticket_id} 첨부파일 수집 오류: {e}")
+                    continue
+            
+            # 마지막 청크 저장
+            if current_chunk:
+                chunk_id = f"{chunk_counter:04d}"
+                self.save_raw_data_chunk(current_chunk, "attachments", chunk_id)
+                progress.setdefault("raw_data_progress", {}).setdefault("attachments_chunks", []).append(chunk_id)
+                
+                logger.info(f"첨부파일 마지막 청크 {chunk_id} 저장 완료: {len(current_chunk)}개 티켓")
+            
+            # 첨부파일 수집 완료 시간 기록
+            progress.setdefault("raw_data_progress", {})["last_attachments_update"] = datetime.now().isoformat()
+            progress.setdefault("raw_data_progress", {})["attachments_tickets_processed"] = len(ticket_ids)
+            self.save_progress(progress)
+            
+            logger.info("티켓 첨부파일 raw 데이터 수집 완료")
+            
+        except Exception as e:
+            logger.error(f"첨부파일 raw 데이터 수집 중 오류 발생: {e}")
+            raise
 
     async def fetch_tickets_by_date_range(
         self, 
@@ -589,7 +667,7 @@ class OptimizedFreshdeskFetcher:
         end_date: str,
         include_conversations: bool = False,
         include_attachments: bool = False,
-        max_tickets: int = None,
+        max_tickets: Optional[int] = None,
         current_total: int = 0
     ) -> List[Dict]:
         """특정 날짜 범위의 티켓 수집"""
@@ -695,14 +773,14 @@ class OptimizedFreshdeskFetcher:
                     conversations = ticket.get("conversations")
                     if not conversations:
                         from .fetcher import fetch_ticket_conversations
-                        conversations = await fetch_ticket_conversations(None, ticket_id)
+                        conversations = await fetch_ticket_conversations(self.client, ticket_id)
                         ticket["conversations"] = conversations
                 if include_attachments:
                     # 안전하게 attachments 접근 (None이거나 존재하지 않는 경우 방지)
                     attachments = ticket.get("attachments", []) or ticket.get("all_attachments", [])
                     if not attachments:
                         from .fetcher import fetch_ticket_attachments
-                        attachments = await fetch_ticket_attachments(None, ticket_id)
+                        attachments = await fetch_ticket_attachments(self.client, ticket_id)
                         # None이 아닌 경우에만 할당 (빈 리스트도 유효한 값으로 간주)
                         if attachments is not None:
                             ticket["attachments"] = attachments
@@ -713,20 +791,27 @@ class OptimizedFreshdeskFetcher:
         return enriched_tickets
 
     def save_tickets_chunk(self, tickets: List[Dict], chunk_id: str):
-        """티켓 청크를 파일로 저장"""
-        chunk_file = self.output_dir / f"tickets_chunk_{chunk_id}.json"
+        """
+        티켓 청크를 raw_data 구조로 저장
+        모든 데이터를 일관된 raw_data/ 구조 하위에 저장하여 대용량 파일 생성을 방지
+        """
+        # raw_data/tickets/ 디렉토리에 청크 파일로만 저장
+        tickets_dir = self.raw_data_dir / "tickets"
+        tickets_dir.mkdir(parents=True, exist_ok=True)  # 디렉토리 생성 보장
+        chunk_file = tickets_dir / f"tickets_chunk_{chunk_id}.json"
+        
         with open(chunk_file, 'w', encoding='utf-8') as f:
             json.dump(tickets, f, ensure_ascii=False, indent=2)
-        logger.info(f"청크 {chunk_id} 저장 완료: {len(tickets)}개 티켓")
+        logger.info(f"티켓 청크 {chunk_id} 저장 완료: {len(tickets)}개 티켓 → {chunk_file}")
 
     async def collect_all_tickets(
         self,
         start_date: str = "2015-01-01",
-        end_date: str = None,
+        end_date: Optional[str] = None,
         include_conversations: bool = False,
         include_attachments: bool = False,
-        max_tickets: int = None,
-        max_kb_articles: int = None,  # 지식베이스 최대 항목 수
+        max_tickets: Optional[int] = None,
+        max_kb_articles: Optional[int] = None,  # 지식베이스 최대 항목 수
         resource_check_func = None,
         resource_check_interval: int = 1000,
         days_per_chunk: int = 30,  # 날짜 범위 청크 크기 (일)
@@ -928,6 +1013,12 @@ class OptimizedFreshdeskFetcher:
             logger.info("티켓 대화내역 raw 데이터 수집 시작...")
             await self.collect_raw_conversations(collected_ticket_ids, progress)
             raw_stats["conversations_collected"] = len(collected_ticket_ids)
+        
+        # 첨부파일 수집 추가 - include_attachments가 True인 경우 항상 수집
+        if include_attachments and collected_ticket_ids:
+            logger.info("티켓 첨부파일 raw 데이터 수집 시작...")
+            await self.collect_raw_attachments(collected_ticket_ids, progress)
+            raw_stats["attachments_collected"] = len(collected_ticket_ids)
         
         if collect_raw_kb:
             logger.info("지식베이스 raw 데이터 수집 시작...")
