@@ -404,9 +404,22 @@ if __name__ == "__main__":
     # 명령행 인자가 지정된 경우
     if args.full_collection or args.quick_test or args.resume:
         # raw 데이터 수집 옵션 처리
-        collect_raw_details = args.raw_details or args.raw_all
-        collect_raw_conversations = args.raw_conversations or args.raw_all
-        collect_raw_kb = args.raw_kb or args.raw_all
+        # CLI에서 raw 옵션이 명시적으로 지정되지 않은 경우 기본값을 True로 설정
+        raw_options_specified = any([args.raw_details, args.raw_conversations, args.raw_kb, args.raw_all])
+        
+        if raw_options_specified:
+            # 명시적으로 옵션이 지정된 경우 해당 옵션 사용
+            collect_raw_details = args.raw_details or args.raw_all
+            collect_raw_conversations = args.raw_conversations or args.raw_all
+            collect_raw_kb = args.raw_kb or args.raw_all
+        else:
+            # 옵션이 지정되지 않은 경우 기본값 True 사용 (함수의 기본값과 일치)
+            collect_raw_details = True
+            collect_raw_conversations = True
+            collect_raw_kb = True
+            logger.info("RAW 데이터 수집 옵션이 지정되지 않아 모든 RAW 데이터 수집을 기본 활성화합니다.")
+            logger.info("특정 RAW 데이터 수집을 비활성화하려면 해당 옵션을 명시적으로 지정하세요.")
+            logger.info("예: --raw-details (상세정보만), --raw-conversations (대화내역만), --raw-kb (지식베이스만)")
         
         if args.full_collection:
             asyncio.run(full_collection_workflow(
@@ -453,8 +466,8 @@ if __name__ == "__main__":
                     
                     # RAW 데이터 수집 옵션 묻기
                     print("\nRAW 데이터 수집 옵션 (임베딩 실패 시 재수집 방지)")
-                    collect_raw_details_input = input("티켓 상세정보 원본 데이터를 수집하시겠습니까? (yes/no, 기본값: no): ").strip().lower()
-                    collect_raw_details = collect_raw_details_input in ["yes", "y"]
+                    collect_raw_details_input = input("티켓 상세정보 원본 데이터를 수집하시겠습니까? (yes/no, 기본값: yes): ").strip().lower()
+                    collect_raw_details = collect_raw_details_input not in ["no", "n"]  # 기본값 yes로 변경
                     
                     collect_raw_conversations_input = input("티켓 대화내역 원본 데이터를 수집하시겠습니까? (yes/no, 기본값: yes): ").strip().lower()
                     collect_raw_conversations = collect_raw_conversations_input not in ["no", "n"]  # 기본값 yes로 변경
