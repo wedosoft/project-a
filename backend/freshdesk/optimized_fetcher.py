@@ -703,9 +703,13 @@ class OptimizedFreshdeskFetcher:
             # 종료 날짜 필터 추가 (Freshdesk는 updated_until 파라미터가 없으므로 클라이언트에서 필터링)
             
             try:
+                logger.info(f"API 호출: {BASE_URL}/tickets (페이지 {page}, 파라미터: {params})")
                 batch_tickets = await self.fetch_with_retry(f"{BASE_URL}/tickets", params)
                 
+                logger.info(f"API 응답: {len(batch_tickets) if batch_tickets else 0}개 티켓 수신")
+                
                 if not batch_tickets:
+                    logger.warning(f"페이지 {page}에서 빈 응답 수신 - 수집 완료")
                     break
                     
                 # 종료 날짜 이후 티켓 필터링
@@ -713,6 +717,8 @@ class OptimizedFreshdeskFetcher:
                     t for t in batch_tickets 
                     if t.get('updated_at', '') <= end_date
                 ]
+                
+                logger.info(f"날짜 필터링: {len(batch_tickets)}개 → {len(filtered_tickets)}개 (종료일: {end_date})")
                 
                 # 모든 티켓이 종료 날짜 이내인 경우에만 계속 수집
                 end_date_filter_active = len(batch_tickets) != len(filtered_tickets)
@@ -922,12 +928,19 @@ class OptimizedFreshdeskFetcher:
                 range_ticket_count = len(tickets)
                 logger.info(f"날짜 범위 {range_start} ~ {range_end}에서 {range_ticket_count}개 티켓 수집됨")
                 
+                # 범위에서 티켓이 하나도 없으면 경고
+                if range_ticket_count == 0:
+                    logger.warning(f"⚠️ 날짜 범위 {range_start} ~ {range_end}에서 티켓이 하나도 수집되지 않았습니다.")
+                    logger.warning(f"   가능한 원인: 1) 해당 기간에 티켓이 없음, 2) API 파라미터 문제, 3) 권한 문제")
+                
                 # 티켓 ID 수집 (raw 데이터 수집용)
                 # 티켓 상세정보, 대화내역, 또는 첨부파일 수집이 필요한 경우 티켓 ID 수집
                 if collect_raw_details or collect_raw_conversations or include_attachments:
                     ticket_ids = [str(t.get("id")) for t in tickets if t.get("id")]
                     collected_ticket_ids.extend(ticket_ids)
                     logger.info(f"이 범위에서 수집된 티켓 ID {len(ticket_ids)}개 (총 {len(collected_ticket_ids)}개)")
+                    if ticket_ids:
+                        logger.info(f"   예시 티켓 ID: {ticket_ids[:3]}{'...' if len(ticket_ids) > 3 else ''}")
                 else:
                     logger.warning(f"티켓 ID 수집 조건이 맞지 않음: collect_raw_details={collect_raw_details}, collect_raw_conversations={collect_raw_conversations}, include_attachments={include_attachments}")
                 
@@ -1034,6 +1047,12 @@ class OptimizedFreshdeskFetcher:
         logger.info(f"collected_ticket_ids 수: {len(collected_ticket_ids)}")
         if collected_ticket_ids:
             logger.info(f"첫 5개 티켓 ID: {collected_ticket_ids[:5]}")
+        else:
+            logger.error(f"❌ collected_ticket_ids가 비어있습니다! 이는 다음 중 하나를 의미합니다:")
+            logger.error(f"   1) API에서 티켓이 반환되지 않았음")
+            logger.error(f"   2) 반환된 티켓에 ID가 없음")
+            logger.error(f"   3) 날짜 범위에 티켓이 없음")
+            logger.error(f"   4) API 호출이 실패했음")
         
         if collect_raw_details and collected_ticket_ids:
             logger.info("✅ 티켓 상세정보 raw 데이터 수집 시작...")
