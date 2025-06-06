@@ -300,7 +300,26 @@ jobs:
           echo "=== Setup Complete ==="
           echo "Environment is ready for Copilot coding agent operations"
 
-      # API 연결 테스트 수정
+      # 네트워크 연결 테스트 추가
+      - name: Test network connectivity
+        shell: bash
+        run: |
+          echo "=== Testing Network Connectivity ==="
+
+          # 기본 네트워크 연결 테스트
+          echo "Testing basic connectivity..."
+          curl -s --connect-timeout 5 https://api.github.com/zen || echo "⚠️ GitHub API 접근 실패"
+          curl -s --connect-timeout 5 https://pypi.org/simple/ | head -1 || echo "⚠️ PyPI 접근 실패"
+          curl -s --connect-timeout 5 https://api.openai.com/ || echo "⚠️ OpenAI API 접근 실패"
+
+          # DNS 해석 테스트
+          echo "Testing DNS resolution..."
+          nslookup huggingface.co || echo "⚠️ HuggingFace DNS 해석 실패"
+          nslookup api.openai.com || echo "⚠️ OpenAI DNS 해석 실패"
+
+          echo "Network connectivity tests completed"
+
+      # API 연결 테스트 - 완성된 버전
       - name: Test API connections
         shell: bash
         run: |
@@ -328,4 +347,13 @@ jobs:
                   print(f'✗ {var} is missing')
               else:
                   # 보안을 위해 처음 몇 글자만 표시
-                  masked_value = value[:5] + '...' if len(value) > 5
+                  masked_value = value[:5] + '...' if len(value) > 5 else '***'
+                  print(f'✓ {var} is set ({masked_value})')
+
+          if missing_vars:
+              print(f'\\n⚠️  Missing environment variables: {missing_vars}')
+              print('This might be expected in GitHub Copilot environment')
+              print('Copilot will use GitHub Secrets directly')
+          else:
+              print('\\n✅ All required environment variables are available')
+          " || echo "⚠ Environment variable check completed with warnings"
