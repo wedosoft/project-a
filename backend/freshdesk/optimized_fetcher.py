@@ -1042,9 +1042,8 @@ class OptimizedFreshdeskFetcher:
             "raw_data_stats": raw_stats
         }
         
-        # 통계 저장
-        with open(self.output_dir / "collection_stats.json", 'w') as f:
-            json.dump(stats, f, ensure_ascii=False, indent=2)
+        # 통계 저장 (legacy collection_stats.json 파일 생성하지 않음)
+        # 대용량 시스템에서는 progress.json만 사용하여 진행 상황 추적
         
         logger.info(f"수집 완료: 총 {total_tickets:,}개 티켓")
         if raw_stats:
