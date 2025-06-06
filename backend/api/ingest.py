@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
 from core.embedder import embed_documents, process_documents
-from core.vectordb import vector_db
+from core.vectordb import get_vector_db
 from freshdesk.fetcher import (
     extract_company_id_from_domain,
     fetch_kb_articles,
@@ -364,10 +364,10 @@ async def ingest(
             incremental = False
             purge = True
         
-        existing_count = vector_db.count(company_id=DEFAULT_COMPANY_ID)
+        existing_count = get_vector_db().count(company_id=DEFAULT_COMPANY_ID)
         logger.info(f"기존 컬렉션에 {existing_count}개 문서가 있습니다 (company_id={DEFAULT_COMPANY_ID})")
 
-        total_count = vector_db.count()
+        total_count = get_vector_db().count()
         logger.info(f"컬렉션 전체 문서 수: {total_count}")
         
         if total_count == 0 and purge is False:
@@ -399,7 +399,7 @@ async def ingest(
                     batch_ids = ids[i:end_idx]
 
                     logger.info(f"문서 배치 저장 중... ({i+1}~{end_idx}/{len(docs)})")
-                    vector_db.add_documents(
+                    get_vector_db().add_documents(
                         texts=batch_docs,
                         embeddings=batch_embeddings,
                         metadatas=batch_metadatas,
@@ -444,13 +444,13 @@ async def ingest(
         # 2. 삭제된 문서 감지 및 처리 (증분 업데이트 모드에서만)
         if incremental:
             # 회사 문서 수 확인 (상세 ID 목록은 Qdrant에서는 직접 조회가 어려움)
-            existing_count = vector_db.count(company_id=DEFAULT_COMPANY_ID)
+            existing_count = get_vector_db().count(company_id=DEFAULT_COMPANY_ID)
             logger.info(f"기존 문서 {existing_count}개 확인됨 (company_id={DEFAULT_COMPANY_ID})")
             
             # ID 목록 생성을 위한 검색 수행
             # 참고: Qdrant에서는 전체 ID 목록을 직접 가져올 수 없어 검색을 통해 추정
             dummy_embedding = embed_documents(["get all documents"])[0]
-            result = vector_db.search(
+            result = get_vector_db().search(
                 query_embedding=dummy_embedding,
                 top_k=1000,  # 최대 1000개까지만 검색 (더 많은 문서가 있으면 모두 처리하지 못할 수 있음)
                 company_id=DEFAULT_COMPANY_ID
@@ -498,7 +498,7 @@ async def ingest(
                     logger.info(
                         f"삭제된 문서 제거 중... ({i+1}~{i+len(batch)}/{len(deleted_ids_list)})"
                     )
-                    vector_db.delete_documents(ids=batch, company_id=DEFAULT_COMPANY_ID)
+                    get_vector_db().delete_documents(ids=batch, company_id=DEFAULT_COMPANY_ID)
                 logger.info(
                     f"{len(deleted_ids)}개 삭제된 문서가 데이터베이스에서 제거됨"
                 )
@@ -511,13 +511,13 @@ async def ingest(
         if incremental:
             # Qdrant에서는 전체 ID 목록을 직접 가져올 수 없어 검색으로 추정
             dummy_embedding = embed_documents(["get all documents"])[0]
-            result = vector_db.search(
+            result = get_vector_db().search(
                 query_embedding=dummy_embedding,
                 top_k=1000,  # 최대 1000개까지만 검색
                 company_id=DEFAULT_COMPANY_ID
             )
             existing_ids = set(result.get("ids", []))
-            existing_count = vector_db.count(company_id=DEFAULT_COMPANY_ID)
+            existing_count = get_vector_db().count(company_id=DEFAULT_COMPANY_ID)
             logger.info(f"현재 문서 {existing_count}개 확인됨 (삭제 처리 후, 최대 1000개 ID 샘플링)")
 
         logger.info("티켓 데이터 처리 중...")
@@ -715,7 +715,7 @@ async def ingest(
                 
                 while retry_count < max_retries and not batch_success:
                     try:
-                        vector_db.add_documents(
+                        get_vector_db().add_documents(
                             texts=batch_docs,
                             embeddings=batch_embeddings,
                             metadatas=batch_metadatas,
@@ -738,7 +738,7 @@ async def ingest(
                             # 개별 문서 저장 시도
                             for j in range(len(batch_docs)):
                                 try:
-                                    vector_db.add_documents(
+                                    get_vector_db().add_documents(
                                         texts=[batch_docs[j]],
                                         embeddings=[batch_embeddings[j]],
                                         metadatas=[batch_metadatas[j]],
@@ -773,7 +773,7 @@ async def ingest(
         # Qdrant 저장 성공 여부 자동 검증
         logger.info("Qdrant 저장 성공 여부 검증 중...")
         try:
-            collection_info = vector_db.get_collection_info()
+            collection_info = get_vector_db().get_collection_info()
             if "error" not in collection_info:
                 points_count = collection_info.get("points_count", 0)
                 logger.info(f"✅ Qdrant 컬렉션 '{collection_info['name']}'에 총 {points_count:,}개 포인트 저장 확인")
@@ -819,8 +819,8 @@ async def update_status_mappings(collection_name: str = COLLECTION_NAME) -> None
         # 기본적인 Qdrant 컬렉션 접근 확인 및 통계 표시
         DEFAULT_COMPANY_ID = "default"
         
-        logger.info(f"전체 문서 수: {vector_db.count()} 개")
-        logger.info(f"{DEFAULT_COMPANY_ID} 회사 문서 수: {vector_db.count(company_id=DEFAULT_COMPANY_ID)} 개")
+        logger.info(f"전체 문서 수: {get_vector_db().count()} 개")
+        logger.info(f"{DEFAULT_COMPANY_ID} 회사 문서 수: {get_vector_db().count(company_id=DEFAULT_COMPANY_ID)} 개")
         
         # TODO: Qdrant의 스캐닝 API를 사용하여 구현
         logger.info("이 기능은 현재 버전에서는 지원되지 않습니다.")
@@ -844,12 +844,12 @@ def verify_database_integrity() -> bool:
         logger.info("데이터베이스 무결성 검증 시작...")
         
         # 1. 컬렉션 존재 확인
-        if not vector_db.collection_exists():
+        if not get_vector_db().collection_exists():
             logger.error("데이터베이스 컬렉션이 존재하지 않습니다.")
             return False
         
         # 2. 문서 수 확인
-        total_count = vector_db.count()
+        total_count = get_vector_db().count()
         logger.info(f"데이터베이스에 총 {total_count}개 문서가 있습니다.")
         
         if total_count == 0:
@@ -860,7 +860,7 @@ def verify_database_integrity() -> bool:
         # 3. 검색 테스트 (간단한 쿼리로 응답 확인)
         DEFAULT_COMPANY_ID = "default"
         dummy_embedding = embed_documents(["database verification test"])[0]
-        result = vector_db.search(
+        result = get_vector_db().search(
             query_embedding=dummy_embedding,
             top_k=1,
             company_id=DEFAULT_COMPANY_ID
@@ -1041,7 +1041,7 @@ if __name__ == "__main__":
             collections = [c.strip() for c in args.drop_only.split(",") if c.strip()]
             for col in collections:
                 logger.info(f"Qdrant 컬렉션 삭제 시도: {col}")
-                success = vector_db.drop_collection(collection_name=col)
+                success = get_vector_db().drop_collection(collection_name=col)
                 if success:
                     logger.info(f"Qdrant 컬렉션 삭제 완료: {col}")
                 else:

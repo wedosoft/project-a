@@ -10,7 +10,7 @@
 import logging
 from typing import Any, Dict, List, Optional
 
-from core.vectordb import vector_db
+from core.vectordb import get_vector_db
 
 # 로깅 설정
 logger = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ def retrieve_top_k_docs(query_embedding: List[float], top_k: int, company_id: st
     
     try:
         # 벡터 검색 수행
-        results = vector_db.search(
+        results = get_vector_db().search(
             query_embedding=query_embedding,
             top_k=top_k,
             company_id=search_company_id,  # 수정된 company_id 사용

@@ -912,8 +912,15 @@ class VectorDBFactory:
             raise ValueError(f"지원되지 않는 벡터 DB 타입: {db_type}")
 
 
-# 싱글톤 벡터 DB 인스턴스
-vector_db = VectorDBFactory.get_vector_db()
+# 싱글톤 벡터 DB 인스턴스 (lazy initialization)
+vector_db = None
+
+def get_vector_db():
+    """벡터 DB 인스턴스를 가져옵니다 (lazy initialization)"""
+    global vector_db
+    if vector_db is None:
+        vector_db = VectorDBFactory.get_vector_db()
+    return vector_db
 
 # 로깅 설정
 logger = logging.getLogger(__name__)

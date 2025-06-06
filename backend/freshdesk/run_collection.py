@@ -176,8 +176,8 @@ async def full_collection_workflow(
             
         except Exception as e:
             logger.error(f"벡터DB 초기화 중 오류 발생: {e}")
-            logger.error("벡터DB 초기화에 실패했습니다. 진행을 중단합니다.")
-            return
+            logger.warning("벡터DB 초기화에 실패했지만 raw 데이터 수집은 계속 진행합니다.")
+            # 벡터DB 없이도 raw 데이터 수집은 가능하므로 계속 진행
 
     try:
         # 시스템 리소스 체크 기능이 있다면 주기적으로 체크
@@ -207,7 +207,7 @@ async def full_collection_workflow(
         logger.info("\n2단계: 데이터 후처리 시작")
         await process_collected_data(OUTPUT_DIR)
 
-        # 3단계: 임베딩 및 Qdrant 저장
+        # 3단계: 임베딩 및 Qdrant 저장 (선택적 - 네트워크 연결 문제 시 건너뜀)
         logger.info("\n3단계: 임베딩 및 Qdrant 저장 시작")
         try:
             # 이미 import된 ingest_main 함수 사용
@@ -249,8 +249,8 @@ async def full_collection_workflow(
                 logger.error(f"❌ Qdrant 저장 검증 중 오류: {ve}")
                 
         except Exception as e:
-            logger.error(f"임베딩 및 Qdrant 저장 중 오류 발생: {e}")
-            logger.error("임베딩 및 Qdrant 저장 단계에서 문제가 발생했습니다. 로그를 확인하세요.")
+            logger.warning(f"임베딩 및 Qdrant 저장 중 오류 발생 (건너뜀): {e}")
+            logger.info("⚠️ 임베딩 단계를 건너뛰지만 raw 데이터는 성공적으로 수집되었습니다.")
 
         # 4단계: 완료 리포트
         end_time = datetime.now()
