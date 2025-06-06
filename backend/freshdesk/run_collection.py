@@ -51,7 +51,7 @@ async def full_collection_workflow(
     
     # 설정
     OUTPUT_DIR = str(Path(__file__).parent.parent / "freshdesk_full_data")  # backend/freshdesk_full_data
-    START_DATE = "2024-01-01"  # 최근 데이터부터 시작 (2015년은 너무 오래됨)
+    START_DATE = "2015-01-01"  # 가능한 가장 오래된 날짜부터 시작
     MAX_TICKETS = None  # 무제한 수집 (None = 제한 없음)
     INCLUDE_CONVERSATIONS = True  # 대화내역 포함 여부 (시간 2배 증가)
     INCLUDE_ATTACHMENTS = True    # 첨부파일 정보 포함 여부 (메타데이터만, 실제 파일 다운로드 X)

@@ -39,15 +39,11 @@ import openai
 # OpenAI 클라이언트 설정
 client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
-# 토큰 인코더 초기화 - 네트워크 연결 없이도 작동하도록 수정
+# 토큰 인코더 초기화
 try:
     tokenizer = tiktoken.encoding_for_model(MODEL_NAME)
-except Exception:
-    try:
-        tokenizer = tiktoken.get_encoding("cl100k_base")  # 최신 모델용 fallback
-    except Exception as e:
-        logger.warning(f"tiktoken 초기화 실패 (네트워크 문제 가능성): {e}")
-        tokenizer = None  # 토큰 카운터 비활성화
+except:
+    tokenizer = tiktoken.get_encoding("cl100k_base")  # 최신 모델용 fallback
 
 # OpenAI API 제한 설정
 MAX_TOKENS_PER_CHUNK = 8000  # API 제한 8192에서 약간의 여유를 둠
@@ -57,10 +53,6 @@ CHUNK_OVERLAP = 200  # 청크 간 중복 토큰 수
 
 def count_tokens(text: str) -> int:
     """텍스트의 토큰 수를 계산합니다."""
-    if tokenizer is None:
-        # 토큰 카운터가 없으면 대략적으로 단어 수 * 1.3으로 추정
-        words = len(text.split())
-        return int(words * 1.3)
     return len(tokenizer.encode(text))
 
 def split_into_chunks(text: str, max_tokens: int = MAX_TOKENS_PER_CHUNK, overlap: int = CHUNK_OVERLAP) -> List[str]:
@@ -68,29 +60,6 @@ def split_into_chunks(text: str, max_tokens: int = MAX_TOKENS_PER_CHUNK, overlap
     긴 텍스트를 청크로 분할합니다.
     각 청크는 최대 토큰 수를 초과하지 않으며, 청크 간에 일부 중복이 있습니다.
     """
-    if tokenizer is None:
-        # 토큰 카운터가 없으면 단어 기준으로 분할
-        words = text.split()
-        if len(words) <= int(max_tokens / 1.3):  # 대략적인 변환
-            return [text]
-        
-        chunks = []
-        chunk_size = int(max_tokens / 1.3)
-        overlap_size = int(overlap / 1.3)
-        
-        start_idx = 0
-        while start_idx < len(words):
-            end_idx = min(start_idx + chunk_size, len(words))
-            chunk_words = words[start_idx:end_idx]
-            chunk_text = ' '.join(chunk_words)
-            chunks.append(chunk_text)
-            
-            if end_idx >= len(words):
-                break
-            start_idx = end_idx - overlap_size
-        
-        return chunks
-    
     tokens = tokenizer.encode(text)
     if len(tokens) <= max_tokens:
         return [text]
@@ -225,15 +194,9 @@ def embed_documents(docs: List[str]) -> List[List[float]]:
         if token_count > MAX_TOKENS_PER_CHUNK:
             # 토큰 수가 제한을 초과하는 경우 잘라서 처리
             logger.warning(f"문서 {i}가 토큰 제한을 초과합니다 ({token_count} > {MAX_TOKENS_PER_CHUNK}). 텍스트를 잘라서 처리합니다.")
-            if tokenizer is not None:
-                tokens = tokenizer.encode(doc)
-                truncated_tokens = tokens[:MAX_TOKENS_PER_CHUNK]
-                truncated_text = tokenizer.decode(truncated_tokens)
-            else:
-                # 토큰 카운터가 없으면 단어 기준으로 자르기
-                words = doc.split()
-                max_words = int(MAX_TOKENS_PER_CHUNK / 1.3)
-                truncated_text = ' '.join(words[:max_words])
+            tokens = tokenizer.encode(doc)
+            truncated_tokens = tokens[:MAX_TOKENS_PER_CHUNK]
+            truncated_text = tokenizer.decode(truncated_tokens)
             processed_docs.append(truncated_text)
         else:
             processed_docs.append(doc)
@@ -251,15 +214,9 @@ def embed_documents(docs: List[str]) -> List[List[float]]:
                 final_token_count = count_tokens(text)
                 if final_token_count > MAX_TOKENS_PER_CHUNK:
                     logger.error(f"최종 검사에서 토큰 초과 감지: {final_token_count} 토큰, 추가 절단 실행")
-                    if tokenizer is not None:
-                        tokens = tokenizer.encode(text)
-                        truncated_tokens = tokens[:MAX_TOKENS_PER_CHUNK]
-                        text = tokenizer.decode(truncated_tokens)
-                    else:
-                        # 토큰 카운터가 없으면 단어 기준으로 자르기
-                        words = text.split()
-                        max_words = int(MAX_TOKENS_PER_CHUNK / 1.3)
-                        text = ' '.join(words[:max_words])
+                    tokens = tokenizer.encode(text)
+                    truncated_tokens = tokens[:MAX_TOKENS_PER_CHUNK]
+                    text = tokenizer.decode(truncated_tokens)
                 
                 response = client.embeddings.create(
                     model=MODEL_NAME,

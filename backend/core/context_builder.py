@@ -16,15 +16,11 @@ from difflib import SequenceMatcher
 # 로깅 설정
 logger = logging.getLogger(__name__)
 
-# 토큰 카운터 초기화 (OpenAI 모델 기준) - 네트워크 연결 없이도 작동하도록 수정
+# 토큰 카운터 초기화 (OpenAI 모델 기준)
 try:
     tokenizer = tiktoken.encoding_for_model("text-embedding-3-small")
-except Exception:
-    try:
-        tokenizer = tiktoken.get_encoding("cl100k_base")  # 기본값으로 fallback
-    except Exception as e:
-        logger.warning(f"tiktoken 초기화 실패 (네트워크 문제 가능성): {e}")
-        tokenizer = None  # 토큰 카운터 비활성화
+except:
+    tokenizer = tiktoken.get_encoding("cl100k_base")  # 기본값으로 fallback
 
 # 설정값
 MAX_CONTEXT_TOKENS = 8000  # 최대 8K 토큰으로 상향 조정
@@ -82,10 +78,6 @@ def count_tokens(text: str) -> int:
     """텍스트의 토큰 수를 정확히 계산"""
     if not text:
         return 0
-    if tokenizer is None:
-        # 토큰 카운터가 없으면 대략적으로 단어 수 * 1.3으로 추정
-        words = len(text.split())
-        return int(words * 1.3)
     return len(tokenizer.encode(text))
 
 
