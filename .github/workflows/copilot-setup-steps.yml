@@ -8,6 +8,9 @@ jobs:
   # The job MUST be called `copilot-setup-steps` or it will not be picked up by Copilot.
   copilot-setup-steps:
     runs-on: ubuntu-latest
+    
+    # Environment 설정 추가 - GitHub Environment Secrets 사용
+    environment: copilot
 
     # Set the permissions to the lowest permissions possible needed for your steps.
     # Copilot will be given its own token for its operations.
@@ -15,7 +18,7 @@ jobs:
       # If you want to clone the repository as part of your setup steps, for example to install dependencies, you'll need the `contents: read` permission. If you don't clone the repository in your setup steps, Copilot will do this for you automatically after the steps complete.
       contents: read
 
-    # GitHub Secrets를 환경변수로 노출
+    # GitHub Environment Secrets를 환경변수로 노출
     env:
       FRESHDESK_DOMAIN: ${{ secrets.FRESHDESK_DOMAIN }}
       FRESHDESK_API_KEY: ${{ secrets.FRESHDESK_API_KEY }}
@@ -94,7 +97,43 @@ jobs:
           mkdir -p .vscode
           mkdir -p .github/{workflows,ISSUE_TEMPLATE}
 
-      # 환경 설정 파일 생성 (GitHub Secrets 사용) - 수정된 버전
+      # 환경 변수 및 비밀 설정 확인
+      - name: Check environment variables and secrets
+        shell: bash
+        run: |
+          echo "=== 환경변수 및 비밀 설정 확인 ==="
+
+          # 필수 환경변수 목록
+          required_vars=(
+            "FRESHDESK_DOMAIN"
+            "FRESHDESK_API_KEY"
+            "QDRANT_URL"
+            "QDRANT_API_KEY"
+            "ANTHROPIC_API_KEY"
+            "OPENAI_API_KEY"
+            "GOOGLE_API_KEY"
+          )
+
+          # 각 환경변수의 설정 상태 확인
+          for var in "${required_vars[@]}"; do
+            if [ -n "${!var}" ]; then
+              echo "✅ $var: [설정됨, 길이: ${#!var}자]"
+            else
+              echo "❌ $var: [설정되지 않음]"
+            fi
+          done
+
+          # GitHub Actions 기본 환경변수 확인
+          echo "=== GitHub Actions 기본 환경변수 ==="
+          echo "GITHUB_ACTOR: $GITHUB_ACTOR"
+          echo "GITHUB_REPOSITORY: $GITHUB_REPOSITORY"
+          echo "GITHUB_WORKSPACE: $GITHUB_WORKSPACE"
+
+          # 전체 환경변수 목록에서 관련 변수 찾기
+          echo "=== 관련 환경변수 검색 ==="
+          env | grep -i "freshdesk\|qdrant\|anthropic\|openai\|google" || echo "관련 환경변수 없음"
+
+      # 환경 설정 파일 생성 - 개선된 버전
       - name: Set up environment configuration with real secrets
         shell: bash
         run: |
@@ -105,55 +144,104 @@ jobs:
           export CURL_CA_BUNDLE=""
           export REQUESTS_CA_BUNDLE=""
 
-          # 환경변수 값 확인 (디버깅용)
-          echo "Checking environment variables:"
-          echo "FRESHDESK_DOMAIN: ${FRESHDESK_DOMAIN:0:10}..." 
-          echo "FRESHDESK_API_KEY: ${FRESHDESK_API_KEY:0:10}..."
-          echo "QDRANT_URL: ${QDRANT_URL:0:20}..."
+          # 환경변수 상세 확인
+          echo "=== 환경변수 상태 확인 ==="
+          
+          # 각 변수의 상태를 배열로 저장
+          declare -A env_status
+          
+          for var in FRESHDESK_DOMAIN FRESHDESK_API_KEY QDRANT_URL QDRANT_API_KEY ANTHROPIC_API_KEY OPENAI_API_KEY GOOGLE_API_KEY; do
+            if [ -n "${!var}" ]; then
+              env_status[$var]="SET"
+              echo "✅ $var: [길이: ${#!var}자]"
+            else
+              env_status[$var]="MISSING"
+              echo "❌ $var: [비어있음]"
+            fi
+          done
 
-          # 환경변수가 설정되어 있는지 확인
-          if [ -z "$FRESHDESK_DOMAIN" ] || [ -z "$FRESHDESK_API_KEY" ]; then
-            echo "⚠️ 일부 환경변수가 비어있습니다"
-            echo "GitHub Secrets가 올바르게 설정되었는지 확인하세요"
-          else
-            echo "✅ 주요 환경변수가 설정되어 있습니다"
-          fi
+          # 기본 환경변수가 하나라도 있는지 확인
+          has_any_env=false
+          for var in FRESHDESK_DOMAIN FRESHDESK_API_KEY; do
+            if [ -n "${!var}" ]; then
+              has_any_env=true
+              break
+            fi
+          done
 
-          # .env 파일 생성 (환경변수 값이 있을 때만)
-          if [ -n "$FRESHDESK_DOMAIN" ] && [ -n "$FRESHDESK_API_KEY" ]; then
+          # 환경 파일 생성 전략
+          if [ "$has_any_env" = true ]; then
+            echo "✅ 일부 환경변수가 설정되어 있어 .env 파일을 생성합니다"
+            
             cat > .env << EOF
-          # Freshdesk Configuration
-          FRESHDESK_DOMAIN=$FRESHDESK_DOMAIN
-          FRESHDESK_API_KEY=$FRESHDESK_API_KEY
+# Freshdesk Configuration
+FRESHDESK_DOMAIN=${FRESHDESK_DOMAIN:-""}
+FRESHDESK_API_KEY=${FRESHDESK_API_KEY:-""}
 
-          # Qdrant Cloud Configuration
-          QDRANT_URL=$QDRANT_URL
-          QDRANT_API_KEY=$QDRANT_API_KEY
+# Qdrant Cloud Configuration  
+QDRANT_URL=${QDRANT_URL:-""}
+QDRANT_API_KEY=${QDRANT_API_KEY:-""}
 
-          # LLM API Keys
-          ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
-          OPENAI_API_KEY=$OPENAI_API_KEY
-          GOOGLE_API_KEY=$GOOGLE_API_KEY
+# LLM API Keys
+ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-""}
+OPENAI_API_KEY=${OPENAI_API_KEY:-""}
+GOOGLE_API_KEY=${GOOGLE_API_KEY:-""}
 
-          # Application Settings
-          COMPANY_ID=wedosoft
-          PROCESS_ATTACHMENTS=true
-          EMBEDDING_MODEL=text-embedding-3-small
-          LOG_LEVEL=INFO
-          MAX_TOKENS=4096
+# Application Settings
+COMPANY_ID=wedosoft
+PROCESS_ATTACHMENTS=true
+EMBEDDING_MODEL=text-embedding-3-small
+LOG_LEVEL=INFO
+MAX_TOKENS=4096
 
-          # Network Configuration
-          PYTHONHTTPSVERIFY=0
-          CURL_CA_BUNDLE=
-          REQUESTS_CA_BUNDLE=
-          TOKENIZERS_PARALLELISM=false
-          HF_HUB_OFFLINE=false
-          TRANSFORMERS_OFFLINE=0
-          EOF
-            echo "✓ Environment file created successfully with network settings"
+# Network Configuration
+PYTHONHTTPSVERIFY=0
+CURL_CA_BUNDLE=
+REQUESTS_CA_BUNDLE=
+TOKENIZERS_PARALLELISM=false
+HF_HUB_OFFLINE=false
+TRANSFORMERS_OFFLINE=0
+EOF
+            echo "✓ .env 파일 생성 완료 (일부 값은 빈 문자열일 수 있음)"
           else
-            echo "⚠️ Environment file not created due to missing secrets"
-            echo "Copilot will use environment variables directly"
+            echo "⚠️ 환경변수가 설정되지 않아 기본 .env 파일을 생성합니다"
+            
+            cat > .env << EOF
+# Freshdesk Configuration (기본값)
+FRESHDESK_DOMAIN=
+FRESHDESK_API_KEY=
+
+# Qdrant Cloud Configuration (기본값)
+QDRANT_URL=
+QDRANT_API_KEY=
+
+# LLM API Keys (기본값)
+ANTHROPIC_API_KEY=
+OPENAI_API_KEY=
+GOOGLE_API_KEY=
+
+# Application Settings
+COMPANY_ID=wedosoft
+PROCESS_ATTACHMENTS=true
+EMBEDDING_MODEL=text-embedding-3-small
+LOG_LEVEL=INFO
+MAX_TOKENS=4096
+
+# Network Configuration
+PYTHONHTTPSVERIFY=0
+CURL_CA_BUNDLE=
+REQUESTS_CA_BUNDLE=
+TOKENIZERS_PARALLELISM=false
+HF_HUB_OFFLINE=false
+TRANSFORMERS_OFFLINE=0
+EOF
+            echo "✓ 기본 .env 파일 생성 완료"
+          fi
+          
+          # .env 파일 내용 확인 (보안상 마스킹)
+          echo "=== .env 파일 내용 확인 ==="
+          if [ -f .env ]; then
+            sed 's/=.*/=***MASKED***/g' .env | head -10
           fi
 
       # Docker 환경 설정 및 확인 (공식 GitHub Actions 사용)
@@ -352,8 +440,8 @@ jobs:
 
           if missing_vars:
               print(f'\\n⚠️  Missing environment variables: {missing_vars}')
-              print('This might be expected in GitHub Copilot environment')
-              print('Copilot will use GitHub Secrets directly')
+              print('GitHub Environment Secrets가 올바르게 설정되었는지 확인하세요')
+              print('Repository Settings > Environments > copilot 에서 설정 필요')
           else:
               print('\\n✅ All required environment variables are available')
           " || echo "⚠ Environment variable check completed with warnings"
