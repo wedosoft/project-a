@@ -843,6 +843,19 @@ class OptimizedFreshdeskFetcher:
         Returns:
             Dict: 수집 통계 정보
         """
+        # 디버그 정보 로깅
+        logger.info(f"=== collect_all_tickets 호출 매개변수 ===")
+        logger.info(f"start_date: {start_date}")
+        logger.info(f"end_date: {end_date}")
+        logger.info(f"include_conversations: {include_conversations}")
+        logger.info(f"include_attachments: {include_attachments}")
+        logger.info(f"max_tickets: {max_tickets}")
+        logger.info(f"max_kb_articles: {max_kb_articles}")
+        logger.info(f"days_per_chunk: {days_per_chunk}")
+        logger.info(f"collect_raw_details: {collect_raw_details}")
+        logger.info(f"collect_raw_conversations: {collect_raw_conversations}")
+        logger.info(f"collect_raw_kb: {collect_raw_kb}")
+        
         progress = self.load_progress()
         date_ranges = self.get_date_ranges(start_date, end_date, days_per_chunk)
         
@@ -910,9 +923,13 @@ class OptimizedFreshdeskFetcher:
                 logger.info(f"날짜 범위 {range_start} ~ {range_end}에서 {range_ticket_count}개 티켓 수집됨")
                 
                 # 티켓 ID 수집 (raw 데이터 수집용)
-                if collect_raw_details or collect_raw_conversations:
+                # 티켓 상세정보, 대화내역, 또는 첨부파일 수집이 필요한 경우 티켓 ID 수집
+                if collect_raw_details or collect_raw_conversations or include_attachments:
                     ticket_ids = [str(t.get("id")) for t in tickets if t.get("id")]
                     collected_ticket_ids.extend(ticket_ids)
+                    logger.info(f"이 범위에서 수집된 티켓 ID {len(ticket_ids)}개 (총 {len(collected_ticket_ids)}개)")
+                else:
+                    logger.warning(f"티켓 ID 수집 조건이 맞지 않음: collect_raw_details={collect_raw_details}, collect_raw_conversations={collect_raw_conversations}, include_attachments={include_attachments}")
                 
                 current_chunk.extend(tickets)
                 total_tickets += range_ticket_count
@@ -1007,28 +1024,47 @@ class OptimizedFreshdeskFetcher:
         
         # RAW 데이터 수집 (선택사항)
         raw_stats = {}
+        
+        # 디버그 정보 로깅
+        logger.info(f"=== RAW 데이터 수집 조건 확인 ===")
+        logger.info(f"collect_raw_details: {collect_raw_details}")
+        logger.info(f"collect_raw_conversations: {collect_raw_conversations}")
+        logger.info(f"collect_raw_kb: {collect_raw_kb}")
+        logger.info(f"include_attachments: {include_attachments}")
+        logger.info(f"collected_ticket_ids 수: {len(collected_ticket_ids)}")
+        if collected_ticket_ids:
+            logger.info(f"첫 5개 티켓 ID: {collected_ticket_ids[:5]}")
+        
         if collect_raw_details and collected_ticket_ids:
-            logger.info("티켓 상세정보 raw 데이터 수집 시작...")
+            logger.info("✅ 티켓 상세정보 raw 데이터 수집 시작...")
             await self.collect_raw_ticket_details(collected_ticket_ids, progress)
             raw_stats["ticket_details_collected"] = len(collected_ticket_ids)
+        else:
+            logger.warning(f"❌ 티켓 상세정보 raw 데이터 수집 건너뜀 (collect_raw_details={collect_raw_details}, ticket_ids={len(collected_ticket_ids)})")
         
         if collect_raw_conversations and collected_ticket_ids:
-            logger.info("티켓 대화내역 raw 데이터 수집 시작...")
+            logger.info("✅ 티켓 대화내역 raw 데이터 수집 시작...")
             await self.collect_raw_conversations(collected_ticket_ids, progress)
             raw_stats["conversations_collected"] = len(collected_ticket_ids)
+        else:
+            logger.warning(f"❌ 티켓 대화내역 raw 데이터 수집 건너뜀 (collect_raw_conversations={collect_raw_conversations}, ticket_ids={len(collected_ticket_ids)})")
         
         # 첨부파일 수집 추가 - include_attachments가 True인 경우 항상 수집
         if include_attachments and collected_ticket_ids:
-            logger.info("티켓 첨부파일 raw 데이터 수집 시작...")
+            logger.info("✅ 티켓 첨부파일 raw 데이터 수집 시작...")
             await self.collect_raw_attachments(collected_ticket_ids, progress)
             raw_stats["attachments_collected"] = len(collected_ticket_ids)
+        else:
+            logger.warning(f"❌ 티켓 첨부파일 raw 데이터 수집 건너뜀 (include_attachments={include_attachments}, ticket_ids={len(collected_ticket_ids)})")
         
         if collect_raw_kb:
-            logger.info("지식베이스 raw 데이터 수집 시작...")
+            logger.info("✅ 지식베이스 raw 데이터 수집 시작...")
             await self.collect_raw_knowledge_base(progress, max_articles=max_kb_articles)
             raw_stats["knowledge_base_collected"] = True
             if max_kb_articles:
                 raw_stats["max_kb_articles"] = max_kb_articles
+        else:
+            logger.warning(f"❌ 지식베이스 raw 데이터 수집 건너뜀 (collect_raw_kb={collect_raw_kb})")
         
         # 최종 통계
         stats = {
