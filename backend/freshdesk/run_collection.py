@@ -327,6 +327,8 @@ async def quick_test(
         logger.info(f"수집된 티켓 수: {stats['total_tickets_collected']:,}개 (테스트)")
         logger.info(f"생성된 청크 수: {stats['chunks_created']}개 (테스트)")
         logger.info(f"출력 파일: {OUTPUT_DIR}/all_tickets.json, {OUTPUT_DIR}/tickets_export.csv")
+    except KeyboardInterrupt:
+        logger.info("\n\n중단됩니다.")
     except Exception as e:
         logger.error(f"빠른 테스트 중 오류 발생: {e}")
         raise
