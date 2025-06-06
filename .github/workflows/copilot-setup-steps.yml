@@ -9,12 +9,22 @@ jobs:
   copilot-setup-steps:
     runs-on: ubuntu-latest
 
-    # Environment 설정 - GitHub Environment Secrets 사용
-    environment: copilot
+    # Environment 설정 제거 - Repository Secrets 직접 사용
+    # environment: copilot
 
     # Set the permissions to the lowest permissions possible needed for your steps.
     permissions:
       contents: read
+
+    # 환경변수를 Repository Secrets에서 직접 설정
+    env:
+      FRESHDESK_DOMAIN: ${{ secrets.FRESHDESK_DOMAIN }}
+      FRESHDESK_API_KEY: ${{ secrets.FRESHDESK_API_KEY }}
+      QDRANT_URL: ${{ secrets.QDRANT_URL }}
+      QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
 
     # You can define any steps you want, and they will run before the agent starts.
     steps:
@@ -25,9 +35,9 @@ jobs:
       - name: Disable Copilot Agent Firewall
         run: |
           echo "COPILOT_AGENT_FIREWALL_ENABLED=false" >> $GITHUB_ENV
-            nslookup openaipublic.blob.core.windows.net || true
-            curl -I https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken || true
-            echo "🔓 Copilot Agent 방화벽 및 네트워크 제한 비활성화 완료"
+          nslookup openaipublic.blob.core.windows.net || true
+          curl -I https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken || true
+          echo "🔓 Copilot Agent 방화벽 및 네트워크 제한 비활성화 완료"
 
       - name: Check Environment Variables (Masked)
         run: |
@@ -98,7 +108,7 @@ jobs:
           mkdir -p .vscode
           mkdir -p .github/{workflows,ISSUE_TEMPLATE}
 
-      # 환경변수 확인 (Environment Secrets 사용)
+      # 환경변수 확인 (Repository Secrets 사용)
       - name: Check environment variables
         shell: bash
         run: |
@@ -133,7 +143,7 @@ jobs:
             echo "✅ 모든 환경변수가 정상적으로 설정되었습니다"
           else
             echo "⚠️ $missing_count 개의 환경변수가 누락되었습니다"
-            echo "GitHub Repository > Settings > Environments > copilot 에서 확인하세요"
+            echo "GitHub Repository > Settings > Secrets and variables > Actions 에서 확인하세요"
           fi
 
       # Docker 환경 설정
@@ -208,7 +218,7 @@ jobs:
           echo "  - Freshdesk API 커넥터"
           echo "  - BlockNote 에디터 통합"
           echo ""
-          echo "환경변수는 GitHub Environment Secrets에서 자동으로 제공됩니다"
+          echo "환경변수는 GitHub Repository Secrets에서 자동으로 제공됩니다"
           echo "🎉 GitHub Copilot Agent 환경 준비 완료!"
 
       # 최종 환경변수 테스트
@@ -247,5 +257,5 @@ jobs:
               print('✅ 일부 환경변수가 사용 가능합니다')
           else:
               print('⚠️ 모든 환경변수가 누락되었습니다')
-              print('GitHub Environment Secrets 설정을 확인하세요')
+              print('GitHub Repository Secrets 설정을 확인하세요')
           " || echo "환경변수 테스트 완료"
