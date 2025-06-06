@@ -9,12 +9,13 @@ jobs:
   copilot-setup-steps:
     runs-on: ubuntu-latest
 
-    # Environment 설정 제거 - Repository Secrets 직접 사용
-    # environment: copilot
+    # Environment 설정 - GitHub Environment Secrets 사용
+    environment: copilot
 
     # Set the permissions to the lowest permissions possible needed for your steps.
     permissions:
       contents: read
+      actions: read
 
     # 환경변수를 Repository Secrets에서 직접 설정
     env:
@@ -38,6 +39,18 @@ jobs:
           nslookup openaipublic.blob.core.windows.net || true
           curl -I https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken || true
           echo "🔓 Copilot Agent 방화벽 및 네트워크 제한 비활성화 완료"
+
+      - name: Debug Secrets Availability
+        run: |
+          echo "=== Secrets Debug ==="
+          echo "Number of secrets passed: ${{ secrets }}"
+          echo "Checking if secrets context is available..."
+          if [ -n "${{ secrets.FRESHDESK_API_KEY }}" ]; then
+            echo "FRESHDESK_API_KEY secret is available"
+          else
+            echo "FRESHDESK_API_KEY secret is NOT available"
+          fi
+          echo "====================="
 
       - name: Check Environment Variables (Masked)
         run: |
