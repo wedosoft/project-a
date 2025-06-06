@@ -59,11 +59,11 @@ jobs:
           cache: "pip"
           cache-dependency-path: "backend/requirements.txt"
 
-      # Node.js 20 설정
+      # Node.js 22 설정
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
       # Python 의존성 설치
       - name: Install Python dependencies
