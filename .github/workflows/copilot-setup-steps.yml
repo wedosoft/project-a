@@ -41,6 +41,39 @@ jobs:
           echo "COPILOT_NETWORK_RESTRICTIONS=disabled" >> $GITHUB_ENV
           echo "🔓 Copilot Agent 방화벽 및 네트워크 제한 비활성화 완료"
 
+      - name: Check Environment Variables (Masked)
+        run: |
+          echo "=== Environment Variable Check ==="
+
+          for var in \
+            FRESHDESK_API_KEY \
+            FRESHDESK_DOMAIN \
+            QDRANT_URL \
+            QDRANT_API_KEY \
+            ANTHROPIC_API_KEY \
+            OPENAI_API_KEY \
+            GOOGLE_API_KEY
+          do
+            if [ -z "${!var}" ]; then
+              echo "$var is NOT set"
+            else
+              echo "$var is set. Length: ${#var}"
+            fi
+          done
+
+          echo "==============================="
+
+        - name: Check Network Access and Firewall ENV
+          run: |
+            echo "== FIREWALL & NETWORK CHECK =="
+            echo "COPILOT_AGENT_FIREWALL_ENABLED=$COPILOT_AGENT_FIREWALL_ENABLED"
+            echo "GITHUB_COPILOT_FIREWALL_ENABLED=$GITHUB_COPILOT_FIREWALL_ENABLED"
+            echo "COPILOT_FIREWALL_DISABLED=$COPILOT_FIREWALL_DISABLED"
+            echo "GITHUB_COPILOT_NETWORK_ACCESS=$GITHUB_COPILOT_NETWORK_ACCESS"
+            echo "COPILOT_NETWORK_RESTRICTIONS=$COPILOT_NETWORK_RESTRICTIONS"
+            nslookup openaipublic.blob.core.windows.net || true
+            curl -I https://openaipublic.blob.core.windows.net/encodings/cl100k_base.tiktoken || true
+
       # Python 3.10 설정 (백엔드 개발 환경)
       - name: Set up Python 3.10
         uses: actions/setup-python@v4
