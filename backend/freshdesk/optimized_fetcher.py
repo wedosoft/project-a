@@ -167,6 +167,7 @@ class OptimizedFreshdeskFetcher:
 
     async def fetch_with_retry(self, url: str, params: Optional[Dict] = None) -> Dict:
         """재시도 로직이 포함된 API 호출"""
+        logger.debug(f"API 호출: {url}, 파라미터: {params}")
         retries = 0
         while retries < self.MAX_RETRIES:
             try:
@@ -196,10 +197,12 @@ class OptimizedFreshdeskFetcher:
                     await asyncio.sleep(wait_time)
                     
                 resp.raise_for_status()
-                return resp.json()
+                result = resp.json()
+                logger.debug(f"API 응답 성공: {len(result) if isinstance(result, list) else 'object'} 항목 반환")
+                return result
                 
             except httpx.HTTPStatusError as e:
-                logger.error(f"HTTP 오류 {e.response.status_code}: {e}")
+                logger.error(f"HTTP 오류 {e.response.status_code}: {e} (URL: {url})")
                 if e.response.status_code in [500, 502, 503, 504]:
                     retries += 1
                     wait_time = self.RETRY_DELAY * (2 ** retries)
@@ -856,6 +859,9 @@ class OptimizedFreshdeskFetcher:
         logger.info(f"collect_raw_conversations: {collect_raw_conversations}")
         logger.info(f"collect_raw_kb: {collect_raw_kb}")
         
+        # 디버그 로깅 활성화
+        logger.setLevel(logging.DEBUG)
+        
         progress = self.load_progress()
         date_ranges = self.get_date_ranges(start_date, end_date, days_per_chunk)
         
@@ -1034,6 +1040,8 @@ class OptimizedFreshdeskFetcher:
         logger.info(f"collected_ticket_ids 수: {len(collected_ticket_ids)}")
         if collected_ticket_ids:
             logger.info(f"첫 5개 티켓 ID: {collected_ticket_ids[:5]}")
+        else:
+            logger.error("❌ 수집된 티켓 ID가 없습니다! 날짜 범위를 확인하거나 API 연결 상태를 점검하세요.")
         
         if collect_raw_details and collected_ticket_ids:
             logger.info("✅ 티켓 상세정보 raw 데이터 수집 시작...")
