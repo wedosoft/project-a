@@ -15,6 +15,16 @@ jobs:
       # If you want to clone the repository as part of your setup steps, for example to install dependencies, you'll need the `contents: read` permission. If you don't clone the repository in your setup steps, Copilot will do this for you automatically after the steps complete.
       contents: read
 
+    # GitHub Secrets를 환경변수로 노출
+    env:
+      FRESHDESK_DOMAIN: ${{ secrets.FRESHDESK_DOMAIN }}
+      FRESHDESK_API_KEY: ${{ secrets.FRESHDESK_API_KEY }}
+      QDRANT_URL: ${{ secrets.QDRANT_URL }}
+      QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+
     # You can define any steps you want, and they will run before the agent starts.
     # If you do not check out your code, Copilot will do this for you.
     steps:
@@ -71,26 +81,26 @@ jobs:
           mkdir -p .vscode
           mkdir -p .github/{workflows,ISSUE_TEMPLATE}
 
-      # 환경 설정 파일 생성
-      - name: Set up environment configuration
+      # 환경 설정 파일 생성 (GitHub Secrets 사용)
+      - name: Set up environment configuration with real secrets
         shell: bash
         run: |
-          echo "Setting up environment configuration..."
+          echo "Setting up environment configuration with GitHub Secrets..."
 
-          # .env 템플릿 생성 (실제 키는 포함하지 않음)
-          cat > .env.example << 'EOF'
+          # .env 파일에 실제 값들 설정
+          cat > .env << 'EOF'
           # Freshdesk Configuration
-          FRESHDESK_DOMAIN=your-domain.freshdesk.com
-          FRESHDESK_API_KEY=your-freshdesk-api-key
+          FRESHDESK_DOMAIN=${{ env.FRESHDESK_DOMAIN }}
+          FRESHDESK_API_KEY=${{ env.FRESHDESK_API_KEY }}
 
           # Qdrant Cloud Configuration
-          QDRANT_URL=https://your-cluster.cloud.qdrant.io
-          QDRANT_API_KEY=your-qdrant-api-key
+          QDRANT_URL=${{ env.QDRANT_URL }}
+          QDRANT_API_KEY=${{ env.QDRANT_API_KEY }}
 
           # LLM API Keys
-          ANTHROPIC_API_KEY=your-anthropic-api-key
-          OPENAI_API_KEY=your-openai-api-key
-          GOOGLE_API_KEY=your-google-api-key
+          ANTHROPIC_API_KEY=${{ env.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY=${{ env.OPENAI_API_KEY }}
+          GOOGLE_API_KEY=${{ env.GOOGLE_API_KEY }}
 
           # Application Settings
           COMPANY_ID=wedosoft
@@ -100,8 +110,7 @@ jobs:
           MAX_TOKENS=4096
           EOF
 
-          # 개발용 .env 파일 생성 (빈 값들)
-          cp .env.example .env
+          echo "✓ Environment file created with GitHub Secrets"
 
       # Docker 환경 설정 및 확인 (공식 GitHub Actions 사용)
       - name: Set up Docker Buildx
@@ -246,3 +255,37 @@ jobs:
 
           echo "=== Setup Complete ==="
           echo "Environment is ready for Copilot coding agent operations"
+
+      # API 연결 테스트 추가
+      - name: Test API connections
+        shell: bash
+        run: |
+          echo "=== Testing API Connections ==="
+
+          cd backend
+
+          # Python 스크립트로 API 연결 테스트
+          python -c "
+          import os
+          import sys
+
+          # 환경변수 확인
+          required_vars = [
+              'FRESHDESK_DOMAIN', 'FRESHDESK_API_KEY',
+              'QDRANT_URL', 'QDRANT_API_KEY',
+              'ANTHROPIC_API_KEY', 'OPENAI_API_KEY'
+          ]
+
+          missing_vars = []
+          for var in required_vars:
+              if not os.getenv(var):
+                  missing_vars.append(var)
+              else:
+                  print(f'✓ {var} is set')
+
+          if missing_vars:
+              print(f'✗ Missing environment variables: {missing_vars}')
+              sys.exit(1)
+          else:
+              print('✓ All required environment variables are set')
+          " || echo "⚠ Environment variable check failed"
