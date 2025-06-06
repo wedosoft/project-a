@@ -454,10 +454,29 @@ class OptimizedFreshdeskFetcher:
         logger.info(f"저장 경로: {chunk_file}")
         logger.info(f"저장할 데이터 개수: {len(data)}개 항목")
         
-        with open(chunk_file, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        # 데이터가 비어있는 경우 경고
+        if not data:
+            logger.warning(f"❌ 저장할 데이터가 비어있습니다: {data_type} 청크 {chunk_id}")
+            return
         
-        logger.info(f"✅ {data_type} 청크 {chunk_id} 저장 완료: {len(data)}개 항목 → {chunk_file}")
+        # 데이터 샘플 로깅 (디버깅용)
+        if data:
+            sample_item = data[0]
+            if isinstance(sample_item, dict):
+                keys = list(sample_item.keys())[:5]  # 처음 5개 키만
+                logger.debug(f"데이터 샘플 키: {keys}...")
+        
+        try:
+            with open(chunk_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            
+            # 저장 완료 후 파일 크기 확인
+            file_size = chunk_file.stat().st_size
+            logger.info(f"✅ {data_type} 청크 {chunk_id} 저장 완료: {len(data)}개 항목 → {chunk_file} ({file_size:,} bytes)")
+            
+        except Exception as e:
+            logger.error(f"❌ {data_type} 청크 {chunk_id} 저장 실패: {e}")
+            raise
     
     
     async def collect_raw_ticket_details(self, ticket_ids: List[str], progress: Dict) -> None:
@@ -472,15 +491,26 @@ class OptimizedFreshdeskFetcher:
         
         chunk_counter = len(progress.get("raw_data_progress", {}).get("ticket_details_chunks", []))
         current_chunk = []
+        success_count = 0
+        error_count = 0
         
         for i, ticket_id in enumerate(ticket_ids):
-            detail = await self.fetch_ticket_detail_raw(str(ticket_id))
-            if detail:
-                current_chunk.append(detail)
+            try:
+                detail = await self.fetch_ticket_detail_raw(str(ticket_id))
+                if detail:
+                    current_chunk.append(detail)
+                    success_count += 1
+                else:
+                    error_count += 1
+                    logger.warning(f"티켓 {ticket_id} 상세정보가 None으로 반환됨")
+            except Exception as e:
+                error_count += 1
+                logger.error(f"티켓 {ticket_id} 상세정보 수집 중 예외 발생: {e}")
             
             # 청크 크기에 도달하면 저장
             if len(current_chunk) >= self.RAW_DATA_CHUNK_SIZE:
                 chunk_id = f"{chunk_counter:04d}"
+                logger.info(f"티켓 상세정보 청크 {chunk_id} 저장 중: {len(current_chunk)}개 항목")
                 self.save_raw_data_chunk(current_chunk, "ticket_details", chunk_id)
                 progress.setdefault("raw_data_progress", {}).setdefault("ticket_details_chunks", []).append(chunk_id)
                 chunk_counter += 1
@@ -490,15 +520,16 @@ class OptimizedFreshdeskFetcher:
                 self.save_progress(progress)
             
             if (i + 1) % 100 == 0:
-                logger.info(f"티켓 상세정보 수집 진행률: {i+1}/{len(ticket_ids)}")
+                logger.info(f"티켓 상세정보 수집 진행률: {i+1}/{len(ticket_ids)} (성공: {success_count}, 실패: {error_count})")
         
         # 마지막 청크 저장
         if current_chunk:
             chunk_id = f"{chunk_counter:04d}"
+            logger.info(f"티켓 상세정보 마지막 청크 {chunk_id} 저장 중: {len(current_chunk)}개 항목")
             self.save_raw_data_chunk(current_chunk, "ticket_details", chunk_id)
             progress.setdefault("raw_data_progress", {}).setdefault("ticket_details_chunks", []).append(chunk_id)
         
-        logger.info("티켓 상세정보 raw 데이터 수집 완료")
+        logger.info(f"티켓 상세정보 raw 데이터 수집 완료: 총 {success_count}개 성공, {error_count}개 실패")
     
     async def collect_raw_conversations(self, ticket_ids: List[str], progress: Dict) -> None:
         """
@@ -512,18 +543,31 @@ class OptimizedFreshdeskFetcher:
         
         chunk_counter = len(progress.get("raw_data_progress", {}).get("conversations_chunks", []))
         current_chunk = []
+        success_count = 0
+        error_count = 0
+        total_conversations = 0
         
         for i, ticket_id in enumerate(ticket_ids):
-            conversations = await self.fetch_conversations_raw(str(ticket_id))
-            if conversations:
-                # 각 대화에 ticket_id 추가하여 나중에 연결 가능하도록 함
-                for conv in conversations:
-                    conv["ticket_id"] = ticket_id
-                current_chunk.extend(conversations)
+            try:
+                conversations = await self.fetch_conversations_raw(str(ticket_id))
+                if conversations:
+                    # 각 대화에 ticket_id 추가하여 나중에 연결 가능하도록 함
+                    for conv in conversations:
+                        conv["ticket_id"] = ticket_id
+                    current_chunk.extend(conversations)
+                    success_count += 1
+                    total_conversations += len(conversations)
+                    logger.debug(f"티켓 {ticket_id}: {len(conversations)}개 대화내역")
+                else:
+                    logger.debug(f"티켓 {ticket_id}: 대화내역 없음")
+            except Exception as e:
+                error_count += 1
+                logger.error(f"티켓 {ticket_id} 대화내역 수집 중 예외 발생: {e}")
             
             # 청크 크기에 도달하면 저장
             if len(current_chunk) >= self.RAW_DATA_CHUNK_SIZE:
                 chunk_id = f"{chunk_counter:04d}"
+                logger.info(f"대화내역 청크 {chunk_id} 저장 중: {len(current_chunk)}개 항목")
                 self.save_raw_data_chunk(current_chunk, "conversations", chunk_id)
                 progress.setdefault("raw_data_progress", {}).setdefault("conversations_chunks", []).append(chunk_id)
                 chunk_counter += 1
@@ -533,15 +577,16 @@ class OptimizedFreshdeskFetcher:
                 self.save_progress(progress)
             
             if (i + 1) % 100 == 0:
-                logger.info(f"대화내역 수집 진행률: {i+1}/{len(ticket_ids)}")
+                logger.info(f"대화내역 수집 진행률: {i+1}/{len(ticket_ids)} (성공: {success_count}, 실패: {error_count}, 총 대화: {total_conversations})")
         
         # 마지막 청크 저장
         if current_chunk:
             chunk_id = f"{chunk_counter:04d}"
+            logger.info(f"대화내역 마지막 청크 {chunk_id} 저장 중: {len(current_chunk)}개 항목")
             self.save_raw_data_chunk(current_chunk, "conversations", chunk_id)
             progress.setdefault("raw_data_progress", {}).setdefault("conversations_chunks", []).append(chunk_id)
         
-        logger.info("티켓 대화내역 raw 데이터 수집 완료")
+        logger.info(f"티켓 대화내역 raw 데이터 수집 완료: 총 {success_count}개 티켓에서 {total_conversations}개 대화, {error_count}개 실패")
     
     async def collect_raw_knowledge_base(self, progress: Dict, max_articles: Optional[int] = None) -> None:
         """
@@ -865,9 +910,17 @@ class OptimizedFreshdeskFetcher:
             logger.info(f"이미 {len(completed_ranges)}/{len(date_ranges)}개 날짜 범위가 처리되었습니다.")
         
         logger.info(f"총 {len(date_ranges)}개 날짜 범위로 분할하여 수집 시작")
+        logger.info(f"날짜 범위 목록: {date_ranges[:5]}{'...' if len(date_ranges) > 5 else ''}")
         
         if max_tickets is not None:
             logger.info(f"최대 {max_tickets}개 티켓만 수집합니다")
+        
+        # Raw 데이터 수집 설정 로깅
+        logger.info(f"Raw 데이터 수집 설정:")
+        logger.info(f"  - 티켓 상세정보: {collect_raw_details}")
+        logger.info(f"  - 대화내역: {collect_raw_conversations}")  
+        logger.info(f"  - 지식베이스: {collect_raw_kb}")
+        logger.info(f"  - 첨부파일: {include_attachments}")
         
         # 적응형 속도 조절 설정
         if adaptive_rate:
@@ -916,9 +969,14 @@ class OptimizedFreshdeskFetcher:
                 logger.info(f"날짜 범위 {range_start} ~ {range_end}에서 {range_ticket_count}개 티켓 수집됨")
                 
                 # 티켓 ID 수집 (raw 데이터 수집용)
+                logger.debug(f"Raw 데이터 수집 설정 확인: collect_raw_details={collect_raw_details}, collect_raw_conversations={collect_raw_conversations}")
                 if collect_raw_details or collect_raw_conversations:
                     ticket_ids = [str(t.get("id")) for t in tickets if t.get("id")]
                     collected_ticket_ids.extend(ticket_ids)
+                    logger.info(f"이 범위에서 수집된 티켓 ID {len(ticket_ids)}개: {ticket_ids[:5]}{'...' if len(ticket_ids) > 5 else ''}")
+                    logger.info(f"총 누적 티켓 ID 수: {len(collected_ticket_ids)}")
+                else:
+                    logger.info("Raw 데이터 수집이 비활성화되어 티켓 ID를 수집하지 않습니다.")
                 
                 current_chunk.extend(tickets)
                 total_tickets += range_ticket_count
@@ -1017,11 +1075,26 @@ class OptimizedFreshdeskFetcher:
         logger.info(f"수집된 티켓 ID 수: {len(collected_ticket_ids)}")
         logger.info(f"첨부파일 포함 설정: {include_attachments}")
         
+        # 디버깅을 위한 상세 정보
+        if collected_ticket_ids:
+            logger.info(f"수집된 티켓 ID 목록 (처음 10개): {collected_ticket_ids[:10]}")
+        else:
+            logger.warning("❌ 티켓 ID가 하나도 수집되지 않았습니다!")
+            logger.warning("이는 다음 원인일 수 있습니다:")
+            logger.warning("  1. 날짜 범위에 해당하는 티켓이 없음")
+            logger.warning("  2. API 호출이 실패함")
+            logger.warning("  3. 티켓 필터링 조건에 맞는 티켓이 없음")
+        
         raw_stats = {}
         if collect_raw_details and collected_ticket_ids:
             logger.info("티켓 상세정보 raw 데이터 수집 시작...")
-            await self.collect_raw_ticket_details(collected_ticket_ids, progress)
-            raw_stats["ticket_details_collected"] = len(collected_ticket_ids)
+            try:
+                await self.collect_raw_ticket_details(collected_ticket_ids, progress)
+                raw_stats["ticket_details_collected"] = len(collected_ticket_ids)
+                logger.info("✅ 티켓 상세정보 raw 데이터 수집 완료")
+            except Exception as e:
+                logger.error(f"❌ 티켓 상세정보 raw 데이터 수집 중 오류: {e}")
+                raw_stats["ticket_details_error"] = str(e)
         elif not collect_raw_details:
             logger.info("티켓 상세정보 raw 데이터 수집이 비활성화되어 건너뜁니다.")
         elif not collected_ticket_ids:
@@ -1029,8 +1102,13 @@ class OptimizedFreshdeskFetcher:
         
         if collect_raw_conversations and collected_ticket_ids:
             logger.info("티켓 대화내역 raw 데이터 수집 시작...")
-            await self.collect_raw_conversations(collected_ticket_ids, progress)
-            raw_stats["conversations_collected"] = len(collected_ticket_ids)
+            try:
+                await self.collect_raw_conversations(collected_ticket_ids, progress)
+                raw_stats["conversations_collected"] = len(collected_ticket_ids)
+                logger.info("✅ 티켓 대화내역 raw 데이터 수집 완료")
+            except Exception as e:
+                logger.error(f"❌ 티켓 대화내역 raw 데이터 수집 중 오류: {e}")
+                raw_stats["conversations_error"] = str(e)
         elif not collect_raw_conversations:
             logger.info("티켓 대화내역 raw 데이터 수집이 비활성화되어 건너뜁니다.")
         elif not collected_ticket_ids:

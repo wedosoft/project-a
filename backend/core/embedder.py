@@ -42,8 +42,14 @@ client = openai.OpenAI(api_key=OPENAI_API_KEY)
 # 토큰 인코더 초기화
 try:
     tokenizer = tiktoken.encoding_for_model(MODEL_NAME)
-except:
-    tokenizer = tiktoken.get_encoding("cl100k_base")  # 최신 모델용 fallback
+except Exception as e:
+    logger.warning(f"tiktoken 모델별 인코딩 로드 실패: {e}")
+    try:
+        tokenizer = tiktoken.get_encoding("cl100k_base")  # 최신 모델용 fallback
+    except Exception as e2:
+        logger.error(f"tiktoken 기본 인코딩 로드도 실패: {e2}")
+        # 네트워크 문제로 tiktoken을 로드할 수 없는 경우 None으로 설정
+        tokenizer = None
 
 # OpenAI API 제한 설정
 MAX_TOKENS_PER_CHUNK = 8000  # API 제한 8192에서 약간의 여유를 둠
@@ -53,6 +59,9 @@ CHUNK_OVERLAP = 200  # 청크 간 중복 토큰 수
 
 def count_tokens(text: str) -> int:
     """텍스트의 토큰 수를 계산합니다."""
+    if tokenizer is None:
+        # 대략적인 토큰 수 계산 (1 토큰 ≈ 4 문자)
+        return len(text) // 4
     return len(tokenizer.encode(text))
 
 def split_into_chunks(text: str, max_tokens: int = MAX_TOKENS_PER_CHUNK, overlap: int = CHUNK_OVERLAP) -> List[str]:
@@ -60,6 +69,27 @@ def split_into_chunks(text: str, max_tokens: int = MAX_TOKENS_PER_CHUNK, overlap
     긴 텍스트를 청크로 분할합니다.
     각 청크는 최대 토큰 수를 초과하지 않으며, 청크 간에 일부 중복이 있습니다.
     """
+    if tokenizer is None:
+        # tokenizer가 없는 경우 문자 기반으로 대략적으로 분할
+        char_limit = max_tokens * 4  # 대략적인 문자 수 계산
+        if len(text) <= char_limit:
+            return [text]
+        
+        chunks = []
+        start_idx = 0
+        overlap_chars = overlap * 4
+        
+        while start_idx < len(text):
+            end_idx = min(start_idx + char_limit, len(text))
+            chunk_text = text[start_idx:end_idx]
+            chunks.append(chunk_text)
+            
+            start_idx += char_limit - overlap_chars
+            if start_idx >= len(text):
+                break
+        
+        return chunks
+    
     tokens = tokenizer.encode(text)
     if len(tokens) <= max_tokens:
         return [text]
@@ -79,7 +109,6 @@ def split_into_chunks(text: str, max_tokens: int = MAX_TOKENS_PER_CHUNK, overlap
         if start_idx >= len(tokens):
             break
     
-    logger.info(f"텍스트({len(tokens)} 토큰)를 {len(chunks)}개 청크로 분할")
     return chunks
 
 def process_documents(docs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -194,9 +223,14 @@ def embed_documents(docs: List[str]) -> List[List[float]]:
         if token_count > MAX_TOKENS_PER_CHUNK:
             # 토큰 수가 제한을 초과하는 경우 잘라서 처리
             logger.warning(f"문서 {i}가 토큰 제한을 초과합니다 ({token_count} > {MAX_TOKENS_PER_CHUNK}). 텍스트를 잘라서 처리합니다.")
-            tokens = tokenizer.encode(doc)
-            truncated_tokens = tokens[:MAX_TOKENS_PER_CHUNK]
-            truncated_text = tokenizer.decode(truncated_tokens)
+            if tokenizer is None:
+                # tokenizer가 없는 경우 문자 기반으로 자르기
+                char_limit = MAX_TOKENS_PER_CHUNK * 4
+                truncated_text = doc[:char_limit]
+            else:
+                tokens = tokenizer.encode(doc)
+                truncated_tokens = tokens[:MAX_TOKENS_PER_CHUNK]
+                truncated_text = tokenizer.decode(truncated_tokens)
             processed_docs.append(truncated_text)
         else:
             processed_docs.append(doc)
@@ -214,9 +248,14 @@ def embed_documents(docs: List[str]) -> List[List[float]]:
                 final_token_count = count_tokens(text)
                 if final_token_count > MAX_TOKENS_PER_CHUNK:
                     logger.error(f"최종 검사에서 토큰 초과 감지: {final_token_count} 토큰, 추가 절단 실행")
-                    tokens = tokenizer.encode(text)
-                    truncated_tokens = tokens[:MAX_TOKENS_PER_CHUNK]
-                    text = tokenizer.decode(truncated_tokens)
+                    if tokenizer is None:
+                        # tokenizer가 없는 경우 문자 기반으로 자르기
+                        char_limit = MAX_TOKENS_PER_CHUNK * 4
+                        text = text[:char_limit]
+                    else:
+                        tokens = tokenizer.encode(text)
+                        truncated_tokens = tokens[:MAX_TOKENS_PER_CHUNK]
+                        text = tokenizer.decode(truncated_tokens)
                 
                 response = client.embeddings.create(
                     model=MODEL_NAME,
