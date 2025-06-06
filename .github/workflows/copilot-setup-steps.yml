@@ -9,8 +9,8 @@ jobs:
   copilot-setup-steps:
     runs-on: ubuntu-latest
 
-    # Environment 설정 - GitHub Environment Secrets 사용
-    environment: copilot
+    # Repository Secrets 사용 (간단한 설정)
+    # environment: copilot  # Environment Secrets 대신 Repository Secrets 사용
 
     # Set the permissions to the lowest permissions possible needed for your steps.
     permissions:
