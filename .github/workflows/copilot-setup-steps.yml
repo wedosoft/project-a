@@ -53,14 +53,6 @@ jobs:
           echo "====================="
 
       - name: Check Environment Variables (Masked)
-        env:
-          FRESHDESK_DOMAIN: ${{ secrets.FRESHDESK_DOMAIN }}
-          FRESHDESK_API_KEY: ${{ secrets.FRESHDESK_API_KEY }}
-          QDRANT_URL: ${{ secrets.QDRANT_URL }}
-          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
         run: |
           echo "=== Environment Variable Check ==="
 
@@ -128,44 +120,6 @@ jobs:
           mkdir -p backend/{data,logs,attachment_cache}
           mkdir -p .vscode
           mkdir -p .github/{workflows,ISSUE_TEMPLATE}
-
-      # 환경변수 확인 (Repository Secrets 사용)
-      - name: Check environment variables
-        shell: bash
-        run: |
-          echo "=== 환경변수 확인 ==="
-
-          # 필수 환경변수 목록
-          required_vars=(
-            "FRESHDESK_DOMAIN"
-            "FRESHDESK_API_KEY" 
-            "QDRANT_URL"
-            "QDRANT_API_KEY"
-            "ANTHROPIC_API_KEY"
-            "OPENAI_API_KEY"
-            "GOOGLE_API_KEY"
-          )
-
-          # 각 환경변수의 설정 상태 확인
-          missing_count=0
-          for var in "${required_vars[@]}"; do
-            if [ -n "${!var}" ]; then
-              echo "✅ $var: [설정됨, 길이: ${#!var}자]"
-            else
-              echo "❌ $var: [설정되지 않음]"
-              ((missing_count++))
-            fi
-          done
-
-          echo "=== 결과 요약 ==="
-          echo "총 ${#required_vars[@]}개 환경변수 중 $((${#required_vars[@]} - missing_count))개 설정됨"
-
-          if [ $missing_count -eq 0 ]; then
-            echo "✅ 모든 환경변수가 정상적으로 설정되었습니다"
-          else
-            echo "⚠️ $missing_count 개의 환경변수가 누락되었습니다"
-            echo "GitHub Repository > Settings > Secrets and variables > Actions 에서 확인하세요"
-          fi
 
       # Docker 환경 설정
       - name: Set up Docker Buildx
