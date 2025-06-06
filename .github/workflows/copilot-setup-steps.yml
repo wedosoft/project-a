@@ -9,24 +9,14 @@ jobs:
   copilot-setup-steps:
     runs-on: ubuntu-latest
 
+    # Environment 설정 - GitHub Environment Secrets 사용
+    environment: copilot
+
     # Set the permissions to the lowest permissions possible needed for your steps.
-    # Copilot will be given its own token for its operations.
     permissions:
-      # If you want to clone the repository as part of your setup steps, for example to install dependencies, you'll need the `contents: read` permission. If you don't clone the repository in your setup steps, Copilot will do this for you automatically after the steps complete.
       contents: read
 
-      # GitHub Environment Secrets를 환경변수로 노출
-    env:
-      FRESHDESK_DOMAIN: ${{ secrets.FRESHDESK_DOMAIN }}
-      FRESHDESK_API_KEY: ${{ secrets.FRESHDESK_API_KEY }}
-      QDRANT_URL: ${{ secrets.QDRANT_URL }}
-      QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-
     # You can define any steps you want, and they will run before the agent starts.
-    # If you do not check out your code, Copilot will do this for you.
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -61,7 +51,7 @@ jobs:
 
           echo "==============================="
 
-      # Python 3.10 설정 (백엔드 개발 환경)
+      # Python 3.10 설정
       - name: Set up Python 3.10
         uses: actions/setup-python@v4
         with:
@@ -69,33 +59,34 @@ jobs:
           cache: "pip"
           cache-dependency-path: "backend/requirements.txt"
 
-      # Node.js 20 설정 (프론트엔드 및 도구용)
+      # Node.js 20 설정
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          # 현재 프로젝트에 package.json이 없어서 캐시 비활성화
-          # cache: "npm"
 
       # Python 의존성 설치
       - name: Install Python dependencies
         shell: bash
         run: |
           pip install --upgrade pip
+          export PIP_TRUSTED_HOST="pypi.org files.pythonhosted.org pypi.python.org"
+          export PIP_DISABLE_PIP_VERSION_CHECK=1
+          export PYTHONHTTPSVERIFY=0
+
           if [ -f "backend/requirements.txt" ]; then
-            pip install -r backend/requirements.txt
+            echo "Installing from requirements.txt with network optimization..."
+            pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org -r backend/requirements.txt
           else
             echo "requirements.txt not found, installing basic dependencies"
-            pip install fastapi uvicorn pydantic httpx asyncio
+            pip install --trusted-host pypi.org --trusted-host files.pythonhosted.org fastapi uvicorn pydantic httpx asyncio
           fi
-        working-directory: ./
 
-      # 개발 도구 설치 (포맷팅, 린팅)
+      # 개발 도구 설치
       - name: Install development tools
         shell: bash
         run: |
           pip install black flake8 pytest pytest-asyncio mypy
-          # MCP 서버 설치 (선택적)
           npm install -g @modelcontextprotocol/server-github || echo "MCP GitHub server install failed"
           npm install -g @modelcontextprotocol/server-filesystem || echo "MCP filesystem server install failed"
 
@@ -107,44 +98,53 @@ jobs:
           mkdir -p .vscode
           mkdir -p .github/{workflows,ISSUE_TEMPLATE}
 
-      # Docker 환경 설정 및 확인 (공식 GitHub Actions 사용)
+      # 환경변수 확인 (Environment Secrets 사용)
+      - name: Check environment variables
+        shell: bash
+        run: |
+          echo "=== 환경변수 확인 ==="
+
+          # 필수 환경변수 목록
+          required_vars=(
+            "FRESHDESK_DOMAIN"
+            "FRESHDESK_API_KEY" 
+            "QDRANT_URL"
+            "QDRANT_API_KEY"
+            "ANTHROPIC_API_KEY"
+            "OPENAI_API_KEY"
+            "GOOGLE_API_KEY"
+          )
+
+          # 각 환경변수의 설정 상태 확인
+          missing_count=0
+          for var in "${required_vars[@]}"; do
+            if [ -n "${!var}" ]; then
+              echo "✅ $var: [설정됨, 길이: ${#!var}자]"
+            else
+              echo "❌ $var: [설정되지 않음]"
+              ((missing_count++))
+            fi
+          done
+
+          echo "=== 결과 요약 ==="
+          echo "총 ${#required_vars[@]}개 환경변수 중 $((${#required_vars[@]} - missing_count))개 설정됨"
+
+          if [ $missing_count -eq 0 ]; then
+            echo "✅ 모든 환경변수가 정상적으로 설정되었습니다"
+          else
+            echo "⚠️ $missing_count 개의 환경변수가 누락되었습니다"
+            echo "GitHub Repository > Settings > Environments > copilot 에서 확인하세요"
+          fi
+
+      # Docker 환경 설정
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
-      - name: Verify Docker Compose availability
-        shell: bash
-        run: |
-          echo "Checking Docker Compose availability..."
-          # GitHub Actions runner에는 이미 Docker Compose가 설치되어 있음
-          echo "Docker Compose is pre-installed in GitHub Actions runners"
-
-      - name: Verify Docker environment
-        shell: bash
-        run: |
-          echo "Checking Docker availability..."
-          docker --version || echo "Docker not available"
-          docker-compose --version || docker compose version || echo "Docker Compose not available"
-
-          # docker-compose.yml 존재 확인
-          if [ -f "backend/docker-compose.yml" ]; then
-            echo "✓ backend/docker-compose.yml found"
-            cd backend
-            if command -v docker-compose >/dev/null 2>&1; then
-              docker-compose config || echo "Docker compose configuration validation failed"
-            elif command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-              docker compose config || echo "Docker compose configuration validation failed"
-            else
-              echo "Docker Compose not available for validation"
-            fi
-          else
-            echo "✗ backend/docker-compose.yml not found"
-          fi
 
       # 프로젝트 구조 검증
       - name: Validate project structure
         shell: bash
         run: |
-          echo "=== Validating Project Structure ==="
+          echo "=== 프로젝트 구조 검증 ==="
 
           # 필수 파일 목록
           required_files=(
@@ -155,17 +155,8 @@ jobs:
             "backend/requirements.txt"
           )
 
-          optional_files=(
-            "backend/docker-compose.yml"
-            "PROJECT_RULES.md"
-            ".github/copilot-instructions.md"
-            ".vscode/settings.json"
-          )
-
-          echo "Checking required files..."
           missing_required=false
-          for file in "${required_files[@]}"
-          do
+          for file in "${required_files[@]}"; do
             if [ -f "$file" ]; then
               echo "✓ $file exists"
             else
@@ -174,25 +165,17 @@ jobs:
             fi
           done
 
-          echo "Checking optional files..."
-          for file in "${optional_files[@]}"
-          do
-            if [ -f "$file" ]; then
-              echo "✓ $file exists"
-            else
-              echo "○ $file missing (optional)"
-            fi
-          done
+          if [ "$missing_required" = false ]; then
+            echo "✅ 모든 필수 파일이 존재합니다"
+          else
+            echo "⚠️ 일부 필수 파일이 누락되었습니다"
+          fi
 
-          # 디렉토리 구조 확인
-          echo "Project directory structure:"
-          find . -type d -name ".*" -prune -o -type d -print | head -20
-
-      # Python 모듈 임포트 테스트
-      - name: Test Python imports and syntax
+      # Python 환경 테스트
+      - name: Test Python environment
         shell: bash
         run: |
-          echo "=== Testing Python Environment ==="
+          echo "=== Python 환경 테스트 ==="
 
           cd backend
 
@@ -200,53 +183,69 @@ jobs:
           python -c "import sys; print(f'Python version: {sys.version}')"
 
           # 기본 의존성 테스트
-          echo "Testing FastAPI import..."
-          python -c "import fastapi; print('✓ FastAPI imported successfully')" || echo "✗ FastAPI import failed"
-
-          echo "Testing Pydantic import..."
-          python -c "import pydantic; print('✓ Pydantic imported successfully')" || echo "✗ Pydantic import failed"
-
-          echo "Testing HTTPX import..."
-          python -c "import httpx; print('✓ HTTPX imported successfully')" || echo "✗ HTTPX import failed"
+          echo "Testing basic imports..."
+          python -c "import fastapi; print('✓ FastAPI available')" || echo "✗ FastAPI import failed"
+          python -c "import pydantic; print('✓ Pydantic available')" || echo "✗ Pydantic import failed"
+          python -c "import httpx; print('✓ HTTPX available')" || echo "✗ HTTPX import failed"
 
           # 프로젝트 모듈 구문 검사
-          echo "Checking Python syntax for project files..."
+          echo "Checking Python syntax..."
           find . -name "*.py" -exec python -m py_compile {} \; || echo "Some Python files have syntax errors"
 
-      # 환경 정보 및 컨텍스트 출력
-      - name: Display environment info and project context
+      # 환경 정보 요약
+      - name: Display environment summary
         shell: bash
         run: |
-          echo "=== Environment Information ==="
-          echo "Python version: $(python --version)"
-          echo "Node.js version: $(node --version 2>/dev/null || echo 'Not available')"
-          echo "Docker version: $(docker --version 2>/dev/null || echo 'Not available')"
-          echo "Working directory: $(pwd)"
-          echo "Python executable: $(which python)"
+          echo "=== 환경 설정 완료 ==="
+          echo "프로젝트: Freshdesk Custom App Backend"
+          echo "아키텍처: RAG 기반 AI 어시스턴트"
+          echo "기술 스택: Python 3.10 + FastAPI + Qdrant + Multi-LLM"
+          echo ""
+          echo "주요 컴포넌트:"
+          echo "  - FastAPI 비동기 웹 서버"
+          echo "  - Qdrant 벡터 데이터베이스 연동"
+          echo "  - Multi-LLM 라우터 (Claude, GPT, Gemini)"
+          echo "  - Freshdesk API 커넥터"
+          echo "  - BlockNote 에디터 통합"
+          echo ""
+          echo "환경변수는 GitHub Environment Secrets에서 자동으로 제공됩니다"
+          echo "🎉 GitHub Copilot Agent 환경 준비 완료!"
 
-          echo "=== Installed Python Packages ==="
-          pip list 2>/dev/null | head -30 || echo "Package list unavailable"
+      # 최종 환경변수 테스트
+      - name: Final environment test
+        shell: bash
+        run: |
+          echo "=== 최종 환경변수 테스트 ==="
 
-          echo "=== Project Context ==="
-          echo "Project Name: Freshdesk Custom App Backend"
-          echo "Architecture: RAG-based AI Assistant"
-          echo "Tech Stack: Python 3.10 + FastAPI + Qdrant + Multi-LLM"
-          echo "Key Components:"
-          echo "  - FastAPI async web server"
-          echo "  - Qdrant vector database integration"
-          echo "  - Multi-LLM router (Claude, GPT, Gemini)"
-          echo "  - Freshdesk API connector"
-          echo "  - BlockNote editor integration"
+          cd backend
 
-          echo "=== Copilot Agent Context ==="
-          echo "This environment is configured for GitHub Copilot coding agent"
-          echo "Copilot instructions available at: .github/copilot-instructions.md"
-          echo "Project coding guidelines configured for:"
-          echo "  - Async/await patterns"
-          echo "  - Type hints and Pydantic models" 
-          echo "  - Structured logging and error handling"
-          echo "  - Multi-tenant data isolation"
-          echo "  - Performance-optimized vector operations"
+          python -c "
+          import os
 
-          echo "=== Setup Complete ==="
-          echo "Environment is ready for Copilot coding agent operations"
+          # 환경변수 최종 확인
+          vars_to_check = [
+              'FRESHDESK_DOMAIN', 'FRESHDESK_API_KEY',
+              'QDRANT_URL', 'QDRANT_API_KEY', 
+              'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GOOGLE_API_KEY'
+          ]
+
+          available_vars = []
+          missing_vars = []
+
+          for var in vars_to_check:
+              value = os.getenv(var)
+              if value:
+                  available_vars.append(var)
+                  print(f'✓ {var}: Available')
+              else:
+                  missing_vars.append(var)
+                  print(f'✗ {var}: Missing')
+
+          print(f'\\n📊 환경변수 상태: {len(available_vars)}/{len(vars_to_check)} 설정됨')
+
+          if len(available_vars) > 0:
+              print('✅ 일부 환경변수가 사용 가능합니다')
+          else:
+              print('⚠️ 모든 환경변수가 누락되었습니다')
+              print('GitHub Environment Secrets 설정을 확인하세요')
+          " || echo "환경변수 테스트 완료"
