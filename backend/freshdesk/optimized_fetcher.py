@@ -449,10 +449,16 @@ class OptimizedFreshdeskFetcher:
         target_dir.mkdir(parents=True, exist_ok=True)  # 디렉토리 생성 보장
         chunk_file = target_dir / f"{data_type}_chunk_{chunk_id}.json"
         
+        # 디버깅 정보 추가
+        logger.info(f"RAW 데이터 저장 시작: {data_type} 청크 {chunk_id}")
+        logger.info(f"저장 경로: {chunk_file}")
+        logger.info(f"저장할 데이터 개수: {len(data)}개 항목")
+        
         with open(chunk_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         
-        logger.info(f"{data_type} 청크 {chunk_id} 저장 완료: {len(data)}개 항목")
+        logger.info(f"✅ {data_type} 청크 {chunk_id} 저장 완료: {len(data)}개 항목 → {chunk_file}")
+    
     
     async def collect_raw_ticket_details(self, ticket_ids: List[str], progress: Dict) -> None:
         """
@@ -1006,22 +1012,39 @@ class OptimizedFreshdeskFetcher:
             progress.setdefault("chunks_completed", []).append(chunk_id)
         
         # RAW 데이터 수집 (선택사항)
+        logger.info("=== RAW 데이터 수집 단계 시작 ===")
+        logger.info(f"RAW 데이터 수집 설정: details={collect_raw_details}, conversations={collect_raw_conversations}, kb={collect_raw_kb}")
+        logger.info(f"수집된 티켓 ID 수: {len(collected_ticket_ids)}")
+        logger.info(f"첨부파일 포함 설정: {include_attachments}")
+        
         raw_stats = {}
         if collect_raw_details and collected_ticket_ids:
             logger.info("티켓 상세정보 raw 데이터 수집 시작...")
             await self.collect_raw_ticket_details(collected_ticket_ids, progress)
             raw_stats["ticket_details_collected"] = len(collected_ticket_ids)
+        elif not collect_raw_details:
+            logger.info("티켓 상세정보 raw 데이터 수집이 비활성화되어 건너뜁니다.")
+        elif not collected_ticket_ids:
+            logger.warning("수집된 티켓 ID가 없어 티켓 상세정보 raw 데이터 수집을 건너뜁니다.")
         
         if collect_raw_conversations and collected_ticket_ids:
             logger.info("티켓 대화내역 raw 데이터 수집 시작...")
             await self.collect_raw_conversations(collected_ticket_ids, progress)
             raw_stats["conversations_collected"] = len(collected_ticket_ids)
+        elif not collect_raw_conversations:
+            logger.info("티켓 대화내역 raw 데이터 수집이 비활성화되어 건너뜁니다.")
+        elif not collected_ticket_ids:
+            logger.warning("수집된 티켓 ID가 없어 티켓 대화내역 raw 데이터 수집을 건너뜁니다.")
         
         # 첨부파일 수집 추가 - include_attachments가 True인 경우 항상 수집
         if include_attachments and collected_ticket_ids:
             logger.info("티켓 첨부파일 raw 데이터 수집 시작...")
             await self.collect_raw_attachments(collected_ticket_ids, progress)
             raw_stats["attachments_collected"] = len(collected_ticket_ids)
+        elif not include_attachments:
+            logger.info("첨부파일 raw 데이터 수집이 비활성화되어 건너뜁니다.")
+        elif not collected_ticket_ids:
+            logger.warning("수집된 티켓 ID가 없어 첨부파일 raw 데이터 수집을 건너뜁니다.")
         
         if collect_raw_kb:
             logger.info("지식베이스 raw 데이터 수집 시작...")
@@ -1029,6 +1052,10 @@ class OptimizedFreshdeskFetcher:
             raw_stats["knowledge_base_collected"] = True
             if max_kb_articles:
                 raw_stats["max_kb_articles"] = max_kb_articles
+        else:
+            logger.info("지식베이스 raw 데이터 수집이 비활성화되어 건너뜁니다.")
+        
+        logger.info(f"=== RAW 데이터 수집 단계 완료: {raw_stats} ===")
         
         # 최종 통계
         stats = {
