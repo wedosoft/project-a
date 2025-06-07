@@ -663,18 +663,25 @@ async def get_initial_context(
             conversation_texts.append(str(conv))
     
     ticket_full_text = f"{ticket_title}\n\n{ticket_body}\n\n" + "\n\n".join(conversation_texts)
-    
-    # 작업 병렬 처리를 위한 태스크 준비
-    tasks = []
+     # 작업별 데이터 초기화
     similar_tickets = []
     kb_documents = []
     ticket_summary = None
+    task_times = {}  # 각 작업별 소요 시간 저장
     
     # 컨텍스트 구축 시작 시간
-    context_start_time = time.time()        # 1. 유사 티켓 조회 - 내부 엔드포인트 직접 호출
+    context_start_time = time.time()
+    
+    # 모든 작업을 병렬로 실행하기 위한 태스크 목록 
+    all_tasks = []
+    task_names = []
+    
+    # 유사 티켓 검색 태스크 (벡터 검색)
     if include_similar_tickets:
         async def fetch_similar_tickets():
+            start_time = time.time()
             try:
+                logger.info(f"🔍 유사 티켓 검색 시작...")
                 # /similar_tickets/{ticket_id} 엔드포인트 직접 호출
                 similar_tickets_response = await get_similar_tickets(ticket_id, company_id)
                 
@@ -708,18 +715,23 @@ async def get_initial_context(
                         doc_type="ticket"
                     ))
                 
-                logger.info(f"유사 티켓 {len(st_results)}개 검색됨 (/similar_tickets 엔드포인트 호출)")
-                return st_results
+                elapsed_time = time.time() - start_time
+                logger.info(f"✅ 유사 티켓 검색 완료: {elapsed_time:.3f}초, {len(st_results)}건")
+                return st_results, elapsed_time
             except Exception as e:
-                logger.error(f"유사 티켓 검색 중 오류 발생: {str(e)}")
-                return []  # 오류 시 빈 리스트 반환
+                elapsed_time = time.time() - start_time
+                logger.error(f"❌ 유사 티켓 검색 중 오류 발생: {str(e)}")
+                return [], elapsed_time  # 오류 시 빈 리스트와 소요 시간 반환
         
-        tasks.append(fetch_similar_tickets())
+        all_tasks.append(fetch_similar_tickets())
+        task_names.append('similar_tickets')
     
-    # 2. 지식베이스 문서 검색 - 내부 엔드포인트 직접 호출
+    # 지식베이스 문서 검색 태스크 (벡터 검색)
     if include_kb_docs:
         async def fetch_kb_documents():
+            start_time = time.time()
             try:
+                logger.info(f"📚 지식베이스 문서 검색 시작...")
                 # /related_docs/{ticket_id} 엔드포인트 직접 호출
                 related_docs_response = await get_related_documents(ticket_id, company_id)
                 
@@ -738,36 +750,42 @@ async def get_initial_context(
                         doc_type=item.source_type or "kb"
                     ))
                 
-                logger.info(f"지식베이스 문서 {len(kb_results)}개 검색됨 (/related_docs 엔드포인트 호출)")
-                return kb_results
+                elapsed_time = time.time() - start_time
+                logger.info(f"✅ 지식베이스 문서 검색 완료: {elapsed_time:.3f}초, {len(kb_results)}건")
+                return kb_results, elapsed_time
             except Exception as e:
-                logger.error(f"지식베이스 문서 검색 중 오류 발생: {str(e)}")
-                return []  # 오류 시 빈 리스트 반환
+                elapsed_time = time.time() - start_time
+                logger.error(f"❌ 지식베이스 문서 검색 중 오류 발생: {str(e)}")
+                return [], elapsed_time  # 오류 시 빈 리스트와 소요 시간 반환
         
-        tasks.append(fetch_kb_documents())
+        all_tasks.append(fetch_kb_documents())
+        task_names.append('kb_documents')
     
-    # 3. 티켓 요약 생성 태스크
+    # 티켓 요약 생성 태스크 (LLM 호출)
     if include_summary:
         async def generate_summary():
+            start_time = time.time()
             try:
-                logger.info(f"티켓 {ticket_id} 요약 생성 시작")
+                logger.info(f"🟢 티켓 요약 생성 시작...")
                 
                 # 티켓 데이터 유효성 검사
                 if not ticket_title and not ticket_body:
                     logger.warning(f"티켓 {ticket_id} 데이터가 부족함 (제목: {bool(ticket_title)}, 내용: {bool(ticket_body)})")
-                    return TicketSummaryContent(
+                    elapsed_time = time.time() - start_time
+                    summary = TicketSummaryContent(
                         ticket_summary="티켓 데이터가 부족하여 요약을 생성할 수 없습니다.",
                         key_points=["데이터 부족"],
                         sentiment="중립적",
                         urgency_level="보통"
                     )
+                    return summary, elapsed_time
                 
                 # 대화 내역을 안전하게 처리
                 conversations = ticket_conversations or []
                 
                 # 티켓 정보 수집
                 ticket_info = {
-                    "id": ticket_id,  # ticket_id 추가
+                    "id": ticket_id,
                     "subject": ticket_title,
                     "description": ticket_body,
                     "conversations": conversations,
@@ -778,7 +796,7 @@ async def get_initial_context(
                 response = await llm_router.generate_ticket_summary(ticket_info)
                 
                 # LLM 응답 파싱
-                ticket_summary = TicketSummaryContent(
+                summary = TicketSummaryContent(
                     ticket_summary=response.get('summary', '요약 생성에 실패했습니다.'),
                     key_points=response.get('key_points', []),
                     sentiment=response.get('sentiment', '중립적'),
@@ -786,44 +804,70 @@ async def get_initial_context(
                     urgency_level=response.get('urgency_level', '보통')
                 )
                 
-                logger.info(f"티켓 {ticket_id} 요약 생성 완료: {ticket_summary.ticket_summary[:100]}...")
-                
                 # 캐시에 저장
-                ticket_summary_cache[ticket_id] = ticket_summary
+                ticket_summary_cache[ticket_id] = summary
                 
-                return ticket_summary
+                elapsed_time = time.time() - start_time
+                logger.info(f"✅ 티켓 요약 생성 완료: {elapsed_time:.3f}초")
+                return summary, elapsed_time
                 
             except Exception as e:
-                logger.error(f"티켓 {ticket_id} 요약 생성 중 오류 발생: {str(e)}", exc_info=True)
+                elapsed_time = time.time() - start_time
+                logger.error(f"❌ 티켓 {ticket_id} 요약 생성 중 오류 발생: {str(e)}", exc_info=True)
                 # 오류 시 기본 요약 반환
-                return TicketSummaryContent(
+                summary = TicketSummaryContent(
                     ticket_summary=f"오류로 인해 요약 생성에 실패했습니다. 티켓 제목: {ticket_title or '제목 없음'}",
                     key_points=["요약 생성 오류", "수동 검토 필요"],
                     sentiment="중립적",
                     priority_recommendation="보통",
                     urgency_level="보통"
                 )
+                return summary, elapsed_time
         
-        tasks.append(generate_summary())
+        all_tasks.append(generate_summary())
+        task_names.append('summary')
     
-    # 모든 태스크 병렬 실행
-    results = await asyncio.gather(*tasks)
+    # 모든 작업을 병렬로 실행
+    if all_tasks:
+        logger.info(f"🚀 모든 태스크 {len(all_tasks)}개 병렬 실행 시작... (순서: {', '.join(task_names)})")
+        results = await asyncio.gather(*all_tasks)
+        
+        # 결과 처리
+        for i, task_name in enumerate(task_names):
+            result, elapsed_time = results[i]
+            task_times[task_name] = elapsed_time
+            
+            if task_name == 'similar_tickets':
+                similar_tickets = result
+            elif task_name == 'kb_documents':
+                kb_documents = result
+            elif task_name == 'summary':
+                ticket_summary = result
     
-    # 결과 처리
-    result_idx = 0
-    if include_similar_tickets:
-        similar_tickets = results[result_idx]
-        result_idx += 1
+    # 전체 요청 처리 총 소요 시간 계산
+    total_time = time.time() - context_start_time
     
-    if include_kb_docs:
-        kb_documents = results[result_idx]
-        result_idx += 1
+    # 타이밍 로그 출력 (모든 처리 완료 후 한 번에)
+    logger.info("=== /init/{} 처리 시간 분석 (병렬 처리) ===".format(ticket_id))
+    if 'summary' in task_times:
+        logger.info(f"🟢 티켓 요약 생성: {task_times['summary']:.3f}초")
+    if 'similar_tickets' in task_times:
+        logger.info(f"🔍 유사 티켓 검색: {task_times['similar_tickets']:.3f}초")
+    if 'kb_documents' in task_times:
+        logger.info(f"📚 추천 솔루션 검색: {task_times['kb_documents']:.3f}초")
     
-    if include_summary:
-        ticket_summary = results[result_idx]
+    # 개별 작업 시간의 합계 계산 (참고용)
+    total_individual_time = sum(task_times.values())
+    logger.info(f"📊 개별 작업 시간 합계: {total_individual_time:.3f}초 (순차 처리시 예상 시간)")
+    logger.info(f"⏱️ 실제 총 소요시간: {total_time:.3f}초 (병렬 처리)")
     
-    # 컨텍스트 구축 소요 시간
-    context_time = time.time() - context_start_time
+    # 성능 개선 효과 계산
+    if total_individual_time > 0:
+        improvement_ratio = total_individual_time / total_time
+        time_saved = total_individual_time - total_time
+        logger.info(f"🚀 병렬 처리 효과: {improvement_ratio:.1f}배 빠름 ({time_saved:.3f}초 단축)")
+    
+    logger.info("=========================")
     
     # 결과 구성
     # 티켓 메타데이터에 id가 없으면 ticket_id로 추가
@@ -838,10 +882,10 @@ async def get_initial_context(
         kb_documents=kb_documents,
         context_id=context_id,
         metadata={
-            "duration_ms": int((time.time() - start_time) * 1000),
-            "context_time_ms": int(context_time * 1000),
+            "duration_ms": int(total_time * 1000),
             "similar_tickets_count": len(similar_tickets),
-            "kb_docs_count": len(kb_documents)
+            "kb_docs_count": len(kb_documents),
+            "task_times": {k: round(v, 3) for k, v in task_times.items()}  # 각 작업별 시간 포함
         }
     )
     
