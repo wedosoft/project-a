@@ -8,8 +8,9 @@ import argparse
 import asyncio
 import logging
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Optional
 
 # backend 루트 경로를 sys.path에 추가
 BACKEND_ROOT = str(Path(__file__).parent.parent)
@@ -39,19 +40,32 @@ setup_logging()
 logger = get_logger(__name__)
 
 
+def get_default_start_date() -> str:
+    """
+    기본 시작 날짜를 계산합니다 (현재부터 10년 전).
+    
+    Returns:
+        str: YYYY-MM-DD 형식의 10년 전 날짜
+    """
+    ten_years_ago = datetime.now() - timedelta(days=365 * 10)
+    return ten_years_ago.strftime("%Y-%m-%d")
+
+
 async def full_collection_workflow(
     reset_vectordb: bool = False, 
     create_backup: bool = True, 
     skip_confirmation: bool = False,
     collect_raw_details: bool = True,  # 기본값을 True로 변경
     collect_raw_conversations: bool = True,  # 기본값을 True로 변경
-    collect_raw_kb: bool = True  # 기본값을 True로 변경
+    collect_raw_kb: bool = True,  # 기본값을 True로 변경
+    start_date: Optional[str] = None  # CLI에서 시작 날짜 전달받기
 ):
     """전체 수집 워크플로우"""
     
     # 설정
     OUTPUT_DIR = str(Path(__file__).parent.parent / "freshdesk_full_data")  # backend/freshdesk_full_data
-    START_DATE = "2015-01-01"  # 가능한 가장 오래된 날짜부터 시작
+    # start_date 처리: CLI 인자가 우선, 없으면 현재부터 10년 전 계산
+    START_DATE = start_date or get_default_start_date()
     MAX_TICKETS = None  # 무제한 수집 (None = 제한 없음)
     INCLUDE_CONVERSATIONS = True  # 대화내역 포함 여부 (시간 2배 증가)
     INCLUDE_ATTACHMENTS = True    # 첨부파일 정보 포함 여부 (메타데이터만, 실제 파일 다운로드 X)
@@ -186,9 +200,20 @@ async def full_collection_workflow(
         
         # 1단계: 티켓 데이터 수집
         logger.info("\n1단계: 티켓 데이터 수집 시작")
+        logger.info(f"🔍 [DEBUG] collect_all_tickets 호출 준비")
+        logger.info(f"🔍 [DEBUG] 파라미터 값:")
+        logger.info(f"  - OUTPUT_DIR: {OUTPUT_DIR}")
+        logger.info(f"  - START_DATE: {START_DATE}")
+        logger.info(f"  - INCLUDE_CONVERSATIONS: {INCLUDE_CONVERSATIONS}")
+        logger.info(f"  - INCLUDE_ATTACHMENTS: {INCLUDE_ATTACHMENTS}")
+        logger.info(f"  - MAX_TICKETS: {MAX_TICKETS}")
+        logger.info(f"  - collect_raw_details: {collect_raw_details}")
+        logger.info(f"  - collect_raw_conversations: {collect_raw_conversations}")
+        logger.info(f"  - collect_raw_kb: {collect_raw_kb}")
         
         # 테스트 로직과 동일하게 단순화
         async with OptimizedFreshdeskFetcher(OUTPUT_DIR) as fetcher:
+            logger.info(f"🔍 [DEBUG] OptimizedFreshdeskFetcher 초기화 완료, collect_all_tickets 호출 시작")
             stats = await fetcher.collect_all_tickets(
                 start_date=START_DATE,
                 end_date=None,  # 현재까지
@@ -198,10 +223,13 @@ async def full_collection_workflow(
                 max_kb_articles=MAX_TICKETS,  # 지식베이스도 동일하게 제한(무제한)
                 collect_raw_details=collect_raw_details,  # 티켓 상세정보 raw 데이터 수집
                 collect_raw_conversations=collect_raw_conversations,  # 대화내역 raw 데이터 수집
+                collect_raw_attachments=True,  # 첨부파일 raw 데이터 수집 (항상 활성화)
                 collect_raw_kb=collect_raw_kb  # 지식베이스 raw 데이터 수집
             )
+            logger.info(f"🔍 [DEBUG] collect_all_tickets 완료")
         
         logger.info(f"수집 완료: {stats}")
+        logger.info(f"🔍 [DEBUG] 1단계 완료 - 반환된 stats: {stats}")
         
         # 2단계: 데이터 후처리
         logger.info("\n2단계: 데이터 후처리 시작")
@@ -286,15 +314,18 @@ async def quick_test(
     try:
         # 1단계: 티켓 데이터 수집
         logger.info("\n1단계: 티켓 데이터 수집 시작 (테스트)")
+        # 테스트용으로는 1년 전부터 수집 (더 빠른 테스트를 위해)
+        test_start_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
         async with OptimizedFreshdeskFetcher(OUTPUT_DIR) as fetcher:
             stats = await fetcher.collect_all_tickets(
-                start_date="2024-01-01",
+                start_date=test_start_date,
                 max_tickets=100,
                 max_kb_articles=100,  # 지식베이스도 100건으로 제한
                 include_conversations=True,  # 모든 경우 대화 내역 포함
                 include_attachments=True,    # 모든 경우 첨부파일 포함
                 collect_raw_details=collect_raw_details,  # 티켓 상세정보 raw 데이터 수집
                 collect_raw_conversations=collect_raw_conversations,  # 대화내역 raw 데이터 수집
+                collect_raw_attachments=True,  # 첨부파일 raw 데이터 수집 (항상 활성화)
                 collect_raw_kb=collect_raw_kb  # 지식베이스 raw 데이터 수집
             )
         logger.info(f"수집 완료: {stats}")
@@ -389,6 +420,9 @@ def parse_args():
     parser.add_argument("--no-backup", action="store_true", help="초기화 시 백업 생성 비활성화")
     parser.add_argument("--force", action="store_true", help="확인 없이 자동 초기화 (CI/CD용)")
     
+    # 수집 범위 옵션
+    parser.add_argument("--start-date", type=str, help=f"수집 시작 날짜 (YYYY-MM-DD) - 기본값: 현재부터 10년 전 ({get_default_start_date()})")
+    
     # RAW 데이터 수집 관련 옵션
     raw_group = parser.add_argument_group("Raw 데이터 수집 옵션")
     raw_group.add_argument("--raw-details", action="store_true", help="티켓 상세정보 원본 데이터 수집")
@@ -430,7 +464,8 @@ if __name__ == "__main__":
                 skip_confirmation=args.force,
                 collect_raw_details=collect_raw_details,
                 collect_raw_conversations=collect_raw_conversations,
-                collect_raw_kb=collect_raw_kb
+                collect_raw_kb=collect_raw_kb,
+                start_date=args.start_date  # CLI에서 시작 날짜 전달
             ))
         elif args.quick_test:
             # quick_test에도 raw 데이터 수집 옵션 전달

@@ -15,6 +15,8 @@ from typing import Any, Dict, List, Tuple
 
 from dotenv import load_dotenv
 
+from .constants import ChunkConstants, DocIdPrefix
+
 # 환경변수 로드 - 상대 경로를 사용하여 backend/.env 파일을 찾습니다
 backend_dir = Path(__file__).parent.parent  # core 디렉토리의 상위(backend) 디렉토리
 dotenv_path = os.path.join(backend_dir, ".env")
@@ -41,7 +43,11 @@ client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
 # 토큰 인코더 초기화
 try:
-    tokenizer = tiktoken.encoding_for_model(MODEL_NAME)
+    # text-embedding-3-small은 cl100k_base 인코딩을 사용
+    if MODEL_NAME in ["text-embedding-3-small", "text-embedding-3-large"]:
+        tokenizer = tiktoken.get_encoding("cl100k_base")
+    else:
+        tokenizer = tiktoken.encoding_for_model(MODEL_NAME)
 except Exception as e:
     logger.warning(f"tiktoken 모델별 인코딩 로드 실패: {e}")
     try:
@@ -126,12 +132,16 @@ def process_documents(docs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         doc_metadata = doc.get('metadata', {})
         # doc_type 필수 보정: 없으면 id 기반 자동 보정, 그래도 없으면 예외
         if "doc_type" not in doc_metadata or not doc_metadata["doc_type"]:
-            if str(doc_id).startswith("ticket-"):
-                doc_metadata["doc_type"] = "ticket"
-            elif str(doc_id).startswith("kb-"):
-                doc_metadata["doc_type"] = "kb"
+            try:
+                doc_metadata["doc_type"] = DocIdPrefix.extract_doc_type(str(doc_id))
+                logger.debug(f"doc_id '{doc_id}'에서 자동으로 doc_type '{doc_metadata['doc_type']}'을 추출했습니다.")
+            except ValueError:
+                # doc_id에서 타입을 추출할 수 없는 경우
+                pass
+        
         if "doc_type" not in doc_metadata or not doc_metadata["doc_type"]:
             raise ValueError(f"문서 {i}의 metadata에 doc_type이 없습니다. id={doc_id}, metadata={doc_metadata}")
+        
         token_count = count_tokens(doc_text)
         if token_count <= MAX_TOKENS_PER_CHUNK:
             processed_docs.append(doc)
@@ -140,18 +150,17 @@ def process_documents(docs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             chunks = split_into_chunks(doc_text, MAX_TOKENS_PER_CHUNK, CHUNK_OVERLAP)
             for chunk_idx, chunk_text in enumerate(chunks):
                 chunk_metadata = doc_metadata.copy()
+                chunk_doc_id = ChunkConstants.create_chunk_id(doc_id, chunk_idx)
                 chunk_metadata.update({
                     'chunk_index': chunk_idx,
                     'total_chunks': len(chunks),
                     'original_id': doc_id,
                     'is_chunk': True
                 })
-                # 청크의 doc_type 필수 보정
+                # 청크의 doc_type 필수 보정 (부모에서 상속)
                 if "doc_type" not in chunk_metadata or not chunk_metadata["doc_type"]:
-                    if str(doc_id).startswith("ticket-"):
-                        chunk_metadata["doc_type"] = "ticket"
-                    elif str(doc_id).startswith("kb-"):
-                        chunk_metadata["doc_type"] = "kb"
+                    chunk_metadata["doc_type"] = doc_metadata["doc_type"]
+                
                 if "doc_type" not in chunk_metadata or not chunk_metadata["doc_type"]:
                     raise ValueError(f"청크 {chunk_idx}의 metadata에 doc_type이 없습니다. id={doc_id}, metadata={chunk_metadata}")
                 required_fields = ['type', 'source_id', 'updated_at', 'status', 'priority']

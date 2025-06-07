@@ -10,6 +10,7 @@ import logging
 import os
 from datetime import datetime, timedelta
 from pathlib import Path
+from turtle import Turtle
 from typing import Dict, List, Optional
 
 import httpx
@@ -91,7 +92,7 @@ class OptimizedFreshdeskFetcher:
     티켓 상세정보와 지식베이스를 raw 데이터로 저장하여 임베딩 실패 시 재수집 방지
     """
     
-    def __init__(self, output_dir: str = "freshdesk_data"):
+    def __init__(self, output_dir: str = "freshdesk_full_data"):
         # output_dir이 절대경로가 아니면 backend/ 기준으로 보정
         output_path = Path(output_dir)
         if not output_path.is_absolute():
@@ -221,18 +222,24 @@ class OptimizedFreshdeskFetcher:
         # 최대 재시도 횟수 초과
         raise Exception(f"최대 재시도 횟수({self.MAX_RETRIES})에 도달했습니다: {url}")
 
-    def get_date_ranges(self, start_date: str = "2015-01-01", end_date: Optional[str] = None, days_per_chunk: int = 30) -> List[tuple]:
+    def get_date_ranges(self, start_date: Optional[str] = None, end_date: Optional[str] = None, days_per_chunk: int = 30) -> List[tuple]:
         """
         날짜 범위를 분할하여 반환
         
         Args:
-            start_date: 시작 날짜 (YYYY-MM-DD)
+            start_date: 시작 날짜 (YYYY-MM-DD), None이면 현재부터 10년 전
             end_date: 종료 날짜 (YYYY-MM-DD), 없으면 현재 날짜
             days_per_chunk: 청크당 일수 (기본 30일, 대용량 티켓 수집 시 7-14일 권장)
         
         Returns:
             List[tuple]: (시작날짜, 종료날짜) 튜플 목록
         """
+        # start_date가 None이면 현재부터 10년 전으로 설정
+        if start_date is None:
+            from datetime import datetime, timedelta
+            ten_years_ago = datetime.now() - timedelta(days=365 * 10)
+            start_date = ten_years_ago.strftime("%Y-%m-%d")
+            
         if end_date is None:
             end_date = datetime.now().strftime("%Y-%m-%d")
             
@@ -436,28 +443,32 @@ class OptimizedFreshdeskFetcher:
             logger.error(f"지식베이스 수집 실패: {e}")
             raise
 
-    def save_raw_data_chunk(self, data: List[Dict], data_type: str, chunk_id: str):
+    async def save_raw_data_chunk(self, data: List[Dict], data_type: str, chunk_id: str) -> None:
         """
-        Raw 데이터를 청크 단위로 저장
+        Raw 데이터 청크를 JSON 파일로 저장합니다.
         
         Args:
-            data: 저장할 데이터 목록
-            data_type: 데이터 유형 ('ticket_details', 'conversations', 'attachments', 'knowledge_base')
-            chunk_id: 청크 식별자
+            data: 저장할 데이터 리스트
+            data_type: 데이터 유형 (ticket_details, conversations, knowledge_base, attachments)
+            chunk_id: 청크 ID (문자열, 예: "0000")
         """
-        target_dir = self.raw_data_dir / data_type
-        target_dir.mkdir(parents=True, exist_ok=True)  # 디렉토리 생성 보장
-        chunk_file = target_dir / f"{data_type}_chunk_{chunk_id}.json"
+        # 디버깅: 함수 진입 및 파라미터 로깅
+        logger.info(f"🔍 [DEBUG] save_raw_data_chunk 함수 진입")
+        logger.info(f"🔍 [DEBUG] 파라미터 - data_type: {data_type}, chunk_id: {chunk_id}, data 항목 수: {len(data) if data else 0}")
+        logger.info(f"🔍 [DEBUG] self.raw_data_dir: {self.raw_data_dir}")
         
-        # 디버깅 정보 추가
-        logger.info(f"RAW 데이터 저장 시작: {data_type} 청크 {chunk_id}")
-        logger.info(f"저장 경로: {chunk_file}")
-        logger.info(f"저장할 데이터 개수: {len(data)}개 항목")
-        
-        # 데이터가 비어있는 경우 경고
         if not data:
-            logger.warning(f"❌ 저장할 데이터가 비어있습니다: {data_type} 청크 {chunk_id}")
+            logger.warning(f"⚠️ {data_type} 청크 {chunk_id}: 저장할 데이터가 없습니다")
             return
+            
+        # 디렉토리 생성
+        data_type_dir = self.raw_data_dir / data_type
+        data_type_dir.mkdir(exist_ok=True)
+        logger.info(f"🔍 [DEBUG] 디렉토리 생성/확인: {data_type_dir}")
+        
+        # 파일 경로 생성
+        chunk_file = data_type_dir / f"{data_type}_chunk_{chunk_id}.json"
+        logger.info(f"🔍 [DEBUG] 저장할 파일 경로: {chunk_file}")
         
         # 데이터 샘플 로깅 (디버깅용)
         if data:
@@ -467,32 +478,50 @@ class OptimizedFreshdeskFetcher:
                 logger.debug(f"데이터 샘플 키: {keys}...")
         
         try:
+            logger.info(f"🔍 [DEBUG] 파일 쓰기 시작: {chunk_file}")
             with open(chunk_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             
             # 저장 완료 후 파일 크기 확인
             file_size = chunk_file.stat().st_size
             logger.info(f"✅ {data_type} 청크 {chunk_id} 저장 완료: {len(data)}개 항목 → {chunk_file} ({file_size:,} bytes)")
+            logger.info(f"🔍 [DEBUG] save_raw_data_chunk 함수 정상 완료")
             
         except Exception as e:
             logger.error(f"❌ {data_type} 청크 {chunk_id} 저장 실패: {e}")
+            logger.error(f"🔍 [DEBUG] save_raw_data_chunk 함수 예외 발생: {type(e).__name__}: {e}")
             raise
     
     
-    async def collect_raw_ticket_details(self, ticket_ids: List[str], progress: Dict) -> None:
+    async def collect_raw_ticket_details(self, ticket_ids: List[str], progress: Dict) -> int:
         """
-        티켓 상세정보를 raw 데이터로 수집하여 저장
+        티켓 상세정보를 raw 형태로 수집하여 저장합니다.
         
         Args:
-            ticket_ids: 수집할 티켓 ID 목록
+            ticket_ids: 상세정보를 수집할 티켓 ID 리스트
             progress: 진행 상황 딕셔너리
+            
+        Returns:
+            int: 성공적으로 수집된 티켓 수
         """
-        logger.info(f"티켓 상세정보 raw 데이터 수집 시작: {len(ticket_ids)}개")
+        if not ticket_ids:
+            logger.warning("티켓 ID 리스트가 비어있어 상세정보 수집을 건너뜁니다.")
+            return 0
+            
+        logger.info(f"🔍 [DEBUG] collect_raw_ticket_details 시작 - 총 티켓 수: {len(ticket_ids)}")
+        logger.info(f"🔍 [DEBUG] self.raw_data_dir: {self.raw_data_dir}")
+        logger.info(f"🔍 [DEBUG] RAW_DATA_CHUNK_SIZE: {self.RAW_DATA_CHUNK_SIZE}")
+        
+        target_dir = self.raw_data_dir / "ticket_details"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"티켓 상세정보 저장 디렉토리 준비 완료: {target_dir}")
+        logger.info(f"🔍 [DEBUG] 티켓 상세정보 저장 디렉토리 생성 완료: {target_dir.exists()}")
         
         chunk_counter = len(progress.get("raw_data_progress", {}).get("ticket_details_chunks", []))
         current_chunk = []
         success_count = 0
         error_count = 0
+        logger.info(f"🔍 [DEBUG] 초기값 - chunk_counter: {chunk_counter}, current_chunk 크기: {len(current_chunk)}")
         
         for i, ticket_id in enumerate(ticket_ids):
             try:
@@ -511,10 +540,12 @@ class OptimizedFreshdeskFetcher:
             if len(current_chunk) >= self.RAW_DATA_CHUNK_SIZE:
                 chunk_id = f"{chunk_counter:04d}"
                 logger.info(f"티켓 상세정보 청크 {chunk_id} 저장 중: {len(current_chunk)}개 항목")
-                self.save_raw_data_chunk(current_chunk, "ticket_details", chunk_id)
+                logger.info(f"🔍 [DEBUG] save_raw_data_chunk 호출 - chunk_id: {chunk_id}, 데이터 수: {len(current_chunk)}")
+                await self.save_raw_data_chunk(current_chunk, "ticket_details", chunk_id)
                 progress.setdefault("raw_data_progress", {}).setdefault("ticket_details_chunks", []).append(chunk_id)
                 chunk_counter += 1
                 current_chunk = []
+                logger.info(f"🔍 [DEBUG] 청크 저장 완료 - 다음 chunk_counter: {chunk_counter}")
                 
                 # 진행 상황 저장
                 self.save_progress(progress)
@@ -526,20 +557,32 @@ class OptimizedFreshdeskFetcher:
         if current_chunk:
             chunk_id = f"{chunk_counter:04d}"
             logger.info(f"티켓 상세정보 마지막 청크 {chunk_id} 저장 중: {len(current_chunk)}개 항목")
-            self.save_raw_data_chunk(current_chunk, "ticket_details", chunk_id)
+            logger.info(f"🔍 [DEBUG] 마지막 청크 save_raw_data_chunk 호출 - chunk_id: {chunk_id}, 데이터 수: {len(current_chunk)}")
+            await self.save_raw_data_chunk(current_chunk, "ticket_details", chunk_id)
             progress.setdefault("raw_data_progress", {}).setdefault("ticket_details_chunks", []).append(chunk_id)
+            logger.info(f"🔍 [DEBUG] 마지막 청크 저장 완료")
         
-        logger.info(f"티켓 상세정보 raw 데이터 수집 완료: 총 {success_count}개 성공, {error_count}개 실패")
-    
-    async def collect_raw_conversations(self, ticket_ids: List[str], progress: Dict) -> None:
+        logger.info(f"티켓 상세정보 수집 완료: {success_count}개 성공, {error_count}개 실패")
+        logger.info(f"🔍 [DEBUG] collect_raw_ticket_details 완료 - 총 성공: {success_count}, 총 실패: {error_count}")
+        return success_count
+
+    async def collect_raw_conversations(self, ticket_ids: List[str], progress: Dict) -> int:
         """
         티켓 대화내역을 raw 데이터로 수집하여 저장
         
         Args:
             ticket_ids: 수집할 티켓 ID 목록
             progress: 진행 상황 딕셔너리
+            
+        Returns:
+            int: 실제로 수집된 대화내역 총 수
         """
         logger.info(f"티켓 대화내역 raw 데이터 수집 시작: {len(ticket_ids)}개")
+        
+        # 디렉토리 생성 및 초기 파일 준비
+        target_dir = self.raw_data_dir / "conversations"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"대화내역 저장 디렉토리 준비 완료: {target_dir}")
         
         chunk_counter = len(progress.get("raw_data_progress", {}).get("conversations_chunks", []))
         current_chunk = []
@@ -568,7 +611,7 @@ class OptimizedFreshdeskFetcher:
             if len(current_chunk) >= self.RAW_DATA_CHUNK_SIZE:
                 chunk_id = f"{chunk_counter:04d}"
                 logger.info(f"대화내역 청크 {chunk_id} 저장 중: {len(current_chunk)}개 항목")
-                self.save_raw_data_chunk(current_chunk, "conversations", chunk_id)
+                await self.save_raw_data_chunk(current_chunk, "conversations", chunk_id)
                 progress.setdefault("raw_data_progress", {}).setdefault("conversations_chunks", []).append(chunk_id)
                 chunk_counter += 1
                 current_chunk = []
@@ -583,20 +626,31 @@ class OptimizedFreshdeskFetcher:
         if current_chunk:
             chunk_id = f"{chunk_counter:04d}"
             logger.info(f"대화내역 마지막 청크 {chunk_id} 저장 중: {len(current_chunk)}개 항목")
-            self.save_raw_data_chunk(current_chunk, "conversations", chunk_id)
+            await self.save_raw_data_chunk(current_chunk, "conversations", chunk_id)
             progress.setdefault("raw_data_progress", {}).setdefault("conversations_chunks", []).append(chunk_id)
         
         logger.info(f"티켓 대화내역 raw 데이터 수집 완료: 총 {success_count}개 티켓에서 {total_conversations}개 대화, {error_count}개 실패")
+        
+        # 실제 수집된 대화내역 총 수 반환
+        return total_conversations
     
-    async def collect_raw_knowledge_base(self, progress: Dict, max_articles: Optional[int] = None) -> None:
+    async def collect_raw_knowledge_base(self, progress: Dict, max_articles: Optional[int] = None) -> int:
         """
         지식베이스를 raw 데이터로 수집하여 저장
         
         Args:
             progress: 진행 상황 딕셔너리
             max_articles: 최대 수집 항목 수 (None이면 제한 없음)
+            
+        Returns:
+            int: 실제 수집된 지식베이스 문서 수
         """
         logger.info("지식베이스 raw 데이터 수집 시작" + (f" (최대 {max_articles}개)" if max_articles else ""))
+        
+        # 디렉토리 생성 및 초기 파일 준비
+        target_dir = self.raw_data_dir / "knowledge_base"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"지식베이스 저장 디렉토리 준비 완료: {target_dir}")
         
         try:
             # 이미 수집된 지식베이스가 있는지 확인
@@ -608,13 +662,16 @@ class OptimizedFreshdeskFetcher:
                     kb_chunks = []  # 테스트 모드에서는 기존 데이터 무시
                 else:
                     logger.info("기존 수집 데이터를 유지합니다")
-                    return
+                    # 기존에 수집된 문서 수를 계산하여 반환
+                    existing_articles_count = progress.get("raw_data_progress", {}).get("kb_articles_collected", 0)
+                    logger.info(f"기존 수집된 지식베이스 문서 수: {existing_articles_count}개")
+                    return existing_articles_count
             
             articles = await self.fetch_knowledge_base_raw(max_articles=max_articles)
             
             if not articles:
                 logger.warning("수집된 지식베이스 문서가 없습니다")
-                return
+                return 0
             
             logger.info(f"수집된 지식베이스 문서 {len(articles)}개를 청크로 저장합니다")
             chunk_counter = len(kb_chunks)
@@ -623,7 +680,7 @@ class OptimizedFreshdeskFetcher:
             for i in range(0, len(articles), self.KB_CHUNK_SIZE):
                 chunk = articles[i:i + self.KB_CHUNK_SIZE]
                 chunk_id = f"{chunk_counter:04d}"
-                self.save_raw_data_chunk(chunk, "knowledge_base", chunk_id)
+                await self.save_raw_data_chunk(chunk, "knowledge_base", chunk_id)
                 progress.setdefault("raw_data_progress", {}).setdefault("knowledge_base_chunks", []).append(chunk_id)
                 chunk_counter += 1
                 
@@ -635,20 +692,29 @@ class OptimizedFreshdeskFetcher:
             self.save_progress(progress)
             
             logger.info(f"지식베이스 raw 데이터 수집 완료: 총 {len(articles)}개 문서 (청크 {chunk_counter}개)")
+            return len(articles)
             
         except Exception as e:
             logger.error(f"지식베이스 raw 데이터 수집 중 오류 발생: {e}")
             raise
     
-    async def collect_raw_attachments(self, ticket_ids: List[str], progress: Dict) -> None:
+    async def collect_raw_attachments(self, ticket_ids: List[str], progress: Dict) -> int:
         """
         티켓 첨부파일을 raw 데이터로 수집하여 저장
         
         Args:
             ticket_ids: 첨부파일을 수집할 티켓 ID 목록
             progress: 진행 상황 딕셔너리
+            
+        Returns:
+            int: 실제 첨부파일이 수집된 티켓 수
         """
         logger.info(f"티켓 첨부파일 raw 데이터 수집 시작: {len(ticket_ids)}개 티켓")
+        
+        # 디렉토리 생성 및 초기 파일 준비
+        target_dir = self.raw_data_dir / "attachments"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"첨부파일 저장 디렉토리 준비 완료: {target_dir}")
         
         try:
             # 이미 수집된 첨부파일 청크가 있는지 확인
@@ -659,6 +725,7 @@ class OptimizedFreshdeskFetcher:
             
             chunk_counter = len(attachment_chunks)
             current_chunk = []
+            processed_tickets_count = 0  # 실제 첨부파일이 수집된 티켓 수를 추적
             
             for ticket_id in ticket_ids:
                 try:
@@ -673,11 +740,12 @@ class OptimizedFreshdeskFetcher:
                             "collected_at": datetime.now().isoformat()
                         }
                         current_chunk.append(ticket_attachment_data)
+                        processed_tickets_count += 1  # 첨부파일이 있는 티켓만 카운트
                         
                         # 청크 크기 도달 시 저장
                         if len(current_chunk) >= self.RAW_DATA_CHUNK_SIZE:
                             chunk_id = f"{chunk_counter:04d}"
-                            self.save_raw_data_chunk(current_chunk, "attachments", chunk_id)
+                            await self.save_raw_data_chunk(current_chunk, "attachments", chunk_id)
                             progress.setdefault("raw_data_progress", {}).setdefault("attachments_chunks", []).append(chunk_id)
                             
                             logger.info(f"첨부파일 청크 {chunk_id} 저장 완료: {len(current_chunk)}개 티켓")
@@ -697,7 +765,7 @@ class OptimizedFreshdeskFetcher:
             # 마지막 청크 저장
             if current_chunk:
                 chunk_id = f"{chunk_counter:04d}"
-                self.save_raw_data_chunk(current_chunk, "attachments", chunk_id)
+                await self.save_raw_data_chunk(current_chunk, "attachments", chunk_id)
                 progress.setdefault("raw_data_progress", {}).setdefault("attachments_chunks", []).append(chunk_id)
                 
                 logger.info(f"첨부파일 마지막 청크 {chunk_id} 저장 완료: {len(current_chunk)}개 티켓")
@@ -707,7 +775,12 @@ class OptimizedFreshdeskFetcher:
             progress.setdefault("raw_data_progress", {})["attachments_tickets_processed"] = len(ticket_ids)
             self.save_progress(progress)
             
-            logger.info("티켓 첨부파일 raw 데이터 수집 완료")
+            logger.info(f"티켓 첨부파일 raw 데이터 수집 완료: {processed_tickets_count}개 티켓에서 첨부파일 발견")
+            return processed_tickets_count  # 실제 첨부파일이 수집된 티켓 수 반환
+            
+        except Exception as e:
+            logger.error(f"첨부파일 raw 데이터 수집 중 오류 발생: {e}")
+            raise
             
         except Exception as e:
             logger.error(f"첨부파일 raw 데이터 수집 중 오류 발생: {e}")
@@ -717,12 +790,25 @@ class OptimizedFreshdeskFetcher:
         self, 
         start_date: str, 
         end_date: str,
-        include_conversations: bool = False,
-        include_attachments: bool = False,
+        include_conversations: bool = True,
+        include_attachments: bool = True,
         max_tickets: Optional[int] = None,
         current_total: int = 0
     ) -> List[Dict]:
-        """특정 날짜 범위의 티켓 수집"""
+        """
+        특정 날짜 범위의 티켓을 수집합니다.
+
+        Args:
+            start_date (str): 수집을 시작할 날짜 (YYYY-MM-DD 형식).
+            end_date (str): 수집을 종료할 날짜 (YYYY-MM-DD 형식).
+            include_conversations (bool): True로 설정하면 각 티켓의 대화내역을 포함하여 수집합니다.
+            include_attachments (bool): True로 설정하면 각 티켓의 첨부파일 정보를 포함하여 수집합니다.
+            max_tickets (Optional[int]): 수집할 티켓의 최대 개수 (None이면 제한 없음).
+            current_total (int): 현재까지 수집된 티켓 수. max_tickets와 비교하여 남은 티켓 수를 계산합니다.
+
+        Returns:
+            List[Dict]: 수집된 티켓의 목록.
+        """
         tickets = []
         page = 1
         
@@ -845,7 +931,14 @@ class OptimizedFreshdeskFetcher:
     def save_tickets_chunk(self, tickets: List[Dict], chunk_id: str):
         """
         티켓 청크를 저장 - raw_data/tickets/ 디렉토리에만 저장
-        현재 구조만 지원하도록 수정
+        
+        Args:
+            tickets (List[Dict]): 저장할 티켓 데이터의 리스트. 각 티켓은 딕셔너리 형태로 제공됩니다.
+            chunk_id (str): 저장할 청크의 고유 ID. 파일 이름에 사용됩니다.
+        
+        Raises:
+            OSError: 파일 쓰기 중 문제가 발생한 경우.
+            ValueError: tickets가 비어 있는 경우.
         """
         # raw_data/tickets/ 디렉토리에 청크 파일 저장
         tickets_dir = self.raw_data_dir / "tickets"
@@ -855,12 +948,17 @@ class OptimizedFreshdeskFetcher:
         with open(raw_chunk_file, 'w', encoding='utf-8') as f:
             json.dump(tickets, f, ensure_ascii=False, indent=2)
         
-        logger.info(f"티켓 청크 {chunk_id} 저장 완료: {len(tickets)}개 티켓")
+        logger.info(json.dumps({
+            "event": "ticket_chunk_saved",
+            "chunk_id": chunk_id,
+            "ticket_count": len(tickets),
+            "file_path": str(raw_chunk_file)
+        }, ensure_ascii=False))
         logger.info(f"  → 저장 경로: {raw_chunk_file}")
 
     async def collect_all_tickets(
         self,
-        start_date: str = "2015-01-01",
+        start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         include_conversations: bool = False,
         include_attachments: bool = False,
@@ -872,6 +970,7 @@ class OptimizedFreshdeskFetcher:
         adaptive_rate: bool = True,   # 적응형 속도 조절 활성화 여부
         collect_raw_details: bool = True,  # 티켓 상세정보 raw 데이터 수집 여부
         collect_raw_conversations: bool = True,  # 대화내역 raw 데이터 수집 여부
+        collect_raw_attachments: bool = True,  # 첨부파일 raw 데이터 수집 여부
         collect_raw_kb: bool = True  # 지식베이스 raw 데이터 수집 여부
     ) -> Dict:
         """
@@ -880,13 +979,17 @@ class OptimizedFreshdeskFetcher:
         Args:
             start_date: 시작 날짜 (YYYY-MM-DD)
             end_date: 종료 날짜 (없으면 현재까지)
-            include_conversations: 대화 내역 포함 여부
-            include_attachments: 첨부파일 정보 포함 여부
+            include_conversations: 대화 내역 포함 여부 (기본 티켓 수집 시)
+            include_attachments: 첨부파일 정보 포함 여부 (기본 티켓 수집 시)
             max_tickets: 최대 수집 티켓 수 (None=무제한)
             resource_check_func: 리소스 체크 함수 (None=체크 안함)
             resource_check_interval: 리소스 체크 간격 (티켓 수)
             days_per_chunk: 날짜 범위 분할 단위 (일)
             adaptive_rate: 서버 응답에 따른 요청 간격 자동 조절
+            collect_raw_details: 티켓 상세정보 raw 데이터 수집 여부
+            collect_raw_conversations: 대화내역 raw 데이터 수집 여부  
+            collect_raw_attachments: 첨부파일 raw 데이터 수집 여부
+            collect_raw_kb: 지식베이스 raw 데이터 수집 여부
             collect_raw_details: 티켓 상세정보를 raw 데이터로 수집할지 여부
             collect_raw_conversations: 대화내역을 raw 데이터로 수집할지 여부
             collect_raw_kb: 지식베이스를 raw 데이터로 수집할지 여부
@@ -894,6 +997,13 @@ class OptimizedFreshdeskFetcher:
         Returns:
             Dict: 수집 통계 정보
         """
+        # start_date가 None이면 현재부터 10년 전으로 설정
+        if start_date is None:
+            from datetime import datetime, timedelta
+            ten_years_ago = datetime.now() - timedelta(days=365 * 10)
+            start_date = ten_years_ago.strftime("%Y-%m-%d")
+            logger.info(f"start_date가 지정되지 않아 기본값으로 10년 전 날짜를 사용합니다: {start_date}")
+        
         progress = self.load_progress()
         date_ranges = self.get_date_ranges(start_date, end_date, days_per_chunk)
         
@@ -920,7 +1030,7 @@ class OptimizedFreshdeskFetcher:
         logger.info(f"  - 티켓 상세정보: {collect_raw_details}")
         logger.info(f"  - 대화내역: {collect_raw_conversations}")  
         logger.info(f"  - 지식베이스: {collect_raw_kb}")
-        logger.info(f"  - 첨부파일: {include_attachments}")
+        logger.info(f"  - 첨부파일: {collect_raw_attachments}")
         
         # 적응형 속도 조절 설정
         if adaptive_rate:
@@ -970,13 +1080,18 @@ class OptimizedFreshdeskFetcher:
                 
                 # 티켓 ID 수집 (raw 데이터 수집용)
                 logger.debug(f"Raw 데이터 수집 설정 확인: collect_raw_details={collect_raw_details}, collect_raw_conversations={collect_raw_conversations}")
+                logger.info(f"🔍 [DEBUG] 플래그 값 확인 - collect_raw_details: {collect_raw_details}, collect_raw_conversations: {collect_raw_conversations}")
+                logger.info(f"🔍 [DEBUG] 조건 체크 결과: {collect_raw_details or collect_raw_conversations}")
+                
                 if collect_raw_details or collect_raw_conversations:
                     ticket_ids = [str(t.get("id")) for t in tickets if t.get("id")]
                     collected_ticket_ids.extend(ticket_ids)
                     logger.info(f"이 범위에서 수집된 티켓 ID {len(ticket_ids)}개: {ticket_ids[:5]}{'...' if len(ticket_ids) > 5 else ''}")
                     logger.info(f"총 누적 티켓 ID 수: {len(collected_ticket_ids)}")
+                    logger.info(f"🔍 [DEBUG] 티켓 ID 수집 완료 - 이번 범위: {len(ticket_ids)}개, 총 누적: {len(collected_ticket_ids)}개")
                 else:
                     logger.info("Raw 데이터 수집이 비활성화되어 티켓 ID를 수집하지 않습니다.")
+                    logger.info(f"🔍 [DEBUG] Raw 데이터 수집 건너뜀 - 플래그 값: collect_raw_details={collect_raw_details}, collect_raw_conversations={collect_raw_conversations}")
                 
                 current_chunk.extend(tickets)
                 total_tickets += range_ticket_count
@@ -1071,9 +1186,8 @@ class OptimizedFreshdeskFetcher:
         
         # RAW 데이터 수집 (선택사항)
         logger.info("=== RAW 데이터 수집 단계 시작 ===")
-        logger.info(f"RAW 데이터 수집 설정: details={collect_raw_details}, conversations={collect_raw_conversations}, kb={collect_raw_kb}")
+        logger.info(f"RAW 데이터 수집 설정: details={collect_raw_details}, conversations={collect_raw_conversations}, kb={collect_raw_kb}, attachments={collect_raw_attachments}")
         logger.info(f"수집된 티켓 ID 수: {len(collected_ticket_ids)}")
-        logger.info(f"첨부파일 포함 설정: {include_attachments}")
         
         # 디버깅을 위한 상세 정보
         if collected_ticket_ids:
@@ -1086,26 +1200,35 @@ class OptimizedFreshdeskFetcher:
             logger.warning("  3. 티켓 필터링 조건에 맞는 티켓이 없음")
         
         raw_stats = {}
+        logger.info(f"🔍 [DEBUG] Raw 데이터 수집 시작 - collected_ticket_ids 수: {len(collected_ticket_ids) if collected_ticket_ids else 0}")
+        logger.info(f"🔍 [DEBUG] 수집 플래그 상태: collect_raw_details={collect_raw_details}, collect_raw_conversations={collect_raw_conversations}")
+        
         if collect_raw_details and collected_ticket_ids:
             logger.info("티켓 상세정보 raw 데이터 수집 시작...")
+            logger.info(f"🔍 [DEBUG] collect_raw_ticket_details 호출 준비 - 티켓 ID 수: {len(collected_ticket_ids)}")
             try:
-                await self.collect_raw_ticket_details(collected_ticket_ids, progress)
-                raw_stats["ticket_details_collected"] = len(collected_ticket_ids)
+                success_count = await self.collect_raw_ticket_details(collected_ticket_ids, progress)
+                raw_stats["ticket_details_collected"] = success_count
                 logger.info("✅ 티켓 상세정보 raw 데이터 수집 완료")
+                logger.info(f"🔍 [DEBUG] collect_raw_ticket_details 완료 - 처리된 티켓 수: {success_count}")
             except Exception as e:
                 logger.error(f"❌ 티켓 상세정보 raw 데이터 수집 중 오류: {e}")
+                logger.error(f"🔍 [DEBUG] collect_raw_ticket_details 예외: {type(e).__name__}: {e}")
                 raw_stats["ticket_details_error"] = str(e)
         elif not collect_raw_details:
             logger.info("티켓 상세정보 raw 데이터 수집이 비활성화되어 건너뜁니다.")
+            logger.info(f"🔍 [DEBUG] collect_raw_details=False 이므로 티켓 상세정보 수집 건너뜀")
         elif not collected_ticket_ids:
             logger.warning("수집된 티켓 ID가 없어 티켓 상세정보 raw 데이터 수집을 건너뜁니다.")
+            logger.warning(f"🔍 [DEBUG] collected_ticket_ids가 비어있어 티켓 상세정보 수집 건너뜀")
         
         if collect_raw_conversations and collected_ticket_ids:
             logger.info("티켓 대화내역 raw 데이터 수집 시작...")
             try:
-                await self.collect_raw_conversations(collected_ticket_ids, progress)
-                raw_stats["conversations_collected"] = len(collected_ticket_ids)
+                conversations_count = await self.collect_raw_conversations(collected_ticket_ids, progress)
+                raw_stats["conversations_collected"] = conversations_count
                 logger.info("✅ 티켓 대화내역 raw 데이터 수집 완료")
+                logger.info(f"🔍 [DEBUG] collect_raw_conversations 완료 - 수집된 대화 수: {conversations_count}")
             except Exception as e:
                 logger.error(f"❌ 티켓 대화내역 raw 데이터 수집 중 오류: {e}")
                 raw_stats["conversations_error"] = str(e)
@@ -1114,17 +1237,18 @@ class OptimizedFreshdeskFetcher:
         elif not collected_ticket_ids:
             logger.warning("수집된 티켓 ID가 없어 티켓 대화내역 raw 데이터 수집을 건너뜁니다.")
         
-        # 첨부파일 수집 추가 - include_attachments가 True인 경우 항상 수집
-        if include_attachments and collected_ticket_ids:
+        # 첨부파일 수집 추가 - collect_raw_attachments가 True인 경우 항상 수집
+        if collect_raw_attachments and collected_ticket_ids:
             logger.info("티켓 첨부파일 raw 데이터 수집 시작...")
             try:
-                await self.collect_raw_attachments(collected_ticket_ids, progress)
-                raw_stats["attachments_collected"] = len(collected_ticket_ids)
+                attachments_count = await self.collect_raw_attachments(collected_ticket_ids, progress)
+                raw_stats["attachments_collected"] = attachments_count
                 logger.info("✅ 티켓 첨부파일 raw 데이터 수집 완료")
+                logger.info(f"🔍 [DEBUG] collect_raw_attachments 완료 - 첨부파일이 있는 티켓 수: {attachments_count}")
             except Exception as e:
                 logger.error(f"❌ 티켓 첨부파일 raw 데이터 수집 중 오류: {e}")
                 raw_stats["attachments_error"] = str(e)
-        elif not include_attachments:
+        elif not collect_raw_attachments:
             logger.info("첨부파일 raw 데이터 수집이 비활성화되어 건너뜁니다.")
         elif not collected_ticket_ids:
             logger.warning("수집된 티켓 ID가 없어 첨부파일 raw 데이터 수집을 건너뜁니다.")
@@ -1132,11 +1256,12 @@ class OptimizedFreshdeskFetcher:
         if collect_raw_kb:
             logger.info("지식베이스 raw 데이터 수집 시작...")
             try:
-                await self.collect_raw_knowledge_base(progress, max_articles=max_kb_articles)
-                raw_stats["knowledge_base_collected"] = True
+                kb_articles_count = await self.collect_raw_knowledge_base(progress, max_articles=max_kb_articles)
+                raw_stats["knowledge_base_collected"] = kb_articles_count
                 if max_kb_articles:
                     raw_stats["max_kb_articles"] = max_kb_articles
                 logger.info("✅ 지식베이스 raw 데이터 수집 완료")
+                logger.info(f"🔍 [DEBUG] collect_raw_knowledge_base 완료 - 수집된 문서 수: {kb_articles_count}")
             except Exception as e:
                 logger.error(f"❌ 지식베이스 raw 데이터 수집 중 오류: {e}")
                 raw_stats["knowledge_base_error"] = str(e)
@@ -1155,7 +1280,7 @@ class OptimizedFreshdeskFetcher:
                 "collect_raw_details": collect_raw_details,
                 "collect_raw_conversations": collect_raw_conversations,
                 "collect_raw_kb": collect_raw_kb,
-                "include_attachments": include_attachments
+                "collect_raw_attachments": collect_raw_attachments
             },
             "raw_data_stats": raw_stats,
             "date_ranges_processed": len(progress.get("completed_ranges", [])),
@@ -1217,6 +1342,7 @@ async def main():
             max_tickets=None,  # 무제한 수집
             collect_raw_details=True,   # 티켓 상세정보 raw 데이터 수집
             collect_raw_conversations=True,  # 대화내역 raw 데이터 수집
+            collect_raw_attachments=True,  # 첨부파일 raw 데이터 수집
             collect_raw_kb=True  # 지식베이스 raw 데이터 수집
         )
         
@@ -1245,6 +1371,7 @@ async def test_collection_limit():
             adaptive_rate=True,       # 적응형 속도 조절 활성화
             collect_raw_details=True, # 테스트에서도 raw 데이터 수집
             collect_raw_conversations=True,
+            collect_raw_attachments=True,  # 첨부파일 raw 데이터 수집
             collect_raw_kb=True
         )
     
