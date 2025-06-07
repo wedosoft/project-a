@@ -537,8 +537,8 @@ class LLMRouter:
         self.gemini = GeminiProvider(timeout=gemini_timeout) # Gemini는 별도 타임아웃 적용
         
         # 제공자 우선순위 및 상태 관리 (Prometheus 연동 시 메트릭으로 활용 가능)
-        # 초기 우선순위: Anthropic > OpenAI > Gemini (API 키 유효성 및 상태에 따라 동적 조정)
-        self.providers_priority = ["anthropic", "openai", "gemini"]
+        # 성능 기반 우선순위: OpenAI > Anthropic > Gemini (응답 속도 최적화)
+        self.providers_priority = ["openai", "anthropic", "gemini"]
         self.provider_instances: Dict[str, LLMProvider] = {
             "anthropic": self.anthropic,
             "openai": self.openai,
