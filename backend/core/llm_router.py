@@ -209,7 +209,7 @@ class LLMProvider:
 class AnthropicProvider(LLMProvider):
     """Anthropic Claude API 제공자"""
     
-    def __init__(self, api_key: str = None, timeout: float = 10.0):
+    def __init__(self, api_key: str = None, timeout: float = 8.0):
         super().__init__(name="anthropic", timeout=timeout) # 부모 클래스 생성자 호출
         self.api_key = api_key or ANTHROPIC_API_KEY
         if not self.api_key:
@@ -287,7 +287,7 @@ class AnthropicProvider(LLMProvider):
 class OpenAIProvider(LLMProvider):
     """OpenAI API 제공자"""
     
-    def __init__(self, api_key: str = None, timeout: float = 15.0):
+    def __init__(self, api_key: str = None, timeout: float = 12.0):
         super().__init__(name="openai", timeout=timeout) # 부모 클래스 생성자 호출
         self.api_key = api_key or OPENAI_API_KEY
         if not self.api_key:
@@ -368,7 +368,7 @@ class OpenAIProvider(LLMProvider):
 class GeminiProvider(LLMProvider):
     """Google Gemini API 제공자"""
     
-    def __init__(self, api_key: str = None, timeout: float = 20.0):
+    def __init__(self, api_key: str = None, timeout: float = 18.0):
         super().__init__(name="gemini", timeout=timeout) # 부모 클래스 생성자 호출
         self.api_key = api_key or GOOGLE_API_KEY
         self.client = None # genai.GenerativeModel 인스턴스
@@ -601,9 +601,21 @@ class LLMRouter:
         """
         # 1. API 키가 있고 건강한 제공자만 필터링
         available_providers = [
-            name for name in self.providers_priority 
-            if self.provider_instances[name].api_key and self.provider_instances[name].is_healthy()
+            name
+            for name in self.providers_priority
+            if self.provider_instances[name].api_key
+            and self.provider_instances[name].is_healthy()
         ]
+
+        # 평균 지연 시간 기준 정렬 (데이터가 없으면 기본 우선순위 사용)
+        available_providers.sort(
+            key=lambda name: (
+                self.provider_instances[name].stats.average_latency_ms
+                if self.provider_instances[name].stats.total_requests > 0
+                else float("inf"),
+                self.providers_priority.index(name),
+            )
+        )
         
         # 2. (선택적) 요청 특성에 따른 우선순위 동적 조정 로직 (예시)
         # estimated_tokens = self.provider_instances[self.providers_priority[0]].count_tokens(prompt) # 가장 우선순위 높은 제공자로 토큰 계산
@@ -617,8 +629,14 @@ class LLMRouter:
             name for name in self.providers_priority if name not in available_providers
         ]
 
+        latency_info = {
+            name: round(self.provider_instances[name].stats.average_latency_ms, 2)
+            for name in available_providers
+        }
+        logger.info(f"동적 라우팅 - 평균 지연 시간(ms): {latency_info}")
+
         ordered_list = available_providers + unavailable_providers
-        if not ordered_list: # 모든 제공자가 사용 불가능한 극단적인 경우
+        if not ordered_list:  # 모든 제공자가 사용 불가능한 극단적인 경우
              logger.error("사용 가능한 LLM 제공자가 없습니다 (API 키 부재 또는 모두 비정상 상태).")
              return [] # 빈 리스트 반환 또는 기본 제공자 이름 반환
         
