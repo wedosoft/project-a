@@ -236,7 +236,6 @@ class OptimizedFreshdeskFetcher:
         """
         # start_date가 None이면 현재부터 10년 전으로 설정
         if start_date is None:
-            from datetime import datetime, timedelta
             ten_years_ago = datetime.now() - timedelta(days=365 * 10)
             start_date = ten_years_ago.strftime("%Y-%m-%d")
             
@@ -999,7 +998,6 @@ class OptimizedFreshdeskFetcher:
         """
         # start_date가 None이면 현재부터 10년 전으로 설정
         if start_date is None:
-            from datetime import datetime, timedelta
             ten_years_ago = datetime.now() - timedelta(days=365 * 10)
             start_date = ten_years_ago.strftime("%Y-%m-%d")
             logger.info(f"start_date가 지정되지 않아 기본값으로 10년 전 날짜를 사용합니다: {start_date}")

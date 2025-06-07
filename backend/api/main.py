@@ -31,6 +31,9 @@ from freshdesk import fetcher
 from prometheus_client import Counter, Histogram
 from pydantic import BaseModel, Field, field_validator
 
+# 첨부파일 API 라우터 import
+from api.attachments import router as attachments_router
+
 # Prometheus 메트릭 정의
 # LLM 관련 메트릭은 llm_router.py에서 정의되어 있으므로 중복 방지를 위해 여기서는 HTTP 요청 관련 메트릭만 정의
 # HTTP 요청 관련 메트릭은 필요시 추후 추가 가능
@@ -38,6 +41,9 @@ from pydantic import BaseModel, Field, field_validator
 
 # FastAPI 앱 생성
 app = FastAPI()
+
+# 첨부파일 라우터 등록
+app.include_router(attachments_router)
 
 # 인메모리 캐시 설정 (TTL: 10분, 최대 100개 항목)
 # 회사 ID와 요청 매개변수를 기반으로 캐시 키를 생성합니다.
@@ -1189,9 +1195,6 @@ async def get_related_documents(ticket_id: str, company_id: str = Depends(get_co
                         # score가 있으면 1-score를 거리로 사용
                         distance = 1 - result["score"]
                     
-                    similarity_score = max(0, 1 - distance)  # 거리를 유사도로 변환
-                    
-                    # 관련 문서 목록에 추가
                     related_docs_list.append(RelatedDocumentItem(
                         id=str(doc_id),
                         title=title,
@@ -1569,7 +1572,7 @@ async def search_query(req: QueryRequest, company_id: str = Depends(get_company_
                                 title=title,
                                 content_summary=content_summary,
                                 source_type=doc_type,
-                                url=metadata.get("url"),
+                                url=url,
                                 similarity_score=round(similarity_score, 3),
                                 created_at=metadata.get("created_at"),
                                 metadata=metadata
