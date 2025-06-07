@@ -537,8 +537,27 @@ class LLMRouter:
         self.gemini = GeminiProvider(timeout=gemini_timeout) # Gemini는 별도 타임아웃 적용
         
         # 제공자 우선순위 및 상태 관리 (Prometheus 연동 시 메트릭으로 활용 가능)
-        # 초기 우선순위: Anthropic > OpenAI > Gemini (API 키 유효성 및 상태에 따라 동적 조정)
-        self.providers_priority = ["anthropic", "openai", "gemini"]
+        # 기본 우선순위: Anthropic > OpenAI > Gemini
+        default_priority = ["anthropic", "openai", "gemini"]
+
+        env_priority = os.getenv("LLM_PROVIDER_PRIORITY")
+        if env_priority:
+            candidates = [p.strip() for p in re.split(r"[ ,]+", env_priority) if p.strip()]
+            priority = []
+            for name in candidates:
+                if name in ["anthropic", "openai", "gemini"]:
+                    if name not in priority:
+                        priority.append(name)
+                else:
+                    logger.warning(f"Unknown provider '{name}' in LLM_PROVIDER_PRIORITY")
+            for name in default_priority:
+                if name not in priority:
+                    priority.append(name)
+            self.providers_priority = priority
+        else:
+            self.providers_priority = default_priority
+
+        logger.info(f"Provider priority set to {self.providers_priority}")
         self.provider_instances: Dict[str, LLMProvider] = {
             "anthropic": self.anthropic,
             "openai": self.openai,
@@ -600,10 +619,23 @@ class LLMRouter:
         (현재는 단순 우선순위 + 건강상태만 고려, 향후 확장 가능)
         """
         # 1. API 키가 있고 건강한 제공자만 필터링
-        available_providers = [
-            name for name in self.providers_priority 
+        healthy_providers = [
+            name for name in self.providers_priority
             if self.provider_instances[name].api_key and self.provider_instances[name].is_healthy()
         ]
+
+        # 1.5. 건강한 제공자를 평균 지연 시간 기준으로 정렬
+        def latency_key(name: str) -> float:
+            provider = self.provider_instances[name]
+            latency = provider.stats.average_latency_ms
+            if latency == 0:
+                latency = provider.timeout * 1000
+            return latency
+
+        available_providers = sorted(
+            healthy_providers,
+            key=lambda n: (latency_key(n), self.providers_priority.index(n)),
+        )
         
         # 2. (선택적) 요청 특성에 따른 우선순위 동적 조정 로직 (예시)
         # estimated_tokens = self.provider_instances[self.providers_priority[0]].count_tokens(prompt) # 가장 우선순위 높은 제공자로 토큰 계산
