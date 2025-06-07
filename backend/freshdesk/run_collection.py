@@ -29,14 +29,12 @@ load_dotenv(dotenv_path=Path(BACKEND_ROOT) / '.env')
 
 # 공통 로깅 모듈 사용
 from api.ingest import ingest as ingest_main
-from core.logger import get_logger, setup_logging
+from core.logger import get_logger
 from data.data_processor import process_collected_data
 
 from freshdesk.optimized_fetcher import OptimizedFreshdeskFetcher
 
-# 로깅 설정 초기화 (이미 core/logger.py에서 설정됨)
-setup_logging()
-
+# 로깅 설정은 core/logger.py에서 자동으로 초기화됨 (중복 설정 방지)
 logger = get_logger(__name__)
 
 

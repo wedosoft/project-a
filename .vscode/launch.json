@@ -68,6 +68,71 @@
             "preLaunchTask": "Activate Virtual Environment"
         },
         {
+            "name": "Freshdesk Collection - Full Collection",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/backend/freshdesk/run_collection.py",
+            "args": [
+                "--full-collection"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "cwd": "${workspaceFolder}/backend",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/backend",
+                "VIRTUAL_ENV": "${workspaceFolder}/backend/venv",
+                "PATH": "${workspaceFolder}/backend/venv/bin:${env:PATH}",
+                "PS1": "(venv) ${env:PS1}"
+            },
+            "envFile": "${workspaceFolder}/backend/.env",
+            "python": "${workspaceFolder}/backend/venv/bin/python",
+            "preLaunchTask": "Activate Virtual Environment"
+        },
+        {
+            "name": "Freshdesk Collection - Quick Test",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/backend/freshdesk/run_collection.py",
+            "args": [
+                "--full-collection",
+                "--start-date",
+                "2025-03-01"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "cwd": "${workspaceFolder}/backend",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/backend",
+                "VIRTUAL_ENV": "${workspaceFolder}/backend/venv",
+                "PATH": "${workspaceFolder}/backend/venv/bin:${env:PATH}",
+                "PS1": "(venv) ${env:PS1}"
+            },
+            "envFile": "${workspaceFolder}/backend/.env",
+            "python": "${workspaceFolder}/backend/venv/bin/python",
+            "preLaunchTask": "Activate Virtual Environment"
+        },
+        {
+            "name": "Freshdesk Collection - Resume",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/backend/freshdesk/run_collection.py",
+            "args": [
+                "--resume"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "cwd": "${workspaceFolder}/backend",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/backend",
+                "VIRTUAL_ENV": "${workspaceFolder}/backend/venv",
+                "PATH": "${workspaceFolder}/backend/venv/bin:${env:PATH}",
+                "PS1": "(venv) ${env:PS1}"
+            },
+            "envFile": "${workspaceFolder}/backend/.env",
+            "python": "${workspaceFolder}/backend/venv/bin/python",
+            "preLaunchTask": "Activate Virtual Environment"
+        },
+        {
             "name": "Test LLM Router",
             "type": "debugpy",
             "request": "launch",

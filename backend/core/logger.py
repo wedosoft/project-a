@@ -96,6 +96,9 @@ def setup_logger(
     
     logger.setLevel(level)
     
+    # 로그 전파 비활성화 (루트 로거와의 중복 방지)
+    logger.propagate = False
+    
     # 로그 포맷터 설정
     formatter = logging.Formatter(LOG_FORMAT)
     
@@ -171,7 +174,59 @@ def get_vectordb_logger() -> logging.Logger:
     )
 
 
+def get_logger(name: str) -> logging.Logger:
+    """
+    모듈명을 기반으로 로거를 반환합니다.
+    
+    Args:
+        name: 모듈명 (일반적으로 __name__ 사용)
+        
+    Returns:
+        logging.Logger: 설정된 로거 인스턴스
+    """
+    # 모듈명에 따라 적절한 로그 파일명 생성
+    if 'freshdesk' in name:
+        log_file = BACKEND_ROOT / 'freshdesk_collection.log'
+    elif 'api' in name:
+        log_file = BACKEND_ROOT / 'api_server.log'
+    elif 'vectordb' in name or 'vector' in name:
+        log_file = BACKEND_ROOT / 'vectordb.log'
+    else:
+        log_file = BACKEND_ROOT / 'backend.log'
+    
+    return setup_logger(
+        name=name,
+        log_file=log_file,
+        max_bytes=MAX_LOG_SIZE,
+        backup_count=BACKUP_COUNT
+    )
+
+
+def setup_logging():
+    """
+    전역 로깅 설정을 초기화합니다.
+    
+    이 함수는 애플리케이션 시작 시 한 번 호출하여 
+    기본 로깅 설정을 구성합니다.
+    """
+    # 루트 로거 설정 - 개별 로거의 중복을 방지하기 위해 최소한만 설정
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.WARNING)  # 루트 로거는 WARNING 이상만 처리
+    
+    # 기존 핸들러 제거 (중복 방지)
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
+    # 로그 디렉토리 생성
+    LOG_DIR.mkdir(exist_ok=True)
+
+
 # 사용 예제:
-# from core.logger import get_freshdesk_logger
-# logger = get_freshdesk_logger()
-# logger.info("Freshdesk 데이터 수집 시작")
+# from core.logger import get_logger, setup_logging
+# 
+# # 애플리케이션 시작 시
+# setup_logging()
+# 
+# # 모듈별 로거 사용
+# logger = get_logger(__name__)
+# logger.info("모듈 시작")
