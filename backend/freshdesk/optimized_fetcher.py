@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 from turtle import Turtle
@@ -444,7 +445,7 @@ class OptimizedFreshdeskFetcher:
 
     async def save_raw_data_chunk(self, data: List[Dict], data_type: str, chunk_id: str) -> None:
         """
-        Raw 데이터 청크를 JSON 파일로 저장합니다.
+        Raw 데이터를 청크 단위로 저장합니다.
         
         Args:
             data: 저장할 데이터 리스트
@@ -930,6 +931,7 @@ class OptimizedFreshdeskFetcher:
     def save_tickets_chunk(self, tickets: List[Dict], chunk_id: str):
         """
         티켓 청크를 저장 - raw_data/tickets/ 디렉토리에만 저장
+        크기 제한을 고려하여 청킹을 수행합니다.
         
         Args:
             tickets (List[Dict]): 저장할 티켓 데이터의 리스트. 각 티켓은 딕셔너리 형태로 제공됩니다.
@@ -939,21 +941,35 @@ class OptimizedFreshdeskFetcher:
             OSError: 파일 쓰기 중 문제가 발생한 경우.
             ValueError: tickets가 비어 있는 경우.
         """
+        if not tickets:
+            logger.warning(f"빈 티켓 리스트로 인해 청크 {chunk_id} 저장을 건너뜁니다.")
+            return
+            
         # raw_data/tickets/ 디렉토리에 청크 파일 저장
         tickets_dir = self.raw_data_dir / "tickets"
         tickets_dir.mkdir(parents=True, exist_ok=True)  # 디렉토리 생성 보장
         raw_chunk_file = tickets_dir / f"tickets_chunk_{chunk_id}.json"
         
+        # 임시로 JSON 크기 계산 (메모리에서)
+        temp_json = json.dumps(tickets, ensure_ascii=False, indent=2)
+        file_size_mb = len(temp_json.encode('utf-8')) / (1024 * 1024)
+        
+        # 크기 경고 로깅 (50MB 이상 시)
+        if file_size_mb > 50:
+            logger.warning(f"큰 청크 파일 생성됨: {file_size_mb:.1f}MB (티켓 {len(tickets)}개)")
+            logger.warning(f"향후 청크 크기 조정을 고려하세요 (현재 RAW_DATA_CHUNK_SIZE: {self.RAW_DATA_CHUNK_SIZE})")
+        
         with open(raw_chunk_file, 'w', encoding='utf-8') as f:
-            json.dump(tickets, f, ensure_ascii=False, indent=2)
+            f.write(temp_json)
         
         logger.info(json.dumps({
             "event": "ticket_chunk_saved",
             "chunk_id": chunk_id,
             "ticket_count": len(tickets),
+            "file_size_mb": round(file_size_mb, 2),
             "file_path": str(raw_chunk_file)
         }, ensure_ascii=False))
-        logger.info(f"  → 저장 경로: {raw_chunk_file}")
+        logger.info(f"  → 저장 경로: {raw_chunk_file} ({file_size_mb:.1f}MB)")
 
     async def collect_all_tickets(
         self,
@@ -1116,13 +1132,18 @@ class OptimizedFreshdeskFetcher:
                     self.save_progress(progress)
                     break
                 
-                # 청크 크기에 도달하면 저장
-                if len(current_chunk) >= self.CHUNK_SIZE:
+                # 청크 크기에 도달하면 저장 (RAW_DATA_CHUNK_SIZE 사용으로 변경)
+                if len(current_chunk) >= self.RAW_DATA_CHUNK_SIZE:
                     chunk_id = f"{chunk_counter:04d}"
                     self.save_tickets_chunk(current_chunk, chunk_id)
                     progress.setdefault("chunks_completed", []).append(chunk_id)
                     chunk_counter += 1
                     current_chunk = []
+                    logger.info(f"티켓 청크 {chunk_id} 저장 완료: {self.RAW_DATA_CHUNK_SIZE}개 티켓")
+                
+                # 주기적 진행률 로깅 (1000개마다)
+                if total_tickets % 1000 == 0 and total_tickets > 0:
+                    logger.info(f"티켓 수집 진행률: {total_tickets}개 수집됨, 현재 청크 크기: {len(current_chunk)}개")
                 
                 # 이 날짜 범위의 상세 정보 기록
                 range_details = {
@@ -1327,6 +1348,88 @@ class OptimizedFreshdeskFetcher:
             logger.info(f"RAW 데이터 수집 통계: {raw_stats}")
         return stats
 
+    async def split_large_ticket_chunks(self):
+        """
+        기존의 큰 티켓 청크 파일들을 RAW_DATA_CHUNK_SIZE 기준으로 재분할합니다.
+        특히 250MB 같은 큰 파일을 작은 청크들로 나눕니다.
+        """
+        logger.info("=== 큰 티켓 청크 파일 분할 시작 ===")
+        
+        tickets_dir = self.raw_data_dir / "tickets"
+        if not tickets_dir.exists():
+            logger.warning("티켓 디렉토리가 존재하지 않습니다.")
+            return
+        
+        # 기존 청크 파일들을 크기순으로 정렬
+        chunk_files = list(tickets_dir.glob("tickets_chunk_*.json"))
+        if not chunk_files:
+            logger.info("분할할 티켓 청크 파일이 없습니다.")
+            return
+            
+        logger.info(f"총 {len(chunk_files)}개 청크 파일 발견")
+        
+        # 백업 디렉토리 생성
+        backup_dir = tickets_dir.parent / "tickets_backup"
+        backup_dir.mkdir(exist_ok=True)
+        
+        total_processed = 0
+        new_chunk_counter = 0
+        
+        for chunk_file in sorted(chunk_files):
+            # 파일 크기 확인
+            file_size_mb = chunk_file.stat().st_size / (1024 * 1024)
+            logger.info(f"처리 중: {chunk_file.name} ({file_size_mb:.1f}MB)")
+            
+            # 50MB 이상의 파일만 분할
+            if file_size_mb < 50:
+                logger.info(f"  → 크기가 작아 분할하지 않음 ({file_size_mb:.1f}MB)")
+                continue
+                
+            try:
+                # 기존 파일 로드
+                with open(chunk_file, 'r', encoding='utf-8') as f:
+                    tickets = json.load(f)
+                
+                logger.info(f"  → {len(tickets)}개 티켓 로드됨, 분할 시작...")
+                
+                # 기존 파일을 백업으로 이동
+                backup_file = backup_dir / chunk_file.name
+                shutil.move(str(chunk_file), str(backup_file))
+                logger.info(f"  → 백업 생성: {backup_file}")
+                
+                # RAW_DATA_CHUNK_SIZE 단위로 분할
+                for i in range(0, len(tickets), self.RAW_DATA_CHUNK_SIZE):
+                    chunk_tickets = tickets[i:i + self.RAW_DATA_CHUNK_SIZE]
+                    new_chunk_id = f"{new_chunk_counter:04d}"
+                    
+                    # 새 청크 저장
+                    self.save_tickets_chunk(chunk_tickets, new_chunk_id)
+                    new_chunk_counter += 1
+                    total_processed += len(chunk_tickets)
+                    
+                    logger.info(f"  → 새 청크 생성: tickets_chunk_{new_chunk_id}.json ({len(chunk_tickets)}개 티켓)")
+                
+                logger.info(f"분할 완료: {chunk_file.name} → {len(tickets) // self.RAW_DATA_CHUNK_SIZE + (1 if len(tickets) % self.RAW_DATA_CHUNK_SIZE else 0)}개 새 청크")
+                
+            except Exception as e:
+                logger.error(f"청크 파일 분할 실패 {chunk_file.name}: {e}")
+                continue
+        
+        logger.info(f"=== 청크 분할 완료 ===")
+        logger.info(f"총 처리된 티켓 수: {total_processed}개")
+        logger.info(f"생성된 새 청크 수: {new_chunk_counter}개")
+        logger.info(f"백업 위치: {backup_dir}")
+        
+        # 진행 상황 업데이트 (새로운 청크 ID들로)
+        progress = self.load_progress()
+        new_chunk_ids = [f"{i:04d}" for i in range(new_chunk_counter)]
+        progress["chunks_completed"] = new_chunk_ids
+        progress["chunk_split_completed"] = True
+        progress["chunk_split_timestamp"] = datetime.now().isoformat()
+        self.save_progress(progress)
+        
+        logger.info("진행 상황 업데이트 완료")
+
 
 async def main():
     """전체 데이터 수집 함수 - freshdesk_full_data 디렉토리 사용"""
@@ -1436,9 +1539,55 @@ async def collect_only_raw_data():
             logger.error("추출된 티켓 ID가 없습니다.")
 
 
+async def split_existing_chunks():
+    """
+    기존의 큰 티켓 청크 파일들을 작은 청크로 분할하는 유틸리티 함수
+    250MB 같은 큰 파일을 1000개 단위의 작은 청크로 분할합니다.
+    """
+    logging.info("======= 기존 청크 파일 분할 시작 =======")
+    output_dir = "freshdesk_full_data"
+    
+    async with OptimizedFreshdeskFetcher(output_dir) as fetcher:
+        await fetcher.split_large_ticket_chunks()
+    
+    logging.info("======= 청크 파일 분할 완료 =======")
+
+
 if __name__ == "__main__":
-    # 기본 호출은 main()이지만, 테스트를 원할 경우 test_collection_limit() 호출
-    # RAW 데이터만 수집하려면 collect_only_raw_data() 호출
-    # asyncio.run(main())
-    # asyncio.run(test_collection_limit())
-    asyncio.run(collect_only_raw_data())
+    import sys
+    
+    # 명령행 인수 처리
+    if len(sys.argv) > 1:
+        command = sys.argv[1].lower()
+        
+        if command == "split":
+            # 기존 큰 청크 파일들을 작은 청크로 분할
+            print("기존 청크 파일 분할을 시작합니다...")
+            asyncio.run(split_existing_chunks())
+        
+        elif command == "raw":
+            # RAW 데이터만 수집
+            print("RAW 데이터 수집을 시작합니다...")
+            asyncio.run(collect_only_raw_data())
+        
+        elif command == "test":
+            # 제한된 수량으로 테스트
+            print("제한된 수량으로 테스트를 시작합니다...")
+            asyncio.run(test_collection_limit())
+        
+        elif command == "full":
+            # 전체 데이터 수집
+            print("전체 데이터 수집을 시작합니다...")
+            asyncio.run(main())
+        
+        else:
+            print("사용법:")
+            print("  python optimized_fetcher.py split    # 기존 큰 청크 파일 분할")
+            print("  python optimized_fetcher.py raw      # RAW 데이터만 수집")
+            print("  python optimized_fetcher.py test     # 제한된 수량으로 테스트")
+            print("  python optimized_fetcher.py full     # 전체 데이터 수집")
+    else:
+        # 기본 동작: RAW 데이터 수집
+        print("기본 모드: RAW 데이터 수집을 시작합니다...")
+        print("다른 옵션을 사용하려면 'python optimized_fetcher.py --help' 참조")
+        asyncio.run(collect_only_raw_data())
