@@ -48,6 +48,7 @@ QDRANT_API_KEY
 ANTHROPIC_API_KEY
 OPENAI_API_KEY
 GOOGLE_API_KEY
+LLM_PROVIDER_PRIORITY  # 예: "openai,anthropic,gemini"
 ```
 
 ### 4. 환경변수 검증
