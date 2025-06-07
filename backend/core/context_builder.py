@@ -8,26 +8,26 @@ Context Builder 모듈
 """
 
 import logging
-import tiktoken # Ensure tiktoken is correctly installed and importable
-from typing import List, Dict, Any, Tuple, Optional
 import re
 from difflib import SequenceMatcher
+from typing import Any, Dict, List, Optional, Tuple
+
+import tiktoken  # Ensure tiktoken is correctly installed and importable
 
 # 로깅 설정
 logger = logging.getLogger(__name__)
 
 # 토큰 카운터 초기화 (OpenAI 모델 기준)
+# text-embedding-3-small은 cl100k_base 인코딩 사용
 # 네트워크 연결 문제가 있을 때 graceful fallback 제공
 try:
-    tokenizer = tiktoken.encoding_for_model("text-embedding-3-small")
+    # text-embedding-3-small/large 모델은 cl100k_base 인코딩을 사용
+    tokenizer = tiktoken.get_encoding("cl100k_base")
+    logger.info("tiktoken cl100k_base 인코딩 로드 성공")
 except Exception as e:
-    logger.warning(f"tiktoken 모델별 인코딩 로드 실패: {e}")
-    try:
-        tokenizer = tiktoken.get_encoding("cl100k_base")  # 기본값으로 fallback
-    except Exception as e2:
-        logger.error(f"tiktoken 기본 인코딩 로드도 실패: {e2}")
-        # 네트워크 문제로 tiktoken을 로드할 수 없는 경우 None으로 설정
-        tokenizer = None
+    logger.error(f"tiktoken 인코딩 로드 실패: {e}")
+    # 네트워크 문제로 tiktoken을 로드할 수 없는 경우 None으로 설정
+    tokenizer = None
 
 # 설정값
 MAX_CONTEXT_TOKENS = 8000  # 최대 8K 토큰으로 상향 조정
