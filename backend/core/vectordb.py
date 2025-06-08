@@ -13,7 +13,11 @@ import time
 import uuid
 from abc import ABC, abstractmethod
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
+
+from dotenv import load_dotenv
+from core.config import get_settings
 
 # Qdrant 클라이언트
 from qdrant_client import QdrantClient
@@ -30,8 +34,11 @@ from qdrant_client.models import Distance, PointStruct, VectorParams
 logger = logging.getLogger(__name__)
 
 # 환경 변수
-QDRANT_URL = os.getenv("QDRANT_URL")
-QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+backend_dir = Path(__file__).parent.parent
+load_dotenv(backend_dir / ".env")
+settings = get_settings()
+QDRANT_URL = settings.QDRANT_URL
+QDRANT_API_KEY = settings.QDRANT_API_KEY
 VECTOR_SIZE = 1536  # OpenAI/Anthropic 임베딩 차원 수, 모델에 따라 조정 필요
 COLLECTION_NAME = "documents"  # 기본 컬렉션명
 
