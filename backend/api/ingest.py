@@ -37,7 +37,7 @@ COLLECTION_NAME = "documents"  # Qdrant 컬렉션 이름
 FRESHDESK_DOMAIN = os.getenv("FRESHDESK_DOMAIN")
 if FRESHDESK_DOMAIN:
     DEFAULT_COMPANY_ID = extract_company_id_from_domain(FRESHDESK_DOMAIN)
-    logger.info(f"FRESHDESK_DOMAIN '{FRESHDESK_DOMAIN}'에서 추출된 company_id: '{DEFAULT_COMPANY_ID}'")
+    logger.debug(f"FRESHDESK_DOMAIN '{FRESHDESK_DOMAIN}'에서 추출된 company_id: '{DEFAULT_COMPANY_ID}'")
 else:
     DEFAULT_COMPANY_ID = "default"
     logger.warning("FRESHDESK_DOMAIN 환경변수가 설정되지 않아 기본값 'default'를 사용합니다.")
@@ -349,7 +349,7 @@ async def ingest(
     FRESHDESK_DOMAIN = os.getenv("FRESHDESK_DOMAIN")
     if FRESHDESK_DOMAIN:
         DEFAULT_COMPANY_ID = extract_company_id_from_domain(FRESHDESK_DOMAIN)
-        logger.info(f"ingest: FRESHDESK_DOMAIN '{FRESHDESK_DOMAIN}'에서 추출된 company_id: '{DEFAULT_COMPANY_ID}'")
+        logger.debug(f"ingest: FRESHDESK_DOMAIN '{FRESHDESK_DOMAIN}'에서 추출된 company_id: '{DEFAULT_COMPANY_ID}'")
     else:
         DEFAULT_COMPANY_ID = "default"
         logger.warning("ingest: FRESHDESK_DOMAIN 환경변수가 설정되지 않아 기본값 'default'를 사용합니다.")

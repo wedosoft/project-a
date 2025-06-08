@@ -10,25 +10,22 @@ import asyncio
 import json
 import logging
 import os
-import re
 import time
-import uuid
 from datetime import datetime
 from functools import partial
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 import prometheus_client
 from cachetools import TTLCache, cached
 from cachetools.keys import hashkey
-from core import context_builder, llm_router, retriever
+from core import llm_router, retriever
 from core.context_builder import build_optimized_context
 from core.embedder import embed_documents
 from core.llm_router import LLMResponse, generate_text
 from core.retriever import retrieve_top_k_docs
 from core.vectordb import vector_db
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException
 from freshdesk import fetcher
-from prometheus_client import Counter, Histogram
 from pydantic import BaseModel, Field, field_validator
 
 # 첨부파일 API 라우터 import
@@ -67,6 +64,9 @@ class QueryRequest(BaseModel):
     ticket_id: Optional[str] = None # 현재 처리 중인 티켓 ID (선택 사항)
     type: List[str] = Field(default_factory=lambda: ["tickets", "solutions", "images", "attachments"])  # 검색할 콘텐츠 타입
     intent: Optional[str] = "search"  # 검색 의도 (예: "search", "recommend", "answer")
+    company_id: Optional[str] = None  # 회사 ID (헤더에서 가져오는 경우 선택 사항)
+    search_types: Optional[List[str]] = Field(default_factory=lambda: ["ticket", "kb"])  # 검색할 데이터 타입
+    min_similarity: float = 0.5  # 최소 유사도 임계값
 
 
 # 회사 ID 의존성 함수
@@ -194,7 +194,7 @@ def build_prompt(context: str, query: str, answer_instructions: Optional[str] = 
     return base_prompt
 
 
-async def call_llm(prompt: str, system_prompt: str = None) -> LLMResponse:
+async def call_llm(prompt: str, system_prompt: Optional[str] = None) -> LLMResponse:
     """
     LLM Router를 사용하여 답변을 생성합니다.
     여러 LLM 모델 간 자동 선택 및 fallback 기능을 제공합니다.
@@ -347,7 +347,15 @@ async def query_endpoint(req: QueryRequest, company_id: str = Depends(get_compan
     context_start = time.time()
     
     # 최적화된 컨텍스트를 구성합니다. (검색된 문서들로부터)
-    base_context, optimized_metadatas, context_meta = build_optimized_context(docs, metadatas)
+    # 새로운 최적화 매개변수들을 활용하여 품질과 성능을 향상시킵니다.
+    base_context, optimized_metadatas, context_meta = build_optimized_context(
+        docs=docs, 
+        metadatas=metadatas,
+        query=req.query,  # 쿼리 기반 관련성 추출을 위해 전달
+        max_tokens=8000,  # 컨텍스트 토큰 제한 (기본값 사용 가능)
+        top_k=req.top_k,  # 품질 기반 문서 선별
+        enable_relevance_extraction=True  # 관련성 추출 활성화
+    )
     
     # LLM에 전달할 최종 컨텍스트 (티켓 정보 + 검색된 문서 정보)
     final_context_for_llm = f"{ticket_context_for_llm}{base_context}"
@@ -450,10 +458,22 @@ async def query_endpoint(req: QueryRequest, company_id: str = Depends(get_compan
     # 총 처리 시간을 계산합니다.
     total_time = time.time() - start_time
     
-    # 성능을 로깅합니다.
-    logger.info(f"성능: company_id=\'{company_id}\', query=\'{req.query[:50]}...\', 검색시간={search_time:.2f}s, 컨텍스트생성시간={context_time:.2f}s, LLM호출시간={llm_time:.2f}s, 총시간={total_time:.2f}s")
+    # 성능을 로깅합니다. (최적화 정보 포함)
+    optimization_info = (
+        f"원본문서:{context_meta.get('original_docs_count', 0)} -> "
+        f"top_k:{context_meta.get('after_top_k_count', 0)} -> "
+        f"중복제거:{context_meta.get('after_deduplication_count', 0)} -> "
+        f"관련성추출:{context_meta.get('after_relevance_extraction_count', 0)} -> "
+        f"최종:{context_meta.get('final_optimized_docs_count', 0)}"
+    )
+    logger.info(
+        f"성능: company_id=\'{company_id}\', query=\'{req.query[:50]}...\', "
+        f"검색시간={search_time:.2f}s, 컨텍스트생성시간={context_time:.2f}s, "
+        f"LLM호출시간={llm_time:.2f}s, 총시간={total_time:.2f}s, "
+        f"최적화정보=({optimization_info})"
+    )
     
-    # 메타데이터를 구성합니다.
+    # 메타데이터를 구성합니다. (최적화 메타데이터 포함)
     metadata = {
         "duration_ms": int(total_time * 1000), # 총 소요 시간 (밀리초)
         "search_time_ms": int(search_time * 1000), # 검색 소요 시간 (밀리초)
@@ -464,7 +484,9 @@ async def query_endpoint(req: QueryRequest, company_id: str = Depends(get_compan
         "context_docs_count": len(structured_docs), # 사용된 컨텍스트 문서 수
         "search_intent": search_intent, # 검색 의도
         "content_types": content_types, # 검색된 콘텐츠 타입
-        "ticket_id": req.ticket_id # 연관된 티켓 ID (있는 경우)
+        "ticket_id": req.ticket_id, # 연관된 티켓 ID (있는 경우)
+        # 새로운 최적화 메타데이터 추가
+        "optimization": context_meta  # 전체 최적화 정보 포함
     }
 
     return QueryResponse(
@@ -512,19 +534,8 @@ class RelatedDocsResponse(BaseModel):
     related_documents: List[RelatedDocumentItem] = Field(description="검색된 관련 문서 목록")
 
 
-# 자연어 검색 요청/응답 모델
-class QueryRequest(BaseModel):
-    """자연어 기반 검색 요청 모델"""
-    
-    query: str = Field(description="사용자의 자연어 검색 질문")
-    top_k: int = Field(default=5, description="반환할 최대 결과 수")
-    company_id: Optional[str] = Field(default=None, description="회사 ID (헤더에서 자동 추출 시 생략 가능)")
-    search_types: Optional[List[str]] = Field(default=["all"], description="검색할 문서 유형 (ticket, kb, all)")
-    min_similarity: float = Field(default=0.5, description="최소 유사도 임계값")
-
-
 class QueryResultItem(BaseModel):
-    """검색 결과 항목"""
+    """자연어 기반 검색 결과 항목"""
     
     id: str = Field(description="문서 고유 ID")
     title: Optional[str] = Field(default=None, description="문서 제목")
@@ -536,14 +547,13 @@ class QueryResultItem(BaseModel):
     metadata: Optional[Dict[str, Any]] = Field(default=None, description="추가 메타데이터")
 
 
-class QueryResponse(BaseModel):
+class SearchQueryResponse(BaseModel):
     """자연어 기반 검색 응답 모델"""
     
-    query: str = Field(description="검색 질문")
+    query: str = Field(description="검색 질의")
     results: List[QueryResultItem] = Field(description="검색 결과 목록")
-    total_results: int = Field(description="총 검색 결과 수")
+    total_results: int = Field(description="검색된 총 결과 수")
     search_time_ms: int = Field(description="검색 소요 시간 (밀리초)")
-
 
 # 응답 생성 요청/응답 모델
 class GenerateReplyRequest(BaseModel):
@@ -587,9 +597,6 @@ async def get_initial_context(
         logger.info(f"티켓 ID {ticket_id} 캐시된 컨텍스트 데이터를 반환합니다.")
         return cached_data
         
-    # 성능 측정 시작
-    start_time = time.time()
-    
     # company_id가 None이면 기본값 설정
     search_company_id = company_id if company_id else "default"
     logger.info(f"티켓 ID {ticket_id} 초기화 요청 (회사 ID: {search_company_id})")
@@ -601,7 +608,7 @@ async def get_initial_context(
         if not ticket_data:
             # Freshdesk API에서 직접 조회 시도
             try:
-                ticket_data = await fetcher.fetch_ticket_details(ticket_id)
+                ticket_data = await fetcher.fetch_ticket_details(int(ticket_id))
                 if not ticket_data:
                     raise HTTPException(status_code=404, detail=f"티켓 ID {ticket_id}를 찾을 수 없습니다.")
             except Exception as fetch_error:
@@ -662,8 +669,7 @@ async def get_initial_context(
         else:
             conversation_texts.append(str(conv))
     
-    ticket_full_text = f"{ticket_title}\n\n{ticket_body}\n\n" + "\n\n".join(conversation_texts)
-     # 작업별 데이터 초기화
+    # 작업별 데이터 초기화
     similar_tickets = []
     kb_documents = []
     ticket_summary = None
@@ -681,7 +687,7 @@ async def get_initial_context(
         async def fetch_similar_tickets():
             start_time = time.time()
             try:
-                logger.info(f"🔍 유사 티켓 검색 시작...")
+                logger.info("🔍 유사 티켓 검색 시작...")
                 # /similar_tickets/{ticket_id} 엔드포인트 직접 호출
                 similar_tickets_response = await get_similar_tickets(ticket_id, company_id)
                 
@@ -710,8 +716,8 @@ async def get_initial_context(
                         title=item.title or f"티켓 {item.id}",
                         content=content,
                         source_id=str(item.id),
-                        source_url=item.ticket_url,
-                        relevance_score=item.similarity_score,  # 원래 유사도 값 그대로 유지
+                        source_url=item.ticket_url or "",
+                        relevance_score=item.similarity_score or 0.0,  # 원래 유사도 값 그대로 유지
                         doc_type="ticket"
                     ))
                 
@@ -731,7 +737,7 @@ async def get_initial_context(
         async def fetch_kb_documents():
             start_time = time.time()
             try:
-                logger.info(f"📚 지식베이스 문서 검색 시작...")
+                logger.info("📚 지식베이스 문서 검색 시작...")
                 # /related_docs/{ticket_id} 엔드포인트 직접 호출
                 related_docs_response = await get_related_documents(ticket_id, company_id)
                 
@@ -746,7 +752,7 @@ async def get_initial_context(
                         content=item.doc_summary or "내용 없음",
                         source_id=str(item.id),
                         source_url=source_url,
-                        relevance_score=item.similarity_score,  # 원래 유사도 값 그대로 유지
+                        relevance_score=item.similarity_score or 0.0,  # 원래 유사도 값 그대로 유지
                         doc_type=item.source_type or "kb"
                     ))
                 
@@ -766,7 +772,7 @@ async def get_initial_context(
         async def generate_summary():
             start_time = time.time()
             try:
-                logger.info(f"🟢 티켓 요약 생성 시작...")
+                logger.info("🟢 티켓 요약 생성 시작...")
                 
                 # 티켓 데이터 유효성 검사
                 if not ticket_title and not ticket_body:
@@ -923,7 +929,7 @@ async def get_similar_tickets(ticket_id: str, company_id: str = Depends(get_comp
         if not current_ticket_data or not current_ticket_data.get("metadata"):
             # Qdrant에서 찾을 수 없으면 Freshdesk API에서 가져오기
             logger.info(f"Qdrant에서 티켓 {ticket_id}를 찾을 수 없어 Freshdesk API를 호출합니다.")
-            current_ticket_data = await fetcher.fetch_ticket_details(ticket_id)
+            current_ticket_data = await fetcher.fetch_ticket_details(int(ticket_id))
             if not current_ticket_data:
                 raise HTTPException(status_code=404, detail=f"티켓 ID {ticket_id}를 찾을 수 없습니다.")
         else:
@@ -1058,7 +1064,7 @@ async def get_related_documents(ticket_id: str, company_id: str = Depends(get_co
             # Qdrant에서 찾을 수 없으면 Freshdesk API에서 가져오기
             logger.info(f"Qdrant에서 티켓 {ticket_id}를 찾을 수 없어 Freshdesk API를 호출합니다.")
             try:
-                current_ticket_data = await fetcher.fetch_ticket_details(ticket_id)
+                current_ticket_data = await fetcher.fetch_ticket_details(int(ticket_id))
             except Exception as api_error:
                 logger.error(f"Freshdesk API에서 티켓 {ticket_id} 조회 실패: {api_error}")
                 current_ticket_data = None
@@ -1109,7 +1115,7 @@ async def get_related_documents(ticket_id: str, company_id: str = Depends(get_co
             
             # 결과가 없으면 메모리 내 필터링 방식으로 시도
             if not related_docs_result.get('documents'):
-                logger.info(f"KB 문서(type=1) 검색 결과가 없어 직접 검색 시도")
+                logger.info("KB 문서(type=1) 검색 결과가 없어 직접 검색 시도")
                 
                 # 필터 없이 검색 후 메모리에서 필터링
                 all_results = vector_db.search(
@@ -1239,6 +1245,9 @@ async def get_related_documents(ticket_id: str, company_id: str = Depends(get_co
                         # score가 있으면 1-score를 거리로 사용
                         distance = 1 - result["score"]
                     
+                    # 거리를 유사도로 변환
+                    similarity_score = max(0, 1 - distance)
+                    
                     related_docs_list.append(RelatedDocumentItem(
                         id=str(doc_id),
                         title=title,
@@ -1320,7 +1329,7 @@ async def get_related_documents(ticket_id: str, company_id: str = Depends(get_co
         else:
             # 유사도가 낮더라도 검색 결과가 있으면 결과는 반환
             if related_docs_list:
-                logger.info(f"임계값보다 낮은 문서만 발견되어 상위 3개 반환")
+                logger.info("임계값보다 낮은 문서만 발견되어 상위 3개 반환")
                 related_docs_list = related_docs_list[:3]
             else:
                 # 결과가 전혀 없으면 빈 응답 반환
@@ -1408,7 +1417,7 @@ async def generate_reply(request: GenerateReplyRequest):
     if not ticket_conversations and ticket_metadata.get("conversation_summary"):
         ticket_conversations = [str(ticket_metadata.get("conversation_summary"))]
     
-    # 컨텍스트 구축
+    # 컨텍스트 구축 (최적화된 컨텍스트 빌더 사용)
     context_start_time = time.time()
     
     # 티켓 기본 컨텍스트
@@ -1421,24 +1430,50 @@ async def generate_reply(request: GenerateReplyRequest):
 {' '.join(ticket_conversations[:3])}  # 처음 3개 대화만 포함
 """
     
-    # 유사 티켓 컨텍스트
-    similar_tickets_context = ""
-    if similar_tickets:
-        similar_tickets_context = "유사 티켓 정보:\n\n"
-        for idx, ticket in enumerate(similar_tickets[:2]):  # 최대 2개만 포함
-            similar_tickets_context += f"[유사 티켓 {idx+1}]\n"
-            similar_tickets_context += f"제목: {ticket.title}\n"
-            similar_tickets_context += f"내용: {ticket.content[:300]}...\n\n"
+    # 문서들과 메타데이터 준비 (최적화된 컨텍스트 빌더를 위해)
+    context_docs = []
+    context_metadatas = []
     
-    # 지식베이스 문서 컨텍스트
-    kb_docs_context = ""
-    if kb_documents:
-        kb_docs_context = "관련 지식베이스 문서:\n\n"
-        for idx, doc in enumerate(kb_documents):
-            kb_docs_context += f"[문서 {idx+1}: {doc.title}]\n"
-            kb_docs_context += f"{doc.content[:500]}...\n\n"
-            if doc.source_url:
-                kb_docs_context += f"URL: {doc.source_url}\n\n"
+    # 유사 티켓을 문서로 변환
+    for idx, ticket in enumerate(similar_tickets[:5]):  # 최대 5개까지 고려
+        doc_content = f"제목: {ticket.title}\n내용: {ticket.content}"
+        context_docs.append(doc_content)
+        context_metadatas.append({
+            "title": ticket.title,
+            "source_type": "similar_ticket",
+            "source_id": ticket.source_id,
+            "relevance_score": ticket.relevance_score,
+            "doc_type": "ticket"
+        })
+    
+    # 지식베이스 문서를 문서로 변환
+    for idx, doc in enumerate(kb_documents[:5]):  # 최대 5개까지 고려
+        doc_content = f"제목: {doc.title}\n내용: {doc.content}"
+        context_docs.append(doc_content)
+        context_metadatas.append({
+            "title": doc.title,
+            "source_type": "kb",
+            "source_id": doc.source_id,
+            "source_url": doc.source_url,
+            "relevance_score": doc.relevance_score,
+            "doc_type": "kb"
+        })
+    
+    # 최적화된 컨텍스트 구성 (쿼리는 티켓 제목으로 설정)
+    query_for_context = f"{ticket_title} {ticket_body[:200]}"  # 티켓 정보를 쿼리로 사용
+    
+    optimized_context = ""
+    context_meta = {}
+    
+    if context_docs:
+        optimized_context, optimized_metadatas, context_meta = build_optimized_context(
+            docs=context_docs,
+            metadatas=context_metadatas,
+            query=query_for_context,
+            max_tokens=6000,  # 응답 생성용이므로 조금 더 작게 설정
+            top_k=8,  # 충분한 정보 제공을 위해 조금 더 많이
+            enable_relevance_extraction=True
+        )
     
     # 스타일과 톤 지침
     style_guide = {
@@ -1453,18 +1488,17 @@ async def generate_reply(request: GenerateReplyRequest):
         "direct": "간결하고 직접적으로 핵심 정보를 제공하세요."
     }
     
-    style_instruction = style_guide.get(request.style, style_guide["professional"])
-    tone_instruction = tone_guide.get(request.tone, tone_guide["helpful"])
+    style_instruction = style_guide.get(request.style or "professional", style_guide["professional"])
+    tone_instruction = tone_guide.get(request.tone or "helpful", tone_guide["helpful"])
     
-    # 프롬프트 구성
+    # 프롬프트 구성 (최적화된 컨텍스트 사용)
     prompt = f"""다음 고객 지원 티켓에 대한 응답을 생성해주세요.
 
 [티켓 정보]
 {ticket_context}
 
 [참고 자료]
-{kb_docs_context}
-{similar_tickets_context}
+{optimized_context}
 
 [응답 지침]
 1. {style_instruction}
@@ -1500,13 +1534,17 @@ async def generate_reply(request: GenerateReplyRequest):
         # 총 처리 시간
         total_time = time.time() - start_time
         
-        # 메타데이터 구성
+        # 메타데이터 구성 (최적화 정보 포함)
         metadata = {
             "duration_ms": int(total_time * 1000),
             "context_time_ms": int(context_time * 1000),
             "llm_time_ms": int(llm_time * 1000),
             "model_used": response.model_used,
-            "paragraph_count": len(reply_text.split("\n\n"))
+            "paragraph_count": len(reply_text.split("\n\n")),
+            # 최적화 컨텍스트 정보 추가
+            "context_optimization": context_meta,
+            "token_count": context_meta.get("token_count", 0),
+            "optimized_docs_count": context_meta.get("final_optimized_docs_count", 0)
         }
         
         # 결과 반환
@@ -1528,7 +1566,7 @@ async def generate_reply(request: GenerateReplyRequest):
         )
 
 
-@app.post("/query", response_model=QueryResponse)
+@app.post("/search_query", response_model=SearchQueryResponse)
 async def search_query(req: QueryRequest, company_id: str = Depends(get_company_id)):
     """
     자연어 기반 검색 엔드포인트 - 사용자의 질문에 대해 관련 문서들을 검색합니다.
@@ -1555,7 +1593,7 @@ async def search_query(req: QueryRequest, company_id: str = Depends(get_company_
         # 검색 질의가 비어있는 경우 처리
         if not req.query.strip():
             logger.warning("빈 검색 질의가 제공되었습니다.")
-            return QueryResponse(
+            return SearchQueryResponse(
                 query=req.query,
                 results=[],
                 total_results=0,
@@ -1608,6 +1646,9 @@ async def search_query(req: QueryRequest, company_id: str = Depends(get_company_
                                 f"{doc_type.upper()} {doc_id}"
                             )
                             
+                            # URL 생성
+                            url = metadata.get("url", "")
+                            
                             # 내용 요약 (300자 제한)
                             content_summary = content[:300] + ("..." if len(content) > 300 else "")
                             
@@ -1638,7 +1679,7 @@ async def search_query(req: QueryRequest, company_id: str = Depends(get_company_
         
         logger.info(f"자연어 검색 완료 (총 {len(final_results)}건, {search_time_ms}ms 소요)")
         
-        return QueryResponse(
+        return SearchQueryResponse(
             query=req.query,
             results=final_results,
             total_results=len(final_results),

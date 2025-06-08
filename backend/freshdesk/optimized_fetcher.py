@@ -60,7 +60,7 @@ def extract_company_id_from_domain(domain: str) -> str:
 
 # company_id 자동 추출
 COMPANY_ID = extract_company_id_from_domain(FRESHDESK_DOMAIN)
-logger.info(f"FRESHDESK_DOMAIN '{FRESHDESK_DOMAIN}'에서 추출된 company_id: '{COMPANY_ID}'")
+logger.debug(f"FRESHDESK_DOMAIN '{FRESHDESK_DOMAIN}'에서 추출된 company_id: '{COMPANY_ID}'")
 
 BASE_URL = f"https://{FRESHDESK_DOMAIN}" if ".freshdesk.com" in FRESHDESK_DOMAIN else f"https://{FRESHDESK_DOMAIN}.freshdesk.com"
 BASE_URL += "/api/v2"

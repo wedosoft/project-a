@@ -188,3 +188,8 @@ node_modules/
 frontend/.fdk
 frontend/coverage
 frontend/.report.json
+
+# Added by Claude Task Master
+# OS specific
+tasks.json
+tasks/ 

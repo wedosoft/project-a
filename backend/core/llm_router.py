@@ -527,6 +527,209 @@ class GeminiProvider(LLMProvider):
         return self._approx_token_count(text)
 
 
+class LLMProviderWeights(BaseModel):
+    """LLM 제공자별 가중치 및 우선순위 관리"""
+    provider_name: str
+    base_weight: float = 1.0  # 기본 가중치 (1.0 = 100%)
+    performance_multiplier: float = 1.0  # 성능 기반 배수
+    cost_efficiency: float = 1.0  # 비용 효율성 점수
+    latency_threshold_ms: float = 5000.0  # 지연 시간 임계값
+    max_consecutive_failures: int = 5  # 최대 연속 실패 허용 횟수
+    
+    def calculate_dynamic_weight(self, stats: LLMProviderStats) -> float:
+        """
+        제공자의 통계 데이터를 기반으로 동적 가중치를 계산합니다.
+        
+        Args:
+            stats: 제공자의 통계 데이터
+            
+        Returns:
+            계산된 동적 가중치 (0.0 ~ 1.0)
+        """
+        if not stats or stats.total_requests == 0:
+            return self.base_weight
+            
+        # 성공률 기반 가중치 (0.0 ~ 1.0)
+        success_weight = stats.success_rate
+        
+        # 지연 시간 기반 가중치 계산
+        avg_latency = stats.average_latency_ms
+        if avg_latency <= self.latency_threshold_ms:
+            latency_weight = 1.0
+        else:
+            # 임계값 초과 시 점진적으로 가중치 감소
+            latency_weight = max(0.1, self.latency_threshold_ms / avg_latency)
+        
+        # 연속 실패 패널티 적용
+        failure_penalty = 1.0
+        if stats.consecutive_failures > 0:
+            # 연속 실패가 늘어날수록 지수적으로 가중치 감소
+            failure_penalty = max(0.1, 1.0 - (stats.consecutive_failures / self.max_consecutive_failures))
+        
+        # 최종 가중치 계산 (모든 요소의 가중 평균)
+        dynamic_weight = (
+            self.base_weight * 
+            success_weight * 
+            latency_weight * 
+            failure_penalty * 
+            self.performance_multiplier
+        )
+        
+        return max(0.0, min(1.0, dynamic_weight))
+    
+    def should_exclude_provider(self, stats: LLMProviderStats) -> bool:
+        """
+        제공자를 일시적으로 제외해야 하는지 판단합니다.
+        
+        Args:
+            stats: 제공자의 통계 데이터
+            
+        Returns:
+            True면 제외, False면 포함
+        """
+        if not stats:
+            return False
+            
+        # 연속 실패 횟수가 임계값을 초과하면 제외
+        if stats.consecutive_failures >= self.max_consecutive_failures:
+            return True
+            
+        # 최근 성공률이 매우 낮으면 제외 (최소 10회 요청 이후부터 적용)
+        if stats.total_requests >= 10 and stats.success_rate < 0.3:
+            return True
+            
+        return False
+
+
+class LLMProviderSelector:
+    """LLM 제공자 선택 로직을 관리하는 클래스"""
+    
+    def __init__(self):
+        # 기본 제공자별 가중치 설정 (성능 우선순위)
+        self.provider_weights = {
+            "openai": LLMProviderWeights(
+                provider_name="openai", 
+                base_weight=1.0,  # 최우선 (속도가 빠름)
+                performance_multiplier=1.2,  # 성능 향상
+                cost_efficiency=1.0,  # 비용 효율성 기준
+                latency_threshold_ms=5000.0,  # 5초 (더 엄격한 기준)
+                max_consecutive_failures=3
+            ),
+            "anthropic": LLMProviderWeights(
+                provider_name="anthropic",
+                base_weight=0.8,  # 두 번째 우선순위 (품질은 좋지만 느림)
+                performance_multiplier=1.0,
+                cost_efficiency=0.9,  # Claude는 조금 더 비싸지만 품질이 좋음
+                latency_threshold_ms=8000.0,  # 8초
+                max_consecutive_failures=3
+            ),
+            "gemini": LLMProviderWeights(
+                provider_name="gemini",
+                base_weight=0.6,  # 세 번째 우선순위 (폴백용)
+                performance_multiplier=0.9,
+                cost_efficiency=1.2,  # 가장 저렴함
+                latency_threshold_ms=12000.0,  # 12초 (폴백용이므로 여유있게)
+                max_consecutive_failures=5
+            )
+        }
+        
+    def select_best_provider(self, providers: Dict[str, LLMProvider]) -> Optional[str]:
+        """
+        사용 가능한 제공자 중에서 가중치 기반으로 최적의 제공자를 선택합니다.
+        
+        Args:
+            providers: 사용 가능한 제공자 딕셔너리
+            
+        Returns:
+            선택된 제공자 이름 또는 None
+        """
+        if not providers:
+            return None
+            
+        # 건강한 제공자만 필터링
+        healthy_providers = {}
+        provider_scores = {}
+        
+        for name, provider in providers.items():
+            if not provider.is_healthy():
+                logger.warning(f"제공자 {name}가 비건강 상태로 제외됩니다.")
+                continue
+                
+            # 가중치 설정이 있는 제공자만 고려
+            if name not in self.provider_weights:
+                logger.warning(f"제공자 {name}에 대한 가중치 설정이 없습니다.")
+                continue
+                
+            weights = self.provider_weights[name]
+            
+            # 제외 조건 확인
+            if weights.should_exclude_provider(provider.stats):
+                logger.warning(f"제공자 {name}가 제외 조건에 의해 제외됩니다.")
+                continue
+                
+            # 동적 가중치 계산
+            dynamic_weight = weights.calculate_dynamic_weight(provider.stats)
+            
+            healthy_providers[name] = provider
+            provider_scores[name] = dynamic_weight
+            
+            logger.debug(f"제공자 {name} 점수: {dynamic_weight:.3f}")
+        
+        if not healthy_providers:
+            logger.error("사용 가능한 건강한 제공자가 없습니다.")
+            return None
+            
+        # 가장 높은 점수의 제공자 선택
+        best_provider = max(provider_scores.items(), key=lambda x: x[1])
+        selected_name = best_provider[0]
+        selected_score = best_provider[1]
+        
+        logger.info(f"선택된 제공자: {selected_name} (점수: {selected_score:.3f})")
+        return selected_name
+    
+    def get_fallback_order(self, providers: Dict[str, LLMProvider], exclude: Optional[str] = None) -> List[str]:
+        """
+        폴백 순서를 가중치 기반으로 결정합니다.
+        
+        Args:
+            providers: 사용 가능한 제공자 딕셔너리
+            exclude: 제외할 제공자 이름
+            
+        Returns:
+            폴백 순서 리스트
+        """
+        if not providers:
+            return []
+            
+        provider_scores = []
+        
+        for name, provider in providers.items():
+            if exclude and name == exclude:
+                continue
+                
+            if name not in self.provider_weights:
+                continue
+                
+            weights = self.provider_weights[name]
+            
+            # 완전히 죽은 제공자가 아니라면 폴백 후보에 포함
+            # (is_healthy()는 더 엄격한 기준이므로 폴백에는 더 관대한 기준 적용)
+            if provider.stats.consecutive_failures >= 10:  # 10회 연속 실패 시에만 완전 제외
+                continue
+                
+            # 가중치가 매우 낮더라도 폴백 후보에는 포함
+            dynamic_weight = max(0.1, weights.calculate_dynamic_weight(provider.stats))
+            provider_scores.append((name, dynamic_weight))
+        
+        # 점수 기준으로 내림차순 정렬
+        provider_scores.sort(key=lambda x: x[1], reverse=True)
+        
+        fallback_order = [name for name, _ in provider_scores]
+        logger.debug(f"폴백 순서: {fallback_order}")
+        
+        return fallback_order
+
+
 class LLMRouter:
     """LLM 라우팅 및 Fallback 로직 구현"""
     
@@ -544,6 +747,9 @@ class LLMRouter:
             "openai": self.openai,
             "gemini": self.gemini
         }
+        
+        # 가중치 기반 제공자 선택기 초기화
+        self.provider_selector = LLMProviderSelector()
 
     async def generate(self, prompt: str, system_prompt: str = None, max_tokens: int = 1024, temperature: float = 0.2) -> LLMResponse:
         """최적의 LLM 제공자를 선택하고, 실패 시 순차적으로 Fallback하여 텍스트 생성"""
@@ -597,33 +803,42 @@ class LLMRouter:
     def _get_ordered_providers(self, prompt: str) -> List[str]:
         """
         요청 특성 및 제공자 상태를 기반으로 시도할 제공자 이름 목록을 우선순위대로 반환합니다.
-        (현재는 단순 우선순위 + 건강상태만 고려, 향후 확장 가능)
+        가중치 기반 선택 로직을 사용하여 동적으로 최적의 순서를 결정합니다.
         """
-        # 1. API 키가 있고 건강한 제공자만 필터링
-        available_providers = [
-            name for name in self.providers_priority 
-            if self.provider_instances[name].api_key and self.provider_instances[name].is_healthy()
+        # 1. 먼저 최고 우선순위 제공자 선택
+        best_provider = self.provider_selector.select_best_provider(self.provider_instances)
+        
+        if not best_provider:
+            # 모든 제공자가 사용 불가능한 경우 기존 우선순위 사용
+            logger.warning("가중치 기반 선택에서 건강한 제공자를 찾지 못해 기존 우선순위를 사용합니다.")
+            available_providers = [
+                name for name in self.providers_priority 
+                if self.provider_instances[name].api_key
+            ]
+            logger.info(f"기본 우선순위 제공자 순서: {available_providers}")
+            return available_providers
+        
+        # 2. 폴백 순서 결정 (선택된 제공자 제외)
+        fallback_order = self.provider_selector.get_fallback_order(
+            self.provider_instances, 
+            exclude=best_provider
+        )
+        
+        # 3. 최종 순서: 최선의 제공자 + 폴백 순서
+        ordered_list = [best_provider] + fallback_order
+        
+        # 4. API 키가 없는 제공자 제거 (최종 검증)
+        valid_providers = [
+            name for name in ordered_list 
+            if self.provider_instances[name].api_key
         ]
         
-        # 2. (선택적) 요청 특성에 따른 우선순위 동적 조정 로직 (예시)
-        # estimated_tokens = self.provider_instances[self.providers_priority[0]].count_tokens(prompt) # 가장 우선순위 높은 제공자로 토큰 계산
-        # if estimated_tokens > 7000: # 긴 컨텍스트는 Gemini나 OpenAI GPT-4o가 유리할 수 있음
-        #     if "gemini" in available_providers and "openai" in available_providers:
-        #         # Gemini와 OpenAI를 앞으로 당기는 로직 (순서 변경)
-        #         pass 
+        if not valid_providers:
+            logger.error("사용 가능한 LLM 제공자가 없습니다 (API 키 부재).")
+            return []
         
-        # 3. API 키가 없거나 건강하지 않은 제공자들을 목록 뒤로 배치 (fallback용)
-        unavailable_providers = [
-            name for name in self.providers_priority if name not in available_providers
-        ]
-
-        ordered_list = available_providers + unavailable_providers
-        if not ordered_list: # 모든 제공자가 사용 불가능한 극단적인 경우
-             logger.error("사용 가능한 LLM 제공자가 없습니다 (API 키 부재 또는 모두 비정상 상태).")
-             return [] # 빈 리스트 반환 또는 기본 제공자 이름 반환
-        
-        logger.info(f"시도할 제공자 순서: {ordered_list}")
-        return ordered_list
+        logger.info(f"가중치 기반 제공자 순서: {valid_providers}")
+        return valid_providers
 
     def _extract_conversation_body(self, conv: Dict[str, Any]) -> str:
         """
@@ -1180,8 +1395,50 @@ class LLMRouter:
                 # 5. 추가 정리: 불필요한 공백 제거
                 json_text = re.sub(r'\s+(?=[:,])', '', json_text)
                 json_text = re.sub(r'(?<=[:,])\s+', ' ', json_text)
-                                
-                result = json.loads(json_text)
+                
+                # 6. 여러 JSON 객체가 연결된 경우 첫 번째 완전한 JSON만 추출
+                try:
+                    result = json.loads(json_text)
+                except json.JSONDecodeError:
+                    logger.warning(f"JSON 파싱 실패, 첫 번째 완전한 JSON 객체 추출 시도: {json_text[:100]}...")
+                    
+                    # 여러 JSON 객체가 있는 경우 첫 번째만 추출 시도
+                    brace_count = 0
+                    json_end = -1
+                    in_string = False
+                    escape_next = False
+                    
+                    for i, char in enumerate(json_text):
+                        if escape_next:
+                            escape_next = False
+                            continue
+                        if char == '\\':
+                            escape_next = True
+                            continue
+                        if char == '"' and not escape_next:
+                            in_string = not in_string
+                            continue
+                        if not in_string:
+                            if char == '{':
+                                brace_count += 1
+                            elif char == '}':
+                                brace_count -= 1
+                                if brace_count == 0:
+                                    json_end = i + 1
+                                    break
+                    
+                    if json_end > 0:
+                        extracted_json = json_text[:json_end]
+                        logger.info(f"첫 번째 완전한 JSON 추출 성공: {extracted_json[:100]}...")
+                        try:
+                            result = json.loads(extracted_json)
+                        except json.JSONDecodeError as e2:
+                            logger.error(f"추출된 JSON도 파싱 실패: {e2}")
+                            raise json.JSONDecodeError("추출된 JSON 파싱 실패", extracted_json, 0)
+                    else:
+                        logger.error("완전한 JSON 객체를 찾을 수 없음")
+                        raise json.JSONDecodeError("완전한 JSON 객체를 찾을 수 없음", json_text, 0)
+                
                 if "issue" in result and "solution" in result:
                     logger.info(f"티켓 Issue/Solution 분석 완료 (ticket_id: {ticket_data.get('id')}, model: {response.model_used})")
                     return result
@@ -1380,3 +1637,5 @@ async def generate_text(prompt: str, system_prompt: str = None, max_tokens: int 
     return await llm_router.generate(prompt, system_prompt, max_tokens, temperature)
 
 # 중복된 standalone 함수는 제거하고 LLMRouter 클래스의 메서드를 사용
+
+# LLM 가중치 및 선택자 클래스들은 LLMRouter 클래스 앞으로 이동됩니다.
