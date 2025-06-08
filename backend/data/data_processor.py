@@ -6,7 +6,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
@@ -215,6 +215,122 @@ async def process_collected_data(data_dir: str):
     # cleanup_temp_files(data_dir, keep_chunks=True)
 
 
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(process_collected_data("freshdesk_100k_data"))
+"""
+Langchain RunnableParallel 체인에서 사용하는 데이터 처리 함수들
+"""
+
+async def fetch_similar_tickets(ticket_data: Dict[str, Any], 
+                               qdrant_client: Any, 
+                               company_id: str, 
+                               limit: int = 5) -> List[Any]:
+    """
+    유사 티켓 검색을 수행합니다.
+    
+    Langchain RunnableParallel 체인에서 호출되는 함수로,
+    기존 main.py의 get_similar_tickets 엔드포인트와 동일한 로직을 수행합니다.
+    
+    Args:
+        ticket_data: 티켓 데이터 딕셔너리
+        qdrant_client: Qdrant 벡터 DB 클라이언트
+        company_id: 회사 식별자
+        limit: 반환할 최대 결과 수
+        
+    Returns:
+        유사 티켓 목록 (DocumentInfo 형태)
+    """
+    from ..api.main import get_similar_tickets
+    from ..models import DocumentInfo
+    
+    try:
+        # 티켓 ID 추출
+        ticket_id = str(ticket_data.get('id', ''))
+        
+        # API 엔드포인트와 동일한 로직 수행
+        similar_tickets_response = await get_similar_tickets(ticket_id, company_id)
+        
+        # 응답 형식 변환: SimilarTicketItem[] -> DocumentInfo[]
+        similar_tickets_list = []
+        for item in similar_tickets_response.similar_tickets:
+            # 구조화된 형식으로 content 생성
+            content_parts = []
+            
+            # 문제 상황 추가
+            if item.issue:
+                content_parts.append(f"문제 상황: {item.issue}")
+            
+            # 해결책 추가
+            if item.solution:
+                content_parts.append(f"해결책: {item.solution}")
+                
+            # ticket_summary가 있으면 추가
+            if item.ticket_summary:
+                content_parts.append(f"요약: {item.ticket_summary}")
+            
+            # content 구성
+            content = "\n\n".join(content_parts) if content_parts else f"티켓 {item.id} 관련 정보"
+            
+            similar_tickets_list.append(DocumentInfo(
+                title=item.title or f"티켓 {item.id}",
+                content=content,
+                source_id=str(item.id),
+                source_url=item.ticket_url or "",
+                relevance_score=item.similarity_score or 0.0,
+                doc_type="ticket"
+            ))
+        
+        return similar_tickets_list[:limit]
+        
+    except Exception as e:
+        logger.error(f"유사 티켓 검색 실패: {str(e)}")
+        return []
+
+
+async def fetch_kb_documents(ticket_data: Dict[str, Any], 
+                            qdrant_client: Any, 
+                            company_id: str, 
+                            limit: int = 3) -> List[Any]:
+    """
+    지식베이스 문서 검색을 수행합니다.
+    
+    Langchain RunnableParallel 체인에서 호출되는 함수로,
+    기존 main.py의 get_related_documents 엔드포인트와 동일한 로직을 수행합니다.
+    
+    Args:
+        ticket_data: 티켓 데이터 딕셔너리
+        qdrant_client: Qdrant 벡터 DB 클라이언트
+        company_id: 회사 식별자
+        limit: 반환할 최대 결과 수
+        
+    Returns:
+        지식베이스 문서 목록 (DocumentInfo 형태)
+    """
+    from ..api.main import get_related_documents
+    from ..models import DocumentInfo
+    
+    try:
+        # 티켓 ID 추출
+        ticket_id = str(ticket_data.get('id', ''))
+        
+        # API 엔드포인트와 동일한 로직 수행
+        related_docs_response = await get_related_documents(ticket_id, company_id)
+        
+        # 응답 형식 변환: RelatedDocumentItem[] -> DocumentInfo[]
+        kb_documents_list = []
+        for item in related_docs_response.related_documents:
+            # source_url이 None이면 빈 문자열로 설정하여 오류 방지
+            source_url = item.url or ""
+            
+            kb_documents_list.append(DocumentInfo(
+                title=item.title or f"문서 {item.id}",
+                content=item.doc_summary or "내용 없음",
+                source_id=str(item.id),
+                source_url=source_url,
+                relevance_score=item.similarity_score or 0.0,
+                doc_type=item.source_type or "kb"
+            ))
+        
+        return kb_documents_list[:limit]
+        
+    except Exception as e:
+        logger.error(f"지식베이스 문서 검색 실패: {str(e)}")
+        return []

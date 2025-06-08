@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     PERPLEXITY_API_KEY: Optional[str] = Field(None, description="Perplexity API 키")
     
     # 애플리케이션 설정
-    COMPANY_ID: str = Field("kyexpert", description="기본 회사 ID")
+    COMPANY_ID: str = Field(default_factory=lambda: os.getenv("COMPANY_ID", "example-company"), description="기본 회사 ID")
     PROCESS_ATTACHMENTS: bool = Field(True, description="첨부 파일 처리 여부")
     EMBEDDING_MODEL: str = Field("text-embedding-3-small", description="임베딩 모델 이름")
     LOG_LEVEL: str = Field("INFO", description="로깅 레벨")
