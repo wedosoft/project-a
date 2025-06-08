@@ -1,0 +1,29 @@
+{
+  "platform-version": "3.0",
+  "modules": {
+    "common": {
+      "requests": {
+        "externalApi": {}
+      }
+    },
+    "support_ticket": {
+      "location": {
+        "ticket_sidebar": {
+          "url": "index.html",
+          "icon": "styles/images/icon.svg"
+        }
+      },
+      "interface": {
+        "trigger": ["showModal", "showNotify"]
+      }
+    }
+  },
+  "engines": {
+    "node": "18.18.2",
+    "fdk": "9.4.2"
+  },
+  "app": {
+    "tracking_id": "926xnatghu0r55msohwe",
+    "start_time": "2025-06-08T06:45:46.719Z"
+  }
+}

@@ -332,6 +332,8 @@ async def ingest(
     force_rebuild: bool = False,
     local_data_dir: Optional[str] = None,
     include_kb: bool = True,
+    domain: Optional[str] = None,
+    api_key: Optional[str] = None,
 ) -> None:
     """
     Freshdesk 티켓과 지식베이스 문서를 임베딩 후 Qdrant에 저장합니다.
@@ -342,6 +344,8 @@ async def ingest(
         force_rebuild: 데이터베이스 강제 재구축 여부 (기본값: False)
         local_data_dir: 로컬 데이터 디렉토리 경로 (None이면 Freshdesk API에서 직접 수집)
         include_kb: 지식베이스 데이터 포함 여부 (기본값: True)
+        domain: Freshdesk 도메인 (None이면 환경변수 사용)
+        api_key: Freshdesk API 키 (None이면 환경변수 사용)
     """
     start_time = time.time()
     
@@ -433,8 +437,9 @@ async def ingest(
         else:
             # 기존 방식: Freshdesk API에서 직접 수집
             logger.info("Freshdesk 데이터 수집 중...")
-            tickets_task = asyncio.create_task(fetch_tickets())
-            articles_task = asyncio.create_task(fetch_kb_articles())
+            # 동적 Freshdesk 설정을 fetch 함수들에 전달
+            tickets_task = asyncio.create_task(fetch_tickets(domain=domain, api_key=api_key))
+            articles_task = asyncio.create_task(fetch_kb_articles(domain=domain, api_key=api_key))
             tickets, articles = await asyncio.gather(tickets_task, articles_task)
 
         if not tickets and not articles:
@@ -537,7 +542,7 @@ async def ingest(
             if not t.get("description") or not t.get("description_text"):
                 from freshdesk.fetcher import fetch_ticket_details
                 if ticket_id:  # ticket_id가 None이 아닌 경우에만 호출
-                    detail = await fetch_ticket_details(ticket_id)
+                    detail = await fetch_ticket_details(ticket_id, domain=domain, api_key=api_key)
                     if detail:
                         t.update({k: v for k, v in detail.items() if k not in t or not t[k]})
                     

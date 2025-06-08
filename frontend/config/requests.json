@@ -1,0 +1,16 @@
+{
+  "externalApi": {
+    "schema": {
+      "method": "GET",
+      "host": "<%= iparam.fastapi_backend_url %>",
+      "path": "/api${context.path}",
+      "headers": {
+        "X-API-Key": "<%= iparam.api_key %>",
+        "Content-Type": "application/json"
+      }
+    },
+    "options": {
+      "retryDelay": 1000
+    }
+  }
+}
