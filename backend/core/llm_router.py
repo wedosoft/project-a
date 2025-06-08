@@ -61,6 +61,19 @@ if not GOOGLE_API_KEY: # Google API 키 확인 추가
 # 임베딩 캐시 설정 (최대 1000개, 1시간 TTL)
 embedding_cache = TTLCache(maxsize=1000, ttl=3600)
 
+# Issue/Solution 캐시 (최대 500개, 6시간 TTL)
+issue_solution_cache = TTLCache(maxsize=500, ttl=21600)
+
+def _get_issue_solution_key(ticket_data: Dict[str, Any]) -> str:
+    """Issue/Solution 캐시 키 생성"""
+    key_fields = {
+        "id": ticket_data.get("id"),
+        "subject": ticket_data.get("subject"),
+        "description": ticket_data.get("description_text", ticket_data.get("description", "")),
+    }
+    key_json = json.dumps(key_fields, sort_keys=True, ensure_ascii=False)
+    return hashlib.md5(key_json.encode("utf-8")).hexdigest()
+
 def _get_cache_key(text: str, model: str) -> str:
     """임베딩 캐시 키 생성"""
     # 텍스트와 모델명을 조합하여 해시 생성
@@ -1293,6 +1306,12 @@ class LLMRouter:
         Raises:
             RuntimeError: 모든 LLM 제공자 호출이 실패한 경우
         """
+        # 캐시 확인
+        cache_key = _get_issue_solution_key(ticket_data)
+        if cache_key in issue_solution_cache:
+            logger.info(f"Issue/Solution 캐시 사용 (ticket_id: {ticket_data.get('id')})")
+            return issue_solution_cache[cache_key]
+
         # 티켓 정보 추출 및 최적화
         subject = ticket_data.get("subject", "제목 없음")
         
@@ -1451,6 +1470,7 @@ class LLMRouter:
                 
                 if "issue" in result and "solution" in result:
                     logger.info(f"티켓 Issue/Solution 분석 완료 (ticket_id: {ticket_data.get('id')}, model: {response.model_used})")
+                    issue_solution_cache[cache_key] = result
                     return result
                 else:
                     logger.warning(f"LLM 응답에 필수 필드가 없음: {json_text}")
@@ -1465,18 +1485,18 @@ class LLMRouter:
                 solution = self._extract_section_from_text(text, "solution", "해결책을 찾을 수 없습니다.")
                 
                 logger.info(f"정규식 추출 결과 - issue: {issue[:50]}..., solution: {solution[:50]}...")
-                return {
-                    "issue": issue,
-                    "solution": solution
-                }
+                result = {"issue": issue, "solution": solution}
+                issue_solution_cache[cache_key] = result
+                return result
                 
         except Exception as e:
             logger.error(f"티켓 Issue/Solution 분석 중 오류 발생 (ticket_id: {ticket_data.get('id')}): {e}")
-            # 오류 발생 시 기본 메시지 반환
-            return {
+            result = {
                 "issue": "문제 상황 분석에 실패했습니다.",
                 "solution": "해결책 분석에 실패했습니다."
             }
+            issue_solution_cache[cache_key] = result
+            return result
     
     def _extract_section_from_text(self, text: str, section: str, default: str) -> str:
         """
@@ -1710,6 +1730,8 @@ class LLMRouter:
             current_ticket_id = str(ticket_data.get('id'))
             
             if similar_tickets_result and similar_tickets_result.get("ids"):
+                analysis_tasks = []
+                base_infos = []
                 for i, doc_id in enumerate(similar_tickets_result["ids"]):
                     # 현재 티켓과 동일한 ID는 제외
                     if str(doc_id) == current_ticket_id:
@@ -1749,40 +1771,47 @@ class LLMRouter:
                         "priority": metadata.get("priority", "")
                     }
                     
-                    # LLM을 사용한 Issue/Solution 분석 수행
-                    try:
-                        analysis_result = await self.analyze_ticket_issue_solution(ticket_data_for_analysis)
-                        issue = analysis_result.get("issue", "문제 상황을 분석할 수 없습니다.")
-                        solution = analysis_result.get("solution", "해결책을 찾을 수 없습니다.")
-                    except Exception as e:
-                        logger.warning(f"티켓 {doc_id} Issue/Solution 분석 실패: {e}")
-                        issue = "문제 상황 분석 실패"
-                        solution = "해결책 분석 실패"
-                    
-                    # 기존 호환성을 위한 요약 생성
-                    summary_text = similar_tickets_result["documents"][i] if i < len(similar_tickets_result.get("documents", [])) else ""
-                    if not summary_text:
-                        summary_text = metadata.get("description_text", "요약 정보 없음")
-                    summary = summary_text[:200] + "..." if len(summary_text) > 200 else summary_text
-                    
-                    # SimilarTicketItem 모델과 호환되는 형태로 반환
+                    # 분석 태스크 모음
+                    analysis_tasks.append(self.analyze_ticket_issue_solution(ticket_data_for_analysis))
+                    base_infos.append({
+                        "id": str(ticket_number),
+                        "title": title,
+                        "ticket_url": ticket_url,
+                        "similarity_score": round(similarity_score, 3),
+                        "summary_text": similar_tickets_result["documents"][i] if i < len(similar_tickets_result.get("documents", [])) else metadata.get("description_text", "")
+                    })
+
+                    if len(base_infos) >= 5:
+                        break
+
+                if analysis_tasks:
+                    results = await asyncio.gather(*analysis_tasks, return_exceptions=True)
                     try:
                         from api.main import SimilarTicketItem
                     except ImportError:
                         from backend.api.main import SimilarTicketItem
-                    similar_tickets.append(SimilarTicketItem(
-                        id=str(ticket_number),  # 순수 티켓 번호만 사용
-                        title=title,
-                        issue=issue,
-                        solution=solution,
-                        ticket_url=ticket_url,
-                        similarity_score=round(similarity_score, 3),
-                        ticket_summary=summary  # 기존 호환성을 위해 유지
-                    ))
-                    
-                    # 최대 5개까지만 반환
-                    if len(similar_tickets) >= 5:
-                        break
+
+                    for info, res in zip(base_infos, results):
+                        if isinstance(res, Exception):
+                            logger.warning(f"티켓 {info['id']} Issue/Solution 분석 실패: {res}")
+                            issue = "문제 상황 분석 실패"
+                            solution = "해결책 분석 실패"
+                        else:
+                            issue = res.get("issue", "문제 상황을 분석할 수 없습니다.")
+                            solution = res.get("solution", "해결책을 찾을 수 없습니다.")
+
+                        summary_text = info["summary_text"] or ""
+                        summary = summary_text[:200] + "..." if len(summary_text) > 200 else summary_text
+
+                        similar_tickets.append(SimilarTicketItem(
+                            id=info["id"],
+                            title=info["title"],
+                            issue=issue,
+                            solution=solution,
+                            ticket_url=info["ticket_url"],
+                            similarity_score=info["similarity_score"],
+                            ticket_summary=summary
+                        ))
             
             execution_time = time.time() - start_time
             logger.info(f"유사 티켓 검색 완료 (ticket_id: {ticket_data.get('id')}, 검색결과: {len(similar_tickets)}건, 실행시간: {execution_time:.2f}초)")
@@ -1951,10 +1980,15 @@ class LLMRouter:
                 "success": False
             }
 
-    def create_init_parallel_chain(self,
-                                 ticket_data: Dict[str, Any],
-                                 qdrant_client: Any,
-                                 company_id: str) -> RunnableParallel:
+    def create_init_parallel_chain(
+        self,
+        ticket_data: Dict[str, Any],
+        qdrant_client: Any,
+        company_id: str,
+        include_summary: bool = True,
+        include_similar_tickets: bool = True,
+        include_kb_docs: bool = True,
+    ) -> RunnableParallel:
         """
         초기화 프로세스를 위한 Langchain RunnableParallel 체인을 생성합니다.
         
@@ -1974,19 +2008,28 @@ class LLMRouter:
         
         # RunnableParallel 체인 생성
         # 각 태스크를 RunnableLambda로 래핑하여 병렬 실행
-        parallel_chain = RunnableParallel({
-            "summary": RunnableLambda(self._generate_summary_task),
-            "similar_tickets": RunnableLambda(self._fetch_similar_tickets_task), 
-            "kb_documents": RunnableLambda(self._fetch_kb_documents_task)
-        })
+        tasks = {}
+        if include_summary:
+            tasks["summary"] = RunnableLambda(self._generate_summary_task)
+        if include_similar_tickets:
+            tasks["similar_tickets"] = RunnableLambda(self._fetch_similar_tickets_task)
+        if include_kb_docs:
+            tasks["kb_documents"] = RunnableLambda(self._fetch_kb_documents_task)
+
+        parallel_chain = RunnableParallel(tasks)
         
         logger.info(f"Langchain RunnableParallel 체인 생성 완료 (ticket_id: {ticket_data.get('id')})")
         return parallel_chain
 
-    async def execute_init_parallel_chain(self, 
-                                        ticket_data: Dict[str, Any], 
-                                        qdrant_client: Any, 
-                                        company_id: str) -> Dict[str, Any]:
+    async def execute_init_parallel_chain(
+        self,
+        ticket_data: Dict[str, Any],
+        qdrant_client: Any,
+        company_id: str,
+        include_summary: bool = True,
+        include_similar_tickets: bool = True,
+        include_kb_docs: bool = True,
+    ) -> Dict[str, Any]:
         """
         초기화 병렬 체인을 실행하고 결과를 반환합니다.
         
@@ -2003,7 +2046,14 @@ class LLMRouter:
         
         try:
             # RunnableParallel 체인 생성
-            parallel_chain = self.create_init_parallel_chain(ticket_data, qdrant_client, company_id)
+            parallel_chain = self.create_init_parallel_chain(
+                ticket_data,
+                qdrant_client,
+                company_id,
+                include_summary=include_summary,
+                include_similar_tickets=include_similar_tickets,
+                include_kb_docs=include_kb_docs,
+            )
             
             # 체인 실행을 위한 입력 데이터 준비
             chain_inputs = {
@@ -2020,9 +2070,9 @@ class LLMRouter:
             
             # 결과 구조화
             return {
-                "summary": results["summary"],
-                "similar_tickets": results["similar_tickets"], 
-                "kb_documents": results["kb_documents"],
+                "summary": results.get("summary"),
+                "similar_tickets": results.get("similar_tickets"),
+                "kb_documents": results.get("kb_documents"),
                 "total_execution_time": total_execution_time,
                 "chain_type": "langchain_runnable_parallel"
             }
