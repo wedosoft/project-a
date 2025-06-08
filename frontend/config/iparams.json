@@ -1,10 +1,16 @@
 {
-  "COPILOT_API_KEY": {
-    "display_name": "CopilotKit API Key",
-    "description": "CopilotKit Cloud에서 발급받은 API 키",
+  "freshdesk_domain": {
+    "description": "Enter your Freshdesk domain (e.g., yourcompany.freshdesk.com)",
+    "type": "text",
+    "required": true,
+    "secure": false,
+    "display_name": "Freshdesk Domain"
+  },
+  "freshdesk_api_key": {
+    "description": "Enter your Freshdesk API key",
     "type": "text",
     "required": true,
     "secure": true,
-    "default_value": "ck_pub_2048e6d9442c1571c2edba0e4fff8415"
+    "display_name": "Freshdesk API Key"
   }
 }

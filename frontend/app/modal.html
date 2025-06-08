@@ -1,484 +1,138 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <title>Conversation History</title>
   <meta charset="utf-8">
-  <title>Ticket Details</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" type="text/css" href="https://static.freshdev.io/fdk/2.0/assets/freshworks.css">
   <script src="{{{appclient}}}"></script>
-  <!-- CopilotKit 관련 스타일 로드 -->
-  <link rel="stylesheet" href="styles/copilot-chat.css">
   <style>
     body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
       margin: 0;
-      padding: 24px;
-      background: #ffffff;
-      color: #222;
-      font-size: 15px;
+      padding: 15px;
+      color: #333;
     }
-    .main-card {
-      background: #fff;
-      border-radius: 14px;
-      box-shadow: 0 2px 12px 0 rgba(0,0,0,0.07);
-      padding: 28px 32px 20px 32px;
-      margin-bottom: 28px;
-      position: relative;
+    .conversation-container {
+      max-height: 500px;
+      overflow-y: auto;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px;
+      padding: 10px;
     }
-    .main-card h2 {
-      margin: 0 0 18px 0;
-      font-size: 22px;
-      font-weight: 600;
+    .message {
+      margin-bottom: 15px;
+      padding: 10px;
+      border-radius: 4px;
     }
-    .summary-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr 1fr 1fr;
-      gap: 10px 24px;
-      margin-bottom: 18px;
+    .sender {
+      font-weight: bold;
     }
-    .summary-label {
-      color: #7a7a7a;
-      font-size: 13px;
-      font-weight: 500;
-      margin-right: 4px;
+    .timestamp {
+      color: #777;
+      font-size: 12px;
+      margin-bottom: 5px;
     }
-    .summary-value {
-      font-weight: 500;
-      color: #222;
+    .content {
+      white-space: pre-wrap;
     }
-    .tags {
+    .agent-message {
+      background-color: #f0f7ff;
+      border-left: 3px solid #2c66c3;
+    }
+    .customer-message {
+      background-color: #f9f9f9;
+      border-left: 3px solid #16ae68;
+    }
+    .system-message {
+      background-color: #f5f5f5;
+      border-left: 3px solid #999;
+      font-style: italic;
+    }
+    .actions {
       display: flex;
-      gap: 8px;
-      margin: 10px 0 18px 0;
+      justify-content: flex-end;
+      margin-top: 15px;
     }
-    .tag {
-      display: inline-block;
-      border-radius: 8px;
-      padding: 3px 14px;
-      font-size: 13px;
-      font-weight: 500;
-      color: #fff;
-      background: #3b82f6;
-      box-shadow: 0 1px 2px rgba(0,0,0,0.04);
-    }
-    .tag:nth-child(2) { background: #22c55e; }
-    .tag:nth-child(3) { background: #94a3b8; }
-    .desc-row {
-      display: flex;
-      gap: 40px;
-      margin-bottom: 18px;
-    }
-    .desc-col {
-      flex: 1;
-    }
-    .desc-title {
-      font-weight: 600;
-      margin-bottom: 6px;
-      font-size: 15px;
-    }
-    .desc-list {
-      margin: 0 0 10px 0;
-      padding-left: 18px;
-      color: #444;
-    }
-    .attachment-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin: 8px 0 0 0;
-      font-size: 14px;
-      color: #555;
-    }
-    .attachment-icon {
-      width: 18px;
-      height: 18px;
-      display: inline-block;
-      background: url('https://cdn.jsdelivr.net/gh/feathericons/feather/icons/paperclip.svg') no-repeat center/contain;
-      vertical-align: middle;
-      opacity: 0.7;
-    }
-    .view-details-btn {
-      position: absolute;
-      right: 32px;
-      bottom: 20px;
-      background: #f3f4f6;
-      color: #1e293b;
+    .close-btn {
+      background-color: #2c66c3;
+      color: white;
       border: none;
-      border-radius: 6px;
-      padding: 7px 18px;
-      font-size: 14px;
-      font-weight: 500;
+      padding: 8px 16px;
+      border-radius: 4px;
       cursor: pointer;
-      transition: background 0.15s;
     }
-    .view-details-btn:hover {
-      background: #e0e7ef;
+    .close-btn:hover {
+      background-color: #1f4e99;
     }
-    .tabs {
-      display: flex;
-      border-bottom: 1.5px solid #e5e7eb;
-      margin-bottom: 0;
-      background: #fff;
-      border-radius: 10px 10px 0 0;
-      overflow: hidden;
-    }
-    .tab {
-      flex: 1;
+    .no-messages {
       text-align: center;
-      padding: 13px 0 11px 0;
-      font-size: 15px;
-      font-weight: 500;
-      color: #64748b;
-      background: #fff;
-      border: none;
-      cursor: pointer;
-      outline: none;
-      transition: color 0.15s, background 0.15s;
-    }
-    .tab.active {
-      color: #2563eb;
-      border-bottom: 2.5px solid #2563eb;
-      background: #f8fafc;
-    }
-    .tab-content {
-      background: #fff;
-      border-radius: 0 0 10px 10px;
-      box-shadow: 0 2px 12px 0 rgba(0,0,0,0.06);
-      padding: 24px 32px 18px 32px;
-      margin-bottom: 32px;
-      min-height: 120px;
-    }
-    .ticket-item, .solution-item {
-      margin-bottom: 18px;
-    }
-    .ticket-id, .solution-id {
-      font-size: 13px;
-      color: #64748b;
-      font-weight: 500;
-      margin-bottom: 2px;
-    }
-    .ticket-title, .solution-title {
-      font-size: 16px;
-      font-weight: 600;
-      margin-bottom: 3px;
-      color: #222;
-    }
-    .ticket-desc, .solution-desc {
-      font-size: 14px;
-      color: #444;
-      margin-bottom: 0;
-    }
-    .copilot-content {
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-      max-width: 420px;
-    }
-    .copilot-input {
-      border: 1.5px solid #e5e7eb;
-      border-radius: 7px;
-      padding: 10px 12px;
-      font-size: 15px;
-      outline: none;
-      transition: border 0.15s;
-      margin-bottom: 0;
-    }
-    .copilot-input:focus {
-      border-color: #2563eb;
-    }
-    .copilot-options {
-      display: flex;
-      gap: 18px;
-      align-items: center;
-      font-size: 14px;
-      color: #555;
-    }
-    .copilot-options label {
-      display: flex;
-      align-items: center;
-      gap: 5px;
-      cursor: pointer;
-    }
-    .copilot-btn {
-      background: #2563eb;
-      color: #fff;
-      border: none;
-      border-radius: 7px;
-      padding: 9px 28px;
-      font-size: 15px;
-      font-weight: 500;
-      cursor: pointer;
-      margin-top: 8px;
-      align-self: flex-start;
-      transition: background 0.15s;
-    }
-    .copilot-btn:hover {
-      background: #1d4ed8;
-    }
-    @media (max-width: 900px) {
-      .main-card, .tab-content { padding: 18px 10px; }
-      .summary-grid { grid-template-columns: 1fr 1fr; }
-      .desc-row { flex-direction: column; gap: 10px; }
+      padding: 20px;
+      color: #777;
+      font-style: italic;
     }
   </style>
 </head>
 <body>
-  <div class="main-card">
-    <h2>Ticket Summary</h2>
-    <div class="summary-grid" id="ticket-details"></div>
-    <div class="tags" id="ticket-tags"></div>
-    <div class="desc-row">
-      <div class="desc-col">
-        <div class="desc-title">Problem</div>
-        <ul class="desc-list" id="problem-list"></ul>
-        <div class="desc-title">Cause</div>
-        <ul class="desc-list" id="cause-list"></ul>
-      </div>
-      <div class="desc-col">
-        <div class="desc-title">Result</div>
-        <ul class="desc-list" id="result-list"></ul>
-      </div>
-    </div>
-    <div class="attachment-row" id="attachment-row" style="display:none;">
-      <span class="attachment-icon"></span>
-      <span id="attachment-name"></span>
-    </div>
-    <button class="view-details-btn" id="view-details-btn">View Details &rsaquo;</button>
+  <div class="conversation-container" id="conversation-container">
+    <!-- Conversation messages will be populated here -->
   </div>
-
-  <div class="tabs">
-    <button class="tab active" data-tab="similar">Similar Tickets</button>
-    <button class="tab" data-tab="solutions">Suggested Solutions</button>
-    <button class="tab" data-tab="copilot">Copilot</button>
+  
+  <div class="actions">
+    <button class="close-btn" id="close-btn">Close</button>
   </div>
-  <div class="tab-content" id="tab-similar">
-    <div class="ticket-item">
-      <div class="ticket-id">ID 123</div>
-      <div class="ticket-title">Similar Ticket Title</div>
-      <div class="ticket-desc">Brief description of the similar issue...</div>
-    </div>
-  </div>
-  <div class="tab-content" id="tab-solutions" style="display:none;">
-    <div class="solution-item">
-      <div class="solution-id">ID sol-1</div>
-      <div class="solution-title">Suggested Solution Title</div>
-      <div class="solution-desc">Solution content goes here.</div>
-    </div>
-  </div>
-  <div class="tab-content" id="tab-copilot" style="display:none;">
-    <!-- React CopilotKit 컴포넌트가 마운트될 컨테이너 -->
-    <div id="copilot-react-root"></div>
-  </div>
-
-  <!-- CopilotKit 관련 JavaScript 번들 로드 -->
-  <script src="scripts/copilot-bundle.js"></script>
 
   <script>
-    // 탭 전환
-    document.querySelectorAll('.tab').forEach(function(tab) {
-      tab.addEventListener('click', function() {
-        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
-        ['similar','solutions','copilot'].forEach(function(name) {
-          document.getElementById('tab-' + name).style.display = (tab.dataset.tab === name) ? '' : 'none';
-        });        });
-    });
-
-    // React 컴포넌트 초기화 함수
-    function initializeCopilotReact() {
-      // CopilotApp이 전역 변수로 등록되어 있는지 확인
-      if (typeof window.CopilotApp !== 'undefined') {
-        const rootElement = document.getElementById('copilot-react-root');
-        if (rootElement && !rootElement.hasChildNodes()) {
-          // React 컴포넌트를 마운트
-          const element = window.React.createElement(window.CopilotApp);
-          window.ReactDOM.render(element, rootElement);
-          console.log('CopilotKit React 컴포넌트가 성공적으로 마운트되었습니다.');
-        }
+    document.addEventListener('DOMContentLoaded', async function() {
+      let client = await app.initialized();
+      
+      // Get modal data
+      const context = await client.instance.context();
+      const { conversationHistory } = context.data;
+      
+      const conversationContainer = document.getElementById('conversation-container');
+      
+      // Check if there are messages to display
+      if (conversationHistory && conversationHistory.length > 0) {
+        // Sort messages by timestamp (oldest first)
+        const sortedMessages = conversationHistory.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+        
+        // Populate the conversation container with messages
+        sortedMessages.forEach(message => {
+          const messageDiv = document.createElement('div');
+          
+          // Determine message type for styling
+          let messageType = 'system-message';
+          if (message.sender && message.sender.type === 'agent') {
+            messageType = 'agent-message';
+          } else if (message.sender && message.sender.type === 'customer') {
+            messageType = 'customer-message';
+          }
+          
+          messageDiv.className = `message ${messageType}`;
+          
+          // Format timestamp
+          const timestamp = new Date(message.timestamp).toLocaleString();
+          
+          // Create message content
+          messageDiv.innerHTML = `
+            <div class="sender">${message.sender ? message.sender.name : 'System'}</div>
+            <div class="timestamp">${timestamp}</div>
+            <div class="content">${message.content}</div>
+          `;
+          
+          conversationContainer.appendChild(messageDiv);
+        });
       } else {
-        // CopilotApp이 아직 로드되지 않은 경우 100ms 후 재시도
-        setTimeout(initializeCopilotReact, 100);
+        // No messages to display
+        conversationContainer.innerHTML = '<div class="no-messages">No conversation history available.</div>';
       }
-    }
-
-    document.addEventListener('DOMContentLoaded', function() {
-      app.initialized()
-        .then(function(client) {
-          window.client = client;
-          
-          // React CopilotKit 컴포넌트 초기화
-          initializeCopilotComponent();
-          
-          client.instance.context()
-            .then(function(context) {
-              const ticket = context.data.ticket;
-              // 기존 티켓 상세 정보 로딩 로직...
-              const ticketDetails = document.getElementById('ticket-details');
-              ticketDetails.innerHTML = `
-                <div><span class="summary-label">Title</span><span class="summary-value">${ticket.subject || 'N/A'}</span></div>
-                <div><span class="summary-label">Status</span><span class="summary-value">${ticket.status_name || 'N/A'}</span></div>
-                <div><span class="summary-label">Priority</span><span class="summary-value">${ticket.priority_name || 'N/A'}</span></div>
-                <div><span class="summary-label">Assignee</span><span class="summary-value">${ticket.agent_name || 'Unassigned'}</span></div>
-                <div><span class="summary-label">Tags</span></div>
-                <div><span class="summary-label">Channel</span><span class="summary-value">${ticket.channel || 'N/A'}</span></div>
-                <div><span class="summary-label">Created</span><span class="summary-value">${new Date(ticket.created_at).toLocaleString()}</span></div>
-                <div><span class="summary-label">Requester</span><span class="summary-value">${ticket.requester_name || 'N/A'}</span></div>
-              `;
-              // Tags
-              const tagsContainer = document.getElementById('ticket-tags');
-              if (ticket.tags && ticket.tags.length > 0) {
-                ticket.tags.forEach(function(tag, idx) {
-                  const tagEl = document.createElement('span');
-                  tagEl.classList.add('tag');
-                  tagEl.textContent = tag;
-                  tagsContainer.appendChild(tagEl);
-                });
-              } else {
-                tagsContainer.textContent = 'No tags';
-              }
-              // Problem, Cause, Result (임시 데이터)
-              const problemList = document.getElementById('problem-list');
-              problemList.innerHTML = '<li>Error message is displayed when user attempts to log in.</li>';
-              const causeList = document.getElementById('cause-list');
-              causeList.innerHTML = '<li>Authentication token expired due to browser cache issue.</li>';
-              const resultList = document.getElementById('result-list');
-              resultList.innerHTML = '<li>Verified successful login is now possible.</li>';
-              // Attachment (임시)
-              const attachmentRow = document.getElementById('attachment-row');
-              const attachmentName = document.getElementById('attachment-name');
-              if (ticket.attachments && ticket.attachments.length > 0) {
-                attachmentRow.style.display = '';
-                attachmentName.textContent = ticket.attachments[0].name || 'error_screenshot.png';
-              } else {
-                // 예시 첨부파일
-                attachmentRow.style.display = '';
-                attachmentName.textContent = 'error_screenshot.png';
-              }
-              // View Details 버튼
-              document.getElementById('view-details-btn').onclick = function() {
-                // 상세 페이지 이동 또는 모달 닫기 등
-                client.instance.close();
-              };
-            })
-            .catch(function(error) {
-              document.body.innerHTML = '<p>Error loading ticket details. Please try again.</p>';
-            });
-
-          // React CopilotKit 컴포넌트 초기화
-          initializeCopilotReact();
-        })
-        .catch(function(error) {
-          document.body.innerHTML = '<p>Error initializing app. Please try again.</p>';
-        });
+      
+      // Close button handler
+      document.getElementById('close-btn').addEventListener('click', function() {
+        client.instance.close();
+      });
     });
-
-    // React 및 CopilotKit 번들 로드
-    function loadReactBundles() {
-      return new Promise(function(resolve, reject) {
-        var scriptsToLoad = [
-          'scripts/copilot-bundle.js'  // CopilotKit과 우리의 컴포넌트가 모두 포함된 번들
-        ];
-        
-        var loadedScripts = 0;
-        
-        scriptsToLoad.forEach(function(scriptSrc) {
-          var script = document.createElement('script');
-          script.src = scriptSrc;
-          script.onload = function() {
-            loadedScripts++;
-            console.log('로드된 스크립트:', scriptSrc);
-            if (loadedScripts === scriptsToLoad.length) {
-              resolve();
-            }
-          };
-          script.onerror = function() {
-            console.error('스크립트 로드 실패:', scriptSrc);
-            reject(new Error('Failed to load ' + scriptSrc));
-          };
-          document.head.appendChild(script);
-        });
-      });
-    }
-
-    // React 번들 로드 후 초기화
-    loadReactBundles()
-      .then(function() {
-        console.log('모든 React 번들이 로드되었습니다.');
-        // DOM이 로드된 후 또는 이미 로드되었다면 즉시 초기화
-        if (document.readyState === 'loading') {
-          document.addEventListener('DOMContentLoaded', initializeApp);
-        } else {
-          initializeApp();
-        }
-      })
-      .catch(function(error) {
-        console.error('React 번들 로드 오류:', error);
-      });
-
-    function initializeApp() {
-      app.initialized()
-        .then(function(client) {
-          window.client = client;
-          client.instance.context()
-            .then(function(context) {
-              const ticket = context.data.ticket;
-              // Ticket details
-              const ticketDetails = document.getElementById('ticket-details');
-              ticketDetails.innerHTML = `
-                <div><span class="summary-label">Title</span><span class="summary-value">${ticket.subject || 'N/A'}</span></div>
-                <div><span class="summary-label">Status</span><span class="summary-value">${ticket.status_name || 'N/A'}</span></div>
-                <div><span class="summary-label">Priority</span><span class="summary-value">${ticket.priority_name || 'N/A'}</span></div>
-                <div><span class="summary-label">Assignee</span><span class="summary-value">${ticket.agent_name || 'Unassigned'}</span></div>
-                <div><span class="summary-label">Tags</span></div>
-                <div><span class="summary-label">Channel</span><span class="summary-value">${ticket.channel || 'N/A'}</span></div>
-                <div><span class="summary-label">Created</span><span class="summary-value">${new Date(ticket.created_at).toLocaleString()}</span></div>
-                <div><span class="summary-label">Requester</span><span class="summary-value">${ticket.requester_name || 'N/A'}</span></div>
-              `;
-              // Tags
-              const tagsContainer = document.getElementById('ticket-tags');
-              if (ticket.tags && ticket.tags.length > 0) {
-                ticket.tags.forEach(function(tag, idx) {
-                  const tagEl = document.createElement('span');
-                  tagEl.classList.add('tag');
-                  tagEl.textContent = tag;
-                  tagsContainer.appendChild(tagEl);
-                });
-              } else {
-                tagsContainer.textContent = 'No tags';
-              }
-              // Problem, Cause, Result (임시 데이터)
-              const problemList = document.getElementById('problem-list');
-              problemList.innerHTML = '<li>Error message is displayed when user attempts to log in.</li>';
-              const causeList = document.getElementById('cause-list');
-              causeList.innerHTML = '<li>Authentication token expired due to browser cache issue.</li>';
-              const resultList = document.getElementById('result-list');
-              resultList.innerHTML = '<li>Verified successful login is now possible.</li>';
-              // Attachment (임시)
-              const attachmentRow = document.getElementById('attachment-row');
-              const attachmentName = document.getElementById('attachment-name');
-              if (ticket.attachments && ticket.attachments.length > 0) {
-                attachmentRow.style.display = '';
-                attachmentName.textContent = ticket.attachments[0].name || 'error_screenshot.png';
-              } else {
-                // 예시 첨부파일
-                attachmentRow.style.display = '';
-                attachmentName.textContent = 'error_screenshot.png';
-              }
-              // View Details 버튼
-              document.getElementById('view-details-btn').onclick = function() {
-                // 상세 페이지 이동 또는 모달 닫기 등
-                client.instance.close();
-              };
-
-              // React CopilotKit 컴포넌트 초기화
-              initializeCopilotReact();
-            })
-            .catch(function(error) {
-              document.body.innerHTML = '<p>Error loading ticket details. Please try again.</p>';
-            });
-        })
-        .catch(function(error) {
-          document.body.innerHTML = '<p>Error initializing app. Please try again.</p>';
-        });
-    }
   </script>
 </body>
 </html>

@@ -7,6 +7,9 @@
           "icon": "styles/images/icon.svg"
         }
       },
+      "interface": {
+        "trigger": ["showModal", "showNotify"]
+      },
       "events": {
         "onTicketCreate": {
           "handler": "onTicketCreateHandler"
@@ -26,5 +29,9 @@
   "engines": {
     "node": "18.18.2",
     "fdk": "9.4.2"
+  },
+  "app": {
+    "tracking_id": "dzokl7zqwtya4uoxmoj0",
+    "start_time": "2025-04-14T06:26:00.997Z"
   }
 }

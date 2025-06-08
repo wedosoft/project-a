@@ -2,192 +2,298 @@
 <html>
 <head>
   <title>Ticket Assistant</title>
+  <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" type="text/css" href="https://static.freshdev.io/fdk/2.0/assets/freshworks.css">
   <script src="{{{appclient}}}"></script>
   <style>
     body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    }
-    .container {
-      padding: 8px;
-    }
-    .ticket-summary {
-      border: 1px solid #ddd;
-      border-radius: 4px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+      margin: 0;
       padding: 10px;
-      margin-bottom: 15px;
-      background-color: #f9f9f9;
+      color: #333;
     }
-    .ticket-info {
-      display: flex;
-      flex-wrap: wrap;
-      margin-bottom: 10px;
-    }
-    .info-item {
-      flex: 0 0 50%;
-      margin-bottom: 5px;
-    }
-    .label {
-      font-weight: bold;
-      color: #555;
-      font-size: 12px;
-    }
-    .value {
-      font-size: 14px;
-    }
-    .tags {
-      margin: 10px 0;
-    }
-    .tag {
-      display: inline-block;
-      background-color: #e0e0e0;
-      border-radius: 10px;
-      padding: 2px 8px;
-      margin: 2px;
-      font-size: 12px;
-    }
-    .description {
-      margin-top: 10px;
-      border-top: 1px solid #eee;
-      padding-top: 10px;
-    }
-    .actions {
-      display: flex;
-      justify-content: space-between;
-      margin-top: 10px;
-    }
-    .btn {
-      background-color: #1E88E5;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      padding: 6px 12px;
-      cursor: pointer;
-      font-size: 13px;
-    }
-    .btn:hover {
-      background-color: #1976D2;
-    }
-    /* Tabs */
-    .tab-container {
+    
+    .search-results {
       margin-top: 15px;
     }
-    .tab-header {
+    
+    .result-item {
+      padding: 12px;
+      border: 1px solid #e0e0e0;
+      margin-bottom: 10px;
+      border-radius: 4px;
+      background-color: #f9f9f9;
+    }
+    
+    .result-item h4 {
+      margin-top: 0;
+      margin-bottom: 8px;
+      color: #2c66c3;
+    }
+    
+    .result-item p {
+      margin-bottom: 10px;
+    }
+    
+    .result-meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: #666;
+    }
+    
+    .result-meta a {
+      color: #2c66c3;
+      text-decoration: none;
+    }
+    
+    .result-meta a:hover {
+      text-decoration: underline;
+    }
+    .container {
+      max-width: 100%;
+    }
+    .ticket-metadata {
+      background-color: #f9f9f9;
+      padding: 12px;
+      margin-bottom: 15px;
+      border-radius: 4px;
+      border: 1px solid #e0e0e0;
+    }
+    .metadata-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .metadata-label {
+      font-weight: 600;
+      color: #555;
+      width: 40%;
+    }
+    .metadata-value {
+      width: 60%;
+    }
+    .view-details-btn {
+      background-color: #2c66c3;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      width: 100%;
+      margin-top: 10px;
+    }
+    .view-details-btn:hover {
+      background-color: #1f4e99;
+    }
+    .tabs-section {
+      margin-top: 20px;
+    }
+    .tabs-header {
       display: flex;
       border-bottom: 1px solid #ddd;
     }
     .tab {
-      padding: 8px 15px;
+      padding: 10px 15px;
       cursor: pointer;
-      border: 1px solid transparent;
-      border-bottom: none;
-      margin-bottom: -1px;
       background-color: #f1f1f1;
+      border: none;
+      border-radius: 4px 4px 0 0;
+      margin-right: 5px;
     }
     .tab.active {
-      background-color: white;
-      border-color: #ddd;
-      border-bottom-color: white;
+      background-color: #fff;
+      border: 1px solid #ddd;
+      border-bottom: 1px solid #fff;
+      margin-bottom: -1px;
     }
     .tab-content {
       display: none;
       padding: 15px;
       border: 1px solid #ddd;
       border-top: none;
+      border-radius: 0 0 4px 4px;
     }
     .tab-content.active {
       display: block;
     }
     .search-box {
+      margin-top: 10px;
       display: flex;
-      margin-bottom: 10px;
+      align-items: center;
     }
-    .search-box input {
-      flex: 1;
-      padding: 6px;
+    .search-input {
+      flex-grow: 1;
+      padding: 8px;
       border: 1px solid #ddd;
       border-radius: 4px 0 0 4px;
     }
-    .search-btn {
-      border-radius: 0 4px 4px 0;
+    .attachments-container {
+      margin-top: 5px;
     }
-    .results-list {
-      max-height: 300px;
-      overflow-y: auto;
-    }
-    .result-card {
-      border: 1px solid #ddd;
+    .attachment-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 5px 10px;
+      margin-bottom: 5px;
+      background-color: #f5f5f5;
       border-radius: 4px;
-      padding: 10px;
-      margin-bottom: 10px;
+      border: 1px solid #e0e0e0;
+    }
+    .search-btn {
+      background-color: #2c66c3;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 0 4px 4px 0;
       cursor: pointer;
     }
-    .result-card:hover {
-      background-color: #f5f5f5;
+    .filters {
+      margin-top: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .filter {
+      padding: 5px 10px;
+      background-color: #f1f1f1;
+      border-radius: 15px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .filter.active {
+      background-color: #2c66c3;
+      color: white;
+    }
+    .backend-status {
+      background-color: #e8f4f8;
+      border: 1px solid #bee5eb;
+      border-radius: 4px;
+      padding: 10px;
+      margin-bottom: 15px;
+      font-size: 14px;
+    }
+    .backend-status.success {
+      background-color: #d4edda;
+      border-color: #c3e6cb;
+      color: #155724;
+    }
+    .backend-status.error {
+      background-color: #f8d7da;
+      border-color: #f5c6cb;
+      color: #721c24;
+    }
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .status-details {
+      font-size: 12px;
+      margin-top: 5px;
+      color: #666;
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <div class="ticket-summary">
-      <h3>Ticket Summary</h3>
-      <div class="ticket-info">
-        <div class="info-item">
-          <div class="label">Subject</div>
-          <div class="value" id="ticket-subject">Loading...</div>
-        </div>
-        <div class="info-item">
-          <div class="label">Status</div>
-          <div class="value" id="ticket-status">Loading...</div>
-        </div>
-        <div class="info-item">
-          <div class="label">Priority</div>
-          <div class="value" id="ticket-priority">Loading...</div>
-        </div>
-        <div class="info-item">
-          <div class="label">Assignee</div>
-          <div class="value" id="ticket-assignee">Loading...</div>
-        </div>
-      </div>
-      <div class="tags" id="ticket-tags">
-        <!-- Tags will be populated here -->
-      </div>
-      <div class="description">
-        <div class="label">Description</div>
-        <div class="value" id="ticket-description">Loading...</div>
-      </div>
-      <div class="actions">
-        <button class="btn" id="view-details-btn">View Details</button>
+    <!-- Backend Initialization Status -->
+    <div id="backend-status" class="backend-status" style="display: none;">
+      <div class="status-indicator">
+        <span id="status-icon">🔄</span>
+        <span id="status-text">백엔드 초기화 중...</span>
       </div>
     </div>
 
-    <div class="tab-container">
-      <div class="tab-header">
-        <div class="tab active" data-tab="similar-tickets">Similar Tickets</div>
-        <div class="tab" data-tab="solutions">Suggested Solutions</div>
-        <div class="tab" data-tab="copilot">Copilot Search</div>
+    <!-- Top section for ticket metadata -->
+    <div class="ticket-metadata">
+      <h3>Ticket Information</h3>
+      <div class="metadata-row">
+        <div class="metadata-label">Problem:</div>
+        <div class="metadata-value" id="ticket-problem">Loading...</div>
       </div>
-      
+      <div class="metadata-row">
+        <div class="metadata-label">Cause:</div>
+        <div class="metadata-value" id="ticket-cause">Loading...</div>
+      </div>
+      <div class="metadata-row">
+        <div class="metadata-label">Actions:</div>
+        <div class="metadata-value" id="ticket-actions">Loading...</div>
+      </div>
+      <div class="metadata-row">
+        <div class="metadata-label">Result:</div>
+        <div class="metadata-value" id="ticket-result">Loading...</div>
+      </div>
+      <div class="metadata-row">
+        <div class="metadata-label">Status:</div>
+        <div class="metadata-value" id="ticket-status">Loading...</div>
+      </div>
+      <div class="metadata-row">
+        <div class="metadata-label">Priority:</div>
+        <div class="metadata-value" id="ticket-priority">Loading...</div>
+      </div>
+      <div class="metadata-row">
+        <div class="metadata-label">Agent:</div>
+        <div class="metadata-value" id="ticket-agent">Loading...</div>
+      </div>
+      <div class="metadata-row">
+        <div class="metadata-label">Requester:</div>
+        <div class="metadata-value" id="ticket-requester">Loading...</div>
+      </div>
+      <div class="metadata-row">
+        <div class="metadata-label">Channel:</div>
+        <div class="metadata-value" id="ticket-channel">Loading...</div>
+      </div>
+      <div class="metadata-row">
+        <div class="metadata-label">Tags:</div>
+        <div class="metadata-value" id="ticket-tags">Loading...</div>
+      </div>
+      <div class="metadata-row">
+        <div class="metadata-label">Attachments:</div>
+        <div class="metadata-value" id="ticket-attachments">None</div>
+      </div>
+      <!-- Attachments section -->
+      <div id="attachments-section" style="display: none; margin-top: 10px;">
+        <h4>Ticket Attachments</h4>
+        <div id="attachments-container" class="attachments-container"></div>
+      </div>
+      <button class="view-details-btn" id="view-details-btn">View Details</button>
+    </div>
+
+    <!-- Bottom section with tabs -->
+    <div class="tabs-section">
+      <div class="tabs-header">
+        <button class="tab active" data-tab="similar-tickets">Similar Tickets</button>
+        <button class="tab" data-tab="suggested-solutions">Suggested Solutions</button>
+        <button class="tab" data-tab="copilot">Copilot</button>
+      </div>
+
+      <!-- Similar Tickets Tab -->
       <div class="tab-content active" id="similar-tickets">
-        <div class="results-list" id="similar-tickets-list">
-          <p>Loading similar tickets...</p>
-        </div>
+        <p>Looking for similar tickets...</p>
       </div>
-      
-      <div class="tab-content" id="solutions">
-        <div class="results-list" id="solutions-list">
-          <p>Loading suggested solutions...</p>
-        </div>
+
+      <!-- Suggested Solutions Tab -->
+      <div class="tab-content" id="suggested-solutions">
+        <p>Finding suggested solutions...</p>
       </div>
-      
+
+      <!-- Copilot Tab -->
       <div class="tab-content" id="copilot">
         <div class="search-box">
-          <input type="text" placeholder="Ask Copilot..." id="copilot-query">
-          <button class="btn search-btn" id="copilot-search-btn">Search</button>
+          <input type="text" class="search-input" placeholder="Ask a question...">
+          <button class="search-btn">Search</button>
         </div>
-        <div class="results-list" id="copilot-results">
-          <p>Use the search box to find help with your tickets</p>
+        <div class="filters">
+          <span class="filter">Knowledge Base</span>
+          <span class="filter">Tickets</span>
+          <span class="filter">Solutions</span>
+          <span class="filter">Web</span>
+        </div>
+        <div id="copilot-results">
+          <p>Ask a question to get assistance.</p>
         </div>
       </div>
     </div>
