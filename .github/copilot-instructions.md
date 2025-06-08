@@ -103,7 +103,7 @@ OPENAI_API_KEY=your-key
 GOOGLE_API_KEY=your-key
 
 # Settings
-COMPANY_ID=kyexpert
+COMPANY_ID=your-company-id
 PROCESS_ATTACHMENTS=true
 EMBEDDING_MODEL=text-embedding-3-small
 ```

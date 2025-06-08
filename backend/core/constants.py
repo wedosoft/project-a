@@ -5,6 +5,7 @@
 doc_id 접두어 패턴과 관련 설정을 중앙에서 관리합니다.
 """
 
+import os
 from enum import Enum
 from typing import Dict, Set
 
@@ -106,7 +107,7 @@ class SystemConfig:
     """시스템 전체 설정"""
     
     # 기본 company_id
-    DEFAULT_COMPANY_ID = "kyexpert"
+    DEFAULT_COMPANY_ID = os.getenv("COMPANY_ID", "example-company")
     
     # 벡터 DB 컬렉션명 패턴
     VECTOR_COLLECTION_PATTERN = "{company_id}_documents"

@@ -47,8 +47,17 @@ app.include_router(attachments_router)
 cache = TTLCache(maxsize=100, ttl=600)
 
 # 성능 로깅을 위한 설정
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s | %(name)s | %(levelname)s | %(message)s',
+    handlers=[
+        logging.StreamHandler()  # 표준 출력으로 로그 출력 (Docker에서 캡처됨)
+    ]
+)
 logger = logging.getLogger(__name__)
+
+# 애플리케이션 시작 로그
+logger.info("FastAPI 백엔드 서버 초기화 완료")
 
 
 
@@ -127,6 +136,30 @@ class TicketSummaryContent(BaseModel):
     urgency_level: Optional[str] = Field(default=None, description="티켓의 긴급도 (예: 높음, 보통, 낮음)")
 
 
+# SimilarTicketItem과 RelatedDocumentItem을 먼저 정의
+class SimilarTicketItem(BaseModel):
+    """유사 티켓 정보 모델"""
+    id: str = Field(description="유사 티켓의 ID")
+    title: Optional[str] = Field(default=None, description="유사 티켓의 제목")
+    issue: Optional[str] = Field(default=None, description="문제 상황 요약")
+    solution: Optional[str] = Field(default=None, description="해결책 요약")
+    ticket_url: Optional[str] = Field(default=None, description="원본 티켓 링크")
+    similarity_score: Optional[float] = Field(default=None, description="유사도 점수 (0.0 ~ 1.0)")
+    
+    # 기존 호환성을 위한 필드 (deprecated)
+    ticket_summary: Optional[str] = Field(default=None, description="유사 티켓의 내용 요약 (deprecated)")
+
+
+class RelatedDocumentItem(BaseModel):
+    """관련 문서 정보 모델"""
+    id: str = Field(description="관련 문서의 고유 ID")
+    title: Optional[str] = Field(default=None, description="관련 문서의 제목")
+    doc_summary: Optional[str] = Field(default=None, description="관련 문서의 내용 요약")
+    url: Optional[str] = Field(default=None, description="관련 문서의 URL (해당하는 경우)")
+    source_type: Optional[str] = Field(default=None, description="문서 출처 유형 (예: 'kb')")
+    similarity_score: Optional[float] = Field(default=None, description="유사도 점수 (0.0 ~ 1.0)")
+
+
 # 티켓 초기화 요청/응답 모델
 class TicketInitRequest(BaseModel):
     """티켓 초기화 요청 모델"""
@@ -144,8 +177,8 @@ class InitResponse(BaseModel):
     ticket_id: str = Field(description="처리 대상 티켓의 ID")  # 처리된 티켓 ID
     ticket_data: Dict[str, Any] = Field(default_factory=dict, description="티켓 원본 데이터")  # 티켓 원본 데이터
     ticket_summary: Optional[TicketSummaryContent] = Field(default=None, description="티켓 요약 정보")  # 티켓 요약 정보
-    similar_tickets: List[DocumentInfo] = Field(default_factory=list, description="유사 티켓 목록")  # 유사 티켓 정보
-    kb_documents: List[DocumentInfo] = Field(default_factory=list, description="지식베이스 문서 목록")  # 관련 지식베이스 문서
+    similar_tickets: List[SimilarTicketItem] = Field(default_factory=list, description="유사 티켓 목록")  # 유사 티켓 정보
+    kb_documents: List[RelatedDocumentItem] = Field(default_factory=list, description="지식베이스 문서 목록")  # 관련 지식베이스 문서
     context_id: str = Field(description="컨텍스트 ID")  # 향후 요청을 위한 컨텍스트 ID 
     metadata: Dict[str, Any] = Field(default_factory=dict, description="메타데이터")  # 메타데이터
 
@@ -505,31 +538,15 @@ async def query_endpoint(req: QueryRequest, company_id: str = Depends(get_compan
 
 
 # --- 통합된 Pydantic 모델 ---
-# 티켓 요약에 대한 상세 정보를 담는 모델
-class SimilarTicketItem(BaseModel):
-    id: str = Field(description="유사 티켓의 ID")
-    title: Optional[str] = Field(default=None, description="유사 티켓의 제목")
-    issue: Optional[str] = Field(default=None, description="문제 상황 요약")
-    solution: Optional[str] = Field(default=None, description="해결책 요약")
-    ticket_url: Optional[str] = Field(default=None, description="원본 티켓 링크")
-    similarity_score: Optional[float] = Field(default=None, description="유사도 점수 (0.0 ~ 1.0)")
-    
-    # 기존 호환성을 위한 필드 (deprecated)
-    ticket_summary: Optional[str] = Field(default=None, description="유사 티켓의 내용 요약 (deprecated)")  
 
 class SimilarTicketsResponse(BaseModel):
+    """유사 티켓 검색 응답 모델"""
     ticket_id: str = Field(description="원본 티켓의 ID")
     similar_tickets: List[SimilarTicketItem] = Field(description="검색된 유사 티켓 목록")
 
-class RelatedDocumentItem(BaseModel):
-    id: str = Field(description="관련 문서의 고유 ID")
-    title: Optional[str] = Field(default=None, description="관련 문서의 제목")
-    doc_summary: Optional[str] = Field(default=None, description="관련 문서의 내용 요약")  # summary → doc_summary로 필드명 변경 (일관성)
-    url: Optional[str] = Field(default=None, description="관련 문서의 URL (해당하는 경우)")
-    source_type: Optional[str] = Field(default=None, description="문서 출처 유형 (예: 'kb')")
-    similarity_score: Optional[float] = Field(default=None, description="유사도 점수 (0.0 ~ 1.0)")
 
 class RelatedDocsResponse(BaseModel):
+    """관련 문서 검색 응답 모델"""
     ticket_id: str = Field(description="원본 티켓의 ID")
     related_documents: List[RelatedDocumentItem] = Field(description="검색된 관련 문서 목록")
 
@@ -578,73 +595,54 @@ async def get_initial_context(
     include_similar_tickets: bool = True
 ):
     """
-    티켓 초기화 엔드포인트 - 티켓 요약, 유사 티켓, 추천 솔루션 등 초기 데이터 제공
-    
-    Args:
-        ticket_id: 티켓 ID
-        company_id: 회사 ID (의존성 함수를 통해 헤더에서 자동 추출)
-        include_summary: 요약 정보 포함 여부 (기본값: True)
-        include_kb_docs: 지식베이스 문서 포함 여부 (기본값: True)
-        include_similar_tickets: 유사 티켓 포함 여부 (기본값: True)
-    
-    Returns:
-        통합된 초기 데이터 (요약, 유사 티켓, 추천 솔루션 등)
+    티켓 초기화 컨텍스트를 제공합니다.
+    티켓 요약, 유사 티켓, 관련 지식베이스 문서를 포함합니다.
     """
-    # 캐시된 데이터가 있는지 확인
-    context_cache_key = f"ctx_{ticket_id}"
-    cached_data = ticket_context_cache.get(context_cache_key)
-    if cached_data:
-        logger.info(f"티켓 ID {ticket_id} 캐시된 컨텍스트 데이터를 반환합니다.")
-        return cached_data
-        
-    # company_id가 None이면 기본값 설정
-    search_company_id = company_id if company_id else "default"
-    logger.info(f"티켓 ID {ticket_id} 초기화 요청 (회사 ID: {search_company_id})")
+    logger.info(f"티켓 {ticket_id} 초기화 요청 수신")
     
-    # 티켓 데이터 조회
+    # 검색용 company_id 처리
+    search_company_id = company_id if company_id != "default" else os.getenv("COMPANY_ID", "example-company")
+    
     try:
-        # doc_type='ticket'을 명시적으로 지정하여 예외 방지 및 일관성 확보
-        ticket_data = vector_db.get_by_id(original_id_value=ticket_id, company_id=search_company_id, doc_type="ticket")
-        if not ticket_data:
-            # Freshdesk API에서 직접 조회 시도
-            try:
-                ticket_data = await fetcher.fetch_ticket_details(int(ticket_id))
-                if not ticket_data:
-                    raise HTTPException(status_code=404, detail=f"티켓 ID {ticket_id}를 찾을 수 없습니다.")
-            except Exception as fetch_error:
-                logger.error(f"Freshdesk API에서 티켓 조회 중 오류: {fetch_error}")
-                raise HTTPException(status_code=404, detail=f"티켓 ID {ticket_id}를 찾을 수 없습니다.")
+        # Freshdesk API에서 티켓 정보 조회
+        ticket_data = await fetcher.fetch_ticket_details(int(ticket_id))
         
+        if not ticket_data:
+            # API 조회 실패 시 벡터 검색 폴백
+            ticket_data = vector_db.get_by_id(original_id_value=ticket_id, company_id=search_company_id, doc_type="ticket")
+            
+            if not ticket_data:
+                raise HTTPException(status_code=404, detail=f"티켓 ID {ticket_id}를 찾을 수 없습니다.")
+            
         # 메타데이터 추출
         ticket_metadata = ticket_data.get("metadata", {}) if isinstance(ticket_data, dict) else ticket_data
         ticket_title = ticket_metadata.get("subject", f"티켓 ID {ticket_id}")
         ticket_body = ticket_metadata.get("text", ticket_metadata.get("description_text", "티켓 본문 정보 없음"))
         
-        # 대화 내용 처리 - 전체 대화 내역 보존하여 요약 품질 개선
-        raw_conversations = ticket_metadata.get("conversations", [])
+        # 대화 내용 처리 - 원본 대화 내역 추출
+        raw_conversations = ticket_data.get("conversations", []) if isinstance(ticket_data, dict) else []
+        
         ticket_conversations = []
         
         if isinstance(raw_conversations, list):
-            # 원본 형식 보존 (가능한 경우 딕셔너리 형태 유지)
+            # 원본 형식 보존 (딕셔너리 형태 유지)
             ticket_conversations = raw_conversations
         elif isinstance(raw_conversations, str):
             try:
                 parsed_convs = json.loads(raw_conversations)
                 if isinstance(parsed_convs, list):
-                    ticket_conversations = parsed_convs  # 딕셔너리 형태 유지
+                    ticket_conversations = parsed_convs
                 else:
                     ticket_conversations = [{"body_text": str(parsed_convs), "created_at": datetime.now().timestamp()}]
             except json.JSONDecodeError:
                 ticket_conversations = [{"body_text": raw_conversations, "created_at": datetime.now().timestamp()}]
         
-        # 대화 내역이 없는 경우 대화 요약 사용 (최후의 대안)
+        # 대화 내역이 없는 경우 대화 요약 사용
         if not ticket_conversations and ticket_metadata.get("conversation_summary"):
             ticket_conversations = [{"body_text": str(ticket_metadata.get("conversation_summary")), 
                                     "created_at": datetime.now().timestamp()}]
             
-        logger.info(f"티켓 ID {ticket_id} 대화 내역 {len(ticket_conversations)}개 로드됨")
-            
-        logger.info(f"티켓 ID {ticket_id} 정보 조회 완료: 제목='{ticket_title[:50]}...'")
+        logger.info(f"✅ 티켓 {ticket_id} 정보 조회 완료 - 대화 내역: {len(ticket_conversations)}개")
     except HTTPException as http_exc:
         raise http_exc
     except Exception as e:
@@ -669,158 +667,65 @@ async def get_initial_context(
         else:
             conversation_texts.append(str(conv))
     
+    # 컨텍스트 구축 시작 시간
+    context_start_time = time.time()
+    
+    # Phase 1: Langchain RunnableParallel로 병렬 작업 관리
+    # 개별 태스크 정의 대신 Langchain 체인이 모든 작업을 처리
+    # 기존 asyncio.gather 방식과 동일한 성능을 유지하면서 더 나은 아키텍처 제공
+    
     # 작업별 데이터 초기화
     similar_tickets = []
     kb_documents = []
     ticket_summary = None
     task_times = {}  # 각 작업별 소요 시간 저장
     
-    # 컨텍스트 구축 시작 시간
-    context_start_time = time.time()
-    
-    # 모든 작업을 병렬로 실행하기 위한 태스크 목록 
-    all_tasks = []
-    task_names = []
-    
-    # 유사 티켓 검색 태스크 (벡터 검색)
-    if include_similar_tickets:
-        async def fetch_similar_tickets():
-            start_time = time.time()
-            try:
-                logger.info("🔍 유사 티켓 검색 시작...")
-                # /similar_tickets/{ticket_id} 엔드포인트 직접 호출
-                similar_tickets_response = await get_similar_tickets(ticket_id, company_id)
-                
-                # 응답 형식 변환: SimilarTicketItem[] -> DocumentInfo[]
-                st_results = []
-                for item in similar_tickets_response.similar_tickets:
-                    # 구조화된 형식으로 content 생성
-                    content_parts = []
-                    
-                    # 문제 상황 추가
-                    if item.issue:
-                        content_parts.append(f"문제 상황: {item.issue}")
-                    
-                    # 해결책 추가
-                    if item.solution:
-                        content_parts.append(f"해결책: {item.solution}")
-                        
-                    # ticket_summary가 있으면 추가
-                    if item.ticket_summary:
-                        content_parts.append(f"요약: {item.ticket_summary}")
-                    
-                    # content 구성
-                    content = "\n\n".join(content_parts) if content_parts else f"티켓 {item.id} 관련 정보"
-                    
-                    st_results.append(DocumentInfo(
-                        title=item.title or f"티켓 {item.id}",
-                        content=content,
-                        source_id=str(item.id),
-                        source_url=item.ticket_url or "",
-                        relevance_score=item.similarity_score or 0.0,  # 원래 유사도 값 그대로 유지
-                        doc_type="ticket"
-                    ))
-                
-                elapsed_time = time.time() - start_time
-                logger.info(f"✅ 유사 티켓 검색 완료: {elapsed_time:.3f}초, {len(st_results)}건")
-                return st_results, elapsed_time
-            except Exception as e:
-                elapsed_time = time.time() - start_time
-                logger.error(f"❌ 유사 티켓 검색 중 오류 발생: {str(e)}")
-                return [], elapsed_time  # 오류 시 빈 리스트와 소요 시간 반환
+    # Phase 1: Langchain RunnableParallel로 병렬 작업 실행
+    # 기존 asyncio.gather 방식에서 Langchain의 RunnableParallel로 전환
+    try:
+        logger.info(f"Langchain RunnableParallel을 사용한 병렬 처리 시작 (ticket_id: {ticket_id})")
+        parallel_start_time = time.time()
         
-        all_tasks.append(fetch_similar_tickets())
-        task_names.append('similar_tickets')
-    
-    # 지식베이스 문서 검색 태스크 (벡터 검색)
-    if include_kb_docs:
-        async def fetch_kb_documents():
-            start_time = time.time()
-            try:
-                logger.info("📚 지식베이스 문서 검색 시작...")
-                # /related_docs/{ticket_id} 엔드포인트 직접 호출
-                related_docs_response = await get_related_documents(ticket_id, company_id)
-                
-                # 응답 형식 변환: RelatedDocumentItem[] -> DocumentInfo[]
-                kb_results = []
-                for item in related_docs_response.related_documents:
-                    # source_url이 None이면 빈 문자열로 설정하여 오류 방지
-                    source_url = item.url or ""
-                    
-                    kb_results.append(DocumentInfo(
-                        title=item.title or f"문서 {item.id}",
-                        content=item.doc_summary or "내용 없음",
-                        source_id=str(item.id),
-                        source_url=source_url,
-                        relevance_score=item.similarity_score or 0.0,  # 원래 유사도 값 그대로 유지
-                        doc_type=item.source_type or "kb"
-                    ))
-                
-                elapsed_time = time.time() - start_time
-                logger.info(f"✅ 지식베이스 문서 검색 완료: {elapsed_time:.3f}초, {len(kb_results)}건")
-                return kb_results, elapsed_time
-            except Exception as e:
-                elapsed_time = time.time() - start_time
-                logger.error(f"❌ 지식베이스 문서 검색 중 오류 발생: {str(e)}")
-                return [], elapsed_time  # 오류 시 빈 리스트와 소요 시간 반환
+        # 티켓 정보 구성
+        ticket_info = {
+            "id": ticket_id,
+            "subject": ticket_title,
+            "description": ticket_body,
+            "conversations": ticket_conversations or [],
+            "metadata": ticket_metadata
+        }
         
-        all_tasks.append(fetch_kb_documents())
-        task_names.append('kb_documents')
-    
-    # 티켓 요약 생성 태스크 (LLM 호출)
-    if include_summary:
-        async def generate_summary():
-            start_time = time.time()
-            try:
-                logger.info("🟢 티켓 요약 생성 시작...")
-                
-                # 티켓 데이터 유효성 검사
-                if not ticket_title and not ticket_body:
-                    logger.warning(f"티켓 {ticket_id} 데이터가 부족함 (제목: {bool(ticket_title)}, 내용: {bool(ticket_body)})")
-                    elapsed_time = time.time() - start_time
-                    summary = TicketSummaryContent(
-                        ticket_summary="티켓 데이터가 부족하여 요약을 생성할 수 없습니다.",
-                        key_points=["데이터 부족"],
-                        sentiment="중립적",
-                        urgency_level="보통"
-                    )
-                    return summary, elapsed_time
-                
-                # 대화 내역을 안전하게 처리
-                conversations = ticket_conversations or []
-                
-                # 티켓 정보 수집
-                ticket_info = {
-                    "id": ticket_id,
-                    "subject": ticket_title,
-                    "description": ticket_body,
-                    "conversations": conversations,
-                    "metadata": ticket_metadata
-                }
-                
-                # LLM 호출하여 요약 생성
-                response = await llm_router.generate_ticket_summary(ticket_info)
-                
-                # LLM 응답 파싱
+        # Langchain RunnableParallel 체인 실행
+        chain_results = await llm_router.execute_init_parallel_chain(
+            ticket_data=ticket_info,
+            qdrant_client=vector_db.client,
+            company_id=search_company_id
+        )
+        
+        parallel_execution_time = time.time() - parallel_start_time
+        logger.info(f"Langchain RunnableParallel 실행 완료 (ticket_id: {ticket_id}, 총 실행시간: {parallel_execution_time:.2f}초)")
+        
+        # 체인 결과를 기존 형식으로 변환
+        results = []
+        task_names_ordered = []
+        
+        # 요약 결과 처리
+        if include_summary and 'summary' in chain_results:
+            summary_result = chain_results['summary']
+            if summary_result.get('success', False):
+                summary_data = summary_result.get('result', {})
                 summary = TicketSummaryContent(
-                    ticket_summary=response.get('summary', '요약 생성에 실패했습니다.'),
-                    key_points=response.get('key_points', []),
-                    sentiment=response.get('sentiment', '중립적'),
-                    priority_recommendation=response.get('priority_recommendation', '보통'),
-                    urgency_level=response.get('urgency_level', '보통')
+                    ticket_summary=summary_data.get('summary', '요약 생성에 실패했습니다.'),
+                    key_points=summary_data.get('key_points', []),
+                    sentiment=summary_data.get('sentiment', '중립적'),
+                    priority_recommendation=summary_data.get('priority_recommendation', '보통'),
+                    urgency_level=summary_data.get('urgency_level', '보통')
                 )
-                
                 # 캐시에 저장
                 ticket_summary_cache[ticket_id] = summary
-                
-                elapsed_time = time.time() - start_time
-                logger.info(f"✅ 티켓 요약 생성 완료: {elapsed_time:.3f}초")
-                return summary, elapsed_time
-                
-            except Exception as e:
-                elapsed_time = time.time() - start_time
-                logger.error(f"❌ 티켓 {ticket_id} 요약 생성 중 오류 발생: {str(e)}", exc_info=True)
-                # 오류 시 기본 요약 반환
+                ticket_summary = summary
+            else:
+                # 에러 시 기본 요약 생성
                 summary = TicketSummaryContent(
                     ticket_summary=f"오류로 인해 요약 생성에 실패했습니다. 티켓 제목: {ticket_title or '제목 없음'}",
                     key_points=["요약 생성 오류", "수동 검토 필요"],
@@ -828,52 +733,82 @@ async def get_initial_context(
                     priority_recommendation="보통",
                     urgency_level="보통"
                 )
-                return summary, elapsed_time
-        
-        all_tasks.append(generate_summary())
-        task_names.append('summary')
-    
-    # 모든 작업을 병렬로 실행
-    if all_tasks:
-        logger.info(f"🚀 모든 태스크 {len(all_tasks)}개 병렬 실행 시작... (순서: {', '.join(task_names)})")
-        results = await asyncio.gather(*all_tasks)
-        
-        # 결과 처리
-        for i, task_name in enumerate(task_names):
-            result, elapsed_time = results[i]
-            task_times[task_name] = elapsed_time
+                ticket_summary = summary
             
-            if task_name == 'similar_tickets':
-                similar_tickets = result
-            elif task_name == 'kb_documents':
-                kb_documents = result
-            elif task_name == 'summary':
-                ticket_summary = result
+            results.append((summary, summary_result.get('execution_time', 0)))
+            task_names_ordered.append('summary')
+            task_times['summary'] = summary_result.get('execution_time', 0)
+        
+        # 유사 티켓 결과 처리  
+        if include_similar_tickets and 'similar_tickets' in chain_results:
+            similar_result = chain_results['similar_tickets']
+            if similar_result.get('success', False):
+                similar_tickets = similar_result.get('result', [])
+            else:
+                similar_tickets = []
+                logger.warning(f"유사 티켓 검색 실패: {similar_result.get('error', 'Unknown error')}")
+            
+            results.append((similar_tickets, similar_result.get('execution_time', 0)))
+            task_names_ordered.append('similar_tickets')
+            task_times['similar_tickets'] = similar_result.get('execution_time', 0)
+        
+        # 지식베이스 문서 결과 처리
+        if include_kb_docs and 'kb_documents' in chain_results:
+            kb_result = chain_results['kb_documents']
+            if kb_result.get('success', False):
+                kb_documents = kb_result.get('result', [])
+            else:
+                kb_documents = []
+                logger.warning(f"지식베이스 문서 검색 실패: {kb_result.get('error', 'Unknown error')}")
+            
+            results.append((kb_documents, kb_result.get('execution_time', 0)))
+            task_names_ordered.append('kb_documents')
+            task_times['kb_documents'] = kb_result.get('execution_time', 0)
+        
+        # task_names를 정렬된 순서로 업데이트
+        task_names = task_names_ordered
+        
+    except Exception as e:
+        logger.error(f"Langchain RunnableParallel 실행 중 예상치 못한 오류 발생: {str(e)}")
+        # 폴백으로 기존 asyncio.gather 방식 사용 (현재는 비활성화)
+        logger.warning("Langchain 체인 실행 실패, 기본값으로 응답 생성")
+        
+        # 기본값 설정
+        if include_summary and not ticket_summary:
+            ticket_summary = TicketSummaryContent(
+                ticket_summary=f"티켓 제목: {ticket_title or '제목 없음'}",
+                key_points=["Langchain 처리 오류로 인한 기본 요약"],
+                sentiment="중립적",
+                priority_recommendation="보통",
+                urgency_level="보통"
+            )
+        
+        if include_similar_tickets and not similar_tickets:
+            similar_tickets = []
+            
+        if include_kb_docs and not kb_documents:
+            kb_documents = []
+        
+        task_names = []
+        if include_summary:
+            task_names.append('summary')
+        if include_similar_tickets:
+            task_names.append('similar_tickets')
+        if include_kb_docs:
+            task_names.append('kb_documents')
     
     # 전체 요청 처리 총 소요 시간 계산
     total_time = time.time() - context_start_time
     
-    # 타이밍 로그 출력 (모든 처리 완료 후 한 번에)
-    logger.info("=== /init/{} 처리 시간 분석 (병렬 처리) ===".format(ticket_id))
-    if 'summary' in task_times:
-        logger.info(f"🟢 티켓 요약 생성: {task_times['summary']:.3f}초")
-    if 'similar_tickets' in task_times:
-        logger.info(f"🔍 유사 티켓 검색: {task_times['similar_tickets']:.3f}초")
-    if 'kb_documents' in task_times:
-        logger.info(f"📚 추천 솔루션 검색: {task_times['kb_documents']:.3f}초")
-    
-    # 개별 작업 시간의 합계 계산 (참고용)
-    total_individual_time = sum(task_times.values())
-    logger.info(f"📊 개별 작업 시간 합계: {total_individual_time:.3f}초 (순차 처리시 예상 시간)")
-    logger.info(f"⏱️ 실제 총 소요시간: {total_time:.3f}초 (병렬 처리)")
-    
-    # 성능 개선 효과 계산
-    if total_individual_time > 0:
-        improvement_ratio = total_individual_time / total_time
-        time_saved = total_individual_time - total_time
-        logger.info(f"🚀 병렬 처리 효과: {improvement_ratio:.1f}배 빠름 ({time_saved:.3f}초 단축)")
-    
-    logger.info("=========================")
+    # 성능 향상 효과 계산 및 로깅
+    if task_times:
+        total_individual_time = sum(task_times.values())
+        if total_individual_time > 0:
+            improvement_ratio = total_individual_time / total_time
+            time_saved = total_individual_time - total_time
+            logger.info(f"🚀 병렬 처리 효과 - 총 시간: {total_time:.3f}초 ({improvement_ratio:.1f}배 빠름, {time_saved:.3f}초 단축)")
+        else:
+            logger.info(f"⏱️ 총 소요 시간: {total_time:.3f}초")
     
     # 결과 구성
     # 티켓 메타데이터에 id가 없으면 ticket_id로 추가
@@ -920,22 +855,19 @@ async def get_similar_tickets(ticket_id: str, company_id: str = Depends(get_comp
         SimilarTicketsResponse: 유사 티켓 목록
     """
     try:
-        logger.info(f"유사 티켓 검색 시작 (ticket_id: {ticket_id}, company_id: {company_id})")
+        logger.info(f"유사 티켓 검색 시작 (ticket_id: {ticket_id})")
         
-        # 1. 현재 티켓 데이터를 Qdrant에서 가져오기 시도
-        # doc_type='ticket'을 명시적으로 지정하여 예외 방지 및 일관성 확보
+        # 1. 현재 티켓 데이터 조회
         current_ticket_data = vector_db.get_by_id(original_id_value=ticket_id, company_id=company_id, doc_type="ticket")
         
         if not current_ticket_data or not current_ticket_data.get("metadata"):
             # Qdrant에서 찾을 수 없으면 Freshdesk API에서 가져오기
-            logger.info(f"Qdrant에서 티켓 {ticket_id}를 찾을 수 없어 Freshdesk API를 호출합니다.")
             current_ticket_data = await fetcher.fetch_ticket_details(int(ticket_id))
             if not current_ticket_data:
                 raise HTTPException(status_code=404, detail=f"티켓 ID {ticket_id}를 찾을 수 없습니다.")
         else:
             # Qdrant에서 가져온 경우 metadata를 최상위로 올리기
             current_ticket_data = current_ticket_data["metadata"]
-            logger.info(f"Qdrant에서 티켓 {ticket_id} 데이터를 성공적으로 가져왔습니다.")
         
         # 2. 검색용 쿼리 텍스트 생성
         search_query = await llm_router.generate_search_query(current_ticket_data)
@@ -946,9 +878,8 @@ async def get_similar_tickets(ticket_id: str, company_id: str = Depends(get_comp
         # 3. 검색 쿼리 임베딩 생성
         try:
             query_embedding = await llm_router.generate_embedding(search_query)
-            logger.info(f"검색 쿼리 임베딩 생성 완료 (vector_size: {len(query_embedding)})")
         except Exception as e:
-            logger.error(f"임베딩 생성 실패, 더미 임베딩 사용: {e}")
+            logger.error(f"임베딩 생성 실패: {e}")
             # 임베딩 생성 실패 시 더미 임베딩 사용 (fallback)
             query_embedding = [0.1] * 1536  # OpenAI embedding 차원에 맞춤
         
@@ -1032,7 +963,7 @@ async def get_similar_tickets(ticket_id: str, company_id: str = Depends(get_comp
                 if len(similar_tickets_list) >= 5:
                     break
         
-        logger.info(f"티켓 {ticket_id}에 대한 유사 티켓 {len(similar_tickets_list)}건 검색 완료")
+        logger.info(f"티켓 {ticket_id} 유사 티켓 검색 완료: {len(similar_tickets_list)}건")
         return SimilarTicketsResponse(ticket_id=str(ticket_id), similar_tickets=similar_tickets_list)
         
     except HTTPException as e:
@@ -1054,19 +985,17 @@ async def get_related_documents(ticket_id: str, company_id: str = Depends(get_co
         RelatedDocsResponse: 관련 문서 목록
     """
     try:
-        logger.info(f"관련 문서 검색 시작 (ticket_id: {ticket_id}, company_id: {company_id})")
+        logger.info(f"관련 문서 검색 시작 (ticket_id: {ticket_id})")
         
-        # 1. 현재 티켓 데이터를 Qdrant에서 가져오기 시도
-        # doc_type='ticket'을 명시적으로 지정하여 예외 방지 및 일관성 확보
+        # 1. 현재 티켓 데이터 조회
         current_ticket_data = vector_db.get_by_id(original_id_value=ticket_id, company_id=company_id, doc_type="ticket")
         
         if not current_ticket_data or not current_ticket_data.get("metadata"):
             # Qdrant에서 찾을 수 없으면 Freshdesk API에서 가져오기
-            logger.info(f"Qdrant에서 티켓 {ticket_id}를 찾을 수 없어 Freshdesk API를 호출합니다.")
             try:
                 current_ticket_data = await fetcher.fetch_ticket_details(int(ticket_id))
             except Exception as api_error:
-                logger.error(f"Freshdesk API에서 티켓 {ticket_id} 조회 실패: {api_error}")
+                logger.error(f"Freshdesk API 조회 실패: {api_error}")
                 current_ticket_data = None
                 
             if not current_ticket_data:
@@ -1074,7 +1003,6 @@ async def get_related_documents(ticket_id: str, company_id: str = Depends(get_co
         else:
             # Qdrant에서 가져온 경우 metadata를 최상위로 올리기
             current_ticket_data = current_ticket_data["metadata"]
-            logger.info(f"Qdrant에서 티켓 {ticket_id} 데이터를 성공적으로 가져왔습니다.")
         
         # 2. 검색용 쿼리 텍스트 생성
         search_query = None
@@ -1094,9 +1022,8 @@ async def get_related_documents(ticket_id: str, company_id: str = Depends(get_co
         # 3. 검색 쿼리 임베딩 생성
         try:
             query_embedding = await llm_router.generate_embedding(search_query)
-            logger.info(f"검색 쿼리 임베딩 생성 완료 (vector_size: {len(query_embedding)})")
         except Exception as e:
-            logger.error(f"임베딩 생성 실패, 더미 임베딩 사용: {e}")
+            logger.error(f"임베딩 생성 실패: {e}")
             # 임베딩 생성 실패 시 더미 임베딩 사용 (fallback)
             query_embedding = [0.1] * 1536  # OpenAI embedding 차원에 맞춤
         
@@ -1108,15 +1035,12 @@ async def get_related_documents(ticket_id: str, company_id: str = Depends(get_co
             related_docs_result = retriever.retrieve_top_k_docs(
                 query_embedding=query_embedding, 
                 top_k=10,  # 더 많이 가져와서 필터링
-                doc_type="kb",  # "kb" 타입으로 검색 (vectordb.py에서 1과 "1"도 함께 처리)
+                doc_type="kb",  # "kb" 타입으로 검색
                 company_id=company_id
             )
-            logger.info(f"KB 검색 완료: {len(related_docs_result.get('documents', []))}개 결과")
             
             # 결과가 없으면 메모리 내 필터링 방식으로 시도
             if not related_docs_result.get('documents'):
-                logger.info("KB 문서(type=1) 검색 결과가 없어 직접 검색 시도")
-                
                 # 필터 없이 검색 후 메모리에서 필터링
                 all_results = vector_db.search(
                     query_embedding=query_embedding,
@@ -1132,7 +1056,6 @@ async def get_related_documents(ticket_id: str, company_id: str = Depends(get_co
                 
                 # 결과가 있는 경우 필터링
                 if all_results and all_results.get("results"):
-                    logger.info(f"벡터DB에서 반환된 전체 결과: {len(all_results['results'])}개")
                     for i, result in enumerate(all_results.get("results", [])):
                         # KB 문서 타입 필드들 (여러 필드 확인)
                         doc_type = result.get("doc_type")
@@ -1177,13 +1100,11 @@ async def get_related_documents(ticket_id: str, company_id: str = Depends(get_co
                 # 필터링된 결과 구성
                 related_docs_result = {
                     "documents": documents,
-                    "metadatas": metadatas, 
-                    "distances": distances,
-                    "ids": ids
-                }
-                logger.info(f"메모리 내 필터링 후 KB 문서(type=1) 검색 결과: {len(documents)}개")
+                    "metadatas": metadatas,                "distances": distances,
+                "ids": ids
+            }
         except Exception as kb_error:
-            logger.error(f"KB 문서 검색 실패: {kb_error}", exc_info=True)
+            logger.error(f"KB 문서 검색 실패: {kb_error}")
             related_docs_result = {
                 "documents": [],
                 "metadatas": [],
@@ -1207,7 +1128,6 @@ async def get_related_documents(ticket_id: str, company_id: str = Depends(get_co
             
             # 결과가 results 목록에 있는 경우
             if not doc_ids and results:
-                logger.info("결과가 results 목록에 있습니다. results 기준으로 처리합니다.")
                 for i, result in enumerate(results):
                     metadata = result  # result 자체가 메타데이터
                     doc_id = result.get("id", f"unknown-{i}")
@@ -1318,35 +1238,28 @@ async def get_related_documents(ticket_id: str, company_id: str = Depends(get_co
         # 유사도 점수 기준으로 정렬하고 상위 결과만 반환
         related_docs_list.sort(key=lambda x: x.similarity_score, reverse=True)
         
-        # 너무 낮은 유사도 점수의 결과 필터링 - 임계값 0.3에서 0.25로 더 낮춤 (25%)
-        min_similarity = 0.25  # 더 많은 결과를 얻기 위해 임계값을 25%로 낮춤
+        # 너무 낮은 유사도 점수의 결과 필터링 - 임계값 0.25 (25%)
+        min_similarity = 0.25
         filtered_docs = [doc for doc in related_docs_list if doc.similarity_score >= min_similarity]
         
         # 최대 반환 결과 수 제한 (상위 5개)
         if filtered_docs:
-            logger.info(f"임계값 {min_similarity} 이상의 관련 문서 {len(filtered_docs)}건 발견")
             related_docs_list = filtered_docs[:5]
         else:
             # 유사도가 낮더라도 검색 결과가 있으면 결과는 반환
             if related_docs_list:
-                logger.info("임계값보다 낮은 문서만 발견되어 상위 3개 반환")
                 related_docs_list = related_docs_list[:3]
             else:
                 # 결과가 전혀 없으면 빈 응답 반환
                 logger.warning("관련 문서 검색 결과가 없습니다.")
         
-        # 관련 문서 유형별 카운팅을 위한 통계 계산
+        # 결과 통계 로깅
         docs_by_type = {}
         for doc in related_docs_list:
             doc_type = doc.source_type or "unknown"
-            if doc_type in docs_by_type:
-                docs_by_type[doc_type] += 1
-            else:
-                docs_by_type[doc_type] = 1
+            docs_by_type[doc_type] = docs_by_type.get(doc_type, 0) + 1
                 
-        # 결과 통계 로깅
-        type_counts = ", ".join([f"{k}: {v}" for k, v in docs_by_type.items()])
-        logger.info(f"티켓 {ticket_id}에 대한 관련 문서 검색 완료: 총 {len(related_docs_list)}건 (유형별: {type_counts})")
+        logger.info(f"티켓 {ticket_id} 관련 문서 검색 완료: {len(related_docs_list)}건")
         return RelatedDocsResponse(ticket_id=ticket_id, related_documents=related_docs_list)
         
     except HTTPException as e:
@@ -1393,7 +1306,7 @@ async def generate_reply(request: GenerateReplyRequest):
     similar_tickets = context["similar_tickets"]
     kb_documents = context["kb_documents"]
     
-    logger.info(f"티켓 ID {ticket_id}에 대한 응답 생성 시작 (회사 ID: {company_id})")
+    logger.info(f"티켓 ID {ticket_id}에 대한 응답 생성 시작")
     
     # 티켓 메타데이터 추출
     ticket_metadata = ticket_data.get("metadata", {})
@@ -1460,6 +1373,7 @@ async def generate_reply(request: GenerateReplyRequest):
         })
     
     # 최적화된 컨텍스트 구성 (쿼리는 티켓 제목으로 설정)
+   
     query_for_context = f"{ticket_title} {ticket_body[:200]}"  # 티켓 정보를 쿼리로 사용
     
     optimized_context = ""
@@ -1584,7 +1498,7 @@ async def search_query(req: QueryRequest, company_id: str = Depends(get_company_
     start_time = time.time()
     
     try:
-        logger.info(f"자연어 검색 시작 (query: {req.query[:50]}..., company_id: {company_id})")
+        logger.info(f"자연어 검색 시작 (query: {req.query[:50]}...)")
         
         # 회사 ID 오버라이드 (요청에 명시된 경우)
         if req.company_id:
@@ -1603,9 +1517,8 @@ async def search_query(req: QueryRequest, company_id: str = Depends(get_company_
         # 1. 검색 쿼리 임베딩 생성
         try:
             query_embedding = await llm_router.generate_embedding(req.query)
-            logger.info(f"검색 쿼리 임베딩 생성 완료 (vector_size: {len(query_embedding)})")
         except Exception as e:
-            logger.error(f"임베딩 생성 실패, 더미 임베딩 사용: {e}")
+            logger.error(f"임베딩 생성 실패: {e}")
             # 임베딩 생성 실패 시 더미 임베딩 사용 (fallback)
             query_embedding = [0.1] * 1536  # OpenAI embedding 차원에 맞춤
         
@@ -1677,7 +1590,7 @@ async def search_query(req: QueryRequest, company_id: str = Depends(get_company_
         # 5. 응답 생성
         search_time_ms = int((time.time() - start_time) * 1000)
         
-        logger.info(f"자연어 검색 완료 (총 {len(final_results)}건, {search_time_ms}ms 소요)")
+        logger.info(f"자연어 검색 완료: {len(final_results)}건 ({search_time_ms}ms)")
         
         return SearchQueryResponse(
             query=req.query,

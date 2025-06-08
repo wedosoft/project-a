@@ -6,18 +6,23 @@ anthropic>=0.51.0
 httpx==0.25.2
 pydantic>=2.7.0  # Pydantic 버전을 pydantic-settings와 호환되도록 조정
 pydantic-settings==2.9.1  # Pydantic v2 설정 관리 패키지
-openai==1.3.7
+openai>=1.10.0,<2.0.0  # Langchain 호환을 위한 OpenAI 버전 업그레이드
 python-dotenv==1.0.0
 Pillow==10.1.0
 pytesseract==0.3.10
 PyPDF2==3.0.1
 python-docx==1.0.1
-tiktoken==0.5.1
+tiktoken>=0.5.2,<1.0.0  # Langchain 호환을 위한 tiktoken 버전 업그레이드
 tenacity==8.2.3
 google-generativeai>=0.3.0 # Gemini API
 cachetools>=4.2.0 # For in-memory caching
 prometheus-client>=0.14.1 # Prometheus metrics client
 pandas>=1.5.0
 psutil>=5.8.0  # 시스템 리소스 모니터링을 위한 패키지
+# Langchain 의존성 추가 (Phase 1: RunnableParallel 적용)
+langchain==0.1.16
+langchain-community==0.0.34
+langchain-core==0.1.45
+langchain-openai==0.1.3
 # 성능 모니터링을 위한 추가 패키지
 # logging==0.4.9.6 - 제거됨, Python 내장 모듈과 충돌

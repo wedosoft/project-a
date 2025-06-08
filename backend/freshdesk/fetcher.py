@@ -122,15 +122,17 @@ async def fetch_ticket_conversations(client: httpx.AsyncClient, ticket_id: int) 
         logger.error(f"티켓 {ticket_id}의 대화 내역 가져오기 오류: {e}")
         return []
 
-async def fetch_ticket_attachments(client: httpx.AsyncClient, ticket_id: int) -> List[Dict[str, Any]]:
+async def fetch_ticket_attachments(client: httpx.AsyncClient, ticket_id: int, ticket_detail: Dict[str, Any] = None, conversations: List[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     """
     특정 티켓의 첨부파일 정보를 가져옵니다.
+    ticket_detail과 conversations가 제공되면 재사용하여 API 호출을 줄입니다.
     """
     attachments = []
     try:
-        # 티켓 상세 정보를 가져와 첨부파일 확인
-        logger.info(f"티켓 {ticket_id}의 상세 정보 요청 중...")
-        ticket_detail = await fetch_with_retry(client, f"{BASE_URL}/tickets/{ticket_id}")
+        # 티켓 상세 정보가 제공되지 않은 경우에만 가져오기
+        if ticket_detail is None:
+            logger.info(f"티켓 {ticket_id}의 상세 정보 요청 중...")
+            ticket_detail = await fetch_with_retry(client, f"{BASE_URL}/tickets/{ticket_id}")
         
         # 티켓 자체의 첨부파일 정보 추출
         if "attachments" in ticket_detail and ticket_detail["attachments"]:
@@ -147,8 +149,9 @@ async def fetch_ticket_attachments(client: httpx.AsyncClient, ticket_id: int) ->
                     "conversation_id": None  # 티켓 자체 첨부파일
                 })
         
-        # 대화 내역의 첨부파일도 확인
-        conversations = await fetch_ticket_conversations(client, ticket_id)
+        # 대화 내역이 제공되지 않은 경우에만 가져오기
+        if conversations is None:
+            conversations = await fetch_ticket_conversations(client, ticket_id)
         for conv in conversations:
             # conv가 None이 아니고 딕셔너리 타입인지 확인
             if conv is not None and isinstance(conv, dict) and "attachments" in conv and conv["attachments"]:
@@ -407,10 +410,13 @@ async def fetch_ticket_details(ticket_id: int) -> Dict[str, Any]:
             logger.info(f"티켓 {ticket_id} 기본 정보 수신 완료")
 
             # 대화 내역 포함 (기존 함수 활용)
-            ticket_data["conversations"] = await fetch_ticket_conversations(client, ticket_id)
+            conversations = await fetch_ticket_conversations(client, ticket_id)
+            ticket_data["conversations"] = conversations
             
-            # 첨부파일 포함 (기존 함수 활용)
-            ticket_data["all_attachments"] = await fetch_ticket_attachments(client, ticket_id)
+            # 첨부파일 포함 (이미 가져온 대화 내역을 재사용하여 API 호출 최적화)
+            ticket_data["all_attachments"] = await fetch_ticket_attachments(
+                client, ticket_id, ticket_detail=ticket_data, conversations=conversations
+            )
             
             logger.info(f"티켓 {ticket_id} 상세 정보 (대화, 첨부파일 포함) 가져오기 완료")
             return ticket_data

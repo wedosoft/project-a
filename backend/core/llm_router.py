@@ -21,6 +21,9 @@ import google.generativeai as genai  # Gemini SDK 임포트
 import httpx
 import openai
 from cachetools import TTLCache
+
+# Langchain imports for Phase 1: RunnableParallel
+from langchain_core.runnables import RunnableLambda, RunnableParallel
 from prometheus_client import Counter, Gauge, Histogram
 from pydantic import BaseModel, Field
 from tenacity import (
@@ -29,6 +32,13 @@ from tenacity import (
     stop_after_attempt,
     wait_exponential,
 )
+
+# 프로젝트 내부 모듈 import
+try:
+    from .retriever import retrieve_top_k_docs
+except ImportError:
+    # 상대 경로로 실행될 때 fallback
+    from backend.core.retriever import retrieve_top_k_docs
 
 # 로깅 설정
 logger = logging.getLogger(__name__)
@@ -209,7 +219,7 @@ class LLMProvider:
 class AnthropicProvider(LLMProvider):
     """Anthropic Claude API 제공자"""
     
-    def __init__(self, api_key: str = None, timeout: float = 10.0):
+    def __init__(self, api_key: Optional[str] = None, timeout: float = 10.0):
         super().__init__(name="anthropic", timeout=timeout) # 부모 클래스 생성자 호출
         self.api_key = api_key or ANTHROPIC_API_KEY
         if not self.api_key:
@@ -1520,11 +1530,11 @@ class LLMRouter:
             json_patterns.append(rf'"{name}"[\s:]*\'(.*?)(?:\'|\n)')
             json_patterns.append(rf"'{name}'[\s:]*\"(.*?)(?:\"|\n)")
             # 큰 따옴표 키, 값은 없음
-            json_patterns.append(rf'"{name}"[\s:]*([^",\}}\]]+)')
+            json_patterns.append(rf'"{name}"[\s:]*([^",\}}]+)')
             # 작은 따옴표 키, 값은 없음
-            json_patterns.append(rf"'{name}'[\s:]*([^',\}}\]]+)")
+            json_patterns.append(rf"'{name}'[\s:]*([^',\}}]+)")
             # 따옴표 없는 JSON 스타일
-            json_patterns.append(rf"{name}[\s:]*([^,\}}\]]+)")
+            json_patterns.append(rf"{name}[\s:]*([^,\}}]+)")
         
         for pattern in json_patterns:
             match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
@@ -1620,6 +1630,429 @@ class LLMRouter:
                     return '\n\n'.join(paragraphs[-2:])[:500]
             
         return default
+
+    async def _generate_summary_task(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """티켓 요약 생성 태스크"""
+        try:
+            ticket_data = inputs["ticket_data"]
+            logger.info(f"티켓 요약 생성 시작 (ticket_id: {ticket_data.get('id')})")
+            start_time = time.time()
+            
+            summary_result = await self.generate_ticket_summary(ticket_data)
+            
+            execution_time = time.time() - start_time
+            logger.info(f"티켓 요약 생성 완료 (ticket_id: {ticket_data.get('id')}, 실행시간: {execution_time:.2f}초)")
+            
+            return {
+                "task_type": "summary",
+                "result": summary_result,
+                "execution_time": execution_time,
+                "success": True
+            }
+        except Exception as e:
+            error_msg = f"티켓 요약 생성 실패: {str(e)}"
+            logger.error(error_msg)
+            return {
+                "task_type": "summary", 
+                "error": error_msg,
+                "execution_time": 0,
+                "success": False
+            }
+    
+    async def _fetch_similar_tickets_task(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """유사 티켓 검색 태스크 - 실제 벡터 검색 구현"""
+        try:
+            # 입력 데이터 추출
+            ticket_data = inputs["ticket_data"]
+            qdrant_client = inputs["qdrant_client"]
+            company_id = inputs["company_id"]
+            
+            logger.info(f"유사 티켓 검색 시작 (ticket_id: {ticket_data.get('id')})")
+            start_time = time.time()
+            
+            # 검색할 컨텐츠가 없는 경우 빈 결과 반환
+            ticket_title = ticket_data.get('subject', '')
+            ticket_body = ticket_data.get('description', '')
+            
+            if not ticket_title and not ticket_body:
+                logger.warning(f"티켓 {ticket_data.get('id')}의 검색 텍스트가 비어있습니다.")
+                return {
+                    "task_type": "similar_tickets",
+                    "result": [],
+                    "execution_time": time.time() - start_time,
+                    "success": True
+                }
+            
+            # 검색 쿼리 생성 (기존 로직과 동일)
+            search_query = await self.generate_search_query(ticket_data)
+            if not search_query.strip():
+                logger.warning(f"티켓 {ticket_data.get('id')}의 검색 쿼리가 비어있습니다.")
+                return {
+                    "task_type": "similar_tickets",
+                    "result": [],
+                    "execution_time": time.time() - start_time,
+                    "success": True
+                }
+            
+            # 임베딩 생성
+            query_embedding = await self.generate_embedding(search_query)
+            
+            # 벡터 DB에서 유사 티켓 검색 (현재 티켓 제외)
+            similar_tickets_result = retrieve_top_k_docs(
+                query_embedding=query_embedding,
+                top_k=10,  # 더 많이 가져와서 필터링
+                doc_type="ticket",
+                company_id=company_id
+            )
+            
+            # 검색 결과를 SimilarTicketItem 형태로 변환
+            similar_tickets = []
+            current_ticket_id = str(ticket_data.get('id'))
+            
+            if similar_tickets_result and similar_tickets_result.get("ids"):
+                for i, doc_id in enumerate(similar_tickets_result["ids"]):
+                    # 현재 티켓과 동일한 ID는 제외
+                    if str(doc_id) == current_ticket_id:
+                        continue
+                        
+                    metadata = similar_tickets_result["metadatas"][i] if i < len(similar_tickets_result.get("metadatas", [])) else {}
+                    
+                    # 티켓 제목 추출
+                    title = (
+                        metadata.get("title") or 
+                        metadata.get("subject") or 
+                        f"티켓 {doc_id}"
+                    )
+                    
+                    # 거리/점수 정보 추가
+                    distance = similar_tickets_result.get("distances", [0])[i] if i < len(similar_tickets_result.get("distances", [])) else 0
+                    similarity_score = max(0, 1 - distance)  # 거리를 유사도로 변환
+                    
+                    # 티켓 ID 추출 (original_id 또는 doc_id 사용)
+                    original_ticket_id = metadata.get("original_id", str(doc_id))
+                    
+                    # "ticket-xxxx" 형식에서 숫자 부분만 추출
+                    ticket_number = original_ticket_id
+                    if isinstance(original_ticket_id, str) and original_ticket_id.startswith("ticket-"):
+                        ticket_number = original_ticket_id.replace("ticket-", "")
+                    
+                    # Freshdesk 원본 티켓 링크 생성
+                    freshdesk_domain = os.getenv("FRESHDESK_DOMAIN", "example.freshdesk.com")
+                    ticket_url = f"https://{freshdesk_domain}/a/tickets/{ticket_number}"
+                    
+                    # Issue/Solution 분석을 위한 티켓 데이터 구성
+                    ticket_data_for_analysis = {
+                        "id": ticket_number,
+                        "subject": title,
+                        "description_text": similar_tickets_result["documents"][i] if i < len(similar_tickets_result.get("documents", [])) else "",
+                        "status": metadata.get("status", ""),
+                        "priority": metadata.get("priority", "")
+                    }
+                    
+                    # LLM을 사용한 Issue/Solution 분석 수행
+                    try:
+                        analysis_result = await self.analyze_ticket_issue_solution(ticket_data_for_analysis)
+                        issue = analysis_result.get("issue", "문제 상황을 분석할 수 없습니다.")
+                        solution = analysis_result.get("solution", "해결책을 찾을 수 없습니다.")
+                    except Exception as e:
+                        logger.warning(f"티켓 {doc_id} Issue/Solution 분석 실패: {e}")
+                        issue = "문제 상황 분석 실패"
+                        solution = "해결책 분석 실패"
+                    
+                    # 기존 호환성을 위한 요약 생성
+                    summary_text = similar_tickets_result["documents"][i] if i < len(similar_tickets_result.get("documents", [])) else ""
+                    if not summary_text:
+                        summary_text = metadata.get("description_text", "요약 정보 없음")
+                    summary = summary_text[:200] + "..." if len(summary_text) > 200 else summary_text
+                    
+                    # SimilarTicketItem 모델과 호환되는 형태로 반환
+                    try:
+                        from api.main import SimilarTicketItem
+                    except ImportError:
+                        from backend.api.main import SimilarTicketItem
+                    similar_tickets.append(SimilarTicketItem(
+                        id=str(ticket_number),  # 순수 티켓 번호만 사용
+                        title=title,
+                        issue=issue,
+                        solution=solution,
+                        ticket_url=ticket_url,
+                        similarity_score=round(similarity_score, 3),
+                        ticket_summary=summary  # 기존 호환성을 위해 유지
+                    ))
+                    
+                    # 최대 5개까지만 반환
+                    if len(similar_tickets) >= 5:
+                        break
+            
+            execution_time = time.time() - start_time
+            logger.info(f"유사 티켓 검색 완료 (ticket_id: {ticket_data.get('id')}, 검색결과: {len(similar_tickets)}건, 실행시간: {execution_time:.2f}초)")
+            
+            return {
+                "task_type": "similar_tickets",
+                "result": similar_tickets,
+                "execution_time": execution_time,
+                "success": True
+            }
+        except Exception as e:
+            error_msg = f"유사 티켓 검색 실패: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return {
+                "task_type": "similar_tickets",
+                "error": error_msg, 
+                "execution_time": 0,
+                "success": False
+            }
+    
+    async def _fetch_kb_documents_task(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """지식베이스 문서 검색 태스크 - 실제 벡터 검색 구현"""
+        try:
+            # 입력 데이터 추출
+            ticket_data = inputs["ticket_data"]
+            qdrant_client = inputs["qdrant_client"]
+            company_id = inputs["company_id"]
+            
+            logger.info(f"지식베이스 문서 검색 시작 (ticket_id: {ticket_data.get('id')})")
+            start_time = time.time()
+            
+            # 검색할 컨텐츠가 없는 경우 빈 결과 반환
+            ticket_title = ticket_data.get('subject', '')
+            ticket_body = ticket_data.get('description', '')
+            
+            if not ticket_title and not ticket_body:
+                logger.warning(f"티켓 {ticket_data.get('id')}의 검색 텍스트가 비어있습니다.")
+                return {
+                    "task_type": "kb_documents",
+                    "result": [],
+                    "execution_time": time.time() - start_time,
+                    "success": True
+                }
+            
+            # 검색 쿼리 생성 (기존 로직과 동일)
+            search_query = await self.generate_search_query(ticket_data)
+            if not search_query.strip():
+                logger.warning(f"티켓 {ticket_data.get('id')}의 검색 쿼리가 비어있습니다.")
+                return {
+                    "task_type": "kb_documents",
+                    "result": [],
+                    "execution_time": time.time() - start_time,
+                    "success": True
+                }
+            
+            # 임베딩 생성
+            query_embedding = await self.generate_embedding(search_query)
+            
+            # 벡터 DB에서 지식베이스 문서 검색
+            related_docs_result = retrieve_top_k_docs(
+                query_embedding=query_embedding,
+                top_k=10,  # 더 많이 가져와서 필터링
+                doc_type="kb",  # "kb" 타입으로 검색
+                company_id=company_id
+            )
+            
+            # 검색 결과를 RelatedDocumentItem 형태로 변환
+            kb_documents = []
+            
+            if related_docs_result and related_docs_result.get("ids"):
+                for i, doc_id in enumerate(related_docs_result["ids"]):
+                    metadata = related_docs_result["metadatas"][i] if i < len(related_docs_result.get("metadatas", [])) else {}
+                    
+                    # 문서 제목 추출
+                    title = (
+                        metadata.get("title") or
+                        metadata.get("subject") or
+                        f"KB 문서 {doc_id}"
+                    )
+                    
+                    # 문서 내용/요약 추출
+                    doc_summary = ""
+                    if i < len(related_docs_result.get("documents", [])):
+                        doc_summary = related_docs_result["documents"][i]
+                    else:
+                        doc_summary = metadata.get("description", "") or metadata.get("description_text", "")
+                    
+                    # 요약이 너무 길면 자르기
+                    if len(doc_summary) > 300:
+                        doc_summary = doc_summary[:300] + "..."
+                    
+                    # 거리/점수 정보 추가
+                    distance = related_docs_result.get("distances", [0])[i] if i < len(related_docs_result.get("distances", [])) else 0
+                    similarity_score = max(0, 1 - distance)  # 거리를 유사도로 변환
+                    
+                    # 문서 URL 생성
+                    freshdesk_domain = os.getenv("FRESHDESK_DOMAIN", "example.freshdesk.com")
+                    doc_url = f"https://{freshdesk_domain}/solution/articles/{doc_id}"
+                    
+                    # 메타데이터에서 URL이 있으면 사용
+                    if metadata.get("url"):
+                        doc_url = metadata["url"]
+                    elif metadata.get("article_url"):
+                        doc_url = metadata["article_url"]
+                    
+                    # source_type 확인
+                    source_type = metadata.get("source_type", "kb")
+                    if metadata.get("doc_type") == "kb":
+                        source_type = "kb"
+                    elif metadata.get("type") in [1, "1"]:
+                        source_type = "kb"
+                    
+                    # RelatedDocumentItem 모델과 호환되는 형태로 반환
+                    try:
+                        from api.main import RelatedDocumentItem
+                    except ImportError:
+                        from backend.api.main import RelatedDocumentItem
+                    kb_documents.append(RelatedDocumentItem(
+                        id=str(doc_id),
+                        title=title,
+                        doc_summary=doc_summary,
+                        url=doc_url,
+                        similarity_score=round(similarity_score, 3),
+                        source_type=source_type
+                    ))
+                    
+                    # 최대 5개까지만 반환
+                    if len(kb_documents) >= 5:
+                        break
+            
+            # 유사도 점수 기준으로 정렬하고 상위 결과만 반환
+            kb_documents.sort(key=lambda x: x.similarity_score, reverse=True)
+            
+            # 너무 낮은 유사도 점수의 결과 필터링 - 임계값 0.25 (25%)
+            min_similarity = 0.25
+            filtered_docs = [doc for doc in kb_documents if doc.similarity_score >= min_similarity]
+            
+            # 최대 반환 결과 수 제한 (상위 3개)
+            if filtered_docs:
+                kb_documents = filtered_docs[:3]
+            else:
+                # 유사도가 낮더라도 검색 결과가 있으면 결과는 반환
+                if kb_documents:
+                    kb_documents = kb_documents[:3]
+                else:
+                    # 결과가 전혀 없으면 빈 배열 반환
+                    logger.warning("지식베이스 문서 검색 결과가 없습니다.")
+                    kb_documents = []
+            
+            execution_time = time.time() - start_time
+            logger.info(f"지식베이스 문서 검색 완료 (ticket_id: {ticket_data.get('id')}, 검색결과: {len(kb_documents)}건, 실행시간: {execution_time:.2f}초)")
+            
+            return {
+                "task_type": "kb_documents",
+                "result": kb_documents,
+                "execution_time": execution_time,
+                "success": True
+            }
+        except Exception as e:
+            error_msg = f"지식베이스 문서 검색 실패: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return {
+                "task_type": "kb_documents",
+                "error": error_msg,
+                "execution_time": 0,
+                "success": False
+            }
+
+    def create_init_parallel_chain(self,
+                                 ticket_data: Dict[str, Any],
+                                 qdrant_client: Any,
+                                 company_id: str) -> RunnableParallel:
+        """
+        초기화 프로세스를 위한 Langchain RunnableParallel 체인을 생성합니다.
+        
+        기존의 asyncio.gather를 대체하여 다음 3가지 작업을 병렬 처리합니다:
+        1. 티켓 요약 생성
+        2. 유사 티켓 검색
+        3. 지식베이스 문서 검색
+        
+        Args:
+            ticket_data: Freshdesk 티켓 데이터
+            qdrant_client: Qdrant 벡터 DB 클라이언트
+            company_id: 회사 식별자
+            
+        Returns:
+            RunnableParallel 체인 객체
+        """
+        
+        # RunnableParallel 체인 생성
+        # 각 태스크를 RunnableLambda로 래핑하여 병렬 실행
+        parallel_chain = RunnableParallel({
+            "summary": RunnableLambda(self._generate_summary_task),
+            "similar_tickets": RunnableLambda(self._fetch_similar_tickets_task), 
+            "kb_documents": RunnableLambda(self._fetch_kb_documents_task)
+        })
+        
+        logger.info(f"Langchain RunnableParallel 체인 생성 완료 (ticket_id: {ticket_data.get('id')})")
+        return parallel_chain
+
+    async def execute_init_parallel_chain(self, 
+                                        ticket_data: Dict[str, Any], 
+                                        qdrant_client: Any, 
+                                        company_id: str) -> Dict[str, Any]:
+        """
+        초기화 병렬 체인을 실행하고 결과를 반환합니다.
+        
+        Args:
+            ticket_data: Freshdesk 티켓 데이터
+            qdrant_client: Qdrant 벡터 DB 클라이언트
+            company_id: 회사 식별자
+            
+        Returns:
+            병렬 작업 실행 결과 딕셔너리
+        """
+        start_time = time.time()
+        logger.info(f"Langchain RunnableParallel 체인 실행 시작 (ticket_id: {ticket_data.get('id')})")
+        
+        try:
+            # RunnableParallel 체인 생성
+            parallel_chain = self.create_init_parallel_chain(ticket_data, qdrant_client, company_id)
+            
+            # 체인 실행을 위한 입력 데이터 준비
+            chain_inputs = {
+                "ticket_data": ticket_data,
+                "qdrant_client": qdrant_client,
+                "company_id": company_id
+            }
+            
+            # 체인 실행
+            results = await parallel_chain.ainvoke(chain_inputs)
+            
+            total_execution_time = time.time() - start_time
+            logger.info(f"Langchain RunnableParallel 체인 실행 완료 (ticket_id: {ticket_data.get('id')}, 총 실행시간: {total_execution_time:.2f}초)")
+            
+            # 결과 구조화
+            return {
+                "summary": results["summary"],
+                "similar_tickets": results["similar_tickets"], 
+                "kb_documents": results["kb_documents"],
+                "total_execution_time": total_execution_time,
+                "chain_type": "langchain_runnable_parallel"
+            }
+            
+        except Exception as e:
+            execution_time = time.time() - start_time
+            error_msg = f"Langchain RunnableParallel 체인 실행 실패: {str(e)}"
+            logger.error(f"{error_msg} (실행시간: {execution_time:.2f}초)")
+            
+            # 에러 발생 시 기본 구조 반환
+            return {
+                "summary": {
+                    "task_type": "summary",
+                    "error": "체인 실행 실패로 인한 요약 생성 불가",
+                    "success": False
+                },
+                "similar_tickets": {
+                    "task_type": "similar_tickets", 
+                    "error": "체인 실행 실패로 인한 유사 티켓 검색 불가",
+                    "success": False
+                },
+                "kb_documents": {
+                    "task_type": "kb_documents",
+                    "error": "체인 실행 실패로 인한 지식베이스 검색 불가", 
+                    "success": False
+                },
+                "total_execution_time": execution_time,
+                "chain_type": "langchain_runnable_parallel",
+                "chain_error": error_msg
+            }
 
 
 # 싱글톤 인스턴스 제공
