@@ -719,6 +719,13 @@ async def get_initial_context(
             else:
                 conversation_texts.append(str(conv))
         
+        # 캐시 확인
+        cached_summary = None
+        include_summary_chain = include_summary
+        if include_summary and ticket_id in ticket_summary_cache:
+            cached_summary = ticket_summary_cache[ticket_id]
+            include_summary_chain = False
+
         # 컨텍스트 구축 시작 시간
         context_start_time = time.time()
         
@@ -751,7 +758,10 @@ async def get_initial_context(
             chain_results = await llm_router.execute_init_parallel_chain(
                 ticket_data=ticket_info,
                 qdrant_client=getattr(vector_db, 'client', None),  # 타입 안전성을 위해 getattr 사용
-                company_id=search_company_id
+                company_id=search_company_id,
+                include_summary=include_summary_chain,
+                include_similar_tickets=include_similar_tickets,
+                include_kb_docs=include_kb_docs,
             )
             
             parallel_execution_time = time.time() - parallel_start_time
@@ -762,7 +772,9 @@ async def get_initial_context(
             task_names_ordered = []
             
             # 요약 결과 처리
-            if include_summary and 'summary' in chain_results:
+            if cached_summary is not None:
+                ticket_summary = cached_summary
+            elif include_summary and 'summary' in chain_results:
                 summary_result = chain_results['summary']
                 if summary_result.get('success', False):
                     summary_data = summary_result.get('result', {})
@@ -773,11 +785,9 @@ async def get_initial_context(
                         priority_recommendation=summary_data.get('priority_recommendation', '보통'),
                         urgency_level=summary_data.get('urgency_level', '보통')
                     )
-                    # 캐시에 저장
                     ticket_summary_cache[ticket_id] = summary
                     ticket_summary = summary
                 else:
-                    # 에러 시 기본 요약 생성
                     summary = TicketSummaryContent(
                         ticket_summary=f"오류로 인해 요약 생성에 실패했습니다. 티켓 제목: {ticket_title or '제목 없음'}",
                         key_points=["요약 생성 오류", "수동 검토 필요"],
@@ -786,7 +796,7 @@ async def get_initial_context(
                         urgency_level="보통"
                     )
                     ticket_summary = summary
-                
+
                 results.append((summary, summary_result.get('execution_time', 0)))
                 task_names_ordered.append('summary')
                 task_times['summary'] = summary_result.get('execution_time', 0)
