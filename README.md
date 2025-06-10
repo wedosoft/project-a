@@ -27,7 +27,7 @@ Code Interpreter 환경에서는 가상환경 없이 바로 사용할 수 있습
 
 # 자동 검증 항목:
 # ✅ 환경변수 설정 상태 (7개)
-# ✅ 라이브러리 설치 상태 (13개) 
+# ✅ 라이브러리 설치 상태 (13개)
 # ✅ 백엔드 모듈 임포트 (7개)
 # ✅ 클라이언트 연결 테스트
 ```
@@ -125,6 +125,16 @@ docker-compose down
 # 환경 변수 로드하기
 ./taskmaster.sh load-env
 ```
+
+### 테스트 실행
+
+`pytest`를 사용하여 백엔드 테스트를 실행할 수 있습니다.
+
+```bash
+pytest backend/tests/
+```
+
+테스트에는 `FRESHDESK_DOMAIN`, `FRESHDESK_API_KEY`, `QDRANT_URL`, `QDRANT_API_KEY` 환경변수가 필요합니다. 환경 변수가 없으면 `pytest`가 자동으로 모든 테스트를 건너뜁니다.
 
 ### 문제 해결
 
