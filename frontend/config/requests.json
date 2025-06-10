@@ -1,16 +1,15 @@
 {
-  "externalApi": {
+  "backendApi": {
     "schema": {
       "method": "GET",
-      "host": "<%= iparam.fastapi_backend_url %>",
-      "path": "/api${context.path}",
+      "protocol": "https",
+      "host": "zb19rpd2m1.execute-api.ap-northeast-2.amazonaws.com",
+      "path": "/dev${context.path}",
       "headers": {
-        "X-API-Key": "<%= iparam.api_key %>",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "X-Freshdesk-Domain": "#{freshdesk_domain}",
+        "X-Freshdesk-API-Key": "#{freshdesk_api_key}"
       }
-    },
-    "options": {
-      "retryDelay": 1000
     }
   }
 }
