@@ -30,8 +30,11 @@ fi
 
 # 가상환경 활성화 및 의존성 설치
 source .venv/bin/activate
-echo -e "\n${YELLOW}3. 백엔드 의존성 라이브러리 설치 중... (requirements.txt)${NC}"
+echo -e "\n${YELLOW}3. 프로젝트 의존성 설치 중...${NC}"
 pip install -r backend/requirements.txt
+echo -e "${YELLOW}   개발 도구 설치 중... (requirements-dev.txt)${NC}"
+pip install -r requirements-dev.txt
+pre-commit install
 echo -e "${GREEN}의존성 설치 완료.${NC}"
 
 # .env 파일 설정
