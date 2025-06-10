@@ -2,148 +2,373 @@
 <html>
 <head>
   <title>Ticket Assistant</title>
-  <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" type="text/css" href="https://static.freshdev.io/fdk/2.0/assets/freshworks.css">
-  <link rel="stylesheet" type="text/css" href="styles/styles.css">
-  <script src="{{{appclient}}}"></script>
+  <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 10px;
+      font-size: 14px;
+    }
+    .ticket-info {
+      background-color: #f8f9fa;
+      border-radius: 5px;
+      padding: 12px;
+      margin-bottom: 15px;
+    }
+    .ticket-info h5 {
+      margin-top: 0;
+      color: #2c3e50;
+    }
+    .info-row {
+      display: flex;
+      margin-bottom: 8px;
+    }
+    .info-label {
+      font-weight: bold;
+      width: 80px;
+      color: #7f8c8d;
+    }
+    .info-value {
+      flex: 1;
+    }
+    .tab-container {
+      margin-top: 15px;
+    }
+    .nav-tabs .nav-link {
+      font-size: 14px;
+      padding: 8px 12px;
+    }
+    .tab-content {
+      padding: 15px;
+      border: 1px solid #dee2e6;
+      border-top: none;
+      border-radius: 0 0 5px 5px;
+      min-height: 200px;
+    }
+    .placeholder-text {
+      color: #95a5a6;
+      font-style: italic;
+      text-align: center;
+      margin-top: 70px;
+    }
+    .search-container {
+      margin-top: 15px;
+      margin-bottom: 15px;
+    }
+    .search-options {
+      margin-top: 10px;
+    }
+    .search-results {
+      margin-top: 15px;
+    }
+    .ticket-card {
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      margin-bottom: 10px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+    .ticket-card:hover {
+      background-color: #f8f9fa;
+    }
+    .ticket-card-header {
+      display: flex;
+      justify-content: space-between;
+    }
+    .ticket-card-id {
+      color: #7f8c8d;
+      font-size: 12px;
+    }
+    .ticket-card-status {
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    .status-open {
+      background-color: #3498db;
+      color: white;
+    }
+    .status-pending {
+      background-color: #f39c12;
+      color: white;
+    }
+    .status-resolved {
+      background-color: #2ecc71;
+      color: white;
+    }
+    .status-closed {
+      background-color: #95a5a6;
+      color: white;
+    }
+    .solution-card {
+      border-left: 4px solid #3498db;
+    }
+    .solution-excerpt {
+      color: #7f8c8d;
+      font-size: 12px;
+      line-height: 1.4;
+      max-height: 50px;
+      overflow: hidden;
+    }
+    
+    /* Chat interface styles */
+    .chat-interface {
+      height: 100%;
+    }
+    .chat-messages {
+      height: 300px;
+      overflow-y: auto;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+      padding: 10px;
+      background-color: #fafafa;
+    }
+    .chat-message {
+      margin-bottom: 15px;
+      padding: 8px 12px;
+      border-radius: 8px;
+      max-width: 85%;
+    }
+    .chat-message.user {
+      background-color: #007bff;
+      color: white;
+      margin-left: auto;
+      text-align: right;
+    }
+    .chat-message.assistant {
+      background-color: white;
+      border: 1px solid #ddd;
+      margin-right: auto;
+    }
+    .chat-input-container {
+      margin-top: 10px;
+    }
+    .loading {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid #f3f3f3;
+      border-top: 2px solid #3498db;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    
+    /* Detail view styles */
+    .detail-content {
+      background-color: #f8f9fa;
+      border-radius: 5px;
+      padding: 15px;
+    }
+    .detail-section {
+      margin-bottom: 20px;
+    }
+    .detail-section h6 {
+      color: #2c3e50;
+      border-bottom: 1px solid #ddd;
+      padding-bottom: 5px;
+      margin-bottom: 10px;
+    }
+    .detail-meta {
+      background-color: white;
+      border-radius: 4px;
+      padding: 10px;
+      margin-bottom: 15px;
+    }
+    .badge-custom {
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      margin-right: 5px;
+    }
+    
+    /* List item styles */
+    .list-item {
+      border: 1px solid #e9ecef;
+      border-radius: 6px;
+      padding: 12px;
+      margin-bottom: 10px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      background-color: white;
+    }
+    .list-item:hover {
+      border-color: #007bff;
+      box-shadow: 0 2px 4px rgba(0,123,255,0.1);
+      transform: translateY(-1px);
+    }
+    .list-item-header {
+      display: flex;
+      justify-content: between;
+      align-items: flex-start;
+      margin-bottom: 8px;
+    }
+    .list-item-title {
+      font-weight: 600;
+      color: #2c3e50;
+      flex: 1;
+      margin-right: 10px;
+    }
+    .list-item-meta {
+      font-size: 12px;
+      color: #6c757d;
+      margin-top: 5px;
+    }
+    .list-item-excerpt {
+      color: #6c757d;
+      font-size: 13px;
+      line-height: 1.4;
+      margin-top: 8px;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    .score-badge {
+      background-color: #28a745;
+      color: white;
+      padding: 2px 6px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+  </style>
 </head>
 <body>
-  <div class="container">
-    <!-- Backend Initialization Status -->
-    <div id="backend-status" class="backend-status" style="display: none;">
-      <div class="status-indicator">
-        <span id="status-icon">🔄</span>
-        <span id="status-text">백엔드 초기화 중...</span>
+  <div class="container-fluid p-0">
+    <!-- Top section - Ticket Information -->
+    <div class="ticket-info">
+      <h5>Ticket Information</h5>
+      <div class="info-row">
+        <div class="info-label">Subject:</div>
+        <div class="info-value" id="ticket-subject">Loading...</div>
+      </div>
+      <div class="info-row">
+        <div class="info-label">Status:</div>
+        <div class="info-value" id="ticket-status">Loading...</div>
+      </div>
+      <div class="info-row">
+        <div class="info-label">Priority:</div>
+        <div class="info-value" id="ticket-priority">Loading...</div>
+      </div>
+      <div class="info-row">
+        <div class="info-label">Type:</div>
+        <div class="info-value" id="ticket-type">Loading...</div>
       </div>
     </div>
-
-    <!-- 🔹 Top Section: Ticket Summary -->
-    <div class="ticket-summary-section">
-      <div class="ticket-header">
-        <h2 id="ticket-title">Loading ticket...</h2>
-        <div class="ticket-badges">
-          <span id="ticket-status" class="status-badge">Loading...</span>
-          <span id="ticket-priority" class="priority-badge">Loading...</span>
-        </div>
-      </div>
-      
-      <div class="ticket-info-grid">
-        <div class="info-item">
-          <span class="info-label">담당자:</span>
-          <span id="ticket-assignee" class="info-value">Loading...</span>
-        </div>
-        <div class="info-item">
-          <span class="info-label">요청자:</span>
-          <span id="ticket-requester" class="info-value">Loading...</span>
-        </div>
-        <div class="info-item">
-          <span class="info-label">채널:</span>
-          <span id="ticket-channel" class="info-value">Loading...</span>
-        </div>
-        <div class="info-item">
-          <span class="info-label">그룹:</span>
-          <span id="ticket-group" class="info-value">Loading...</span>
-        </div>
-      </div>
-
-      <div class="ticket-tags-section">
-        <span class="info-label">태그:</span>
-        <div id="ticket-tags" class="tags-container">Loading...</div>
-      </div>
-
-      <!-- 구조화된 티켓 정보 -->
-      <div class="structured-info">
-        <div class="info-section">
-          <h4>문제 (Problem)</h4>
-          <div id="ticket-problem" class="info-content">Loading...</div>
-        </div>
-        <div class="info-section">
-          <h4>원인 (Cause)</h4>
-          <div id="ticket-cause" class="info-content">Loading...</div>
-        </div>
-        <div class="info-section">
-          <h4>수행한 조치 (Actions Taken)</h4>
-          <div id="ticket-actions" class="info-content">Loading...</div>
-        </div>
-        <div class="info-section">
-          <h4>결과 (Result)</h4>
-          <div id="ticket-result" class="info-content">Loading...</div>
-        </div>
-      </div>
-
-      <!-- 첨부파일 섹션 -->
-      <div id="attachments-section" class="attachments-section" style="display: none;">
-        <h4>첨부파일</h4>
-        <div id="ticket-attachments" class="attachments-container">Loading...</div>
-      </div>
-
-      <!-- 세부사항 보기 버튼 -->
-      <div class="ticket-actions">
-        <button id="view-details-btn" class="view-details-btn">View Details</button>
-      </div>
-    </div>
-
-    <!-- 🔹 Bottom Section: Tabbed Interface with 3 Tabs -->
-    <div class="tabs-section">
-      <div class="tabs-header">
-        <button class="tab active" data-tab="similar-tickets">Similar Tickets</button>
-        <button class="tab" data-tab="suggested-solutions">Suggested Solutions</button>
-        <button class="tab" data-tab="copilot">Copilot</button>
-      </div>
-
-      <!-- 1. Similar Tickets Tab: ID, title, and short excerpt -->
-      <div class="tab-content active" id="similar-tickets">
-        <p>Click on this tab to search for similar tickets.</p>
-      </div>
-
-      <!-- 2. Suggested Solutions Tab: solution title and brief content -->
-      <div class="tab-content" id="suggested-solutions">
-        <p>Click on this tab to view suggested solutions.</p>
-      </div>
-
-      <!-- 3. Copilot Tab: Natural language input + search scope checkboxes -->
-      <div class="tab-content" id="copilot">
-        <div class="copilot-interface">
-          <div class="search-input-section">
-            <input type="text" id="copilot-input" class="copilot-search-input" placeholder="Type your question here…">
-            <button id="copilot-search-btn" class="copilot-search-btn">Search</button>
+    
+    <!-- Bottom section - Tabbed Interface -->
+    <ul class="nav nav-tabs" id="ticketTabs" role="tablist">
+      <li class="nav-item" role="presentation">
+        <button class="nav-link active" id="similar-tickets-tab" data-bs-toggle="tab" data-bs-target="#similar-tickets" 
+          type="button" role="tab" aria-controls="similar-tickets" aria-selected="true">Similar Tickets</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="suggested-solutions-tab" data-bs-toggle="tab" data-bs-target="#suggested-solutions" 
+          type="button" role="tab" aria-controls="suggested-solutions" aria-selected="false">Suggested Solutions</button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link" id="copilot-tab" data-bs-toggle="tab" data-bs-target="#copilot" 
+          type="button" role="tab" aria-controls="copilot" aria-selected="false">Copilot</button>
+      </li>
+    </ul>
+    <div class="tab-content" id="ticketTabsContent">
+      <div class="tab-pane fade show active" id="similar-tickets" role="tabpanel" aria-labelledby="similar-tickets-tab">
+        <!-- Similar Tickets List/Detail View -->
+        <div id="similar-tickets-list-view">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <h6>Similar Tickets</h6>
+            <button class="btn btn-sm btn-outline-primary" id="refresh-similar-tickets">Refresh</button>
           </div>
-          
-          <div class="search-scope-section">
-            <h5>Search Scope:</h5>
-            <div class="checkbox-group">
-              <label class="checkbox-item">
-                <input type="checkbox" id="scope-tickets" checked>
-                <span class="checkmark"></span>
-                Tickets
-              </label>
-              <label class="checkbox-item">
-                <input type="checkbox" id="scope-solutions" checked>
-                <span class="checkmark"></span>
-                Solutions
-              </label>
-              <label class="checkbox-item">
-                <input type="checkbox" id="scope-images">
-                <span class="checkmark"></span>
-                Images
-              </label>
-              <label class="checkbox-item">
-                <input type="checkbox" id="scope-attachments">
-                <span class="checkmark"></span>
-                Attachments
-              </label>
+          <div id="similar-tickets-list">
+            <div class="placeholder-text">Loading similar tickets...</div>
+          </div>
+        </div>
+        <div id="similar-tickets-detail-view" style="display: none;">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <button class="btn btn-sm btn-outline-secondary" id="back-to-similar-list">← Back to List</button>
+            <button class="btn btn-sm btn-outline-primary" id="open-ticket-link">Open in Freshdesk</button>
+          </div>
+          <div id="similar-ticket-detail-content">
+            <!-- Detail content will be loaded here -->
+          </div>
+        </div>
+      </div>
+      <div class="tab-pane fade" id="suggested-solutions" role="tabpanel" aria-labelledby="suggested-solutions-tab">
+        <!-- Suggested Solutions List/Detail View -->
+        <div id="solutions-list-view">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <h6>Suggested Solutions</h6>
+            <button class="btn btn-sm btn-outline-primary" id="refresh-solutions">Refresh</button>
+          </div>
+          <div id="suggested-solutions-list">
+            <div class="placeholder-text">Loading suggested solutions...</div>
+          </div>
+        </div>
+        <div id="solutions-detail-view" style="display: none;">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <button class="btn btn-sm btn-outline-secondary" id="back-to-solutions-list">← Back to List</button>
+            <button class="btn btn-sm btn-outline-success" id="use-solution">Use This Solution</button>
+          </div>
+          <div id="solution-detail-content">
+            <!-- Detail content will be loaded here -->
+          </div>
+        </div>
+      </div>
+      <div class="tab-pane fade" id="copilot" role="tabpanel" aria-labelledby="copilot-tab">
+        <!-- AI Chat Interface -->
+        <div class="chat-interface">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <h6>AI Assistant</h6>
+            <button class="btn btn-sm btn-outline-danger" id="clear-chat">Clear Chat</button>
+          </div>
+          <div id="chat-messages" class="chat-messages mb-3">
+            <div class="chat-message assistant">
+              <strong>AI:</strong> 안녕하세요! 이 티켓에 대해 어떤 도움이 필요하신가요?
             </div>
           </div>
-          
-          <div id="copilot-results" class="copilot-results">
-            <p>Ask a question to get assistance from the AI copilot.</p>
+          <div class="chat-input-container">
+            <div class="input-group mb-2">
+              <input type="text" class="form-control" id="chat-input" placeholder="질문을 입력하세요...">
+              <button class="btn btn-primary" id="chat-search-button">Send</button>
+            </div>
+            <div class="search-options">
+              <small class="text-muted">검색 범위:</small>
+              <div class="form-check form-check-inline">
+                <input class="form-check-input" type="checkbox" id="search-tickets" value="tickets" checked>
+                <label class="form-check-label" for="search-tickets">Tickets</label>
+              </div>
+              <div class="form-check form-check-inline">
+                <input class="form-check-input" type="checkbox" id="search-solutions" value="solutions" checked>
+                <label class="form-check-label" for="search-solutions">Solutions</label>
+              </div>
+              <div class="form-check form-check-inline">
+                <input class="form-check-input" type="checkbox" id="search-images" value="images">
+                <label class="form-check-label" for="search-images">Images</label>
+              </div>
+              <div class="form-check form-check-inline">
+                <input class="form-check-input" type="checkbox" id="search-attachments" value="attachments">
+                <label class="form-check-label" for="search-attachments">Attachments</label>
+              </div>
+            </div>
           </div>
         </div>
       </div>
     </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="{{{appclient}}}"></script>
   <script src="scripts/app.js"></script>
 </body>
 </html>

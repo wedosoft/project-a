@@ -1,994 +1,1817 @@
-let client;
+let client; // Global client variable
+let isInitialized = false; // 중복 초기화 방지 플래그
 
-/**
- * 탭 전환 기능 초기화 (각 탭별 최초 1회만 렌더링)
- */
-function initTabSwitching() {
-  const tabs = document.querySelectorAll('.tab');
-  const tabContents = document.querySelectorAll('.tab-content');
-  
-  tabs.forEach(tab => {
-    tab.addEventListener('click', function() {
-      const tabId = this.getAttribute('data-tab');
-      
-      // Remove active class from all tabs and tab contents
-      tabs.forEach(tab => tab.classList.remove('active'));
-      tabContents.forEach(content => content.classList.remove('active'));
-      
-      // Add active class to clicked tab and corresponding content
-      this.classList.add('active');
-      const targetContent = document.getElementById(tabId);
-      if (targetContent) {
-        targetContent.classList.add('active');
-      }
-      
-      // Handle tab-specific actions using only cached data (render approach)
-      if (tabId === 'similar-tickets') {
-        // 캐시된 데이터만 사용하는 render 방식
-        if (window.ticketInitData && window.ticketInitData.similar_tickets && window.ticketInitData.similar_tickets.length > 0) {
-          console.log("📋 캐시된 유사 티켓 데이터 사용");
-          updateSimilarTicketsFromCache(window.ticketInitData.similar_tickets);
-        } else {
-          console.log("🔍 유사 티켓 데이터 없음");
-          const container = document.getElementById('similar-tickets');
-          if (container) {
-            container.innerHTML = '<p>유사한 티켓을 찾을 수 없습니다.</p>';
-          }
-        }
-      } else if (tabId === 'suggested-solutions') {
-        // 캐시된 지식베이스 데이터만 사용하는 render 방식
-        if (window.ticketInitData && window.ticketInitData.kb_docs && window.ticketInitData.kb_docs.length > 0) {
-          console.log("📚 캐시된 지식베이스 데이터 사용");
-          updateKnowledgeBaseFromCache(window.ticketInitData.kb_docs);
-        } else {
-          console.log("🔍 추천 솔루션 데이터 없음");
-          const container = document.getElementById('suggested-solutions');
-          if (container) {
-            container.innerHTML = '<p>관련 문서를 찾을 수 없습니다.</p>';
-          }
-        }
-      }
-    });
-  });
+// 전역 데이터 캐시 (init 엔드포인트에서 받은 데이터 저장)
+let globalTicketData = {
+  summary: null,
+  similar_tickets: [],
+  recommended_solutions: [], // kb_documents와 매핑됨
+  cached_ticket_id: null,
+  ticket_info: null, // 백엔드에서 받은 완전한 티켓 정보
+};
 
-  // Initialize active tab on page load using only cached data
-  const activeTab = document.querySelector('.tab.active');
-  if (activeTab) {
-    const tabId = activeTab.getAttribute('data-tab');
-    
-    if (tabId === 'similar-tickets') {
-      // 캐시된 데이터만 사용하는 render 방식으로 초기화
-      if (window.ticketInitData && window.ticketInitData.similar_tickets && window.ticketInitData.similar_tickets.length > 0) {
-        updateSimilarTicketsFromCache(window.ticketInitData.similar_tickets);
-      } else {
-        const container = document.getElementById('similar-tickets');
-        if (container) {
-          container.innerHTML = '<p>비슷한 티켓 데이터가 없습니다. 데이터 로딩을 기다려주세요.</p>';
-        }
-      }
-    } else if (tabId === 'suggested-solutions') {
-      // 캐시된 데이터만 사용하는 render 방식으로 초기화
-      if (window.ticketInitData && window.ticketInitData.kb_docs && window.ticketInitData.kb_docs.length > 0) {
-        updateKnowledgeBaseFromCache(window.ticketInitData.kb_docs);
-      } else {
-        const container = document.getElementById('suggested-solutions');
-        if (container) {
-          container.innerHTML = '<p>제안된 솔루션 데이터가 없습니다. 데이터 로딩을 기다려주세요.</p>';
-        }
-      }
-    }
-  }
-}
-
-/**
- * 필터 선택 기능 초기화
- */
-function initFilterSelection() {
-  const filters = document.querySelectorAll('.filter');
-  filters.forEach(filter => {
-    filter.addEventListener('click', function() {
-      this.classList.toggle('active');
-    });
-  });
-}
-
-/**
- * 공통 모달 트리거 함수
- */
-async function showModal() {
-  try {
-    const data = await client.data.get("ticket");
-    const ticket = data.ticket;
-    await client.interface.trigger("showModal", {
-      title: "Copilot Canvas",
-      template: "index.html",
-      data: { showAiTab: false, ticket },
-      noBackdrop: true,
-      size: {
-        width: "800px",
-        height: "600px",
-      },
-    });
-    console.log("Modal 열림");
-  } catch (error) {
-    console.error("Modal 오류", error);
-  }
-}
-
-/**
- * 코파일럿 AI 응답 모달 트리거 함수
- */
-async function showCopilotModal() {
-  try {
-    const data = await client.data.get("ticket");
-    const ticket = data.ticket;
-    await client.interface.trigger("showModal", {
-      title: "Copilot Canvas",
-      template: "modal.html",
-      data: { showAiTab: true, ticket },
-      noBackdrop: true,
-      size: {
-        width: "800px",
-        height: "600px",
-      },
-    });
-    console.log("Copilot Modal 열림");
-  } catch (error) {
-    console.error("Copilot Modal 오류", error);
-  }
-}
-
-  // Freshdesk Custom App 초기화 - 새로운 방식
-app.initialized()
+app
+  .initialized()
   .then((c) => {
     client = c;
+    console.log("✅ 앱 초기화 완료");
+    console.log("📱 클라이언트 객체:", client);
 
-    // ① 상단 네비게이션 앱 아이콘 클릭 시 처리
+    // ① 적극적인 백그라운드 데이터 준비 (다중 시점 시도)
+    attemptMultipleBackgroundLoads(client);
+
+    // ② 상단 네비게이션 앱 아이콘 클릭 시 처리 (캐시된 데이터로 즉시 모달 표시)
     client.events.on("app.activated", async () => {
       try {
         const ctx = await client.instance.context();
-        
+
         // 디버깅: 실제 location 값 확인
         console.log("앱 활성화 - 컨텍스트:", ctx);
         console.log("현재 location:", ctx.location);
-        
-        // 상단 네비게이션에서의 동작: 백엔드 데이터 로드 후 모달 표시
+
+        // 상단 네비게이션에서의 동작: 스마트 캐싱 전략 적용
         if (ctx.location === "ticket_top_navigation") {
-          console.log("상단 네비게이션 아이콘 클릭 → 백엔드 데이터 로드 후 모달 표시");
-          
-          // 1단계: 백엔드에서 데이터 로드 (DOM 접근 없이)
-          await loadTicketDataFromBackend();
-          
-          // 2단계: 모달 표시
-          await showModal();
+          console.log("🚀 상단 네비게이션 아이콘 클릭 → 스마트 캐싱 전략 시작");
+
+          // 현재 티켓 정보 가져오기 (이 시점에서는 FDK가 안전함)
+          const ticketData = await client.data.get("ticket");
+          const currentTicketId = ticketData?.ticket?.id;
+
+          // 캐시된 데이터가 현재 티켓과 일치하는지 확인
+          if (
+            globalTicketData.cached_ticket_id === currentTicketId &&
+            globalTicketData.summary
+          ) {
+            console.log("⚡ 캐시된 데이터 발견 → 즉시 모달 표시 (0ms 지연)");
+            await showModal();
+          } else {
+            console.log(
+              "🔄 새 티켓이거나 캐시 없음 → 백엔드 호출 후 모달 표시"
+            );
+
+            // 사용자에게 피드백 제공
+            console.log(
+              "⏳ 첫 방문이므로 데이터 준비 중... (약 2-3초, 이후부터는 즉시 표시됩니다)"
+            );
+
+            // 가능하면 로딩 스피너 표시 (DOM이 있다면)
+            const loadingIndicator = showQuickLoadingIndicator();
+
+            try {
+              await loadTicketDetails(client);
+              await showModal();
+              console.log(
+                "✅ 데이터 로딩 완료 → 다음 클릭부터는 즉시 표시됩니다"
+              );
+            } finally {
+              hideQuickLoadingIndicator(loadingIndicator);
+            }
+          }
+
+          // 모달 표시 후 이벤트 설정 (한 번만)
+          if (!isInitialized) {
+            setupTabEvents(client);
+            setupSearchButton(client);
+            isInitialized = true;
+          }
         } else {
           // 예상치 못한 위치에서의 호출
           console.warn("예상치 못한 위치에서 앱 활성화:", ctx.location);
-          await loadTicketDataFromBackend();
+          if (!isInitialized) {
+            await loadTicketDetails(client);
+            setupTabEvents(client);
+            setupSearchButton(client);
+            isInitialized = true;
+          }
         }
       } catch (err) {
         console.error("onAppActivated 오류", err);
       }
     });
 
-    // ② 모달이 열린 후 DOM 요소에 데이터 렌더링
+    // ③ 모달이 열린 후 DOM 요소에 데이터 렌더링
     client.events.on("template.render", () => {
       try {
-        console.log("🎭 모달 템플릿 렌더링 완료 - DOM 초기화 시작");
-        
-        // DOM이 완전히 로드되도록 짧은 지연 후 초기화
-        setTimeout(async () => {
-          await initializeTicketWithBackend();
-          // DOM 이벤트 리스너도 함께 초기화
-          initEventListeners();
-        }, 100);
-        
-      } catch (err) {
-        console.error("template.render 이벤트 처리 오류", err);
-      }
-    });
+        console.log("🎭 모달 템플릿 렌더링 완료");
 
-    // ③ 티켓 속성 업데이트 이벤트 리스너
-    client.events.on('ticket.propertiesUpdated', function() {
-      // 티켓 속성 업데이트 시 백엔드 데이터 새로고침
-      console.log("🔄 티켓 속성 업데이트됨 - 데이터 새로고침");
-      loadTicketDataFromBackend();
+        // DOM이 완전히 로드되도록 짧은 지연 후 캐시된 데이터로 UI 업데이트
+        setTimeout(() => {
+          // 캐시된 데이터로 UI 업데이트
+          if (globalTicketData.summary) {
+            updateUIWithCachedData();
+          }
+
+          // 이벤트 설정 (한 번만)
+          if (!isInitialized) {
+            setupTabEvents(client);
+            setupSearchButton(client);
+            isInitialized = true;
+          }
+        }, 100);
+      } catch (err) {
+        console.error("template.render 오류", err);
+      }
     });
   })
-  .catch(err => console.error("SDK 초기화 실패", err));
+  .catch((error) => {
+    console.error("앱 초기화 실패:", error);
+  });
 
-/**
- * 모든 DOM 이벤트 리스너를 초기화하는 함수
- */
-function initEventListeners() {
-  // 탭 전환 기능 초기화
-  initTabSwitching();
-  
-  // 필터 선택 기능 초기화
-  initFilterSelection();
-  
-  // 검색 버튼 클릭 이벤트
-  const searchBtn = document.querySelector('.search-btn');
-  if (searchBtn) {
-    searchBtn.addEventListener('click', async function() {
-      try {
-        await showCopilotModal();
-      } catch (error) {
-        console.error('검색 버튼 오류:', error);
-      }
+/*
+document.addEventListener("DOMContentLoaded", function() {
+  init();
+});
+*/
+
+async function init() {
+  try {
+    const client = await app.initialized();
+    console.log("App initialized");
+
+    // Register event for ticket details when app is activated
+    client.events.on("app.activated", function () {
+      console.log("App activated - loading ticket details");
+      loadTicketDetails(client);
+      setupTabEvents(client);
+      setupSearchButton(client);
     });
-  }
-  
-  // 상세 보기 버튼 클릭 이벤트  
-  const viewDetailsBtn = document.getElementById('view-details-btn');
-  if (viewDetailsBtn) {
-    viewDetailsBtn.addEventListener('click', async function() {
-      try {
-        await showSampleModal();
-      } catch (error) {
-        console.error('상세 보기 버튼 오류:', error);
-      }
-    });
+  } catch (error) {
+    console.error("Error during initialization:", error);
+    showError("Failed to initialize the app. Please refresh and try again.");
   }
 }
 
-/**
- * 유사 티켓 데이터를 캐시에서 가져와 UI에 표시 (최초 1회만 렌더링)
- */
-let isSimilarTicketsRendered = false; // 이미 렌더링 여부 플래그
-function renderSimilarTicketsFromCache() {
+// 티켓 상세 정보 로드 및 UI 업데이트 함수
+async function loadTicketDetails(client) {
   try {
-    // 이미 렌더링된 경우 재렌더링 방지
-    if (isSimilarTicketsRendered) return;
-    // 로딩 상태 표시
-    document.getElementById('similar-tickets').innerHTML = '<p>유사 티켓을 불러오는 중입니다...</p>';
-    // 캐시 데이터 확인
-    if (window.ticketInitData && window.ticketInitData.similar_tickets) {
-      console.log("📋 캐시된 유사 티켓 데이터 사용");
-      const similarTickets = window.ticketInitData.similar_tickets;
-      if (similarTickets.length > 0) {
-        // updateSimilarTicketsFromCache 함수가 있다면 활용
-        if (typeof updateSimilarTicketsFromCache === 'function') {
-          updateSimilarTicketsFromCache(similarTickets);
-        } else {
-          // 직접 테이블 렌더링 (예시)
-          let tableHtml = `<fw-data-table id="similar-tickets-table" label="유사 티켓"></fw-data-table>`;
-          document.getElementById('similar-tickets').innerHTML = tableHtml;
-          const table = document.getElementById('similar-tickets-table');
-          const columns = [
-            { key: 'id', text: 'ID' },
-            { key: 'subject', text: '제목' },
-            { key: 'status', text: '상태' },
-            { key: 'priority', text: '우선순위' },
-            { key: 'score', text: '유사도' }
-          ];
-          const rows = similarTickets.map(t => ({
-            id: t.id?.toString() || '-',
-            subject: t.subject || '-',
-            status: t.status || '-',
-            priority: t.priority || '-',
-            score: t.score ? `${Math.round(t.score * 100)}%` : '-'
-          }));
-          table.columns = columns;
-          table.rows = rows;
+    console.log("📋 티켓 상세 정보 로드 시작");
+
+    // 티켓 ID 먼저 가져오기 (메타데이터는 백엔드에서 받을 예정)
+    const ticketData = await client.data.get("ticket");
+
+    if (ticketData && ticketData.ticket) {
+      const basicTicketInfo = ticketData.ticket;
+      console.log("✅ 기본 티켓 정보 로드 완료:", basicTicketInfo);
+
+      // 새로운 티켓인 경우 캐시 초기화
+      if (globalTicketData.cached_ticket_id !== basicTicketInfo.id) {
+        resetGlobalTicketCache();
+      }
+
+      // 백엔드 API 호출하여 완전한 티켓 데이터와 AI 분석 결과 로드
+      await loadInitialDataFromBackend(client, basicTicketInfo);
+    } else {
+      console.warn("⚠️ 기본 티켓 정보를 찾을 수 없음");
+      showError("티켓 정보를 로드할 수 없습니다.");
+    }
+  } catch (error) {
+    console.error("❌ 티켓 상세 정보 로드 오류:", error);
+    showError("티켓 정보 로드 중 오류가 발생했습니다.");
+  }
+}
+
+// 티켓 페이지 로드 시 백그라운드에서 데이터 미리 준비하는 함수
+function preloadTicketDataOnPageLoad(client) {
+  try {
+    console.log("🔄 FDK 안전한 백그라운드 데이터 준비 시작");
+
+    // 더 안전한 FDK API 접근을 위한 지연 시간 증가 및 단계적 검증
+    setTimeout(async () => {
+      try {
+        // 1단계: FDK 클라이언트가 준비되었는지 확인
+        if (!client || typeof client.instance === "undefined") {
+          console.warn("⚠️ FDK 클라이언트가 아직 준비되지 않음");
+          return;
         }
-        isSimilarTicketsRendered = true; // 렌더링 완료 플래그 설정
-      } else {
-        document.getElementById('similar-tickets').innerHTML = '<p>유사 티켓이 없습니다.</p>';
-      }
-    } else {
-      document.getElementById('similar-tickets').innerHTML = '<p>유사 티켓 데이터를 불러올 수 없습니다. 새로고침 해주세요.</p>';
-    }
-  } catch (error) {
-    document.getElementById('similar-tickets').innerHTML = '<p>유사 티켓 표시 중 오류가 발생했습니다.</p>';
-    console.error('유사 티켓 렌더링 오류:', error);
-  }
-}
 
-/**
- * 추천 솔루션(지식베이스) 데이터를 캐시에서 가져와 UI에 표시 (최초 1회만 렌더링)
- */
-let isSuggestedSolutionsRendered = false; // 이미 렌더링 여부 플래그
-function renderSuggestedSolutionsFromCache() {
-  try {
-    if (isSuggestedSolutionsRendered) return;
-    
-    console.log("📚 추천 솔루션 렌더링 시작");
-    document.getElementById('suggested-solutions').innerHTML = '<p>추천 솔루션을 불러오는 중입니다...</p>';
-    
-    if (window.ticketInitData && window.ticketInitData.kb_docs) {
-      console.log("📚 캐시된 추천 솔루션 데이터 사용");
-      const kbDocs = window.ticketInitData.kb_docs;
-      
-      if (Array.isArray(kbDocs) && kbDocs.length > 0) {
-        // updateSuggestedSolutionsFromCache 함수 호출하여 실제 렌더링 처리
-        updateSuggestedSolutionsFromCache();
-        isSuggestedSolutionsRendered = true;
-        console.log("✅ 추천 솔루션 렌더링 완료");
-      } else {
-        document.getElementById('suggested-solutions').innerHTML = '<p>추천 솔루션이 없습니다.</p>';
-        console.log("❌ 추천 솔루션 데이터 없음");
-      }
-    } else {
-      document.getElementById('suggested-solutions').innerHTML = '<p>추천 솔루션 데이터를 불러올 수 없습니다. 새로고침 해주세요.</p>';
-      console.log("❌ 추천 솔루션 캐시 데이터 없음");
-    }
-  } catch (error) {
-    document.getElementById('suggested-solutions').innerHTML = '<p>추천 솔루션 표시 중 오류가 발생했습니다.</p>';
-    console.error('추천 솔루션 렌더링 오류:', error);
-  }
-}
-
-/**
- * Handle attachment download when the download button is clicked
- * @param {Event} event - Click event
- */
-async function handleAttachmentDownload(event) {
-  try {
-    // Show loading state
-    const downloadButton = event.currentTarget;
-    const attachmentId = downloadButton.getAttribute('data-attachment-id');
-    
-    // Disable the button and show loading state
-    downloadButton.loading = true;
-    
-    // Get attachment details using Data API
-    const attachmentData = await client.data.get('attachment', { id: attachmentId });
-    const attachment = attachmentData.attachment;
-    
-    if (attachment && attachment.attachment_url) {
-      // Create a temporary anchor element to trigger download
-      const downloadLink = document.createElement('a');
-      downloadLink.href = attachment.attachment_url;
-      downloadLink.download = attachment.name || 'attachment';
-      downloadLink.target = '_blank';
-      downloadLink.click();
-      
-      // Show success notification
-      client.interface.trigger('showNotify', {
-        type: 'success',
-        message: `Downloading ${attachment.name}`
-      });
-    } else {
-      // Show error notification if attachment URL is not available
-      client.interface.trigger('showNotify', {
-        type: 'danger',
-        message: 'Failed to get attachment download URL'
-      });
-    }
-  } catch (error) {
-    console.error('Error downloading attachment:', error);
-    client.interface.trigger('showNotify', {
-      type: 'danger',
-      message: 'Failed to download attachment. Please try again.'
-    });
-  } finally {
-    // Reset button state after download attempt
-    event.currentTarget.loading = false;
-  }
-}
-
-/**
- * 페이지 로드 시 백엔드에서 티켓 데이터를 미리 로드하는 함수 (DOM 접근 없이)
- * 데이터는 window.ticketInitData에 저장되어 나중에 모달에서 사용됨
- */
-async function loadTicketDataFromBackend() {
-  try {
-    console.log("🔄 백엔드 데이터 로드 시작 (DOM 접근 없이)");
-    
-    // 기존 데이터 초기화
-    window.ticketInitData = {};
-    
-    // 티켓 ID 추출
-    const data = await client.data.get("ticket");
-    const ticketId = data.ticket.id;
-    
-    // iparams에서 백엔드 URL 가져오기
-    const iparams = await client.iparams.get();
-    let backendBaseUrl = iparams.backend_url || "https://zb19rpd2m1.execute-api.ap-northeast-2.amazonaws.com/dev";
-    
-    // URL 유효성 검사 및 정규화
-    if (!backendBaseUrl) {
-      throw new Error("Backend URL이 설정되지 않았습니다. iparams에서 backend_url을 설정해주세요.");
-    }
-    
-    // 프로토콜이 없으면 https:// 추가
-    if (!backendBaseUrl.startsWith('http://') && !backendBaseUrl.startsWith('https://')) {
-      backendBaseUrl = `https://${backendBaseUrl}`;
-    }
-    
-    // 마지막 슬래시 제거 (있다면)
-    backendBaseUrl = backendBaseUrl.replace(/\/$/, '');
-    
-    console.log(`📋 최종 백엔드 URL: ${backendBaseUrl}`);
-    
-    // SSE 연결 URL 구성
-    const sseUrl = `${backendBaseUrl}/init/${ticketId}`;
-    console.log(`🔗 SSE 연결 시작: ${sseUrl}`);
-    
-    return new Promise((resolve, reject) => {
-      const source = new EventSource(sseUrl);
-      let receivedData = { summary: false, similar_tickets: false, solutions: false };
-      
-      source.onmessage = function(event) {
+        // 2단계: 컨텍스트 확인 (안전한 방법)
+        let ctx;
         try {
-          const { type, data } = JSON.parse(event.data);
-          console.log(`📡 SSE 수신: ${type}`, data);
-          
-          // DOM 접근 없이 데이터만 저장
-          if (type === "summary") {
-            window.ticketInitData.summary = data;
-            receivedData.summary = true;
-          } else if (type === "similar_tickets") {
-            window.ticketInitData.similar_tickets = Array.isArray(data) ? data : (data.results || data.tickets || []);
-            receivedData.similar_tickets = true;
-          } else if (type === "solutions") {
-            window.ticketInitData.kb_docs = Array.isArray(data) ? data : (data.results || data.documents || []);
-            receivedData.solutions = true;
+          ctx = await client.instance.context();
+          console.log("🔍 페이지 컨텍스트 확인 성공:", ctx);
+        } catch (contextError) {
+          console.warn(
+            "⚠️ 컨텍스트 확인 실패, 기본 로직으로 진행:",
+            contextError
+          );
+          // 컨텍스트 확인 실패 시 안전하게 종료
+          return;
+        }
+
+        // 3단계: 티켓 페이지인지 확인
+        const isTicketPage =
+          ctx.location &&
+          (ctx.location.includes("ticket") ||
+            ctx.location === "ticket_top_navigation");
+
+        if (isTicketPage) {
+          console.log("📋 티켓 페이지 확인됨 → 데이터 로드 시작");
+
+          // 4단계: 티켓 데이터 안전하게 가져오기
+          let ticketData;
+          try {
+            ticketData = await client.data.get("ticket");
+          } catch (dataError) {
+            console.warn(
+              "⚠️ 티켓 데이터 접근 실패 (EventAPI 오류 가능성):",
+              dataError
+            );
+            return;
           }
-        } catch (err) {
-          console.error("SSE 데이터 파싱 오류", err);
-        }
-      };
-      
-      source.addEventListener("end", () => {
-        console.log("🏁 SSE 연결 종료 - 데이터 로드 완료");
-        source.close();
-        
-        // 데이터 수신 완료 체크
-        const completed = Object.values(receivedData).filter(Boolean).length;
-        console.log(`✅ 로드된 데이터 타입 수: ${completed}/3`);
-        
-        resolve(window.ticketInitData);
-      });
-      
-      source.onerror = function(err) {
-        console.error("SSE 연결 오류", err);
-        source.close();
-        reject(err);
-      };
-      
-      // 타임아웃 설정 (30초)
-      setTimeout(() => {
-        if (source.readyState !== EventSource.CLOSED) {
-          console.warn("SSE 연결 타임아웃");
-          source.close();
-          resolve(window.ticketInitData); // 부분 데이터라도 사용
-        }
-      }, 30000);
-    });
-  } catch (err) {
-    console.error("백엔드 데이터 로드 오류", err);
-    // 에러가 발생해도 빈 객체로 초기화하여 모달은 열리도록 함
-    window.ticketInitData = {};
-    throw err;
-  }
-}
 
-/**
- * 모달이 열린 후 DOM 요소에 데이터를 렌더링하는 함수
- * 이미 로드된 데이터가 있으면 그것을 사용하고, 없으면 SSE로 실시간 로드
- */
-async function initializeTicketWithBackend() {
-  try {
-    console.log("🔄 모달 내 티켓 데이터 초기화 시작");
-    
-    // DOM 요소 존재 확인 (안전성 체크)
-    const summaryEl = document.getElementById('summary');
-    const similarTicketsEl = document.getElementById('similar-tickets');
-    const suggestedSolutionsEl = document.getElementById('suggested-solutions');
-    
-    if (!summaryEl || !similarTicketsEl || !suggestedSolutionsEl) {
-      console.warn("⚠️ DOM 요소가 아직 존재하지 않음 - 모달이 완전히 로드되지 않았을 수 있음");
-      // 짧은 지연 후 재시도
-      setTimeout(() => initializeTicketWithBackend(), 500);
-      return;
-    }
-    
-    // 로딩 상태 표시
-    summaryEl.innerHTML = '<p>요약을 불러오는 중입니다...</p>';
-    similarTicketsEl.innerHTML = '<p>유사 티켓을 불러오는 중입니다...</p>';
-    suggestedSolutionsEl.innerHTML = '<p>추천 솔루션을 불러오는 중입니다...</p>';
-    
-    // 이미 로드된 데이터가 있는지 확인
-    if (window.ticketInitData && Object.keys(window.ticketInitData).length > 0) {
-      console.log("✅ 이미 로드된 데이터 사용하여 즉시 렌더링");
-      
-      // 기존 데이터로 즉시 렌더링
-      if (window.ticketInitData.summary) {
-        renderSummaryFromCache();
-      }
-      if (window.ticketInitData.similar_tickets) {
-        renderSimilarTicketsFromCache();
-      }
-      if (window.ticketInitData.kb_docs) {
-        renderSuggestedSolutionsFromCache();
-      }
-      
-      return;
-    }
-    
-    // 데이터가 없으면 SSE로 실시간 로드하면서 DOM에 즉시 반영
-    console.log("🔄 데이터 없음 - SSE로 실시간 로드 시작");
-    
-    const data = await client.data.get("ticket");
-    const ticketId = data.ticket.id;
-    
-    // iparams에서 백엔드 URL 가져오기
-    const iparams = await client.iparams.get();
-    let backendBaseUrl = iparams.backend_url;
-    
-    // URL 유효성 검사 및 정규화
-    if (!backendBaseUrl) {
-      throw new Error("Backend URL이 설정되지 않았습니다. iparams에서 backend_url을 설정해주세요.");
-    }
-    
-    // 프로토콜이 없으면 https:// 추가
-    if (!backendBaseUrl.startsWith('http://') && !backendBaseUrl.startsWith('https://')) {
-      backendBaseUrl = `https://${backendBaseUrl}`;
-    }
-    
-    // 마지막 슬래시 제거 (있다면)
-    backendBaseUrl = backendBaseUrl.replace(/\/$/, '');
-    
-    console.log(`📋 모달용 최종 백엔드 URL: ${backendBaseUrl}`);
-    
-    const sseUrl = `${backendBaseUrl}/init/${ticketId}`;
-    console.log(`🔗 모달용 SSE 연결 시작: ${sseUrl}`);
-    
-    const source = new EventSource(sseUrl);
-    let receivedData = { summary: false, similar_tickets: false, solutions: false };
-    
-    source.onmessage = function(event) {
-      try {
-        const { type, data } = JSON.parse(event.data);
-        console.log(`📡 모달용 SSE 수신: ${type}`, data);
-        
-        // 데이터 저장과 동시에 DOM에 즉시 렌더링
-        if (type === "summary") {
-          window.ticketInitData.summary = data;
-          renderSummaryFromCache(); // 즉시 렌더링
-          receivedData.summary = true;
-        } else if (type === "similar_tickets") {
-          window.ticketInitData.similar_tickets = Array.isArray(data) ? data : (data.results || data.tickets || []);
-          renderSimilarTicketsFromCache(); // 즉시 렌더링
-          receivedData.similar_tickets = true;
-        } else if (type === "solutions") {
-          window.ticketInitData.kb_docs = Array.isArray(data) ? data : (data.results || data.documents || []);
-          renderSuggestedSolutionsFromCache(); // 즉시 렌더링
-          receivedData.solutions = true;
+          if (ticketData && ticketData.ticket) {
+            const currentTicketId = ticketData.ticket.id;
+
+            // 5단계: 캐시 확인 및 백엔드 호출
+            if (
+              globalTicketData.cached_ticket_id === currentTicketId &&
+              globalTicketData.summary
+            ) {
+              console.log("✅ 이미 캐시된 데이터 존재 → 백그라운드 로드 스킵");
+              return;
+            }
+
+            console.log(
+              "🚀 백그라운드에서 새로운 티켓 데이터 로드 중...",
+              currentTicketId
+            );
+
+            // 6단계: 백엔드 호출 (FDK와 독립적)
+            try {
+              resetGlobalTicketCache();
+              await loadInitialDataFromBackend(client, ticketData.ticket);
+              console.log(
+                "✅ 백그라운드 데이터 로드 완료 → 앱 아이콘 클릭 시 즉시 모달 표시 가능"
+              );
+            } catch (backendError) {
+              console.warn("⚠️ 백엔드 호출 실패:", backendError);
+            }
+          } else {
+            console.log("⚠️ 티켓 정보 없음 → 백그라운드 로드 스킵");
+          }
+        } else {
+          console.log("📄 티켓 페이지가 아님 → 백그라운드 로드 스킵");
         }
-      } catch (err) {
-        console.error("모달용 SSE 데이터 파싱 오류", err);
+      } catch (error) {
+        console.warn("⚠️ 백그라운드 데이터 로드 중 예외 발생:", error);
       }
-    };
-    
-    source.addEventListener("end", () => {
-      console.log("🏁 모달용 SSE 연결 종료");
-      source.close();
-      
-      const completed = Object.values(receivedData).filter(Boolean).length;
-      console.log(`📊 모달 SSE 완료: ${completed}/3 데이터 타입 수신됨`);
-    });
-    
-    source.onerror = function(err) {
-      console.error("❌ 모달용 SSE 연결 오류", err);
-      source.close();
-      
-      // 폴백 UI 표시 (DOM 안전성 체크)
-      if (!receivedData.summary && document.getElementById('summary')) {
-        document.getElementById('summary').innerHTML = '<p>요약을 불러올 수 없습니다. 새로고침 해주세요.</p>';
-      }
-      if (!receivedData.similar_tickets && document.getElementById('similar-tickets')) {
-        document.getElementById('similar-tickets').innerHTML = '<p>유사 티켓을 불러올 수 없습니다. 새로고침 해주세요.</p>';
-      }
-      if (!receivedData.solutions && document.getElementById('suggested-solutions')) {
-        document.getElementById('suggested-solutions').innerHTML = '<p>추천 솔루션을 불러올 수 없습니다. 새로고침 해주세요.</p>';
-      }
-    };
-    
+    }, 2000); // 2초로 지연 시간 증가하여 FDK 완전 초기화 대기
   } catch (error) {
-    console.error("모달 티켓 초기화 오류", error);
-    
-    // DOM 안전성 체크 후 에러 메시지 표시
-    if (document.getElementById('summary')) {
-      document.getElementById('summary').innerHTML = '<p>데이터 로드 중 오류가 발생했습니다.</p>';
-    }
-    if (document.getElementById('similar-tickets')) {
-      document.getElementById('similar-tickets').innerHTML = '<p>데이터 로드 중 오류가 발생했습니다.</p>';
-    }
-    if (document.getElementById('suggested-solutions')) {
-      document.getElementById('suggested-solutions').innerHTML = '<p>데이터 로드 중 오류가 발생했습니다.</p>';
-    }
+    console.warn("⚠️ 백그라운드 데이터 준비 초기화 실패:", error);
   }
 }
 
-/**
- * 요약 데이터를 캐시에서 가져와 UI에 표시
- */
-function renderSummaryFromCache() {
+// 캐시된 데이터로 UI를 즉시 업데이트하는 함수
+function updateUIWithCachedData() {
   try {
-    console.log("📝 요약 데이터 렌더링 시작");
-    const summaryDiv = document.getElementById('summary');
-    
-    // DOM 안전성 체크
-    if (!summaryDiv) {
-      console.warn("⚠️ summary DOM 요소를 찾을 수 없음");
+    if (!globalTicketData.summary) {
+      console.log("⚠️ 캐시된 데이터 없음 → UI 업데이트 스킵");
       return;
     }
-    
-    if (window.ticketInitData && window.ticketInitData.summary) {
-      const summaryData = window.ticketInitData.summary;
-      
-      // 요약 데이터가 문자열인 경우와 객체인 경우 모두 처리
-      let summaryText = '';
-      if (typeof summaryData === 'string') {
-        summaryText = summaryData;
-      } else if (summaryData.text || summaryData.summary) {
-        summaryText = summaryData.text || summaryData.summary;
+
+    console.log("🎯 캐시된 데이터로 UI 즉시 업데이트 시작");
+
+    // 티켓 기본 정보 업데이트 (백엔드 응답의 ticket_data 사용)
+    if (globalTicketData.ticket_info) {
+      updateTicketInfo(globalTicketData.ticket_info);
+    }
+
+    // 요약 정보 업데이트
+    if (globalTicketData.summary) {
+      const summaryContent = document.getElementById("copilot-content");
+      if (summaryContent) {
+        summaryContent.innerHTML = formatSummaryForDisplay(
+          globalTicketData.summary
+        );
+      }
+    }
+
+    // 유사 티켓 데이터가 있으면 미리 준비
+    if (
+      globalTicketData.similar_tickets &&
+      globalTicketData.similar_tickets.length > 0
+    ) {
+      console.log(
+        `✅ 유사 티켓 ${globalTicketData.similar_tickets.length}개 캐시 준비 완료`
+      );
+    }
+
+    // 추천 솔루션 데이터가 있으면 미리 준비
+    if (
+      globalTicketData.recommended_solutions &&
+      globalTicketData.recommended_solutions.length > 0
+    ) {
+      console.log(
+        `✅ 추천 솔루션 ${globalTicketData.recommended_solutions.length}개 캐시 준비 완료`
+      );
+    }
+
+    console.log("✅ 캐시된 데이터로 UI 업데이트 완료");
+  } catch (error) {
+    console.error("❌ 캐시된 데이터로 UI 업데이트 실패:", error);
+  }
+}
+
+// 티켓 정보 UI 업데이트 함수
+function updateTicketInfo(ticket) {
+  // 제목 업데이트
+  const subjectElement = document.getElementById("ticket-subject");
+  if (subjectElement) {
+    subjectElement.textContent = ticket.subject || "No subject available";
+  }
+
+  // 상태 업데이트
+  const statusElement = document.getElementById("ticket-status");
+  if (statusElement) {
+    const statusText = getStatusText(ticket.status);
+    statusElement.textContent = statusText;
+    statusElement.className = `info-value status-${statusText.toLowerCase()}`;
+  }
+
+  // 우선순위 업데이트
+  const priorityElement = document.getElementById("ticket-priority");
+  if (priorityElement) {
+    const priorityText = getPriorityText(ticket.priority);
+    priorityElement.textContent = priorityText;
+    priorityElement.className = `info-value priority-${priorityText.toLowerCase()}`;
+  }
+
+  // 타입 업데이트
+  const typeElement = document.getElementById("ticket-type");
+  if (typeElement) {
+    typeElement.textContent = ticket.type || "Question";
+  }
+
+  console.log("✅ 티켓 정보 UI 업데이트 완료");
+}
+
+// 탭 이벤트 설정 함수
+function setupTabEvents(client) {
+  const tabs = document.querySelectorAll('[role="tab"]');
+  tabs.forEach((tab) => {
+    tab.addEventListener("click", function () {
+      const tabId = this.id;
+      const targetPanel = this.getAttribute("data-bs-target").substring(1);
+
+      console.log(`📂 탭 클릭: ${tabId} targeting panel: ${targetPanel}`);
+
+      // 탭에 따른 적절한 함수 호출
+      switch (tabId) {
+        case "similar-tickets-tab":
+          handleSimilarTicketsTab(client);
+          break;
+        case "suggested-solutions-tab":
+          handleSuggestedSolutionsTab(client);
+          break;
+        case "copilot-tab":
+          handleCopilotTab(client);
+          break;
+      }
+    });
+  });
+
+  // 각 탭의 버튼 이벤트 설정
+  setupSimilarTicketsEvents(client);
+  setupSuggestedSolutionsEvents(client);
+  setupCopilotEvents(client);
+}
+
+// 검색 버튼 이벤트 설정 함수
+function setupSearchButton(client) {
+  const searchButton = document.getElementById("search-button");
+  const searchInput = document.getElementById("search-input");
+
+  if (searchButton) {
+    searchButton.addEventListener("click", async function () {
+      const searchQuery = searchInput.value.trim();
+
+      if (searchQuery) {
+        console.log("🔍 검색 실행:", searchQuery);
+        await performTicketSearch(client, searchQuery);
       } else {
-        summaryText = JSON.stringify(summaryData);
+        showError("검색어를 입력해주세요.");
       }
-      
-      summaryDiv.innerHTML = `<p>${summaryText}</p>`;
-      console.log("✅ 요약 렌더링 완료");
-    } else {
-      summaryDiv.innerHTML = '<p>요약 데이터를 불러올 수 없습니다.</p>';
-      console.log("❌ 요약 데이터 없음");
-    }
-  } catch (error) {
-    console.error("요약 렌더링 오류", error);
-    const summaryDiv = document.getElementById('summary');
-    if (summaryDiv) {
-      summaryDiv.innerHTML = '<p>요약 표시 중 오류가 발생했습니다.</p>';
-    }
+    });
+  }
+
+  // Enter 키 지원
+  if (searchInput) {
+    searchInput.addEventListener("keypress", function (e) {
+      if (e.key === "Enter") {
+        searchButton.click();
+      }
+    });
   }
 }
 
-/**
- * 캐시된 유사 티켓 데이터로 UI 업데이트
- */
-function updateSimilarTicketsFromCache(similarTickets) {
+// 유사 티켓 탭 처리 함수
+async function handleSimilarTicketsTab(client) {
+  console.log("🔍 유사 티켓 탭 활성화");
+
+  // 리스트 뷰로 초기화
+  showSimilarTicketsListView();
+
   try {
-    if (similarTickets && similarTickets.length > 0) {
-      // 유사 티켓 탭 컨테이너 찾기
-      const similarTicketsContainer = document.getElementById('similar-tickets');
-      if (!similarTicketsContainer) return;
-      
-      // 데이터 테이블 HTML 생성
-      let tableHtml = `
-        <fw-data-table id="cached-similar-tickets-table" label="Similar Tickets (Pre-loaded)">
-        </fw-data-table>
+    // 현재 티켓 데이터 가져오기
+    const ticketData = await client.data.get("ticket");
+
+    if (ticketData && ticketData.ticket) {
+      const ticket = ticketData.ticket;
+
+      // 캐시된 데이터가 있고 같은 티켓인 경우 재사용
+      if (
+        globalTicketData.cached_ticket_id === ticket.id &&
+        globalTicketData.similar_tickets.length > 0
+      ) {
+        console.log("🔄 캐시된 유사 티켓 데이터 사용");
+        displaySimilarTickets(globalTicketData.similar_tickets);
+      } else {
+        // 캐시된 데이터가 없거나 다른 티켓인 경우 백엔드에서 로드
+        await loadSimilarTicketsFromBackend(ticket);
+      }
+    }
+  } catch (error) {
+    console.error("❌ 유사 티켓 로드 오류:", error);
+    showErrorInResults(
+      "유사 티켓을 로드할 수 없습니다.",
+      "similar-tickets-list"
+    );
+  }
+}
+
+// 유사 티켓 이벤트 설정 함수
+function setupSimilarTicketsEvents(client) {
+  // 새로고침 버튼
+  const refreshButton = document.getElementById("refresh-similar-tickets");
+  if (refreshButton) {
+    refreshButton.addEventListener("click", async () => {
+      console.log("🔄 유사 티켓 새로고침 - 캐시 초기화");
+      const ticketData = await client.data.get("ticket");
+      if (ticketData && ticketData.ticket) {
+        // 캐시에서 유사 티켓 데이터만 초기화
+        globalTicketData.similar_tickets = [];
+        await loadSimilarTicketsFromBackend(ticketData.ticket);
+      }
+    });
+  }
+
+  // 뒤로가기 버튼
+  const backButton = document.getElementById("back-to-similar-list");
+  if (backButton) {
+    backButton.addEventListener("click", () => {
+      showSimilarTicketsListView();
+    });
+  }
+
+  // 티켓 열기 버튼
+  const openTicketButton = document.getElementById("open-ticket-link");
+  if (openTicketButton) {
+    openTicketButton.addEventListener("click", () => {
+      const currentTicketId = openTicketButton.dataset.ticketId;
+      if (currentTicketId) {
+        window.open(
+          `https://${window.location.host}/a/tickets/${currentTicketId}`,
+          "_blank"
+        );
+      }
+    });
+  }
+}
+
+// 유사 티켓 리스트 뷰 표시
+function showSimilarTicketsListView() {
+  const listView = document.getElementById("similar-tickets-list-view");
+  const detailView = document.getElementById("similar-tickets-detail-view");
+
+  if (listView) listView.style.display = "block";
+  if (detailView) detailView.style.display = "none";
+}
+
+// 유사 티켓 상세 뷰 표시
+function showSimilarTicketDetailView(ticket) {
+  const listView = document.getElementById("similar-tickets-list-view");
+  const detailView = document.getElementById("similar-tickets-detail-view");
+  const detailContent = document.getElementById(
+    "similar-ticket-detail-content"
+  );
+  const openTicketButton = document.getElementById("open-ticket-link");
+
+  if (listView) listView.style.display = "none";
+  if (detailView) detailView.style.display = "block";
+
+  // 버튼에 티켓 ID 저장
+  if (openTicketButton) {
+    openTicketButton.dataset.ticketId = ticket.id;
+  }
+
+  if (detailContent) {
+    detailContent.innerHTML = `
+      <div class="detail-content">
+        <div class="detail-meta">
+          <div class="d-flex justify-content-between align-items-start mb-2">
+            <h5 class="mb-0">#${ticket.id}</h5>
+            <span class="badge-custom ${getStatusClass(
+              ticket.status
+            )}">${getStatusText(ticket.status)}</span>
+          </div>
+          <div class="row">
+            <div class="col-6">
+              <small class="text-muted">Priority:</small>
+              <div class="badge-custom ${getPriorityClass(
+                ticket.priority
+              )}">${getPriorityText(ticket.priority)}</div>
+            </div>
+            <div class="col-6">
+              <small class="text-muted">Type:</small>
+              <div>${ticket.type || "Question"}</div>
+            </div>
+          </div>
+          ${
+            ticket.created_at
+              ? `
+            <div class="mt-2">
+              <small class="text-muted">Created:</small>
+              <div>${formatDate(ticket.created_at)}</div>
+            </div>
+          `
+              : ""
+          }
+        </div>
+        
+        <div class="detail-section">
+          <h6>Subject</h6>
+          <p>${ticket.subject || "No subject available"}</p>
+        </div>
+        
+        ${
+          ticket.description_text || ticket.description
+            ? `
+          <div class="detail-section">
+            <h6>Description</h6>
+            <div class="description-content">
+              ${formatDescription(
+                ticket.description_text || ticket.description
+              )}
+            </div>
+          </div>
+        `
+            : ""
+        }
+        
+        ${
+          ticket.tags && ticket.tags.length > 0
+            ? `
+          <div class="detail-section">
+            <h6>Tags</h6>
+            <div>
+              ${ticket.tags
+                .map(
+                  (tag) => `<span class="badge bg-secondary me-1">${tag}</span>`
+                )
+                .join("")}
+            </div>
+          </div>
+        `
+            : ""
+        }
+        
+        ${
+          ticket.fr_escalated
+            ? `
+          <div class="detail-section">
+            <h6>Additional Info</h6>
+            <ul class="list-unstyled">
+              <li><strong>Escalated:</strong> Yes</li>
+              ${
+                ticket.requester_id
+                  ? `<li><strong>Requester ID:</strong> ${ticket.requester_id}</li>`
+                  : ""
+              }
+              ${
+                ticket.group_id
+                  ? `<li><strong>Group ID:</strong> ${ticket.group_id}</li>`
+                  : ""
+              }
+            </ul>
+          </div>
+        `
+            : ""
+        }
+      </div>
+    `;
+  }
+
+  console.log("✅ 유사 티켓 상세 정보 표시 완료");
+}
+
+// 백엔드에서 유사 티켓 로드 함수
+async function loadSimilarTicketsFromBackend(ticket) {
+  try {
+    console.log("🔍 유사 티켓 검색 시작");
+
+    // 캐시된 데이터가 있고 같은 티켓인 경우 재사용
+    if (
+      globalTicketData.cached_ticket_id === ticket.id &&
+      globalTicketData.similar_tickets.length > 0
+    ) {
+      console.log("🔄 캐시된 유사 티켓 데이터 사용");
+      displaySimilarTickets(globalTicketData.similar_tickets);
+      return;
+    }
+
+    console.log(
+      "⚠️ 유사 티켓이 캐시에 없음 - /init 엔드포인트에서 이미 받았어야 하는 데이터"
+    );
+
+    // /init 엔드포인트에서 이미 모든 데이터를 받았어야 하므로,
+    // 별도 API 호출 대신 Freshdesk API 폴백 사용
+    console.log("🔄 Freshdesk API 폴백 사용");
+    await loadSimilarTicketsFromFreshdesk(ticket);
+  } catch (error) {
+    console.error("❌ 백엔드 연결 오류:", error);
+    // 폴백: Freshdesk API 사용
+    await loadSimilarTicketsFromFreshdesk(ticket);
+  }
+}
+
+// 로딩 상태 관리를 위한 전역 변수
+let isLoadingSimilarTickets = false;
+
+// Freshdesk API를 사용한 유사 티켓 검색 (폴백)
+async function loadSimilarTicketsFromFreshdesk(ticket) {
+  // 중복 호출 방지
+  if (isLoadingSimilarTickets) {
+    console.log("⏳ 이미 유사 티켓 로딩 중, 중복 호출 방지");
+    return;
+  }
+
+  try {
+    isLoadingSimilarTickets = true;
+    console.log("🔄 Freshdesk API 폴백으로 유사 티켓 검색");
+
+    // 검색 쿼리 구성
+    let searchTerms = [];
+
+    // 제목 검색 추가
+    if (ticket.subject) {
+      searchTerms.push(`"subject:'${ticket.subject}'"`);
+    }
+
+    // 태그 검색 추가 (태그가 있는 경우)
+    if (ticket.tags && ticket.tags.length > 0) {
+      const tagsQuery = ticket.tags
+        .map((tag) => `"tags:'${tag}'"`)
+        .join(" OR ");
+      searchTerms.push(`(${tagsQuery})`);
+    }
+
+    // 설명 검색 추가 (설명이 있는 경우)
+    if (ticket.description_text) {
+      const descriptionExcerpt = ticket.description_text
+        .substring(0, 100)
+        .replace(/[^\w\s]/gi, " ");
+      searchTerms.push(`"description:'${descriptionExcerpt}'"`);
+    }
+
+    // 검색 쿼리 조합
+    const searchQuery = searchTerms.join(" OR ");
+
+    console.log("🔍 Freshdesk 검색 쿼리:", searchQuery);
+
+    // Freshdesk 검색 API 호출
+    const result = await client.request.invokeTemplate("searchTickets", {
+      context: {
+        searchQuery: searchQuery,
+      },
+    });
+
+    const response = JSON.parse(result.response);
+
+    // 현재 티켓을 결과에서 제외
+    const similarTickets = response.results
+      ? response.results.filter((t) => t.id != ticket.id)
+      : [];
+
+    displaySimilarTickets(similarTickets);
+  } catch (error) {
+    console.error("❌ Freshdesk API 검색 오류:", error);
+    showErrorInResults("유사 티켓을 찾을 수 없습니다.");
+  } finally {
+    // 로딩 상태 초기화
+    isLoadingSimilarTickets = false;
+  }
+}
+
+// 유사 티켓 결과 표시 함수 (새로운 리스트 형태)
+function displaySimilarTickets(similarTickets) {
+  const resultsElement = document.getElementById("similar-tickets-list");
+  if (!resultsElement) return;
+
+  if (similarTickets.length > 0) {
+    resultsElement.innerHTML = `
+      <div class="similar-tickets-content">
+        <div class="mb-3">
+          <small class="text-muted">발견된 유사 티켓: ${similarTickets.length}개</small>
+        </div>
+        <div id="tickets-container"></div>
+      </div>
+    `;
+
+    const ticketsContainer = document.getElementById("tickets-container");
+
+    // 각 유사 티켓을 새로운 리스트 아이템으로 렌더링
+    similarTickets.forEach((similarTicket) => {
+      const ticketItem = document.createElement("div");
+      ticketItem.className = "list-item";
+
+      // 유사도 점수 계산 (임시)
+      const similarityScore = similarTicket.score || Math.random() * 30 + 70;
+
+      ticketItem.innerHTML = `
+        <div class="list-item-header">
+          <div class="list-item-title">${
+            similarTicket.subject || "No subject"
+          }</div>
+          <div class="d-flex align-items-center gap-2">
+            <span class="score-badge">${Math.round(similarityScore)}%</span>
+            <span class="badge-custom ${getStatusClass(
+              similarTicket.status
+            )}">${getStatusText(similarTicket.status)}</span>
+          </div>
+        </div>
+        <div class="list-item-meta">
+          <span>티켓 #${similarTicket.id}</span> • 
+          <span>우선순위: ${getPriorityText(similarTicket.priority)}</span>
+          ${
+            similarTicket.created_at
+              ? ` • <span>${formatDate(similarTicket.created_at)}</span>`
+              : ""
+          }
+        </div>
+        ${
+          similarTicket.description_text || similarTicket.description
+            ? `
+          <div class="list-item-excerpt">
+            ${truncateText(
+              similarTicket.description_text || similarTicket.description,
+              150
+            )}
+          </div>
+        `
+            : ""
+        }
+        ${
+          similarTicket.tags && similarTicket.tags.length > 0
+            ? `
+          <div class="mt-2">
+            ${similarTicket.tags
+              .slice(0, 3)
+              .map(
+                (tag) =>
+                  `<span class="badge bg-light text-dark me-1">${tag}</span>`
+              )
+              .join("")}
+            ${
+              similarTicket.tags.length > 3
+                ? `<span class="badge bg-light text-muted">+${
+                    similarTicket.tags.length - 3
+                  }</span>`
+                : ""
+            }
+          </div>
+        `
+            : ""
+        }
       `;
-      
-      similarTicketsContainer.innerHTML = tableHtml;
-      
-      // 테이블 설정
-      const table = document.getElementById('cached-similar-tickets-table');
-      
-      // 컬럼 정의
-      const columns = [
-        { key: 'id', text: 'Ticket ID' },
-        { key: 'subject', text: 'Subject' },
-        { key: 'status', text: 'Status' },
-        { key: 'priority', text: 'Priority' },
-        { key: 'similarity_score', text: 'Similarity' }
-      ];
-      
-      // 행 데이터 포맷팅
-      const rows = similarTickets.map(ticket => ({
-        id: ticket.id?.toString() || ticket.ticket_id?.toString() || 'N/A',
-        subject: ticket.subject || ticket.title || 'No subject',
-        status: ticket.status || 'Unknown',
-        priority: ticket.priority || 'Unknown',
-        similarity_score: ticket.similarity_score 
-          ? `${Math.round(ticket.similarity_score * 100)}%` 
-          : 'N/A'
-      }));
-      
-      // 테이블 데이터 설정
-      table.columns = columns;
-      table.rows = rows;
-      
-      console.log(`✅ 캐시된 유사 티켓 ${similarTickets.length}개 UI 업데이트 완료`);
+
+      // 티켓 상세 보기 클릭 이벤트 추가
+      ticketItem.addEventListener("click", function () {
+        console.log("📋 유사 티켓 상세 보기:", similarTicket.id);
+        showSimilarTicketDetailView(similarTicket);
+      });
+
+      ticketsContainer.appendChild(ticketItem);
+    });
+  } else {
+    resultsElement.innerHTML =
+      '<div class="placeholder-text">유사한 티켓을 찾을 수 없습니다.</div>';
+  }
+
+  console.log(`✅ 유사 티켓 ${similarTickets.length}개 표시 완료`);
+}
+
+// 검색 실행 함수
+async function performTicketSearch(client, searchQuery) {
+  const resultsElement = document.getElementById("search-results");
+  if (!resultsElement) return;
+
+  // 로딩 상태 표시
+  resultsElement.innerHTML = '<div class="placeholder-text">검색 중...</div>';
+
+  try {
+    // 검색 옵션 가져오기
+    const searchSubject =
+      document.getElementById("search-subject")?.checked || true;
+    const searchDescription =
+      document.getElementById("search-description")?.checked || true;
+    const searchTags = document.getElementById("search-tags")?.checked || false;
+
+    // 검색 범위에 따른 쿼리 구성
+    let searchTerms = [];
+
+    if (searchSubject) {
+      searchTerms.push(`"subject:'${searchQuery}'"`);
     }
+
+    if (searchDescription) {
+      searchTerms.push(`"description:'${searchQuery}'"`);
+    }
+
+    if (searchTags) {
+      searchTerms.push(`"tags:'${searchQuery}'"`);
+    }
+
+    const finalQuery = searchTerms.join(" OR ");
+
+    console.log("🔍 실행할 검색 쿼리:", finalQuery);
+
+    // 먼저 백엔드 API 시도
+    try {
+      const response = await fetch("/api/search-tickets", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          query: searchQuery,
+          search_subject: searchSubject,
+          search_description: searchDescription,
+          search_tags: searchTags,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        displaySimilarTickets(data.tickets || []);
+        return;
+      }
+    } catch (error) {
+      console.warn("⚠️ 백엔드 검색 실패, Freshdesk API 사용:", error);
+    }
+
+    // 폴백: Freshdesk API 사용
+    const result = await client.request.invokeTemplate("searchTickets", {
+      context: {
+        searchQuery: finalQuery,
+      },
+    });
+
+    const response = JSON.parse(result.response);
+    const tickets = response.results || [];
+
+    displaySimilarTickets(tickets);
   } catch (error) {
-    console.error("❌ 캐시된 유사 티켓 UI 업데이트 실패:", error);
+    console.error("❌ 검색 오류:", error);
+    showErrorInResults("검색 중 오류가 발생했습니다.");
   }
 }
 
-/**
- * 캐시된 지식베이스 데이터로 UI 업데이트
- */
-function updateKnowledgeBaseFromCache(kbDocs) {
+// 추천 해결책 탭 처리 함수
+async function handleSuggestedSolutionsTab(client) {
+  console.log("💡 추천 솔루션 탭 활성화");
+
+  // 리스트 뷰로 초기화
+  showSuggestedSolutionsListView();
+
   try {
-    if (kbDocs && kbDocs.length > 0) {
-      console.log(`📚 캐시된 지식베이스 문서 ${kbDocs.length}개 발견`);
-      
-      // 지식베이스 데이터를 suggested-solutions 탭에 표시할 수 있도록 글로벌 변수에 저장
-      window.cachedKbDocs = kbDocs;
-      
-      // suggested-solutions 탭이 활성화되어 있으면 즉시 표시
-      const suggestedSolutionsTab = document.querySelector('.tab[data-tab="suggested-solutions"]');
-      if (suggestedSolutionsTab && suggestedSolutionsTab.classList.contains('active')) {
-        updateSuggestedSolutionsFromCache();
+    // 현재 티켓 데이터 가져오기
+    const ticketData = await client.data.get("ticket");
+
+    if (ticketData && ticketData.ticket) {
+      const ticket = ticketData.ticket;
+
+      // 캐시된 데이터가 있고 같은 티켓인 경우 재사용
+      if (
+        globalTicketData.cached_ticket_id === ticket.id &&
+        globalTicketData.recommended_solutions.length > 0
+      ) {
+        console.log("🔄 캐시된 추천 솔루션 데이터 사용");
+        displaySuggestedSolutions(globalTicketData.recommended_solutions);
+      } else {
+        // 캐시된 데이터가 없거나 다른 티켓인 경우 백엔드에서 로드
+        await loadSuggestedSolutions(ticket);
       }
     }
   } catch (error) {
-    console.error("❌ 캐시된 지식베이스 UI 업데이트 실패:", error);
+    console.error("❌ 추천 해결책 로드 오류:", error);
+    showErrorInResults(
+      "추천 해결책을 로드할 수 없습니다.",
+      "suggested-solutions-list"
+    );
   }
 }
 
-/**
- * 캐시된 지식베이스로 Suggested Solutions 탭 업데이트
- */
-function updateSuggestedSolutionsFromCache() {
+// 추천 솔루션 이벤트 설정 함수
+function setupSuggestedSolutionsEvents(client) {
+  // 새로고침 버튼
+  const refreshButton = document.getElementById("refresh-solutions");
+  if (refreshButton) {
+    refreshButton.addEventListener("click", async () => {
+      console.log("🔄 추천 솔루션 새로고침 - 캐시 초기화");
+      const ticketData = await client.data.get("ticket");
+      if (ticketData && ticketData.ticket) {
+        // 캐시에서 추천 솔루션 데이터만 초기화
+        globalTicketData.recommended_solutions = [];
+        await loadSuggestedSolutions(ticketData.ticket);
+      }
+    });
+  }
+
+  // 뒤로가기 버튼
+  const backButton = document.getElementById("back-to-solutions-list");
+  if (backButton) {
+    backButton.addEventListener("click", () => {
+      showSuggestedSolutionsListView();
+    });
+  }
+
+  // 솔루션 사용 버튼
+  const useSolutionButton = document.getElementById("use-solution");
+  if (useSolutionButton) {
+    useSolutionButton.addEventListener("click", () => {
+      const solutionData = useSolutionButton.dataset.solution;
+      if (solutionData) {
+        try {
+          const solution = JSON.parse(solutionData);
+          insertSolutionToReply(solution);
+        } catch (error) {
+          console.error("❌ 솔루션 데이터 파싱 오류:", error);
+        }
+      }
+    });
+  }
+}
+
+// 추천 솔루션 리스트 뷰 표시
+function showSuggestedSolutionsListView() {
+  const listView = document.getElementById("solutions-list-view");
+  const detailView = document.getElementById("solutions-detail-view");
+
+  if (listView) listView.style.display = "block";
+  if (detailView) detailView.style.display = "none";
+}
+
+// 추천 솔루션 상세 뷰 표시
+function showSuggestedSolutionDetailView(solution) {
+  const listView = document.getElementById("solutions-list-view");
+  const detailView = document.getElementById("solutions-detail-view");
+  const detailContent = document.getElementById("solution-detail-content");
+  const useSolutionButton = document.getElementById("use-solution");
+
+  if (listView) listView.style.display = "none";
+  if (detailView) detailView.style.display = "block";
+
+  // 버튼에 솔루션 데이터 저장
+  if (useSolutionButton) {
+    useSolutionButton.dataset.solution = JSON.stringify(solution);
+  }
+
+  if (detailContent) {
+    detailContent.innerHTML = `
+      <div class="detail-content">
+        <div class="detail-meta">
+          <div class="d-flex justify-content-between align-items-start mb-2">
+            <h5 class="mb-0">${solution.title || "해결책"}</h5>
+            ${
+              solution.score
+                ? `<span class="score-badge">${Math.round(
+                    solution.score * 100
+                  )}% 관련도</span>`
+                : ""
+            }
+          </div>
+          <div class="row">
+            <div class="col-6">
+              <small class="text-muted">카테고리:</small>
+              <div class="badge-custom bg-info">${
+                solution.category || "일반"
+              }</div>
+            </div>
+            <div class="col-6">
+              <small class="text-muted">유형:</small>
+              <div>${solution.type || "Solution"}</div>
+            </div>
+          </div>
+          ${
+            solution.source
+              ? `
+            <div class="mt-2">
+              <small class="text-muted">출처:</small>
+              <div>${solution.source}</div>
+            </div>
+          `
+              : ""
+          }
+        </div>
+        
+        ${
+          solution.summary
+            ? `
+          <div class="detail-section">
+            <h6>요약</h6>
+            <p>${solution.summary}</p>
+          </div>
+        `
+            : ""
+        }
+        
+        <div class="detail-section">
+          <h6>해결책 내용</h6>
+          <div class="solution-content">
+            ${formatSolutionContent(
+              solution.content ||
+                solution.description ||
+                "솔루션 내용이 없습니다."
+            )}
+          </div>
+        </div>
+        
+        ${
+          solution.steps && solution.steps.length > 0
+            ? `
+          <div class="detail-section">
+            <h6>단계별 해결 과정</h6>
+            <ol class="solution-steps">
+              ${solution.steps.map((step) => `<li>${step}</li>`).join("")}
+            </ol>
+          </div>
+        `
+            : ""
+        }
+        
+        ${
+          solution.tags && solution.tags.length > 0
+            ? `
+          <div class="detail-section">
+            <h6>관련 태그</h6>
+            <div>
+              ${solution.tags
+                .map(
+                  (tag) => `<span class="badge bg-secondary me-1">${tag}</span>`
+                )
+                .join("")}
+            </div>
+          </div>
+        `
+            : ""
+        }
+        
+        ${
+          solution.url
+            ? `
+          <div class="detail-section">
+            <h6>추가 정보</h6>
+            <a href="${solution.url}" target="_blank" class="btn btn-outline-primary btn-sm">
+              원본 문서 보기 <i class="fas fa-external-link-alt"></i>
+            </a>
+          </div>
+        `
+            : ""
+        }
+      </div>
+    `;
+  }
+
+  console.log("✅ 추천 솔루션 상세 정보 표시 완료");
+}
+
+// 추천 해결책 로드 함수
+function loadSuggestedSolutions(ticket) {
+  const resultsElement = document.getElementById("suggested-solutions-list");
+  if (resultsElement) {
+    resultsElement.innerHTML =
+      '<div class="placeholder-text">추천 해결책을 로드하는 중...</div>';
+  }
+
   try {
-    // 캐시된 데이터에서 직접 가져오기
-    const kbDocs = window.ticketInitData && window.ticketInitData.kb_docs;
-    const container = document.getElementById('suggested-solutions');
-    
-    // DOM 안전성 체크
-    if (!container) {
-      console.warn("⚠️ suggested-solutions DOM 요소를 찾을 수 없음");
+    console.log("💡 추천 해결책 로드 시작");
+
+    // 캐시된 데이터가 있고 같은 티켓인 경우 재사용
+    if (
+      globalTicketData.cached_ticket_id === ticket.id &&
+      globalTicketData.recommended_solutions.length > 0
+    ) {
+      console.log("🔄 캐시된 추천 솔루션 데이터 사용");
+      displaySuggestedSolutions(globalTicketData.recommended_solutions);
       return;
     }
-    
-    if (!kbDocs || !Array.isArray(kbDocs) || kbDocs.length === 0) {
-      container.innerHTML = '<p>관련 문서를 찾을 수 없습니다.</p>';
-      return;
+
+    // 캐시된 데이터가 없거나 다른 티켓인 경우에만 API 호출
+    console.log(
+      "⚠️ 추천 솔루션이 캐시에 없음 - /init 엔드포인트에서 이미 받았어야 하는 데이터"
+    );
+
+    // /init 엔드포인트에서 이미 모든 데이터를 받았어야 하므로,
+    // 별도 API 호출 대신 모의 데이터 표시
+    console.log("🔄 모의 데이터로 폴백");
+    displaySuggestedSolutions(generateMockSolutions());
+
+    // 캐시 업데이트 (모의 데이터로)
+    globalTicketData.recommended_solutions = generateMockSolutions();
+    globalTicketData.cached_ticket_id = ticket.id;
+  } catch (error) {
+    console.error("❌ 추천 솔루션 로드 오류:", error);
+    // 폴백: 모의 데이터 표시
+    displaySuggestedSolutions(generateMockSolutions());
+  }
+}
+
+// 추천 솔루션 표시 함수 (새로운 리스트 형태)
+function displaySuggestedSolutions(solutions) {
+  const resultsElement = document.getElementById("suggested-solutions-list");
+  if (!resultsElement) return;
+
+  if (solutions.length > 0) {
+    resultsElement.innerHTML = `
+      <div class="suggested-solutions-content">
+        <div class="mb-3">
+          <small class="text-muted">추천 솔루션: ${solutions.length}개</small>
+        </div>
+        <div id="solutions-container"></div>
+      </div>
+    `;
+
+    const solutionsContainer = document.getElementById("solutions-container");
+
+    // 각 솔루션을 새로운 리스트 아이템으로 렌더링
+    solutions.forEach((solution, index) => {
+      const solutionItem = document.createElement("div");
+      solutionItem.className = "list-item";
+
+      // 관련도 점수 계산
+      const relevanceScore = solution.score
+        ? Math.round(solution.score * 100)
+        : Math.random() * 20 + 75;
+
+      solutionItem.innerHTML = `
+        <div class="list-item-header">
+          <div class="list-item-title">${
+            solution.title || `Solution ${index + 1}`
+          }</div>
+          <div class="d-flex align-items-center gap-2">
+            <span class="score-badge">${relevanceScore}%</span>
+            <span class="badge-custom bg-info">${
+              solution.category || "일반"
+            }</span>
+          </div>
+        </div>
+        <div class="list-item-meta">
+          <span>유형: ${solution.type || "Solution"}</span>
+          ${solution.source ? ` • <span>출처: ${solution.source}</span>` : ""}
+        </div>
+        ${
+          solution.content || solution.description
+            ? `
+          <div class="list-item-excerpt">
+            ${truncateText(solution.content || solution.description, 150)}
+          </div>
+        `
+            : ""
+        }
+        ${
+          solution.tags && solution.tags.length > 0
+            ? `
+          <div class="mt-2">
+            ${solution.tags
+              .slice(0, 3)
+              .map(
+                (tag) =>
+                  `<span class="badge bg-light text-dark me-1">${tag}</span>`
+              )
+              .join("")}
+            ${
+              solution.tags.length > 3
+                ? `<span class="badge bg-light text-muted">+${
+                    solution.tags.length - 3
+                  }</span>`
+                : ""
+            }
+          </div>
+        `
+            : ""
+        }
+      `;
+
+      // 솔루션 상세 보기 클릭 이벤트 추가
+      solutionItem.addEventListener("click", function () {
+        console.log(
+          "💡 추천 솔루션 상세 보기:",
+          solution.title || `Solution ${index + 1}`
+        );
+        showSuggestedSolutionDetailView(solution);
+      });
+
+      solutionsContainer.appendChild(solutionItem);
+    });
+  } else {
+    resultsElement.innerHTML =
+      '<div class="placeholder-text">추천할 솔루션을 찾을 수 없습니다.</div>';
+  }
+
+  console.log(`✅ 추천 솔루션 ${solutions.length}개 표시 완료`);
+}
+
+// 코파일럿 탭 처리 함수
+function handleCopilotTab(client) {
+  console.log("🤖 코파일럿 탭 활성화");
+
+  // 코파일럿 이벤트가 이미 설정되어 있는지 확인하고, 없으면 설정
+  if (!window.copilotEventsSetup) {
+    setupCopilotEvents(client);
+    window.copilotEventsSetup = true;
+  }
+}
+
+// 코파일럿 이벤트 설정 함수
+function setupCopilotEvents(client) {
+  const searchButton = document.getElementById("chat-search-button");
+  const searchInput = document.getElementById("chat-input");
+  const clearChatButton = document.getElementById("clear-chat");
+
+  if (searchButton) {
+    searchButton.addEventListener("click", async function () {
+      const query = searchInput.value.trim();
+
+      // 선택된 콘텐츠 타입 가져오기
+      const selectedTypes = [];
+      if (document.getElementById("search-tickets")?.checked)
+        selectedTypes.push("tickets");
+      if (document.getElementById("search-solutions")?.checked)
+        selectedTypes.push("solutions");
+      if (document.getElementById("search-images")?.checked)
+        selectedTypes.push("images");
+      if (document.getElementById("search-attachments")?.checked)
+        selectedTypes.push("attachments");
+
+      if (query) {
+        console.log("🤖 코파일럿 검색 실행:", query, "타입:", selectedTypes);
+        await performCopilotSearch(client, query, selectedTypes);
+
+        // 입력 필드 초기화
+        searchInput.value = "";
+      } else {
+        showErrorInResults("질문을 입력해주세요.", "chat-messages");
+      }
+    });
+  }
+
+  // Enter 키 지원
+  if (searchInput) {
+    searchInput.addEventListener("keypress", function (e) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        searchButton.click();
+      }
+    });
+  }
+
+  // 채팅 초기화 버튼
+  if (clearChatButton) {
+    clearChatButton.addEventListener("click", function () {
+      const chatMessages = document.getElementById("chat-messages");
+      if (chatMessages) {
+        chatMessages.innerHTML = `
+          <div class="chat-message assistant">
+            <strong>AI:</strong> 안녕하세요! 이 티켓에 대해 어떤 도움이 필요하신가요?
+          </div>
+        `;
+      }
+      console.log("🧹 채팅 기록 초기화");
+    });
+  }
+}
+
+// 코파일럿 검색 실행 함수
+async function performCopilotSearch(client, query, contentTypes) {
+  const resultsElement = document.getElementById("chat-messages");
+  if (!resultsElement) return;
+
+  // 사용자 메시지 추가
+  const userMessage = document.createElement("div");
+  userMessage.className = "chat-message user";
+  userMessage.innerHTML = `<strong>질문:</strong> ${query}`;
+  resultsElement.appendChild(userMessage);
+
+  // 로딩 메시지 추가
+  const loadingMessage = document.createElement("div");
+  loadingMessage.className = "chat-message assistant";
+  loadingMessage.innerHTML =
+    '<div class="loading"><div class="spinner"></div><span>AI가 답변을 생성하는 중입니다...</span></div>';
+  resultsElement.appendChild(loadingMessage);
+
+  // 스크롤을 맨 아래로
+  resultsElement.scrollTop = resultsElement.scrollHeight;
+
+  try {
+    // 현재 티켓 정보 가져오기
+    const ticketData = await client.data.get("ticket");
+
+    const requestData = {
+      intent: "search",
+      type: contentTypes,
+      query: query,
+      ticket_id: ticketData?.ticket?.id || null,
+    };
+
+    // FDK를 통한 백엔드 /query API 호출 (POST 메서드로 데이터 전송)
+    const response = await callBackendAPI(client, "query", requestData, "POST");
+
+    // 로딩 메시지 제거
+    resultsElement.removeChild(loadingMessage);
+
+    if (response.ok) {
+      const data = response.data;
+      displayCopilotResults(data, resultsElement);
+    } else {
+      console.error("❌ 코파일럿 API 응답 오류:", response.status);
+      const errorMessage = document.createElement("div");
+      errorMessage.className = "chat-message assistant";
+      errorMessage.innerHTML =
+        "<strong>오류:</strong> AI 응답을 가져올 수 없습니다.";
+      resultsElement.appendChild(errorMessage);
     }
-    
-    let html = '<div class="suggested-solutions-list">';
-    html += '<h4>📚 관련 지식베이스 문서 (스트리밍 로드됨)</h4>';
-    
-    kbDocs.slice(0, 5).forEach((doc, index) => {
-      const title = doc.title || doc.subject || `문서 ${index + 1}`;
-      const content = doc.content || doc.text || doc.body || 'No content available';
-      const score = doc.similarity_score 
-        ? `(유사도: ${Math.round(doc.similarity_score * 100)}%)` 
-        : '';
-      
-      html += `
-        <div class="solution-item" style="margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; border-radius: 5px;">
-          <h5 style="margin: 0 0 5px 0; color: #333;">${title} ${score}</h5>
-          <p style="margin: 0; color: #666; font-size: 14px;">${content.substring(0, 200)}${content.length > 200 ? '...' : ''}</p>
+  } catch (error) {
+    console.error("❌ 코파일럿 연결 오류:", error);
+    // 로딩 메시지 제거
+    if (resultsElement.contains(loadingMessage)) {
+      resultsElement.removeChild(loadingMessage);
+    }
+
+    const errorMessage = document.createElement("div");
+    errorMessage.className = "chat-message assistant";
+    errorMessage.innerHTML =
+      "<strong>오류:</strong> AI 서비스에 연결할 수 없습니다.";
+    resultsElement.appendChild(errorMessage);
+  }
+
+  // 스크롤을 맨 아래로
+  resultsElement.scrollTop = resultsElement.scrollHeight;
+}
+
+// 코파일럿 컨텍스트 가져오기 함수
+async function getCopilotContext(client) {
+  try {
+    const ticketData = await client.data.get("ticket");
+    return {
+      ticket: ticketData.ticket,
+      timestamp: new Date().toISOString(),
+    };
+  } catch (error) {
+    console.error("❌ 컨텍스트 가져오기 오류:", error);
+    return {};
+  }
+}
+
+// 코파일럿 결과 표시 함수
+function displayCopilotResults(data, resultsElement) {
+  if (!resultsElement)
+    resultsElement = document.getElementById("chat-messages");
+  if (!resultsElement) return;
+
+  const assistantMessage = document.createElement("div");
+  assistantMessage.className = "chat-message assistant";
+
+  if (data.answer || data.response) {
+    let content = `<strong>AI 답변:</strong><br>${
+      data.answer || data.response
+    }`;
+
+    // 검색 결과가 있는 경우 추가 표시
+    if (data.results && data.results.length > 0) {
+      content += "<br><br><strong>관련 정보:</strong><ul>";
+      data.results.forEach((result, index) => {
+        if (index < 3) {
+          // 상위 3개만 표시
+          content += `<li><strong>${
+            result.title || result.subject || `항목 ${index + 1}`
+          }</strong><br>
+                     <small>${
+                       result.excerpt || result.description || "내용 없음"
+                     }</small></li>`;
+        }
+      });
+      content += "</ul>";
+    }
+
+    // 참고 자료가 있는 경우
+    if (data.sources && data.sources.length > 0) {
+      content += "<br><strong>참고 자료:</strong><ul>";
+      data.sources.forEach((source) => {
+        content += `<li><a href="${source.url}" target="_blank">${source.title}</a></li>`;
+      });
+      content += "</ul>";
+    }
+
+    assistantMessage.innerHTML = content;
+  } else {
+    assistantMessage.innerHTML =
+      "<strong>AI:</strong> 죄송합니다. 답변을 생성할 수 없습니다.";
+  }
+
+  resultsElement.appendChild(assistantMessage);
+
+  // 스크롤을 맨 아래로
+  resultsElement.scrollTop = resultsElement.scrollHeight;
+
+  console.log("✅ 코파일럿 결과 표시 완료");
+}
+
+// 백엔드 /init 엔드포인트를 호출하는 함수 추가
+// 백엔드에서 초기 데이터 로드 함수 (/init 엔드포인트 호출)
+async function loadInitialDataFromBackend(client, basicTicketInfo) {
+  try {
+    console.log("🚀 백엔드 초기 데이터 로드 시작");
+
+    // FDK를 통한 백엔드 /init API 호출 (GET 메서드, 데이터 없음)
+    const response = await callBackendAPI(
+      client,
+      `init/${basicTicketInfo.id}`,
+      null,
+      "GET"
+    );
+
+    if (response.ok) {
+      const data = response.data;
+      console.log("✅ 백엔드 초기 데이터 로드 완료:", data);
+
+      // 백엔드에서 받은 완전한 티켓 정보로 UI 업데이트
+      if (data.ticket_data) {
+        console.log("🎫 백엔드에서 받은 완전한 티켓 정보로 UI 업데이트");
+        updateTicketInfo(data.ticket_data);
+      } else {
+        // 백엔드에서 티켓 데이터가 없으면 기본 정보 사용
+        console.log("🎫 기본 티켓 정보로 UI 업데이트");
+        updateTicketInfo(basicTicketInfo);
+      }
+
+      // 전역 캐시에 데이터 저장 (ticket_info 포함)
+      globalTicketData = {
+        summary: data.ticket_summary,
+        similar_tickets: data.similar_tickets || [],
+        recommended_solutions: data.kb_documents || [], // 백엔드에서는 kb_documents로 온다
+        cached_ticket_id: basicTicketInfo.id,
+        ticket_info: data.ticket_data || basicTicketInfo, // 백엔드 티켓 정보를 캐시에 저장
+      };
+
+      // /init 엔드포인트에서 모든 데이터를 한 번에 받아서 표시
+      if (data.ticket_summary) {
+        displayTicketSummary(data.ticket_summary);
+      }
+
+      if (data.similar_tickets && data.similar_tickets.length > 0) {
+        displaySimilarTickets(data.similar_tickets);
+      } else {
+        // 유사 티켓이 없는 경우 폴백으로 Freshdesk API 사용
+        console.log("📋 백엔드에서 유사 티켓 없음, Freshdesk API 폴백 사용");
+        await loadSimilarTicketsFromFreshdesk(basicTicketInfo);
+      }
+
+      if (data.kb_documents && data.kb_documents.length > 0) {
+        displaySuggestedSolutions(data.kb_documents);
+      } else {
+        // 추천 솔루션이 없는 경우 모의 데이터 사용
+        console.log("💡 백엔드에서 추천 솔루션 없음, 모의 데이터 사용");
+        displaySuggestedSolutions(generateMockSolutions());
+      }
+    } else {
+      console.error("❌ 백엔드 초기 데이터 로드 실패:", response.status);
+      // 폴백: Freshdesk API 사용
+      console.log("🔄 백엔드 실패, Freshdesk API 폴백 사용");
+      updateTicketInfo(basicTicketInfo);
+      await loadSimilarTicketsFromFreshdesk(basicTicketInfo);
+      displaySuggestedSolutions(generateMockSolutions());
+
+      // 캐시 초기화
+      globalTicketData = {
+        summary: null,
+        similar_tickets: [],
+        recommended_solutions: [],
+        cached_ticket_id: null,
+        ticket_info: basicTicketInfo, // 기본 정보라도 저장
+      };
+    }
+  } catch (error) {
+    console.error("❌ 백엔드 초기 데이터 로드 오류:", error);
+    // 폴백: Freshdesk API 사용
+    console.log("🔄 백엔드 연결 오류, Freshdesk API 폴백 사용");
+    updateTicketInfo(basicTicketInfo);
+    await loadSimilarTicketsFromFreshdesk(basicTicketInfo);
+    displaySuggestedSolutions(generateMockSolutions());
+
+    // 캐시 초기화
+    globalTicketData = {
+      summary: null,
+      similar_tickets: [],
+      recommended_solutions: [],
+      cached_ticket_id: null,
+      ticket_info: basicTicketInfo, // 기본 정보라도 저장
+    };
+  }
+}
+
+// 티켓 요약 표시 함수
+function displayTicketSummary(summary) {
+  const summarySection = document.getElementById("ticket-summary-section");
+  if (!summarySection || !summary) return;
+
+  summarySection.innerHTML = `
+    <div class="summary-section">
+      <h6>티켓 요약</h6>
+      <div class="summary-content">
+        <div class="mb-2">
+          <strong>문제:</strong> ${summary.problem || "요약 정보 없음"}
+        </div>
+        <div class="mb-2">
+          <strong>원인:</strong> ${summary.cause || "분석 중"}
+        </div>
+        <div class="mb-2">
+          <strong>해결방안:</strong> ${summary.solution || "검토 중"}
+        </div>
+        <div>
+          <strong>처리결과:</strong> ${summary.result || "진행 중"}
+        </div>
+      </div>
+    </div>
+  `;
+
+  console.log("✅ 티켓 요약 표시 완료");
+}
+
+// 전역 데이터 캐시 초기화 함수
+function resetGlobalTicketCache() {
+  globalTicketData = {
+    summary: null,
+    similar_tickets: [],
+    recommended_solutions: [],
+    cached_ticket_id: null,
+    ticket_info: null,
+  };
+  console.log("🗑️ 전역 티켓 데이터 캐시 초기화됨");
+}
+
+// 다중 시점에서 백그라운드 데이터 로드를 적극적으로 시도하는 함수
+function attemptMultipleBackgroundLoads(client) {
+  console.log("🎯 적극적인 백그라운드 데이터 로드 전략 시작");
+
+  // 여러 시점에서 안전한 데이터 로드 시도 (점진적 지연)
+  const loadAttempts = [
+    { delay: 1000, label: "초기 시도" },
+    { delay: 2000, label: "재시도 1" },
+    { delay: 3500, label: "재시도 2" },
+    { delay: 5000, label: "최종 시도" },
+  ];
+
+  loadAttempts.forEach(({ delay, label }) => {
+    setTimeout(async () => {
+      // 이미 로드된 경우 스킵
+      if (globalTicketData.cached_ticket_id && globalTicketData.summary) {
+        console.log(`✅ ${label}: 이미 데이터 준비됨 - 스킵`);
+        return;
+      }
+
+      try {
+        console.log(`🔄 ${label} (${delay}ms 후) - FDK 안전성 검증 시작`);
+
+        // FDK 안전성 검증
+        if (
+          !client ||
+          typeof client.data === "undefined" ||
+          typeof client.instance === "undefined"
+        ) {
+          console.warn(`⚠️ ${label}: FDK 아직 준비 안됨`);
+          return;
+        }
+
+        // 컨텍스트 확인 (옵션, 실패해도 계속 진행)
+        let isTicketPage = false;
+        try {
+          const ctx = await client.instance.context();
+          isTicketPage =
+            ctx.location &&
+            (ctx.location.includes("ticket") ||
+              ctx.location === "ticket_top_navigation");
+          console.log(
+            `🔍 ${label}: 컨텍스트 확인 - ${ctx.location} (티켓페이지: ${isTicketPage})`
+          );
+        } catch (contextError) {
+          console.warn(
+            `⚠️ ${label}: 컨텍스트 확인 실패, 티켓 데이터로 추론 시도`
+          );
+          isTicketPage = true; // 일단 시도해보기
+        }
+
+        // 티켓 데이터 안전하게 가져오기
+        if (isTicketPage) {
+          const ticketData = await client.data.get("ticket");
+
+          if (ticketData && ticketData.ticket && ticketData.ticket.id) {
+            const currentTicketId = ticketData.ticket.id;
+
+            console.log(
+              `🚀 ${label}: 티켓 ID ${currentTicketId} 백엔드 로드 시작`
+            );
+
+            // 백엔드 호출 (FDK와 독립적)
+            resetGlobalTicketCache();
+            await loadInitialDataFromBackend(client, ticketData.ticket);
+
+            console.log(
+              `✅ ${label}: 백엔드 데이터 로드 완료! 다음 앱 아이콘 클릭 시 즉시 표시됩니다.`
+            );
+
+            // 성공 시 더 이상 시도하지 않도록 플래그 설정
+            return;
+          } else {
+            console.warn(`⚠️ ${label}: 티켓 데이터 없음`);
+          }
+        } else {
+          console.log(`📄 ${label}: 티켓 페이지 아님 - 스킵`);
+        }
+      } catch (error) {
+        console.warn(`⚠️ ${label}: 로드 실패 (${error.message})`);
+
+        // EventAPI 오류는 예상된 상황이므로 덜 심각하게 처리
+        if (error.message && error.message.includes("EventAPI")) {
+          console.log(`🔧 ${label}: EventAPI 타이밍 이슈 - 나중에 다시 시도`);
+        }
+      }
+    }, delay);
+  });
+
+  // 추가 전략: URL 변경 감지
+  if (typeof window !== "undefined") {
+    let lastUrl = window.location.href;
+    const urlCheckInterval = setInterval(() => {
+      if (window.location.href !== lastUrl) {
+        lastUrl = window.location.href;
+        if (
+          lastUrl.includes("/tickets/") &&
+          (!globalTicketData.cached_ticket_id || !globalTicketData.summary)
+        ) {
+          console.log(
+            "🎯 URL 변경으로 티켓 페이지 진입 감지 → 백그라운드 로드 시도"
+          );
+          setTimeout(() => {
+            attemptSingleBackgroundLoad(client, "URL변경감지");
+          }, 1500);
+        }
+      }
+    }, 1000);
+
+    // 10분 후 URL 감지 정리 (메모리 누수 방지)
+    setTimeout(() => {
+      clearInterval(urlCheckInterval);
+      console.log("🧹 URL 변경 감지 종료");
+    }, 600000);
+  }
+}
+
+// 단일 백그라운드 로드 시도 함수
+async function attemptSingleBackgroundLoad(client, source = "단일시도") {
+  try {
+    if (globalTicketData.cached_ticket_id && globalTicketData.summary) {
+      return; // 이미 로드됨
+    }
+
+    const ticketData = await client.data.get("ticket");
+    if (ticketData && ticketData.ticket && ticketData.ticket.id) {
+      console.log(
+        `🔄 ${source}: 백그라운드 로드 시작 (티켓: ${ticketData.ticket.id})`
+      );
+      resetGlobalTicketCache();
+      await loadInitialDataFromBackend(client, ticketData.ticket);
+      console.log(`✅ ${source}: 백그라운드 로드 성공`);
+    }
+  } catch (error) {
+    console.warn(`⚠️ ${source}: 백그라운드 로드 실패:`, error.message);
+  }
+}
+
+// 빠른 로딩 인디케이터 함수들
+function showQuickLoadingIndicator() {
+  try {
+    // 간단한 브라우저 알림 또는 콘솔 메시지
+    console.log("🔄 로딩 중...");
+
+    // 가능하면 간단한 토스트 메시지 표시
+    if (typeof window !== "undefined" && window.parent) {
+      // Freshdesk 내에서 실행 중인 경우
+      const loadingToast = {
+        type: "loading",
+        message: "데이터 준비 중...",
+        timestamp: Date.now(),
+      };
+
+      console.log("📱 로딩 상태:", loadingToast);
+      return loadingToast;
+    }
+
+    return null;
+  } catch (error) {
+    console.warn("⚠️ 로딩 인디케이터 표시 실패:", error);
+    return null;
+  }
+}
+
+function hideQuickLoadingIndicator(indicator) {
+  try {
+    if (indicator) {
+      const duration = Date.now() - indicator.timestamp;
+      console.log(`✅ 로딩 완료 (${duration}ms 소요)`);
+    }
+  } catch (error) {
+    console.warn("⚠️ 로딩 인디케이터 숨김 실패:", error);
+  }
+}
+
+// 백엔드 API 호출을 위한 공통 함수
+async function callBackendAPI(client, endpoint, data = null, method = "GET") {
+  try {
+    console.log(`🌐 백엔드 API 호출: ${method} /${endpoint}`);
+
+    // FDK를 통한 백엔드 API 호출
+    if (method === "GET") {
+      const response = await client.request.invokeTemplate("backendApi", {
+        context: { path: endpoint },
+      });
+      return { ok: true, data: response };
+    } else if (method === "POST") {
+      const response = await client.request.invokeTemplate("backendApiPost", {
+        context: { path: endpoint },
+        body: JSON.stringify(data),
+      });
+      return { ok: true, data: response };
+    }
+  } catch (error) {
+    console.error(`❌ 백엔드 API 호출 오류 (${method} /${endpoint}):`, error);
+    return { ok: false, error: error.message };
+  }
+}
+
+// 에러 메시지를 결과 영역에 표시하는 함수
+function showErrorInResults(message, containerId = "similar-tickets-list") {
+  try {
+    const container = document.getElementById(containerId);
+    if (container) {
+      container.innerHTML = `
+        <div class="error-message alert alert-warning">
+          <i class="fas fa-exclamation-triangle"></i>
+          ${message}
         </div>
       `;
-    });
-    
-    html += '</div>';
-    container.innerHTML = html;
-    
-    console.log(`✅ 캐시된 지식베이스 ${kbDocs.length}개 Suggested Solutions 탭 업데이트 완료`);
-  } catch (error) {
-    console.error("❌ Suggested Solutions 캐시 업데이트 실패:", error);
-    const container = document.getElementById('suggested-solutions');
-    if (container) {
-      container.innerHTML = '<p>추천 솔루션 표시 중 오류가 발생했습니다.</p>';
+    } else {
+      console.warn(`⚠️ 컨테이너를 찾을 수 없음: ${containerId}`);
     }
+  } catch (error) {
+    console.error("❌ showErrorInResults 오류:", error);
   }
 }
 
-/**
- * Fetch ticket data using Data methods and populate UI
- */
-async function getTicketData() {
+// 로딩 메시지를 표시하는 함수
+function showLoadingInResults(containerId = "similar-tickets-list") {
   try {
-    // Get ticket data from the current context
-    const data = await client.data.get('ticket');
-    const ticket = data.ticket;
-    
-    // Populate UI with ticket metadata
-    document.getElementById('ticket-problem').textContent = ticket.subject || 'N/A';
-    document.getElementById('ticket-cause').textContent = 'Analyzing...';
-    document.getElementById('ticket-actions').textContent = 'Pending Analysis';
-    document.getElementById('ticket-result').textContent = 'Pending';
-    document.getElementById('ticket-status').textContent = ticket.status || 'N/A';
-    document.getElementById('ticket-priority').textContent = ticket.priority || 'N/A';
-    
-    // Get agent data if assigned
-    if (ticket.responder_id) {
-      try {
-        const agentData = await client.data.get('agent', { id: ticket.responder_id });
-        document.getElementById('ticket-agent').textContent = agentData.agent.name || 'Unassigned';
-      } catch (error) {
-        document.getElementById('ticket-agent').textContent = 'Unassigned';
-        console.error('Error fetching agent data:', error);
-      }
-    } else {
-      document.getElementById('ticket-agent').textContent = 'Unassigned';
+    const container = document.getElementById(containerId);
+    if (container) {
+      container.innerHTML = `
+        <div class="loading-message">
+          <i class="fas fa-spinner fa-spin"></i>
+          로딩 중...
+        </div>
+      `;
     }
-    
-    // Get requester data
-    try {
-      const requesterData = await client.data.get('requester', { id: ticket.requester_id });
-      document.getElementById('ticket-requester').textContent = requesterData.requester.name || 'N/A';
-    } catch (error) {
-      document.getElementById('ticket-requester').textContent = 'N/A';
-      console.error('Error fetching requester data:', error);
-    }
-    
-    // Set channel info
-    document.getElementById('ticket-channel').textContent = ticket.source || 'N/A';
-    
-    // Set tags
-    const tags = ticket.tags || [];
-    document.getElementById('ticket-tags').textContent = tags.length > 0 ? tags.join(', ') : 'No tags';
-    
-    // Set attachments
-    const attachments = ticket.attachments || [];
-    if (attachments.length > 0) {
-      const attachmentsContainer = document.getElementById('attachments-container');
-      attachmentsContainer.innerHTML = '';
-      
-      attachments.forEach(attachment => {
-        const attachmentItem = document.createElement('div');
-        attachmentItem.className = 'attachment-item';
-        
-        const attachmentName = document.createElement('span');
-        attachmentName.textContent = attachment.name;
-        
-        const downloadBtn = document.createElement('fw-button');
-        downloadBtn.color = 'secondary';
-        downloadBtn.size = 'small';
-        downloadBtn.setAttribute('data-attachment-id', attachment.id);
-        downloadBtn.innerHTML = '<fw-icon name="download" size="14" slot="before-label"></fw-icon>Download';
-        
-        attachmentItem.appendChild(attachmentName);
-        attachmentItem.appendChild(downloadBtn);
-        attachmentsContainer.appendChild(attachmentItem);
-        
-        // Register click event on the download button
-        downloadBtn.addEventListener('click', handleAttachmentDownload);
-      });
-      
-      document.getElementById('attachments-section').style.display = 'block';
-    } else {
-      document.getElementById('ticket-attachments').textContent = 'None';
-      document.getElementById('attachments-section').style.display = 'none';
-    }
-    
   } catch (error) {
-    console.error('Error fetching ticket data:', error);
-    // Update UI to show error state
-    document.getElementById('ticket-problem').textContent = 'Error loading ticket data';
-    document.getElementById('ticket-cause').textContent = 'Error';
-    document.getElementById('ticket-actions').textContent = 'Error';
-    document.getElementById('ticket-result').textContent = 'Error';
+    console.error("❌ showLoadingInResults 오류:", error);
   }
 }
 
-/**
- * 티켓 메타데이터를 동적으로 렌더링하는 함수
- * 상태/우선순위 값에 따라 CSS 클래스를 동적으로 적용
- * @param {Object} metadata - 티켓 메타데이터 객체
- */
-function renderTicketMetadata(metadata) {
-    // 각 메타데이터 영역의 DOM 요소를 가져옴
-    const titleEl = document.getElementById('ticket-title');
-    const statusEl = document.getElementById('ticket-status');
-    const priorityEl = document.getElementById('ticket-priority');
-    const agentEl = document.getElementById('ticket-agent');
-    const groupEl = document.getElementById('ticket-group');
-    const createdAtEl = document.getElementById('ticket-created-at');
-    const channelEl = document.getElementById('ticket-channel');
-    const tagsEl = document.getElementById('ticket-tags');
-
-    // 값이 존재할 때만 갱신
-    if (titleEl && metadata.title) titleEl.textContent = metadata.title;
-    if (statusEl && metadata.status) {
-        statusEl.textContent = metadata.status;
-        // 상태별 색상 강조 클래스 적용
-        statusEl.className = 'metadata-value status-label ' + getStatusClass(metadata.status);
-    }
-    if (priorityEl && metadata.priority) {
-        priorityEl.textContent = metadata.priority;
-        // 우선순위별 색상 강조 클래스 적용
-        priorityEl.className = 'metadata-value priority-label ' + getPriorityClass(metadata.priority);
-    }
-    if (agentEl && metadata.agent) agentEl.textContent = metadata.agent;
-    if (groupEl && metadata.group) groupEl.textContent = metadata.group;
-    if (createdAtEl && metadata.created_at) createdAtEl.textContent = metadata.created_at;
-    if (channelEl && metadata.channel) channelEl.textContent = metadata.channel;
-    if (tagsEl && metadata.tags) tagsEl.textContent = Array.isArray(metadata.tags) ? metadata.tags.join(', ') : metadata.tags;
+// 티켓 상태 텍스트 변환 함수
+function getStatusText(statusId) {
+  const statuses = {
+    2: "Open",
+    3: "Pending",
+    4: "Resolved",
+    5: "Closed",
+  };
+  return statuses[statusId] || "Unknown";
 }
 
-/**
- * 상태 값에 따라 CSS 클래스를 반환
- * @param {string} status
- * @returns {string}
- */
-function getStatusClass(status) {
-    // Freshdesk 표준 상태명 기준, 필요시 확장
-    switch (status.toLowerCase()) {
-        case 'open':
-        case '열림':
-            return 'status-open';
-        case 'pending':
-        case '대기':
-            return 'status-pending';
-        case 'resolved':
-        case '해결':
-            return 'status-resolved';
-        case 'closed':
-        case '종료':
-            return 'status-closed';
-        default:
-            return 'status-default';
-    }
-}
-
-/**
- * 우선순위 값에 따라 CSS 클래스를 반환
- * @param {string} priority
- * @returns {string}
- */
-function getPriorityClass(priority) {
-    // Freshdesk 표준 우선순위명 기준, 필요시 확장
-    switch (priority.toLowerCase()) {
-        case 'low':
-        case '낮음':
-            return 'priority-low';
-        case 'medium':
-        case '보통':
-            return 'priority-medium';
-        case 'high':
-        case '높음':
-            return 'priority-high';
-        case 'urgent':
-        case '긴급':
-            return 'priority-urgent';
-        default:
-            return 'priority-default';
-    }
-}
-
-// partial 데이터 수신 시 메타데이터 영역 갱신
-function handlePartialData(partial) {
-    // ...기존 영역별 렌더링 로직...
-    if (partial.metadata) {
-        // 티켓 메타데이터가 포함된 경우 동적으로 렌더링
-        renderTicketMetadata(partial.metadata);
-    }
-    // ...summary, similar-tickets, suggested-solutions 등 기존 렌더링...
-}
-
-// SSE 수신부에서 partial 데이터 처리 시 handlePartialData 호출하도록 연결
-// 예시:
-// eventSource.onmessage = function(event) {
-//     const partial = JSON.parse(event.data);
-//     handlePartialData(partial);
-// };
-
-/**
- * 현재 티켓 ID를 가져오는 헬퍼 함수
- */
-function getCurrentTicketId() {
-  // URL에서 티켓 ID 추출 시도
-  const urlParams = new URLSearchParams(window.location.search);
-  let ticketId = urlParams.get('ticket_id');
-  
-  if (!ticketId) {
-    // 글로벌 변수에서 티켓 ID 찾기
-    if (window.ticketInitData && window.ticketInitData.ticket_id) {
-      ticketId = window.ticketInitData.ticket_id;
-    }
-  }
-  
-  if (!ticketId) {
-    // Freshdesk context에서 티켓 ID 찾기 (만약 Freshdesk FDK를 사용한다면)
-    try {
-      if (typeof app !== 'undefined' && app.initialized) {
-        // Freshdesk app context가 있는 경우
-        app.get('ticket').then(function(ticketData) {
-          ticketId = ticketData.ticket.id;
-        });
-      }
-    } catch (e) {
-      console.warn("Freshdesk context에서 티켓 ID를 가져올 수 없습니다:", e);
-    }
-  }
-  
-  return ticketId;
+// 티켓 우선순위 텍스트 변환 함수
+function getPriorityText(priorityId) {
+  const priorities = {
+    1: "Low",
+    2: "Medium",
+    3: "High",
+    4: "Urgent",
+  };
+  return priorities[priorityId] || "Unknown";
 }

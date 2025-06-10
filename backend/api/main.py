@@ -15,6 +15,12 @@ from functools import partial
 from typing import Any, Dict, List, Optional
 
 import prometheus_client
+
+# 첨부파일 API 라우터 import
+from api.attachments import router as attachments_router
+
+# 데이터 수집 함수 import
+from api.ingest import ingest
 from cachetools import TTLCache, cached
 from cachetools.keys import hashkey
 from core import llm_router, retriever
@@ -24,14 +30,9 @@ from core.llm_router import LLMResponse, generate_text
 from core.retriever import retrieve_top_k_docs
 from core.vectordb import vector_db
 from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.responses import StreamingResponse
 from freshdesk import fetcher
 from pydantic import BaseModel, Field, field_validator
-
-# 첨부파일 API 라우터 import
-from api.attachments import router as attachments_router
-
-# 데이터 수집 함수 import
-from api.ingest import ingest
 
 # Prometheus 메트릭 정의
 # LLM 관련 메트릭은 llm_router.py에서 정의되어 있으므로 중복 방지를 위해 여기서는 HTTP 요청 관련 메트릭만 정의
@@ -61,6 +62,118 @@ logger = logging.getLogger(__name__)
 # 애플리케이션 시작 로그
 logger.info("FastAPI 백엔드 서버 초기화 완료")
 
+
+# 헬스체크 응답 모델
+class HealthResponse(BaseModel):
+    """헬스체크 응답 모델"""
+    status: str = Field(description="서버 상태 (healthy, unhealthy)")
+    timestamp: str = Field(description="응답 생성 시간")
+    version: str = Field(description="API 버전")
+    services: Dict[str, Any] = Field(description="각 서비스 상태 정보")
+
+
+@app.get("/health", response_model=HealthResponse)
+async def health_check():
+    """
+    백엔드 서버 및 연결된 서비스들의 상태를 확인하는 헬스체크 엔드포인트
+    
+    이 엔드포인트는 다음 서비스들의 상태를 확인합니다:
+    - Qdrant Vector Database 연결 상태
+    - LLM Router 서비스 상태
+    - 캐시 시스템 상태
+    
+    Returns:
+        HealthResponse: 서버 및 서비스 상태 정보
+    """
+    logger.info("헬스체크 요청 수신")
+    
+    services_status = {}
+    overall_status = "healthy"
+    
+    try:
+        # Qdrant Vector DB 상태 확인
+        try:
+            # vector_db 인스턴스가 정상적으로 연결되어 있는지 확인
+            qdrant_info = await vector_db.get_collection_info("tickets")
+            services_status["qdrant"] = {
+                "status": "healthy",
+                "connected": True,
+                "collection_exists": qdrant_info is not None
+            }
+            logger.info("Qdrant Vector DB 상태: 정상")
+        except Exception as e:
+            services_status["qdrant"] = {
+                "status": "unhealthy",
+                "connected": False,
+                "error": str(e)
+            }
+            overall_status = "unhealthy"
+            logger.warning(f"Qdrant Vector DB 상태: 비정상 - {str(e)}")
+        
+        # LLM Router 상태 확인
+        try:
+            # LLM Router가 초기화되어 있는지 확인 (간단한 API 키 체크)
+            available_models = []
+            if os.getenv("ANTHROPIC_API_KEY"):
+                available_models.append("anthropic")
+            if os.getenv("OPENAI_API_KEY"):
+                available_models.append("openai")
+            if os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY"):
+                available_models.append("google")
+            
+            services_status["llm_router"] = {
+                "status": "healthy" if available_models else "unhealthy",
+                "available_models": available_models,
+                "initialized": len(available_models) > 0
+            }
+            logger.info(f"LLM Router 상태: 정상 (사용 가능한 모델: {available_models})")
+        except Exception as e:
+            services_status["llm_router"] = {
+                "status": "unhealthy",
+                "initialized": False,
+                "error": str(e)
+            }
+            overall_status = "unhealthy"
+            logger.warning(f"LLM Router 상태: 비정상 - {str(e)}")
+        
+        # 캐시 시스템 상태 확인
+        try:
+            cache_info = {
+                "main_cache_size": len(cache),
+                "main_cache_maxsize": cache.maxsize,
+                "ticket_cache_size": len(ticket_context_cache),
+                "ticket_cache_maxsize": ticket_context_cache.maxsize
+            }
+            services_status["cache"] = {
+                "status": "healthy",
+                "info": cache_info
+            }
+            logger.info("캐시 시스템 상태: 정상")
+        except Exception as e:
+            services_status["cache"] = {
+                "status": "unhealthy",
+                "error": str(e)
+            }
+            overall_status = "unhealthy"
+            logger.warning(f"캐시 시스템 상태: 비정상 - {str(e)}")
+        
+        return HealthResponse(
+            status=overall_status,
+            timestamp=datetime.now().isoformat(),
+            version="1.0.0",
+            services=services_status
+        )
+        
+    except Exception as e:
+        logger.error(f"헬스체크 중 예외 발생: {str(e)}")
+        return HealthResponse(
+            status="unhealthy",
+            timestamp=datetime.now().isoformat(),
+            version="1.0.0",
+            services={
+                "error": str(e)
+            }
+        )
 
 
 # 티켓 초기화 컨텍스트 캐시 (티켓 ID를 키로 사용)
@@ -270,7 +383,91 @@ async def call_llm(prompt: str, system_prompt: Optional[str] = None) -> LLMRespo
     )
 
 
-
+@app.get("/health")
+async def health_check():
+    """
+    백엔드 서버 헬스체크 엔드포인트
+    
+    서버 상태, 데이터베이스 연결, 외부 서비스 상태를 확인합니다.
+    프론트엔드나 모니터링 시스템에서 서버 상태를 확인할 때 사용됩니다.
+    
+    Returns:
+        Dict: 서버 상태 정보
+    """
+    import time
+    from datetime import datetime
+    
+    health_status = {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "version": "1.0.0",
+        "services": {}
+    }
+    
+    # Vector DB (Qdrant) 연결 상태 확인
+    try:
+        # 간단한 연결 테스트
+        collections = vector_db.client.get_collections()
+        health_status["services"]["qdrant"] = {
+            "status": "healthy",
+            "collections_count": len(collections.collections) if collections else 0
+        }
+    except Exception as e:
+        health_status["services"]["qdrant"] = {
+            "status": "unhealthy",
+            "error": str(e)
+        }
+        health_status["status"] = "degraded"
+    
+    # LLM Router 상태 확인 (간단한 테스트)
+    try:
+        # LLM Router 객체가 올바르게 초기화되었는지 확인
+        if hasattr(llm_router, 'providers'):
+            health_status["services"]["llm_router"] = {
+                "status": "healthy",
+                "providers": list(llm_router.providers.keys()) if llm_router.providers else []
+            }
+        else:
+            health_status["services"]["llm_router"] = {
+                "status": "healthy",
+                "note": "Router initialized"
+            }
+    except Exception as e:
+        health_status["services"]["llm_router"] = {
+            "status": "unhealthy",
+            "error": str(e)
+        }
+        health_status["status"] = "degraded"
+    
+    # 캐시 상태 확인
+    try:
+        health_status["services"]["cache"] = {
+            "status": "healthy",
+            "size": len(cache),
+            "maxsize": cache.maxsize,
+            "ttl": cache.ttl
+        }
+    except Exception as e:
+        health_status["services"]["cache"] = {
+            "status": "unhealthy",
+            "error": str(e)
+        }
+    
+    # 티켓 컨텍스트 캐시 상태 확인
+    try:
+        health_status["services"]["ticket_cache"] = {
+            "status": "healthy", 
+            "size": len(ticket_context_cache),
+            "maxsize": ticket_context_cache.maxsize,
+            "ttl": ticket_context_cache.ttl
+        }
+    except Exception as e:
+        health_status["services"]["ticket_cache"] = {
+            "status": "unhealthy",
+            "error": str(e)
+        }
+    
+    return health_status
 
 
 @app.get("/metrics")
@@ -1821,3 +2018,661 @@ async def trigger_data_ingestion(
             duration_seconds=duration,
             error=str(e)
         )
+
+
+# SSE 스트리밍 지원 함수들
+
+async def get_similar_tickets_data(ticket_id: str, company_id: str, top_k: int = 5) -> SimilarTicketsResponse:
+    """
+    유사 티켓 데이터를 가져오는 내부 함수
+    
+    Args:
+        ticket_id: 기준 티켓 ID
+        company_id: 회사 ID
+        top_k: 반환할 최대 결과 수
+        
+    Returns:
+        SimilarTicketsResponse: 유사 티켓 응답 객체
+    """
+    try:
+        # 기존 get_similar_tickets 함수 로직을 재사용
+        current_ticket_data = vector_db.get_by_id(original_id_value=ticket_id, company_id=company_id, doc_type="ticket")
+        
+        if not current_ticket_data or not current_ticket_data.get("metadata"):
+            logger.warning(f"티켓 ID {ticket_id} 정보를 찾을 수 없습니다.")
+            return SimilarTicketsResponse(ticket_id=ticket_id, similar_tickets=[])
+        
+        current_ticket_data = current_ticket_data["metadata"]
+        
+        # 검색용 쿼리 텍스트 생성
+        search_query = await llm_router.generate_search_query(current_ticket_data)
+        if not search_query.strip():
+            return SimilarTicketsResponse(ticket_id=ticket_id, similar_tickets=[])
+        
+        # 검색 쿼리 임베딩 생성
+        try:
+            query_embedding = await llm_router.generate_embedding(search_query)
+        except Exception as e:
+            logger.error(f"임베딩 생성 실패: {e}")
+            query_embedding = [0.1] * 1536
+        
+        # 벡터 DB에서 유사 티켓 검색
+        similar_tickets_result = retriever.retrieve_top_k_docs(
+            query_embedding=query_embedding, 
+            top_k=min(10, top_k * 2),  # 더 많이 가져와서 필터링
+            doc_type="ticket",
+            company_id=company_id
+        )
+        
+        # 검색 결과 처리
+        similar_tickets_list = []
+        if similar_tickets_result and similar_tickets_result.get("ids"):
+            for i, doc_id in enumerate(similar_tickets_result["ids"]):
+                # 현재 티켓과 동일한 ID는 제외
+                if str(doc_id) == str(ticket_id):
+                    continue
+                    
+                metadata = similar_tickets_result["metadatas"][i] if i < len(similar_tickets_result.get("metadatas", [])) else {}
+                
+                # 티켓 제목 추출
+                title = (
+                    metadata.get("title") or 
+                    metadata.get("subject") or 
+                    f"티켓 {doc_id}"
+                )
+                
+                # 거리/점수 정보 추가
+                distance = similar_tickets_result.get("distances", [0])[i] if i < len(similar_tickets_result.get("distances", [])) else 0
+                similarity_score = max(0, 1 - distance)
+                
+                # 요약 정보
+                summary_text = similar_tickets_result["documents"][i] if i < len(similar_tickets_result.get("documents", [])) else ""
+                if not summary_text:
+                    summary_text = metadata.get("description_text", "요약 정보 없음")
+                
+                summary = summary_text[:200] + "..." if len(summary_text) > 200 else summary_text
+                
+                similar_tickets_list.append(SimilarTicketItem(
+                    id=str(doc_id),
+                    title=title,
+                    issue="문제 상황 분석 중...",
+                    solution="해결책 분석 중...",
+                    similarity_score=round(similarity_score, 3),
+                    ticket_summary=summary
+                ))
+                
+                # 최대 결과 수 제한
+                if len(similar_tickets_list) >= top_k:
+                    break
+        
+        return SimilarTicketsResponse(ticket_id=ticket_id, similar_tickets=similar_tickets_list)
+        
+    except Exception as e:
+        logger.error(f"유사 티켓 데이터 가져오기 실패: {e}")
+        return SimilarTicketsResponse(ticket_id=ticket_id, similar_tickets=[])
+
+
+async def get_related_docs_data(ticket_id: str, company_id: str, top_k: int = 5) -> RelatedDocsResponse:
+    """
+    관련 문서 데이터를 가져오는 내부 함수
+    
+    Args:
+        ticket_id: 기준 티켓 ID
+        company_id: 회사 ID
+        top_k: 반환할 최대 결과 수
+        
+    Returns:
+        RelatedDocsResponse: 관련 문서 응답 객체
+    """
+    try:
+        # 기존 get_related_documents 함수 로직을 재사용
+        current_ticket_data = vector_db.get_by_id(original_id_value=ticket_id, company_id=company_id, doc_type="ticket")
+        
+        if not current_ticket_data or not current_ticket_data.get("metadata"):
+            logger.warning(f"티켓 ID {ticket_id} 정보를 찾을 수 없습니다.")
+            return RelatedDocsResponse(ticket_id=ticket_id, related_documents=[])
+        
+        current_ticket_data = current_ticket_data["metadata"]
+        
+        # 검색용 쿼리 텍스트 생성
+        try:
+            search_query = await llm_router.generate_search_query(current_ticket_data)
+        except Exception as query_error:
+            logger.error(f"검색 쿼리 생성 실패: {query_error}")
+            subject = current_ticket_data.get("subject", "")
+            description = current_ticket_data.get("description", "")
+            search_query = f"{subject} {description[:200]}"
+        
+        if not search_query or not search_query.strip():
+            return RelatedDocsResponse(ticket_id=ticket_id, related_documents=[])
+        
+        # 검색 쿼리 임베딩 생성
+        try:
+            query_embedding = await llm_router.generate_embedding(search_query)
+        except Exception as e:
+            logger.error(f"임베딩 생성 실패: {e}")
+            query_embedding = [0.1] * 1536
+        
+        # 벡터 DB에서 관련 문서 검색
+        related_docs_result = retriever.retrieve_top_k_docs(
+            query_embedding=query_embedding, 
+            top_k=min(10, top_k * 2),
+            doc_type="kb",
+            company_id=company_id
+        )
+        
+        # 검색 결과 처리
+        related_docs_list = []
+        if related_docs_result and related_docs_result.get("ids"):
+            doc_ids = related_docs_result.get("ids", [])
+            metadatas = related_docs_result.get("metadatas", [])
+            documents = related_docs_result.get("documents", [])
+            distances = related_docs_result.get("distances", [])
+            
+            for i, doc_id in enumerate(doc_ids):
+                metadata = metadatas[i] if i < len(metadatas) else {}
+                
+                title = metadata.get("title", f"문서 {doc_id}")
+                
+                # 문서 요약 생성
+                summary_text = documents[i] if i < len(documents) else ""
+                if not summary_text:
+                    summary_text = metadata.get("description", "요약 정보 없음")
+                
+                summary = summary_text[:200] + "..." if len(summary_text) > 200 else summary_text
+                
+                # 거리/점수 정보 추가
+                distance = distances[i] if i < len(distances) else 0
+                similarity_score = max(0, 1 - distance)
+                
+                # URL 생성
+                url = metadata.get("url", "")
+                
+                related_docs_list.append(RelatedDocumentItem(
+                    id=str(doc_id),
+                    title=title,
+                    doc_summary=summary,
+                    url=url,
+                    source_type="kb",
+                    similarity_score=round(similarity_score, 3)
+                ))
+                
+                # 최대 결과 수 제한
+                if len(related_docs_list) >= top_k:
+                    break
+        
+        return RelatedDocsResponse(ticket_id=ticket_id, related_documents=related_docs_list)
+        
+    except Exception as e:
+        logger.error(f"관련 문서 데이터 가져오기 실패: {e}")
+        return RelatedDocsResponse(ticket_id=ticket_id, related_documents=[])
+
+
+async def sse_generator(data_generator):
+    """
+    SSE(Server-Sent Events) 스트리밍을 위한 제너레이터
+    
+    Args:
+        data_generator: 데이터를 생성하는 비동기 제너레이터
+        
+    Yields:
+        SSE 형식의 문자열 데이터
+    """
+    try:
+        async for data in data_generator:
+            if data:
+                # SSE 형식으로 데이터 전송
+                yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+    except Exception as e:
+        # 에러 발생 시 에러 정보를 SSE로 전송
+        error_data = {
+            "type": "error",
+            "message": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+        yield f"data: {json.dumps(error_data, ensure_ascii=False)}\n\n"
+    finally:
+        # 스트림 종료 신호
+        yield f"data: {json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
+
+
+async def streaming_query_generator(req: QueryRequest, company_id: str):
+    """
+    쿼리 처리를 스트리밍으로 수행하는 제너레이터
+    
+    Args:
+        req: 쿼리 요청 객체
+        company_id: 회사 ID
+        
+    Yields:
+        각 단계별 진행 상황과 결과
+    """
+    try:
+        start_time = time.time()
+        
+        # 1. 초기화 단계
+        yield {
+            "type": "progress",
+            "stage": "initialization",
+            "message": "쿼리 처리를 시작합니다...",
+            "progress": 10
+        }
+        
+        # 티켓 정보 조회 (있는 경우)
+        ticket_context_for_query = ""
+        ticket_context_for_llm = ""
+        
+        if req.ticket_id:
+            yield {
+                "type": "progress", 
+                "stage": "ticket_loading",
+                "message": f"티켓 ID {req.ticket_id} 정보를 조회하는 중...",
+                "progress": 20
+            }
+            
+            ticket_data = vector_db.get_by_id(original_id_value=req.ticket_id, company_id=company_id, doc_type="ticket")
+            if ticket_data and ticket_data.get("metadata"):
+                metadata = ticket_data["metadata"]
+                ticket_title = metadata.get("subject", f"티켓 ID {req.ticket_id} 관련 문의")
+                ticket_body = metadata.get("text", metadata.get("description_text", "티켓 본문 정보 없음"))
+                ticket_context_for_query = f"현재 티켓 제목: {ticket_title}\n현재 티켓 본문: {ticket_body}"
+                ticket_context_for_llm = f"\n[현재 티켓 정보]\n제목: {ticket_title}\n본문: {ticket_body}\n"
+        
+        # 2. 임베딩 생성 단계
+        yield {
+            "type": "progress",
+            "stage": "embedding",
+            "message": "쿼리 임베딩을 생성하는 중...",
+            "progress": 30
+        }
+        
+        query_for_embedding_str = f"{ticket_context_for_query}\n\n사용자 질문: {req.query}" if req.ticket_id else req.query
+        query_embedding = embed_documents([query_for_embedding_str])[0]
+        
+        # 3. 문서 검색 단계
+        yield {
+            "type": "progress",
+            "stage": "searching",
+            "message": "관련 문서를 검색하는 중...",
+            "progress": 50
+        }
+        
+        content_types = [t.lower() for t in req.type] if req.type else ["tickets", "solutions", "images", "attachments"]
+        top_k_per_type = max(1, req.top_k // len([t for t in content_types if t in ["tickets", "solutions"]]))
+        
+        # 티켓 검색
+        ticket_results = {"documents": [], "metadatas": [], "ids": [], "distances": []}
+        if "tickets" in content_types:
+            ticket_results = retrieve_top_k_docs(query_embedding, top_k_per_type, company_id, doc_type="ticket")
+        
+        # KB 문서 검색
+        kb_results = {"documents": [], "metadatas": [], "ids": [], "distances": []}
+        if "solutions" in content_types:
+            kb_results = retrieve_top_k_docs(query_embedding, top_k_per_type, company_id, doc_type="kb")
+        
+        # 4. 컨텍스트 구성 단계
+        yield {
+            "type": "progress",
+            "stage": "context_building",
+            "message": "검색 결과를 분석하고 컨텍스트를 구성하는 중...",
+            "progress": 70
+        }
+        
+        # 검색 결과 병합 및 정렬
+        all_docs_content = ticket_results["documents"] + kb_results["documents"]
+        all_metadatas = ticket_results["metadatas"] + kb_results["metadatas"]
+        all_distances = ticket_results["distances"] + kb_results["distances"]
+        
+        # 메타데이터에 source_type 추가
+        for meta in ticket_results["metadatas"]:
+            meta["source_type"] = "ticket"
+        for meta in kb_results["metadatas"]:
+            meta["source_type"] = "kb"
+        # 문서 타입별 메타데이터 설정 완료
+
+        combined = list(zip(all_docs_content, all_metadatas, all_distances))
+        combined.sort(key=lambda x: x[2])
+        combined = combined[:req.top_k]
+        
+        docs = [item[0] for item in combined]
+        metadatas = [item[1] for item in combined]
+        distances = [item[2] for item in combined]
+        
+        # 컨텍스트 최적화
+        base_context, optimized_metadatas, context_meta = build_optimized_context(
+            docs=docs,
+            metadatas=metadatas,
+            query=req.query,
+            max_tokens=8000,
+            top_k=req.top_k,
+            enable_relevance_extraction=True
+        )
+        
+        # 5. AI 응답 생성 단계
+        yield {
+            "type": "progress",
+            "stage": "generating",
+            "message": "AI 응답을 생성하는 중...",
+            "progress": 85
+        }
+        
+        final_context_for_llm = f"{ticket_context_for_llm}{base_context}"
+        prompt = build_prompt(final_context_for_llm, req.query, answer_instructions=req.answer_instructions)
+        
+        # 시스템 프롬프트 설정
+        search_intent = req.intent.lower() if req.intent else "search"
+        base_system_prompt = "당신은 친절한 고객 지원 AI입니다."
+        
+        if search_intent == "recommend":
+            base_system_prompt += " 고객의 질문에 대해 최적의 솔루션을 추천해 주세요."
+        elif search_intent == "answer":
+            base_system_prompt += " 고객의 질문에 직접적이고 명확하게 답변해 주세요."
+        
+        system_prompt = base_system_prompt
+        if req.answer_instructions:
+            system_prompt = f"{base_system_prompt} 다음 지침에 따라 응답해 주세요: {req.answer_instructions}"
+        
+        response = await call_llm(prompt, system_prompt=system_prompt)
+        answer = response.text
+        
+        # 구조화된 문서 정보 생성
+        structured_docs = []
+        for i, (doc_content_item, metadata_item, distance_or_score_metric) in enumerate(zip(docs, metadatas, distances)):
+            title = metadata_item.get("title", "")
+            content = doc_content_item
+            doc_type = metadata_item.get("source_type", "unknown")
+
+            lines = doc_content_item.split("\n", 2)
+            if len(lines) > 0 and lines[0].startswith("제목:"):
+                title = lines[0].replace("제목:", "").strip()
+                if len(lines) > 1:
+                    content = "\n".join(lines[1:]).strip()
+                    if content.startswith("설명:"):
+                        content = content.replace("설명:", "", 1).strip()
+        
+        # 코사인 거리 (0~2)를 백분율로 변환
+        relevance_score = round(((2 - distance_or_score_metric) / 2) * 100, 1)
+
+
+        doc_info = DocumentInfo(
+            title=title,
+            content=content,
+            source_id=metadata_item.get("source_id", metadata_item.get("id", "")),
+            source_url=metadata_item.get("source_url", ""),
+            relevance_score=relevance_score,
+            doc_type=doc_type
+        )
+        structured_docs.append(doc_info)
+    
+        # 6. 최종 결과 전송
+        yield {
+            "type": "progress",
+            "stage": "complete",
+            "message": "처리가 완료되었습니다.",
+            "progress": 100
+        }
+        
+        total_time = time.time() - start_time
+        
+        # 최종 결과 전송
+        final_result = {
+            "type": "result",
+            "data": {
+                "answer": answer,
+                "context_docs": [doc.dict() for doc in structured_docs],
+                "context_images": [],
+                "metadata": {
+                    "duration_ms": int(total_time * 1000),
+                    "model_used": response.model_used,
+                    "search_intent": search_intent,
+                    "content_types": content_types,
+                    "ticket_id": req.ticket_id,
+                    "optimization": context_meta
+                }
+            }
+        }
+        
+        yield final_result
+        
+    except Exception as e:
+        logger.error(f"스트리밍 쿼리 처리 중 오류 발생: {e}")
+        yield {
+            "type": "error",
+            "message": f"쿼리 처리 중 오류가 발생했습니다: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }
+
+
+async def streaming_reply_generator(req: GenerateReplyRequest, company_id: str):
+    """
+    응답 생성을 스트리밍으로 수행하는 제너레이터
+    
+    Args:
+        req: 응답 생성 요청 객체
+        company_id: 회사 ID
+        
+    Yields:
+        각 단계별 진행 상황과 결과
+    """
+    try:
+        start_time = time.time()
+        
+        # 1. 컨텍스트 검증
+        yield {
+            "type": "progress",
+            "stage": "context_validation",
+            "message": f"컨텍스트 ID {req.context_id} 검증 중...",
+            "progress": 20
+        }
+        
+        # 컨텍스트 ID가 캐시에 있는지 확인
+        if req.context_id not in ticket_context_cache:
+            # 캐시에 없으면 기본 메시지 생성
+            yield {
+                "type": "error",
+                "message": f"컨텍스트 ID {req.context_id}를 찾을 수 없습니다. 먼저 /init 엔드포인트를 호출해주세요.",
+                "progress": 100
+            }
+            return
+            
+        context_data = ticket_context_cache[req.context_id]
+        
+        # 2. 컨텍스트에서 티켓 정보 추출
+        yield {
+            "type": "progress",
+            "stage": "extracting_context",
+            "message": "저장된 컨텍스트에서 티켓 정보를 추출하는 중...",
+            "progress": 40
+        }
+        
+        # 캐시된 컨텍스트에서 필요한 정보 추출
+        ticket_summary = context_data.get("ticket_summary", {})
+        similar_tickets = context_data.get("similar_tickets", [])
+        related_docs = context_data.get("related_documents", [])
+        
+        # 3. 응답 생성 준비
+        yield {
+            "type": "progress",
+            "stage": "preparing_generation",
+            "message": "응답 생성을 준비하는 중...",
+            "progress": 60
+        }
+        
+        # 4. AI 응답 생성
+        yield {
+            "type": "progress",
+            "stage": "generating_reply",
+            "message": "AI 응답을 생성하는 중...",
+            "progress": 80
+        }
+        
+        # 컨텍스트 구성
+        context_parts = []
+        
+        if ticket_summary:
+            context_parts.append(f"현재 티켓 요약:\n{ticket_summary.get('ticket_summary', '')}")
+        
+        if similar_tickets:
+            context_parts.append("유사 티켓들:")
+            for ticket in similar_tickets[:3]:
+                title = ticket.get('title', '')
+                solution = ticket.get('solution', '') or ticket.get('issue', '')
+                context_parts.append(f"- {title}: {solution}")
+        
+        if related_docs:
+            context_parts.append("관련 문서들:")
+            for doc in related_docs[:3]:
+                title = doc.get('title', '')
+                summary = doc.get('doc_summary', '')
+                context_parts.append(f"- {title}: {summary}")
+        
+        context = "\n".join(context_parts)
+        
+        # 스타일과 톤 지침 적용
+        style_guide = {
+            "professional": "전문적이고 격식 있는 언어를 사용하세요.",
+            "friendly": "친근하고 대화체로 응답하세요.",
+            "technical": "기술적 용어와 자세한 설명을 포함하세요."
+        }
+        
+        tone_guide = {
+            "helpful": "도움을 주는 태도로 응답하세요.",
+            "empathetic": "고객의 감정에 공감하는 태도로 응답하세요.",
+            "direct": "간결하고 직접적으로 핵심 정보를 제공하세요."
+        }
+        
+        style_instruction = style_guide.get(req.style or "professional", style_guide["professional"])
+        tone_instruction = tone_guide.get(req.tone or "helpful", tone_guide["helpful"])
+        
+        # 응답 생성을 위한 프롬프트
+        prompt = f"""다음 티켓에 대한 전문적인 응답을 작성해 주세요:
+
+{context}
+
+응답 지침:
+1. {style_instruction}
+2. {tone_instruction}"""
+
+        if req.instructions:
+            prompt += f"\n3. {req.instructions}"
+            
+        if req.include_greeting:
+            prompt += "\n4. 적절한 인사말로 응답을 시작하세요."
+            
+        if req.include_signature:
+            prompt += "\n5. 응답 끝에 적절한 서명을 포함하세요."
+            
+        prompt += """
+
+응답 요구사항:
+- 고객의 문제를 정확히 이해했음을 보여주세요
+- 구체적이고 실행 가능한 해결책을 제시해 주세요
+- 단계별 가이드가 필요한 경우 명확하게 설명해 주세요
+- 추가 도움이 필요한 경우 연락 방법을 안내해 주세요
+
+응답:"""
+        
+        system_prompt = "당신은 전문적이고 친절한 고객 지원 담당자입니다. 고객의 문제를 정확히 파악하고 최적의 해결책을 제공해 주세요."
+        
+        response = await call_llm(prompt, system_prompt=system_prompt)
+        generated_reply = response.text
+        
+        # 5. 완료
+        yield {
+            "type": "progress",
+            "stage": "complete",
+            "message": "응답 생성이 완료되었습니다.",
+            "progress": 100
+        }
+        
+        total_time = time.time() - start_time
+        
+        # 최종 결과 전송
+        final_result = {
+            "type": "result",
+            "data": {
+                "reply": generated_reply,
+                "context_id": req.context_id,
+                "similar_tickets": similar_tickets[:3] if similar_tickets else [],
+                "related_docs": related_docs[:3] if related_docs else [],
+                "metadata": {
+                    "duration_ms": int(total_time * 1000),
+                    "model_used": response.model_used,
+                    "style": req.style,
+                    "tone": req.tone,
+                    "generated_at": datetime.now().isoformat()
+                }
+            }
+        }
+        
+        yield final_result
+        
+    except Exception as e:
+        logger.error(f"스트리밍 응답 생성 중 오류 발생: {e}")
+        yield {
+            "type": "error",
+            "message": f"응답 생성 중 오류가 발생했습니다: {str(e)}",
+            "timestamp": datetime.now().isoformat()
+        }
+
+
+# SSE 스트리밍 엔드포인트들
+
+@app.post("/query/stream")
+async def query_stream_endpoint(req: QueryRequest, company_id: str = Depends(get_company_id)):
+    """
+    SSE 스트리밍을 통한 실시간 쿼리 처리 엔드포인트
+    
+    프론트엔드에서 실시간으로 쿼리 처리 진행 상황을 받을 수 있습니다.
+    각 단계별 진행률과 최종 결과를 스트리밍으로 전송합니다.
+    
+    Args:
+        req: 쿼리 요청 객체
+        company_id: 회사 ID (헤더에서 자동 추출)
+        
+    Returns:
+        StreamingResponse: SSE 형식의 스트리밍 응답
+    """
+    logger.info(f"SSE 스트리밍 쿼리 시작: {req.query[:50]}...")
+    
+    return StreamingResponse(
+        sse_generator(streaming_query_generator(req, company_id)),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "*",
+        }
+    )
+
+
+@app.post("/generate_reply/stream")
+async def generate_reply_stream_endpoint(
+    req: GenerateReplyRequest,
+    company_id: str = Depends(get_company_id)
+):
+    """
+    SSE 스트리밍을 통한 실시간 응답 생성 엔드포인트
+    
+    티켓에 대한 AI 응답을 실시간으로 생성하고 진행 상황을 스트리밍으로 전송합니다.
+    
+    Args:
+        req: 응답 생성 요청 객체
+        company_id: 회사 ID (헤더에서 자동 추출)
+        
+    Returns:
+        StreamingResponse: SSE 형식의 스트리밍 응답
+    """
+    logger.info(f"SSE 스트리밍 응답 생성 시작: context_id={req.context_id}")
+    
+    return StreamingResponse(
+        sse_generator(streaming_reply_generator(req, company_id)),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "*",
+        }
+    )
