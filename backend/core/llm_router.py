@@ -526,7 +526,7 @@ class GeminiProvider(LLMProvider):
             self.stats.record_failure(duration) # 실패 통계 기록
             llm_requests_total.labels(provider=self.name, status='failure').inc()
             if duration > 0:
-                llm_request_duration_seconds.labels(provider=self.name).observe(duration / 1000)
+                 llm_request_duration_seconds.labels(provider=self.name).observe(duration / 1000)
             logger.error(f"{self.name} 호출 중 오류: {type(e).__name__} - {str(e)}")
             raise
 
@@ -632,25 +632,25 @@ class LLMProviderSelector:
         self.provider_weights = {
             "openai": LLMProviderWeights(
                 provider_name="openai", 
-                base_weight=1.0,  # 최우선 (속도가 빠름)
-                performance_multiplier=1.2,  # 성능 향상
-                cost_efficiency=1.0,  # 비용 효율성 기준
+                base_weight=2.0,  # 최우선 (가중치 2배 증가)
+                performance_multiplier=2.0,  # 성능 가중치 대폭 강화
+                cost_efficiency=1.5,  # 비용 효율성 향상
                 latency_threshold_ms=5000.0,  # 5초 (더 엄격한 기준)
                 max_consecutive_failures=3
             ),
             "anthropic": LLMProviderWeights(
                 provider_name="anthropic",
-                base_weight=0.8,  # 두 번째 우선순위 (품질은 좋지만 느림)
-                performance_multiplier=1.0,
-                cost_efficiency=0.9,  # Claude는 조금 더 비싸지만 품질이 좋음
+                base_weight=0.3,  # 더 낮은 우선순위로 변경
+                performance_multiplier=0.5,  # 성능 가중치 대폭 감소
+                cost_efficiency=0.5,  # 비용 효율성 감소
                 latency_threshold_ms=8000.0,  # 8초
                 max_consecutive_failures=3
             ),
             "gemini": LLMProviderWeights(
                 provider_name="gemini",
-                base_weight=0.6,  # 세 번째 우선순위 (폴백용)
-                performance_multiplier=0.9,
-                cost_efficiency=1.2,  # 가장 저렴함
+                base_weight=0.4,  # 최하위 우선순위
+                performance_multiplier=0.7,
+                cost_efficiency=1.0,  # 가장 저렴함
                 latency_threshold_ms=12000.0,  # 12초 (폴백용이므로 여유있게)
                 max_consecutive_failures=5
             )
@@ -1372,7 +1372,6 @@ class LLMRouter:
             
             # JSON 파싱 시도
             import json
-            import re
             try:
                 # 응답 전처리: 제어 문자 제거 및 이스케이프
                 cleaned_text = response.text.strip()
@@ -2101,6 +2100,121 @@ class LLMRouter:
                 },
                 "total_execution_time": execution_time,
                 "chain_type": "langchain_runnable_parallel",
+                "chain_error": error_msg
+            }
+
+    async def execute_optimized_init_chain(
+        self,
+        ticket_data: Dict[str, Any],
+        qdrant_client,
+        company_id: str,
+        essential_tasks: List[str] = None,
+        optional_tasks: List[str] = None,
+        max_similar_tickets: int = 5,
+        max_kb_docs: int = 5,
+    ) -> Dict[str, Any]:
+        """
+        성능 최적화된 init 체인 실행
+        필수 작업과 선택적 작업을 분리하여 처리하고, 결과 크기를 제한합니다.
+        
+        Args:
+            ticket_data: 티켓 데이터
+            qdrant_client: Qdrant 클라이언트
+            company_id: 회사 ID
+            essential_tasks: 필수 작업 목록 (즉시 필요)
+            optional_tasks: 선택적 작업 목록 (백그라운드 처리 가능)
+            max_similar_tickets: 최대 유사 티켓 수
+            max_kb_docs: 최대 지식베이스 문서 수
+            
+        Returns:
+            Dict: 체인 실행 결과
+        """
+        start_time = time.time()
+        essential_tasks = essential_tasks or []
+        optional_tasks = optional_tasks or []
+        
+        logger.info(f"최적화된 init 체인 실행 시작 - 필수: {essential_tasks}, 선택적: {optional_tasks}")
+        
+        try:
+            # 1단계: 필수 작업 (블로킹) - 빠른 응답 필요
+            essential_results = {}
+            if essential_tasks:
+                essential_start = time.time()
+                
+                # 요약 생성 (가장 중요한 필수 작업)
+                if "summary" in essential_tasks:
+                    summary_task = RunnableLambda(self._generate_summary_task)
+                    summary_result = await summary_task.ainvoke({"ticket_data": ticket_data})
+                    essential_results["summary"] = summary_result
+                
+                essential_time = time.time() - essential_start
+                logger.info(f"필수 작업 완료 시간: {essential_time:.2f}초")
+            
+            # 2단계: 선택적 작업 (비블로킹) - 병렬 처리로 성능 최적화
+            optional_results = {}
+            if optional_tasks:
+                optional_start = time.time()
+                
+                # 선택적 작업을 위한 병렬 체인 구성
+                parallel_optional_chains = {}
+                
+                if "similar_tickets" in optional_tasks:
+                    parallel_optional_chains["similar_tickets"] = RunnableLambda(self._fetch_similar_tickets_task)
+                
+                if "kb_documents" in optional_tasks:
+                    parallel_optional_chains["kb_documents"] = RunnableLambda(self._fetch_kb_documents_task)
+                
+                # 병렬 실행
+                if parallel_optional_chains:
+                    optional_parallel_chain = RunnableParallel(parallel_optional_chains)
+                    chain_inputs = {
+                        "ticket_data": ticket_data,
+                        "qdrant_client": qdrant_client,
+                        "company_id": company_id
+                    }
+                    optional_results = await optional_parallel_chain.ainvoke(chain_inputs)
+                
+                optional_time = time.time() - optional_start
+                logger.info(f"선택적 작업 완료 시간: {optional_time:.2f}초")
+            
+            # 결과 통합
+            final_results = {**essential_results, **optional_results}
+            
+            total_execution_time = time.time() - start_time
+            logger.info(f"최적화된 init 체인 실행 완료 (총 시간: {total_execution_time:.2f}초)")
+            
+            return {
+                **final_results,
+                "total_execution_time": total_execution_time,
+                "chain_type": "optimized_langchain_parallel",
+                "essential_task_count": len(essential_tasks),
+                "optional_task_count": len(optional_tasks)
+            }
+            
+        except Exception as e:
+            execution_time = time.time() - start_time
+            error_msg = f"최적화된 init 체인 실행 실패: {str(e)}"
+            logger.error(f"{error_msg} (실행시간: {execution_time:.2f}초)")
+            
+            # 에러 발생 시 기본 구조 반환
+            return {
+                "summary": {
+                    "task_type": "summary",
+                    "error": "최적화된 체인 실행 실패로 인한 요약 생성 불가",
+                    "success": False
+                },
+                "similar_tickets": {
+                    "task_type": "similar_tickets", 
+                    "error": "최적화된 체인 실행 실패로 인한 유사 티켓 검색 불가",
+                    "success": False
+                },
+                "kb_documents": {
+                    "task_type": "kb_documents",
+                    "error": "최적화된 체인 실행 실패로 인한 지식베이스 검색 불가", 
+                    "success": False
+                },
+                "total_execution_time": execution_time,
+                "chain_type": "optimized_langchain_parallel",
                 "chain_error": error_msg
             }
 

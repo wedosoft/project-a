@@ -3,12 +3,13 @@
     "schema": {
       "method": "GET",
       "protocol": "https",
-      "host": "37b4-58-122-170-2.ngrok-free.app",
+      "host": "df49-61-73-3-53.ngrok-free.app",
       "path": "/${context.path}",
       "headers": {
         "Content-Type": "application/json",
         "X-Freshdesk-Domain": "wedosoft",
-        "X-Freshdesk-API-Key": "Ug9H1cKCZZtZ4haamBy"
+        "X-Freshdesk-API-Key": "Ug9H1cKCZZtZ4haamBy",
+        "ngrok-skip-browser-warning": "true"
       }
     }
   },
@@ -16,21 +17,22 @@
     "schema": {
       "method": "POST",
       "protocol": "https",
-      "host": "37b4-58-122-170-2.ngrok-free.app",
+      "host": "df49-61-73-3-53.ngrok-free.app",
       "path": "/${context.path}",
       "headers": {
         "Content-Type": "application/json",
-        "X-Freshdesk-Domain": "wedosoft",
-        "X-Freshdesk-API-Key": "Ug9H1cKCZZtZ4haamBy"
+        "X-Freshdesk-Domain": "#{freshdesk_domain}",
+        "X-Freshdesk-API-Key": "#{freshdesk_api_key}",
+        "ngrok-skip-browser-warning": "true"
       }
     }
   },
-  "searchTickets": {
+  "generic": {
     "schema": {
       "method": "GET",
       "protocol": "https",
-      "host": "wedosoft.freshdesk.com",
-      "path": "/api/v2/search/tickets",
+      "host": "df49-61-73-3-53.ngrok-free.app",
+      "path": "/",
       "headers": {
         "Content-Type": "application/json"
       }

@@ -52,39 +52,138 @@ def extract_company_id_from_domain(domain: str) -> str:
     
     return company_id
 
+def smart_domain_parsing(input_domain: str) -> str:
+    """
+    다양한 형태의 도메인 입력을 표준 Freshdesk 도메인으로 변환합니다.
+    
+    지원하는 입력 형식:
+    - wedosoft.freshdesk.com (완전한 도메인)
+    - https://wedosoft.freshdesk.com (URL 형태)
+    - wedosoft (company_id만)
+    
+    Args:
+        input_domain: 사용자가 입력한 도메인 또는 company_id
+        
+    Returns:
+        표준화된 Freshdesk 도메인 (예: wedosoft.freshdesk.com)
+        
+    Raises:
+        ValueError: 유효하지 않은 도메인 형식인 경우
+    """
+    if not input_domain or not input_domain.strip():
+        raise ValueError("도메인 입력값이 비어있습니다.")
+    
+    # 입력값 정리
+    domain = input_domain.strip().lower()
+    
+    # URL 형태인 경우 도메인 부분만 추출
+    if domain.startswith(("http://", "https://")):
+        from urllib.parse import urlparse
+        parsed = urlparse(domain)
+        domain = parsed.netloc
+    
+    # 이미 완전한 .freshdesk.com 도메인인 경우
+    if domain.endswith(".freshdesk.com"):
+        # company_id 추출하여 검증
+        company_id = domain.replace(".freshdesk.com", "")
+        if not company_id or len(company_id) < 2:
+            raise ValueError(f"유효하지 않은 company_id가 포함된 도메인입니다: {domain}")
+        return domain
+    
+    # company_id만 입력된 경우 (.freshdesk.com 추가)
+    else:
+        # company_id 검증
+        if len(domain) < 2:
+            raise ValueError(f"company_id가 너무 짧습니다: {domain}")
+        
+        # 특수문자 제거 (도메인에 허용되지 않는 문자)
+        import re
+        if not re.match(r'^[a-z0-9\-]+$', domain):
+            raise ValueError(f"company_id에 허용되지 않는 문자가 포함되어 있습니다: {domain}")
+        
+        return f"{domain}.freshdesk.com"
+
 def get_freshdesk_config(domain: Optional[str] = None, api_key: Optional[str] = None) -> Tuple[str, str, str, Dict[str, str], Tuple[str, str]]:
     """
     Freshdesk 설정을 가져오거나 파라미터로 오버라이드합니다.
+    iparams에서 입력받은 값을 우선 사용하며, 스마트 도메인 파싱을 적용합니다.
     
     Args:
-        domain: Freshdesk 도메인 (파라미터로 전달된 경우 우선 사용)
-        api_key: Freshdesk API 키 (파라미터로 전달된 경우 우선 사용)
+        domain: Freshdesk 도메인 (iparams에서 전달된 경우 우선 사용)
+        api_key: Freshdesk API 키 (iparams에서 전달된 경우 우선 사용)
         
     Returns:
         tuple: (company_id, base_url, api_key, headers, auth)
+        
+    Raises:
+        ValueError: 필수 설정값이 누락되거나 유효하지 않은 경우
     """
-    # 파라미터가 제공되지 않은 경우 환경변수에서 가져오기
+    # 파라미터 우선, 없으면 환경변수 사용 (개발 환경용)
     final_domain = domain or DEFAULT_FRESHDESK_DOMAIN
     final_api_key = api_key or DEFAULT_FRESHDESK_API_KEY
     
     if not final_domain or not final_api_key:
-        raise ValueError("Freshdesk 도메인과 API 키가 필요합니다.")
+        raise ValueError(
+            "Freshdesk 도메인과 API 키가 필요합니다. "
+            "iparams에서 설정하거나 개발 환경의 경우 환경변수로 제공해주세요."
+        )
     
-    # company_id 추출
-    company_id = extract_company_id_from_domain(final_domain)
+    # 스마트 도메인 파싱 적용
+    try:
+        normalized_domain = smart_domain_parsing(final_domain)
+    except ValueError as e:
+        raise ValueError(f"도메인 파싱 오류: {e}")
     
-    # base_url 생성
-    base_url = f"https://{final_domain}" if ".freshdesk.com" in final_domain else f"https://{final_domain}.freshdesk.com"
-    base_url += "/api/v2"
+    # 보안: 예시 도메인 완전 차단
+    invalid_domains = [
+        "your-domain.freshdesk.com", "example.freshdesk.com", "test.freshdesk.com",
+        "demo.freshdesk.com", "sample.freshdesk.com", "company.freshdesk.com",
+        "your-company.freshdesk.com", "default.freshdesk.com"
+    ]
+    if normalized_domain.lower() in invalid_domains:
+        raise ValueError(
+            f"유효하지 않은 Freshdesk 도메인입니다: {normalized_domain}. "
+            f"실제 고객사 도메인을 iparams에 설정해주세요."
+        )
+    
+    # API 키 예시값 차단
+    invalid_api_keys = [
+        "your-api-key", "example-key", "test-key", "demo-key", "sample-key",
+        "api-key", "freshdesk-api-key", "default-key"
+    ]
+    if final_api_key.lower() in invalid_api_keys:
+        raise ValueError(
+            f"유효하지 않은 API 키입니다. "
+            f"실제 Freshdesk API 키를 iparams에 설정해주세요."
+        )
+    
+    # company_id 추출 (정규화된 도메인에서)
+    company_id = extract_company_id_from_domain(normalized_domain)
+    
+    # company_id 검증 강화
+    if not company_id or len(company_id) < 2:
+        raise ValueError(f"유효하지 않은 company_id가 추출되었습니다: {company_id}")
+    
+    # 예시 company_id 차단
+    invalid_company_ids = ["example", "test", "demo", "sample", "company", "your-company", "default"]
+    if company_id.lower() in invalid_company_ids:
+        raise ValueError(
+            f"유효하지 않은 company_id입니다: {company_id}. "
+            f"실제 고객사 ID를 iparams에 설정해주세요."
+        )
+    
+    # base_url 생성 (정규화된 도메인 사용)
+    base_url = f"https://{normalized_domain}/api/v2"
     
     # 헤더 및 인증 정보 생성
     headers = {
         "Content-Type": "application/json",
-        "X-Company-ID": company_id
+        "X-Company-ID": company_id,
+        "User-Agent": "Freshdesk-RAG-Backend/1.0"
     }
     auth = (final_api_key, "X")
     
-    logger.debug(f"Freshdesk 설정 - 도메인: {final_domain}, company_id: {company_id}")
+    logger.info(f"Freshdesk 설정 검증 완료 - 도메인: {normalized_domain}, company_id: {company_id}")
     
     return company_id, base_url, final_api_key, headers, auth
 
@@ -109,33 +208,70 @@ async def fetch_with_retry(client: httpx.AsyncClient, url: str, headers: Dict[st
         
     Returns:
         Any: API 응답 데이터 (일반적으로 딕셔너리 또는 리스트)
+        
+    Raises:
+        httpx.HTTPStatusError: 재시도 후에도 해결되지 않는 HTTP 오류
+        httpx.RequestError: 재시도 후에도 해결되지 않는 요청 오류
     """
     retries = 0
+    last_exception = None
+    
     while retries < MAX_RETRIES:
         try:
             resp = await client.get(url, headers=headers, auth=auth, params=params)
             resp.raise_for_status()
-            return resp.json()
+            
+            # 응답 데이터 검증
+            try:
+                response_data = resp.json()
+                logger.debug(f"API 호출 성공: {url} (시도 {retries + 1}/{MAX_RETRIES})")
+                return response_data
+            except Exception as e:
+                logger.error(f"응답 JSON 파싱 오류: {e}")
+                raise httpx.RequestError(f"응답 JSON 파싱 실패: {e}")
+                
         except httpx.HTTPStatusError as e:
+            last_exception = e
             if e.response.status_code == 429:  # Rate limit 초과
                 retry_after = int(e.response.headers.get('Retry-After', RETRY_DELAY))
-                logger.warning(f"Rate limit 초과. {retry_after}초 후 재시도합니다.")
+                logger.warning(f"Rate limit 초과 (429). {retry_after}초 후 재시도합니다. (시도 {retries + 1}/{MAX_RETRIES})")
                 await asyncio.sleep(retry_after)
-                retries += 1
-                continue
             elif e.response.status_code >= 500:  # 서버 오류
-                logger.warning(f"서버 오류 발생: {e}. 재시도 중...")
-                await asyncio.sleep(RETRY_DELAY * (retries + 1))
-                retries += 1
-                continue
+                wait_time = RETRY_DELAY * (retries + 1)
+                logger.warning(f"서버 오류 발생 ({e.response.status_code}): {e}. {wait_time}초 후 재시도합니다. (시도 {retries + 1}/{MAX_RETRIES})")
+                await asyncio.sleep(wait_time)
+            elif e.response.status_code == 401:  # 인증 오류
+                logger.error("인증 오류 (401): API 키가 유효하지 않습니다.")
+                raise  # 인증 오류는 재시도하지 않음
+            elif e.response.status_code == 403:  # 권한 오류
+                logger.error("권한 오류 (403): 요청된 리소스에 접근할 권한이 없습니다.")
+                raise  # 권한 오류는 재시도하지 않음
+            elif e.response.status_code == 404:  # 리소스 없음
+                logger.warning(f"리소스를 찾을 수 없습니다 (404): {url}")
+                raise  # 404는 재시도해도 의미 없음
             else:
-                logger.error(f"HTTP 오류: {e}")
-                raise
+                logger.error(f"HTTP 오류 ({e.response.status_code}): {e}")
+                raise  # 기타 클라이언트 오류는 재시도하지 않음
+                
         except httpx.RequestError as e:
-            logger.warning(f"요청 오류: {e}. 재시도 중...")
-            await asyncio.sleep(RETRY_DELAY * (retries + 1))
-            retries += 1
-            continue
+            last_exception = e
+            wait_time = RETRY_DELAY * (retries + 1)
+            logger.warning(f"요청 오류: {e}. {wait_time}초 후 재시도합니다. (시도 {retries + 1}/{MAX_RETRIES})")
+            await asyncio.sleep(wait_time)
+            
+        except Exception as e:
+            last_exception = e
+            logger.error(f"예상치 못한 오류: {e}")
+            raise
+            
+        retries += 1
+    
+    # 모든 재시도 실패
+    logger.error(f"API 호출 최종 실패: {url} (총 {MAX_RETRIES}번 시도)")
+    if last_exception:
+        raise last_exception
+    else:
+        raise httpx.RequestError(f"API 호출 실패: {url}")
     
     raise Exception(f"최대 재시도 횟수({MAX_RETRIES})를 초과했습니다.")
 
@@ -511,18 +647,36 @@ async def fetch_ticket_details(ticket_id: int, domain: Optional[str] = None, api
         
     Returns:
         Optional[Dict[str, Any]]: 티켓 상세 정보 (대화내역, 첨부파일 포함) 또는 None (티켓이 없는 경우)
+        
+    Raises:
+        ValueError: 유효하지 않은 티켓 ID 또는 설정
+        httpx.HTTPStatusError: API 호출 오류 (404 제외)
+        Exception: 기타 예외
     """
+    # 티켓 ID 검증
+    if not ticket_id or ticket_id <= 0:
+        raise ValueError(f"유효하지 않은 티켓 ID입니다: {ticket_id}")
+    
     # Freshdesk 설정 가져오기
-    company_id, base_url, final_api_key, headers, auth = get_freshdesk_config(domain, api_key)
+    try:
+        company_id, base_url, final_api_key, headers, auth = get_freshdesk_config(domain, api_key)
+    except ValueError as e:
+        logger.error(f"Freshdesk 설정 오류: {e}")
+        raise
     
     logger.info(f"티켓 {ticket_id} 상세 정보 가져오기 시작 - 도메인: {domain or DEFAULT_FRESHDESK_DOMAIN}")
     
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             # 티켓 기본 정보 가져오기
             ticket_url = f"{base_url}/tickets/{ticket_id}"
             logger.info(f"티켓 {ticket_id} 기본 정보 요청 중: {ticket_url}")
             ticket_data = await fetch_with_retry(client, ticket_url, headers, auth)
+            
+            if not ticket_data or not isinstance(ticket_data, dict):
+                logger.warning(f"티켓 {ticket_id} 응답이 유효하지 않습니다.")
+                return None
+                
             logger.info(f"티켓 {ticket_id} 기본 정보 수신 완료")
 
             # 대화 내역 포함 (기존 함수 활용)
@@ -536,11 +690,22 @@ async def fetch_ticket_details(ticket_id: int, domain: Optional[str] = None, api
             
             logger.info(f"티켓 {ticket_id} 상세 정보 (대화, 첨부파일 포함) 가져오기 완료")
             return ticket_data
+            
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
                 logger.warning(f"티켓 {ticket_id}를 찾을 수 없습니다 (404).")
                 return None
-            logger.error(f"티켓 {ticket_id} 상세 정보 가져오기 HTTP 오류: {e}")
+            elif e.response.status_code == 403:
+                logger.error(f"티켓 {ticket_id} 접근 권한이 없습니다 (403). API 키 또는 권한을 확인하세요.")
+                raise
+            elif e.response.status_code == 429:
+                logger.error("API 요청 한도 초과 (429). 잠시 후 다시 시도하세요.")
+                raise
+            else:
+                logger.error(f"티켓 {ticket_id} 상세 정보 가져오기 HTTP 오류: {e.response.status_code} - {e}")
+                raise
+        except httpx.TimeoutException:
+            logger.error(f"티켓 {ticket_id} 상세 정보 가져오기 시간 초과")
             raise
         except Exception as e:
             logger.error(f"티켓 {ticket_id} 상세 정보 가져오기 중 예외 발생: {e}")

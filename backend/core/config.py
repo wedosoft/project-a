@@ -8,6 +8,7 @@
 """
 
 import json
+import logging
 import os
 import sys
 from functools import lru_cache
@@ -18,6 +19,9 @@ from typing import Any, Dict, List, Optional
 from dotenv import load_dotenv
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# 로거 설정
+logger = logging.getLogger(__name__)
 
 # 환경변수 로드
 backend_dir = Path(__file__).parent.parent  # core 디렉토리의 상위(backend) 디렉토리
@@ -59,11 +63,39 @@ class Settings(BaseSettings):
     PERPLEXITY_API_KEY: Optional[str] = Field(None, description="Perplexity API 키")
     
     # 애플리케이션 설정
-    COMPANY_ID: str = Field(default_factory=lambda: os.getenv("COMPANY_ID", "example-company"), description="기본 회사 ID")
+    COMPANY_ID: str = Field(default_factory=lambda: Settings._get_secure_company_id(), description="회사 ID (환경변수 필수)")
     PROCESS_ATTACHMENTS: bool = Field(True, description="첨부 파일 처리 여부")
     EMBEDDING_MODEL: str = Field("text-embedding-3-small", description="임베딩 모델 이름")
     LOG_LEVEL: str = Field("INFO", description="로깅 레벨")
     MAX_TOKENS: int = Field(4096, description="LLM 최대 토큰 수")
+    
+    @staticmethod
+    def _get_secure_company_id() -> str:
+        """
+        보안이 강화된 company_id 검증 및 반환
+        개발 환경에서는 선택적으로 설정 가능
+        """
+        company_id = os.getenv("COMPANY_ID")
+        
+        # 개발 환경에서는 기본값 제공 (프로덕션에서는 반드시 설정 필요)
+        if not company_id:
+            # 개발 모드 확인
+            if os.getenv("ENVIRONMENT", "development") == "development":
+                logger.warning("개발 환경에서 COMPANY_ID가 설정되지 않았습니다. 기본값을 사용합니다.")
+                return "development-default"
+            else:
+                raise ValueError("COMPANY_ID 환경변수가 설정되지 않았습니다. 멀티테넌트 보안을 위해 반드시 설정해야 합니다.")
+        
+        # 예시 또는 테스트용 company_id 거부
+        invalid_ids = ["example-company", "test-company", "your-company", "demo-company", "sample-company"]
+        if company_id in invalid_ids:
+            raise ValueError(f"유효하지 않은 company_id입니다: {company_id}. 실제 고객사 ID를 사용해주세요.")
+        
+        # 최소 길이 검증
+        if len(company_id) < 3:
+            raise ValueError(f"company_id가 너무 짧습니다: {company_id}. 최소 3자 이상이어야 합니다.")
+        
+        return company_id
     
     # 개발 환경 설정
     DEBUG: bool = Field(False, description="디버그 모드 활성화 여부")

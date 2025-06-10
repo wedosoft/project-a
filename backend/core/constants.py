@@ -106,8 +106,33 @@ class ChunkConstants:
 class SystemConfig:
     """시스템 전체 설정"""
     
-    # 기본 company_id
-    DEFAULT_COMPANY_ID = os.getenv("COMPANY_ID", "example-company")
+    # 기본 company_id - 보안상 기본값 완전 제거 (헤더에서만 받음)
+    DEFAULT_COMPANY_ID = None
+    
+    @classmethod
+    def get_company_id(cls) -> str:
+        """
+        환경변수에서 company_id를 가져옵니다.
+        보안상 기본값을 제공하지 않으며, 반드시 iparams나 헤더에서 전달되어야 합니다.
+        """
+        company_id = os.getenv("COMPANY_ID")
+        if not company_id:
+            raise ValueError(
+                "COMPANY_ID가 설정되지 않았습니다. "
+                "iparams에서 설정한 값이 헤더로 전달되어야 합니다."
+            )
+        
+        # 보안: 예시나 기본값 company_id 완전 차단
+        invalid_company_ids = [
+            "example-company", "test-company", "your-company", "demo-company",
+            "company", "test", "example", "demo", "sample", "default"
+        ]
+        if company_id.lower() in invalid_company_ids:
+            raise ValueError(
+                f"유효하지 않은 company_id입니다: {company_id}. "
+                f"실제 고객사 ID를 iparams에 설정해주세요."
+            )
+        return company_id
     
     # 벡터 DB 컬렉션명 패턴
     VECTOR_COLLECTION_PATTERN = "{company_id}_documents"
