@@ -40,6 +40,10 @@ if [ ! -f "backend/.env" ]; then
     echo -e "${YELLOW}backend/.env 파일이 없습니다. 템플릿에서 복사합니다.${NC}"
     if [ -f "backend/.env.example" ]; then
         cp backend/.env.example backend/.env
+        if [ $? -ne 0 ]; then
+            echo -e "${YELLOW}backend/.env 파일 복사에 실패했습니다. 수동으로 생성해주세요.${NC}"
+            exit 1
+        fi
         echo -e "${GREEN}backend/.env 파일이 backend/.env.example에서 생성되었습니다.${NC}"
     else
         echo -e "${YELLOW}backend/.env.example 파일을 찾을 수 없습니다. 수동으로 생성해주세요.${NC}"
