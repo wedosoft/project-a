@@ -22,6 +22,7 @@ echo -e "${GREEN}Python 버전 확인 완료.${NC}"
 # 가상환경 설정
 echo -e "\n${YELLOW}2. Python 가상환경 설정 중...${NC}"
 if [ ! -d "backend/venv" ]; then
+    mkdir -p backend
     python3 -m venv backend/venv
     echo -e "${GREEN}가상환경(backend/venv) 생성 완료.${NC}"
 else
