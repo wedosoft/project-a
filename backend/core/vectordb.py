@@ -369,9 +369,9 @@ class QdrantAdapter(VectorDBInterface):
 
         try:
             # doc_type 필터링이 필요한 경우 더 많은 결과를 요청하여 메모리 내 필터링 수행
-            # 더 많은 결과를 가져와 필터링하기 위해 배수를 10으로 설정
-            fetch_limit = top_k * 10 if use_doc_type_filter else top_k
-            logger.info(f"Qdrant 검색 시도 (company_id={company_id}, 검색 크기={fetch_limit})")
+            # 검색 효율성 향상을 위해 배수를 3으로 줄임 (100개 → 30개로 감소)
+            fetch_limit = top_k * 3 if use_doc_type_filter else top_k
+            logger.info(f"⚡ Qdrant 검색 시도 (company_id={company_id}, 검색 크기={fetch_limit} ← 최적화됨)")
 
             search_results = self.client.search(
                 collection_name=self.collection_name,

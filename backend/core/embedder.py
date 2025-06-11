@@ -287,3 +287,52 @@ def embed_documents(docs: List[str]) -> List[List[float]]:
             raise
         
     return all_embeddings
+
+async def generate_embedding(text: str) -> List[float]:
+    """
+    단일 텍스트에 대한 임베딩을 생성합니다.
+    API 호출에서 사용되는 비동기 함수입니다.
+    
+    Args:
+        text: 임베딩을 생성할 텍스트
+        
+    Returns:
+        임베딩 벡터 리스트
+        
+    Raises:
+        RuntimeError: 임베딩 생성 실패 시
+    """
+    if not text or not text.strip():
+        logger.warning("빈 텍스트에 대한 임베딩 요청")
+        return []
+    
+    try:
+        # 토큰 수 확인 및 필요시 자르기
+        token_count = count_tokens(text)
+        
+        if token_count > MAX_TOKENS_PER_CHUNK:
+            logger.warning(f"텍스트가 토큰 제한을 초과합니다 ({token_count} > {MAX_TOKENS_PER_CHUNK}). 텍스트를 잘라서 처리합니다.")
+            if tokenizer is None:
+                # tokenizer가 없는 경우 문자 기반으로 자르기
+                char_limit = MAX_TOKENS_PER_CHUNK * 4
+                text = text[:char_limit]
+            else:
+                tokens = tokenizer.encode(text)
+                truncated_tokens = tokens[:MAX_TOKENS_PER_CHUNK]
+                text = tokenizer.decode(truncated_tokens)
+        
+        # 임베딩 생성
+        response = client.embeddings.create(
+            model=MODEL_NAME,
+            input=text
+        )
+        
+        embedding = response.data[0].embedding
+        logger.info(f"임베딩 생성 완료 (차원: {len(embedding)}, 토큰: {token_count})")
+        
+        return embedding
+        
+    except Exception as e:
+        error_msg = f"임베딩 생성 실패: {str(e)}"
+        logger.error(error_msg)
+        raise RuntimeError(error_msg)

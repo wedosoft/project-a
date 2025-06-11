@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 import time
 from datetime import datetime
 from functools import partial
@@ -49,6 +50,59 @@ app.include_router(attachments_router)
 # 인메모리 캐시 설정 (TTL: 10분, 최대 100개 항목)
 # 회사 ID와 요청 매개변수를 기반으로 캐시 키를 생성합니다.
 cache = TTLCache(maxsize=100, ttl=600)
+
+# 🛡️ 안전한 티켓 요약 캐시 (구조화된 데이터로 관리)
+ticket_summary_cache = {}
+
+def cleanup_expired_cache():
+    """
+    만료된 캐시 엔트리를 정리하는 함수
+    - 30분 이상 된 캐시 제거
+    - 메모리 사용량 최적화
+    """
+    current_time = time.time()
+    expired_keys = []
+    
+    for key, data in ticket_summary_cache.items():
+        if isinstance(data, dict) and 'cache_timestamp' in data:
+            cache_age_minutes = (current_time - data['cache_timestamp']) / 60
+            if cache_age_minutes > 30:  # 30분 이상 된 캐시
+                expired_keys.append(key)
+        else:
+            # 구조화되지 않은 레거시 캐시는 즉시 제거
+            expired_keys.append(key)
+    
+    for key in expired_keys:
+        del ticket_summary_cache[key]
+    
+    if expired_keys:
+        logger.info(f"🧹 만료된 캐시 {len(expired_keys)}개 정리 완료")
+
+def validate_cache_integrity(company_id: str):
+    """
+    특정 company_id에 대한 캐시 무결성 검증
+    다른 회사 데이터가 섞였는지 확인
+    """
+    invalid_keys = []
+    
+    for key, data in ticket_summary_cache.items():
+        if isinstance(data, dict) and 'company_id' in data:
+            if data['company_id'] != company_id and company_id in key:
+                # 캐시 키에는 해당 company_id가 있지만 데이터는 다른 회사
+                invalid_keys.append(key)
+                logger.error(f"🚨 캐시 무결성 오류 발견: {key} - 예상 company_id: {company_id}, 실제: {data['company_id']}")
+    
+    for key in invalid_keys:
+        del ticket_summary_cache[key]
+    
+    if invalid_keys:
+        logger.warning(f"🛡️ 무결성 오류 캐시 {len(invalid_keys)}개 제거됨")
+
+# 정기적으로 캐시 정리 (요청마다 실행하지 않고 가끔씩만)
+def periodic_cache_cleanup():
+    """10% 확률로 캐시 정리 실행 (성능 영향 최소화)"""
+    if random.random() < 0.1:  # 10% 확률
+        cleanup_expired_cache()
 
 # 성능 로깅을 위한 설정
 logging.basicConfig(
@@ -508,35 +562,74 @@ async def query_endpoint(req: QueryRequest, company_id: str = Depends(get_compan
         ticket_context_for_llm = f"\\n[현재 티켓 정보]\\n제목: {ticket_title}\\n본문: {ticket_body}\\n대화 요약:\\n" + "\\n".join(ticket_conversations) + "\\n"
 
     search_start = time.time()
-    # 1. 검색 단계: 사용자 쿼리를 임베딩하고 관련 문서를 검색합니다.
+    # 1. 검색 단계: 중복 임베딩 생성을 방지하여 성능 최적화
     # 티켓 ID가 있는 경우, 티켓 내용을 포함하여 임베딩할 쿼리 생성
     query_for_embedding_str = f"{ticket_context_for_query}\\n\\n사용자 질문: {req.query}" if req.ticket_id else req.query
+    
+    # 단일 임베딩 생성 (중복 방지로 성능 향상)
+    logger.info(f"⚡ 통합 임베딩 생성 시작 (쿼리 길이: {len(query_for_embedding_str)})")
+    embedding_start = time.time()
     query_embedding = embed_documents([query_for_embedding_str])[0]
+    embedding_time = time.time() - embedding_start
+    logger.info(f"⚡ 임베딩 생성 완료 ({embedding_time:.2f}초)")
     
-    # 콘텐츠 타입에 따라 검색할 문서 타입 결정
-    top_k_per_type = max(1, req.top_k // len([t for t in content_types if t in ["tickets", "solutions"]]))
-    
-    # 티켓 검색 (콘텐츠 타입에 "tickets"가 포함된 경우만)
-    ticket_results = {"documents": [], "metadatas": [], "ids": [], "distances": []}
+    # 검색할 문서 타입 목록 생성 (성능 최적화)
+    search_types = []
     if "tickets" in content_types:
-        ticket_results = retrieve_top_k_docs(
-            query_embedding, 
-            top_k_per_type, 
-            company_id, 
-            doc_type="ticket"
-        )
-        logger.info(f"티켓 검색 결과: {len(ticket_results.get('documents', []))} 건")
-    
-    # 지식베이스 문서 검색 (콘텐츠 타입에 "solutions"가 포함된 경우만)
-    kb_results = {"documents": [], "metadatas": [], "ids": [], "distances": []}
+        search_types.append("ticket")
     if "solutions" in content_types:
-        kb_results = retrieve_top_k_docs(
+        search_types.append("kb")
+    
+    # 통합 검색 실행 (단일 검색으로 중복 호출 방지)
+    if len(search_types) == 1:
+        # 단일 타입 검색 (기존 방식)
+        single_type = search_types[0]
+        unified_results = retrieve_top_k_docs(
             query_embedding, 
-            top_k_per_type, 
+            req.top_k, 
             company_id, 
-            doc_type="kb"
+            doc_type=single_type
         )
-        logger.info(f"솔루션 검색 결과: {len(kb_results.get('documents', []))} 건")
+        logger.info(f"⚡ 통합 검색 완료 - {single_type}: {len(unified_results.get('documents', []))} 건")
+        
+        # 결과를 기존 형식으로 변환
+        if single_type == "ticket":
+            ticket_results = unified_results
+            kb_results = {"documents": [], "metadatas": [], "ids": [], "distances": []}
+        else:
+            kb_results = unified_results
+            ticket_results = {"documents": [], "metadatas": [], "ids": [], "distances": []}
+    else:
+        # 다중 타입 검색 (각 타입당 절반씩)
+        top_k_per_type = max(1, req.top_k // len(search_types))
+        
+        # 병렬 검색으로 성능 최적화
+        async def search_by_type(doc_type):
+            return retrieve_top_k_docs(
+                query_embedding, 
+                top_k_per_type, 
+                company_id, 
+                doc_type=doc_type
+            )
+        
+        search_tasks = []
+        for doc_type in search_types:
+            search_tasks.append(search_by_type(doc_type))
+        
+        # 병렬 실행
+        search_results = await asyncio.gather(*search_tasks)
+        
+        # 결과 분배
+        ticket_results = {"documents": [], "metadatas": [], "ids": [], "distances": []}
+        kb_results = {"documents": [], "metadatas": [], "ids": [], "distances": []}
+        
+        for i, doc_type in enumerate(search_types):
+            if doc_type == "ticket":
+                ticket_results = search_results[i]
+            elif doc_type == "kb":
+                kb_results = search_results[i]
+        
+        logger.info(f"⚡ 병렬 검색 완료 - 티켓: {len(ticket_results.get('documents', []))} 건, KB: {len(kb_results.get('documents', []))} 건")
 
     # 검색 결과를 병합합니다.
     all_docs_content = ticket_results["documents"] + kb_results["documents"]
@@ -819,8 +912,12 @@ async def get_initial_context(
         
         # Freshdesk API 호출을 위한 전체 도메인 구성
         if company_id_from_header:
-            # company_id로부터 전체 Freshdesk 도메인 구성
-            full_domain = f"{company_id_from_header}.freshdesk.com"
+            # 헤더값이 이미 전체 도메인인지 확인
+            if company_id_from_header.endswith('.freshdesk.com'):
+                full_domain = company_id_from_header
+            else:
+                # company_id만 있는 경우 전체 Freshdesk 도메인 구성
+                full_domain = f"{company_id_from_header}.freshdesk.com"
         else:
             # 환경변수에서 전체 도메인 사용 (개발용)
             full_domain = os.getenv("FRESHDESK_DOMAIN")
@@ -831,9 +928,13 @@ async def get_initial_context(
                 detail="Freshdesk company_id와 API 키가 필요합니다. 헤더 또는 환경변수로 제공해주세요."
             )
         
-        # 보안: company_id 직접 사용 (iparams에서 이미 처리됨)
-        search_company_id = company_id_from_header
-        logger.info(f"iparams에서 받은 company_id '{search_company_id}' 사용, API 도메인: '{full_domain}'")
+        # 보안: company_id 추출 (도메인에서 서브도메인 부분만)
+        if full_domain and full_domain.endswith('.freshdesk.com'):
+            search_company_id = full_domain.replace('.freshdesk.com', '')
+        else:
+            search_company_id = company_id_from_header
+        logger.info(f"company_id를 Freshdesk 도메인에서 추출: {search_company_id}")
+        logger.info(f"사용할 API 도메인: '{full_domain}'")
     
         # Freshdesk API에서 티켓 정보 조회 (동적 설정 사용)
         ticket_data = None
@@ -951,16 +1052,61 @@ async def get_initial_context(
         # 캐시 확인 및 성능 최적화
         cached_summary = None
         
-        # 캐시 키 생성 (company_id 포함으로 멀티테넌트 지원)
-        cache_key_base = f"{search_company_id}_{ticket_id}"
-        summary_cache_key = f"summary_{cache_key_base}"
+        # 🛡️ 안전한 캐시 키 생성 (company_id + ticket_id + updated_at 포함)
+        ticket_updated_at = ticket_metadata.get('updated_at', '')
+        # 안전한 캐시 키: company_id_ticket_id_updated_timestamp
+        safe_cache_key = f"{search_company_id}_{ticket_id}_{ticket_updated_at}"
+        summary_cache_key = f"summary_{safe_cache_key}"
         
-        # 캐시된 데이터 확인
+        # 🔍 캐시된 데이터 검증 및 무효화 로직
+        cached_summary = None
+        cache_is_valid = False
+        
         if include_summary and summary_cache_key in ticket_summary_cache:
-            cached_summary = ticket_summary_cache[summary_cache_key]
-            logger.info(f"티켓 {ticket_id} 요약 캐시 히트")
+            cached_data = ticket_summary_cache[summary_cache_key]
+            
+            # 🛡️ 캐시 유효성 엄격 검증
+            if isinstance(cached_data, dict):
+                # 구조화된 캐시 데이터 검증
+                cache_company_id = cached_data.get('company_id')
+                cache_ticket_id = cached_data.get('ticket_id') 
+                cache_updated_at = cached_data.get('updated_at')
+                cache_content = cached_data.get('content')
+                cache_timestamp = cached_data.get('cache_timestamp', 0)
+                
+                # 현재 시간과 캐시 시간 비교 (최대 30분 유효)
+                current_time = time.time()
+                cache_age_minutes = (current_time - cache_timestamp) / 60
+                
+                # 🔍 다중 검증 조건
+                if (cache_company_id == search_company_id and 
+                    cache_ticket_id == ticket_id and
+                    cache_updated_at == ticket_updated_at and
+                    cache_content and isinstance(cache_content, str) and
+                    len(cache_content.strip()) > 100 and  # 최소 100자 이상
+                    cache_age_minutes < 30):  # 30분 이내
+                    
+                    cached_summary = cache_content
+                    cache_is_valid = True
+                    logger.info(f"✅ 캐시 유효성 검증 통과 - 사용 (캐시 나이: {cache_age_minutes:.1f}분)")
+                else:
+                    logger.warning("⚠️ 캐시 유효성 검증 실패:")
+                    logger.warning(f"  - Company ID 일치: {cache_company_id == search_company_id}")
+                    logger.warning(f"  - Ticket ID 일치: {cache_ticket_id == ticket_id}")
+                    logger.warning(f"  - Updated At 일치: {cache_updated_at == ticket_updated_at}")
+                    logger.warning(f"  - 내용 유효성: {cache_content and len(cache_content.strip()) > 100}")
+                    logger.warning(f"  - 캐시 나이: {cache_age_minutes:.1f}분 (< 30분)")
+            else:
+                # 레거시 문자열 캐시는 더 이상 신뢰하지 않음
+                logger.warning("⚠️ 레거시 캐시 형식 발견 - 무효화")
+            
+            # 🗑️ 유효하지 않은 캐시 즉시 제거
+            if not cache_is_valid:
+                del ticket_summary_cache[summary_cache_key]
+                logger.info("🗑️ 유효하지 않은 캐시 제거됨")
         
-        include_summary_chain = include_summary and cached_summary is None
+        # 🔍 요약 생성 조건 개선
+        include_summary_chain = include_summary and not cache_is_valid
 
         # 컨텍스트 구축 시작 시간
         context_start_time = time.time()
@@ -978,148 +1124,473 @@ async def get_initial_context(
         kb_documents = []
         ticket_summary = None
         
-        # 성능 최적화된 병렬 처리: 우선순위별 작업 분리
+        # 🚀 병렬 처리 최적화: 티켓 요약과 벡터 검색을 동시에 실행
         try:
-            logger.info(f"최적화된 병렬 처리 시작 (ticket_id: {ticket_id})")
+            logger.info(f"🚀 병렬 처리 시작 (ticket_id: {ticket_id})")
             parallel_start_time = time.time()
             
-            # 티켓 정보 구성 (경량화)
-            ticket_info = {
-                "id": ticket_id,
-                "subject": ticket_title,
-                "description": ticket_body[:1000],  # 설명 길이 제한으로 성능 향상
-                "conversations": ticket_conversations[:5] if ticket_conversations else [],  # 최근 5개 대화만
-                "metadata": ticket_metadata
-            }
+            # 병렬 태스크 정의
+            async def generate_ticket_summary():
+                """티켓 요약 생성 태스크"""
+                if not include_summary_chain:
+                    if cache_is_valid and cached_summary:
+                        return cached_summary
+                    else:
+                        # 기본 요약 생성
+                        return f"""## 📋 티켓 요약
+**제목**: {ticket_title}  
+**티켓 ID**: {ticket_id}  
+**상태**: {ticket_metadata.get('status', '알 수 없음')}  
+**우선순위**: {ticket_metadata.get('priority', '알 수 없음')}  
+
+## 🔍 초기 문의 내용
+{ticket_body[:500] + '...' if len(ticket_body) > 500 else ticket_body}
+
+## 📈 다음 단계  
+- 상세한 AI 분석을 위해 페이지를 새로고침하시거나
+- 수동으로 티켓 내용을 검토해 주세요"""
+                
+                # 대화 내용 기반 상세 요약 생성
+                # 대화 내용 기반 상세 요약 생성
+                try:
+                    logger.info(f"티켓 {ticket_id} 실시간 대화 분석 요약 시작")
+                    
+                    # 전체 대화 내용 분석 - 더 정교한 분석 로직
+                    conversation_analysis = ""
+                    key_customer_requests = []
+                    agent_responses = []
+                    recent_developments = []
+                    unresolved_issues = []
+                    
+                    if ticket_conversations and len(ticket_conversations) > 0:
+                        logger.info(f"전체 {len(ticket_conversations)}개 대화 분석 시작")
+                        
+                        # 대화를 시간순으로 정렬 (최신이 마지막)
+                        sorted_conversations = sorted(ticket_conversations, 
+                                                   key=lambda x: x.get('created_at', ''), 
+                                                   reverse=False)
+                        
+                        # 최근 대화부터 분석 (최근 10개 중점 분석)
+                        recent_convs = sorted_conversations[-10:] if len(sorted_conversations) > 10 else sorted_conversations
+                        
+                        for i, conv in enumerate(sorted_conversations):
+                            if isinstance(conv, dict):
+                                user_name = conv.get('user_name', '사용자')
+                                created_at = conv.get('created_at', '')
+                                body_text = conv.get('body_text', conv.get('body', ''))
+                                
+                                if body_text and len(body_text.strip()) > 10:  # 의미있는 내용만
+                                    # 고객 vs 상담사 구분 (타입 안전성 확보)
+                                    user_name_str = str(user_name).lower() if user_name else ''
+                                    source_str = str(conv.get('source', '')).lower()
+                                    from_email_str = str(conv.get('from_email', '')).lower()
+                                    
+                                    # 고객 식별 - 이메일 도메인이나 사용자명으로 판단
+                                    is_customer = (
+                                        'customer' in user_name_str or 
+                                        'requester' in source_str or
+                                        '@' in from_email_str and 'freshdesk' not in from_email_str and 'wedosoft' not in from_email_str
+                                    )
+                                    
+                                    # 최근 대화인지 확인
+                                    is_recent = conv in recent_convs
+                                    
+                                    if is_customer:
+                                        # 고객 요청사항 분류
+                                        if any(word in body_text.lower() for word in ['급하', '빨리', '문제', '오류', '안됨', '불편', '해결']):
+                                            if is_recent:
+                                                recent_developments.append(f"최근 고객 요청: {body_text[:120]}...")
+                                        
+                                        # 주요 요청사항 추출
+                                        key_customer_requests.append({
+                                            'content': body_text[:200],
+                                            'is_recent': is_recent,
+                                            'timestamp': created_at
+                                        })
+                                        
+                                        # 미해결 문제 식별
+                                        if any(word in body_text.lower() for word in ['아직', '여전히', '계속', '다시', '또', '재요청']):
+                                            unresolved_issues.append(f"미해결 이슈: {body_text[:100]}...")
+                                            
+                                    else:
+                                        # 상담사 응답/조치사항
+                                        if is_recent:
+                                            agent_responses.append({
+                                                'content': body_text[:200],
+                                                'timestamp': created_at
+                                            })
+                        
+                        # 대화 분석 요약 구성
+                        conversation_analysis = "=== 대화 흐름 분석 ===\n\n"
+                        
+                        # 최근 진행상황 (가장 중요)
+                        if recent_developments:
+                            conversation_analysis += f"📈 최근 진행상황 ({len(recent_developments)}건):\n"
+                            for dev in recent_developments[-3:]:  # 최근 3개만
+                                conversation_analysis += f"  • {dev}\n"
+                            conversation_analysis += "\n"
+                        
+                        # 미해결 문제 (우선순위 높음)
+                        if unresolved_issues:
+                            conversation_analysis += f"⚠️ 미해결 문제 ({len(unresolved_issues)}건):\n"
+                            for issue in unresolved_issues[-2:]:  # 최근 2개만
+                                conversation_analysis += f"  • {issue}\n"
+                            conversation_analysis += "\n"
+                        
+                        # 주요 고객 요청 요약
+                        if key_customer_requests:
+                            recent_requests = [req for req in key_customer_requests if req['is_recent']]
+                            if recent_requests:
+                                conversation_analysis += f"🔥 최근 주요 요청 ({len(recent_requests)}건):\n"
+                                for req in recent_requests[-3:]:
+                                    conversation_analysis += f"  • {req['content']}\n"
+                                conversation_analysis += "\n"
+                        
+                        # 상담사 최근 조치
+                        if agent_responses:
+                            conversation_analysis += f"💬 상담사 최근 조치 ({len(agent_responses)}건):\n"
+                            for resp in agent_responses[-2:]:  # 최근 2개만
+                                conversation_analysis += f"  • {resp['content']}\n"
+                            conversation_analysis += "\n"
+                        
+                        # 전체 요약 통계
+                        conversation_analysis += "📊 대화 통계:\n"
+                        conversation_analysis += f"  • 전체 대화: {len(ticket_conversations)}개\n"
+                        conversation_analysis += f"  • 고객 요청: {len(key_customer_requests)}개\n"
+                        conversation_analysis += f"  • 상담사 응답: {len(agent_responses)}개\n"
+                        conversation_analysis += f"  • 미해결 이슈: {len(unresolved_issues)}개\n"
+                    
+                    # 🚀 최적화된 간소 프롬프트 - 속도 우선
+                    optimized_summary_prompt = f"""티켓 요약 요청:
+
+ID: {ticket_id}
+제목: {ticket_title}
+우선순위: {ticket_metadata.get('priority', '보통')}
+대화수: {len(ticket_conversations)}개
+
+초기 문의:
+{ticket_body[:500]}
+
+{conversation_analysis}
+
+다음 형식으로 간결하게 요약하세요:
+
+## 📋 상황 요약
+## 🔍 핵심 문제  
+## ⚡ 다음 조치
+## 📊 분석"""
+                    
+                    # 🚀 초고속 요약 생성 - 경량 모델 사용
+                    summary_response = await llm_router.generate(
+                        prompt=optimized_summary_prompt,
+                        operation="ticket_summary",  # 티켓 요약 작업으로 명시적 지정
+                        system_prompt="고객 지원 티켓을 빠르게 요약하는 전문가입니다. 간결하고 핵심적인 정보만 제공합니다.",
+                        max_tokens=800,  # 토큰 수 줄여서 속도 향상
+                        temperature=0.1
+                    )
+                    
+                    # 원본 LLM 마크다운 응답을 그대로 사용
+                    llm_generated_summary = summary_response.text.strip()
+                    
+                    # 키 포인트 추출 개선 - 더 풍부한 정보 제공
+                    key_points = []
+                    import re
+                    
+                    # 1. 핵심 문제 섹션에서 키포인트 추출
+                    problem_section = re.search(r'## 🔍 핵심 문제\n(.*?)(?=\n## |$)', llm_generated_summary, re.DOTALL)
+                    if problem_section:
+                        problem_content = problem_section.group(1).strip()
+                        # 리스트 항목뿐만 아니라 문장도 추출
+                        problem_items = re.findall(r'^\d+\.\s*(.+)$', problem_content, re.MULTILINE)
+                        if problem_items:
+                            key_points.extend([f"문제: {item}" for item in problem_items[:2]])
+                        else:
+                            # 리스트가 없으면 첫 문장 추출
+                            first_sentence = problem_content.split('.')[0].strip()
+                            if first_sentence and len(first_sentence) > 10:
+                                key_points.append(f"핵심 문제: {first_sentence}")
+                    
+                    # 2. 다음 조치 섹션에서 키포인트 추출
+                    action_section = re.search(r'## ⚡ 다음 조치\n(.*?)(?=\n## |$)', llm_generated_summary, re.DOTALL)
+                    if action_section:
+                        action_content = action_section.group(1).strip()
+                        action_items = re.findall(r'^\d+\.\s*(.+)$', action_content, re.MULTILINE)
+                        if action_items:
+                            key_points.extend([f"조치: {item}" for item in action_items[:1]])
+                        elif "없음" not in action_content.lower():
+                            first_sentence = action_content.split('.')[0].strip()
+                            if first_sentence and len(first_sentence) > 5:
+                                key_points.append(f"조치사항: {first_sentence}")
+                    
+                    # 3. 분석 섹션에서 키포인트 추출
+                    analysis_section = re.search(r'## 📊 분석\n(.*?)(?=\n## |$)', llm_generated_summary, re.DOTALL)
+                    if analysis_section:
+                        analysis_content = analysis_section.group(1).strip()
+                        first_sentence = analysis_content.split('.')[0].strip()
+                        if first_sentence and len(first_sentence) > 10:
+                            key_points.append(f"분석: {first_sentence}")
+                    
+                    # 4. 상황 요약 섹션에서 키포인트 추출
+                    summary_section = re.search(r'## 📋 상황 요약\n(.*?)(?=\n## |$)', llm_generated_summary, re.DOTALL)
+                    if summary_section:
+                        summary_content = summary_section.group(1).strip()
+                        # 첫 번째 문장이 가장 중요한 정보
+                        first_sentence = summary_content.split('.')[0].strip()
+                        if first_sentence and len(first_sentence) > 15:
+                            key_points.insert(0, first_sentence)  # 첫 번째로 배치
+                    
+                    # 키 포인트가 없으면 제목에서 추출 시도
+                    if not key_points:
+                        if ticket_title and len(ticket_title) > 10:
+                            # 제목에서 키워드 추출
+                            title_clean = re.sub(r'\[.*?\]', '', ticket_title).strip()
+                            if title_clean:
+                                key_points.append(f"주제: {title_clean[:50]}")
+                        
+                        # 여전히 없으면 대화 수 정보 사용 (최후 수단)
+                        if not key_points:
+                            key_points = [f'총 {len(ticket_conversations)}개 대화 내용 분석']
+                    
+                    # 🛡️ 안전한 캐시 저장
+                    safe_cache_data = {
+                        'company_id': search_company_id,
+                        'ticket_id': ticket_id,
+                        'updated_at': ticket_updated_at,
+                        'content': llm_generated_summary,
+                        'cache_timestamp': time.time(),
+                        'content_length': len(llm_generated_summary),
+                        'generation_method': 'llm_parallel_analysis'
+                    }
+                    ticket_summary_cache[summary_cache_key] = safe_cache_data
+                    logger.info("🛡️ 병렬 처리 요약 캐시 저장 완료")
+                    
+                    return llm_generated_summary
+                    
+                except Exception as e:
+                    logger.error(f"티켓 {ticket_id} 요약 생성 실패: {str(e)}")
+                    return f"⚠️ 요약 생성 실패: {str(e)}"
             
-            # 1단계: 즉시 필요한 데이터만 처리 (요약)
-            essential_tasks = []
-            if include_summary_chain:
-                essential_tasks.append("summary")
+            async def perform_vector_search():
+                """벡터 검색 태스크"""
+                if not (include_similar_tickets or include_kb_docs):
+                    return [], []
+                
+                try:
+                    # 검索 쿼리 생성 및 임베딩
+                    search_text = f"{ticket_title} {ticket_body}"
+                    
+                    # 임베딩 생성
+                    from core.embedder import generate_embedding
+                    query_embedding = await generate_embedding(search_text[:800])  # 토큰 제한
+                    
+                    # 통합 검색: 모든 문서 타입을 한 번에 검색
+                    all_results = vector_db.search(
+                        query_embedding=query_embedding,
+                        top_k=6,  # 🚀 최적화: 3개 유사 티켓용으로 6개 검색
+                        company_id=search_company_id
+                    )
+                    
+                    # 결과를 타입별로 분리 처리
+                    kb_documents_data = []
+                    similar_tickets_temp = []
+                    
+                    if all_results and all_results.get("results"):
+                        for result in all_results["results"]:
+                            doc_type = result.get("doc_type", "unknown")
+                            similarity_score = result.get("score", 0)
+                            
+                            if similarity_score < 0.3:  # 최소 유사도 필터
+                                continue
+                            
+                            if doc_type == "ticket" and include_similar_tickets:
+                                # 현재 티켓 제외
+                                if str(result.get("id")) == str(ticket_id):
+                                    continue
+                                
+                                if len(similar_tickets_temp) < 3:  # 🚀 최대 3개로 제한
+                                    title = result.get("title") or result.get("subject") or f"티켓 {result.get('id')}"
+                                    ticket_text = result.get("text", result.get("description", ""))
+                                    
+                                    similar_tickets_temp.append({
+                                        "id": str(result.get("id")),
+                                        "title": title,
+                                        "ticket_text": ticket_text,
+                                        "status": result.get("status", ""),
+                                        "priority": result.get("priority", ""),
+                                        "similarity_score": similarity_score,
+                                        "ticket_url": f"https://{search_company_id}.freshdesk.com/a/tickets/{result.get('id')}"
+                                    })
+                                
+                                # 3개가 채워지면 중단
+                                if len(similar_tickets_temp) >= 3:
+                                    break
+                            
+                            elif doc_type == "kb" and include_kb_docs:
+                                if len(kb_documents_data) < 5:  # 최대 5개
+                                    title = result.get("title") or result.get("subject") or f"KB 문서 {result.get('id')}"
+                                    kb_text = result.get("text", result.get("description", ""))
+                                    doc_summary = kb_text[:300] + "..." if len(kb_text) > 300 else kb_text
+                                    
+                                    kb_documents_data.append({
+                                        "id": str(result.get("id")),
+                                        "title": title,
+                                        "doc_summary": doc_summary,
+                                        "url": result.get("url", f"https://{search_company_id}.freshdesk.com/solution/articles/{result.get('id')}"),
+                                        "similarity_score": round(similarity_score, 3),
+                                        "source_type": "kb"
+                                    })
+                    
+                    return similar_tickets_temp, kb_documents_data
+                    
+                except Exception as e:
+                    logger.error(f"벡터 검색 실패: {str(e)}")
+                    return [], []
             
-            # 2단계: 선택적 데이터 (유사 티켓, KB 문서) - 백그라운드 처리 가능
-            optional_tasks = []
-            if include_similar_tickets:
-                optional_tasks.append("similar_tickets")
-            if include_kb_docs:
-                optional_tasks.append("kb_documents")
+            # 🚀 병렬 실행: 티켓 요약과 벡터 검색을 동시에 수행
+            logger.info("🚀 병렬 태스크 실행 시작")
+            summary_task = generate_ticket_summary()
+            vector_task = perform_vector_search()
             
-            # 필수 작업과 선택적 작업을 분리하여 처리
-            if essential_tasks or optional_tasks:
-                # Langchain RunnableParallel 체인 실행 (우선순위 기반)
-                chain_results = await llm_router.execute_optimized_init_chain(
-                    ticket_data=ticket_info,
-                    qdrant_client=getattr(vector_db, 'client', None),
-                    company_id=search_company_id,
-                    essential_tasks=essential_tasks,
-                    optional_tasks=optional_tasks,
-                    max_similar_tickets=5,  # 성능을 위해 제한
-                    max_kb_docs=5,  # 성능을 위해 제한
-                )
-            else:
-                chain_results = {}
+            # asyncio.gather로 병렬 실행
+            ticket_summary, (similar_tickets_temp, kb_documents) = await asyncio.gather(
+                summary_task,
+                vector_task
+            )
+            
+            # 🚀 유사 티켓 배치 분석 (3개만 처리하므로 빠름)
+            similar_tickets = []
+            if similar_tickets_temp and include_similar_tickets:
+                try:
+                    logger.info(f"🔥 배치 분석 시작: {len(similar_tickets_temp)}개 유사 티켓")
+                    
+                    # 배치 분석을 위한 데이터 구성
+                    tickets_for_analysis = []
+                    for ticket in similar_tickets_temp:
+                        tickets_for_analysis.append({
+                            "id": ticket["id"],
+                            "subject": ticket["title"],
+                            "description_text": ticket["ticket_text"],
+                            "status": ticket["status"],
+                            "priority": ticket["priority"]
+                        })
+                    
+                    # 배치 LLM 분석 실행
+                    batch_results = await llm_router.analyze_multiple_tickets_batch(tickets_for_analysis)
+                    
+                    # 결과를 최종 데이터에 반영
+                    for i, ticket in enumerate(similar_tickets_temp):
+                        if i < len(batch_results):
+                            analysis = batch_results[i]
+                            issue = analysis.get("issue", "고객 문의사항 분석 중")
+                            solution = analysis.get("solution", "해결 방안 검토 중")
+                        else:
+                            issue = "문제 상황 분석 중"
+                            solution = "해결 방안 검토 중"
+                        
+                        similar_tickets.append({
+                            "id": ticket["id"],
+                            "title": ticket["title"],
+                            "issue": issue,
+                            "solution": solution,
+                            "similarity_score": round(ticket["similarity_score"], 3),
+                            "ticket_url": ticket["ticket_url"]
+                        })
+                        
+                except Exception as e:
+                    logger.error(f"배치 분석 실패: {e}, 기본 데이터 사용")
+                    # 배치 실패 시 기본 데이터 사용
+                    for ticket in similar_tickets_temp:
+                        similar_tickets.append({
+                            "id": ticket["id"],
+                            "title": ticket["title"],
+                            "issue": "고객 문의사항 분석 중",
+                            "solution": "해결 방안 검토 중",
+                            "similarity_score": round(ticket["similarity_score"], 3),
+                            "ticket_url": ticket["ticket_url"]
+                        })
             
             parallel_execution_time = time.time() - parallel_start_time
-            logger.info(f"최적화된 병렬 처리 완료 (ticket_id: {ticket_id}, 총 실행시간: {parallel_execution_time:.2f}초)")
-            
-            # 결과 처리 및 캐시 업데이트
-            similar_tickets = []
-            kb_documents = []
-            ticket_summary = cached_summary  # 캐시된 요약 사용
-            
-            # 요약 결과 처리
-            if include_summary_chain and 'summary' in chain_results:
-                summary_result = chain_results['summary']
-                if summary_result.get('success', False):
-                    # 'data' 대신 'result' 필드 사용 (LLM Router 태스크 구조에 맞춤)
-                    ticket_summary = summary_result.get('result', '')
-                    logger.info(f"요약 체인 결과 수신: {type(ticket_summary)} 타입")
-                    # 캐시에 저장 (company_id 포함)
-                    ticket_summary_cache[summary_cache_key] = ticket_summary
-                    logger.info(f"티켓 {ticket_id} 요약 캐시 저장 완료")
-                else:
-                    logger.warning(f"티켓 {ticket_id} 요약 생성 실패: {summary_result.get('error', '알 수 없는 오류')}")
-            
-            # 유사 티켓 결과 처리
-            if include_similar_tickets and 'similar_tickets' in chain_results:
-                similar_result = chain_results['similar_tickets']
-                if similar_result.get('success', False):
-                    # 'data' 대신 'result' 필드 사용 (LLM Router 태스크 구조에 맞춤)
-                    similar_tickets_data = similar_result.get('result', [])
-                    logger.info(f"유사 티켓 체인 결과 수신: {len(similar_tickets_data)}개")
-                    
-                    for ticket in similar_tickets_data:
-                        # SimilarTicketItem 객체인 경우 직접 변환
-                        if hasattr(ticket, 'id'):
-                            similar_tickets.append({
-                                "id": ticket.id,
-                                "title": ticket.title,
-                                "issue": ticket.issue,
-                                "solution": ticket.solution,
-                                "similarity_score": ticket.similarity_score,
-                                "url": ticket.ticket_url,
-                                "summary": ticket.ticket_summary
-                            })
-                        else:
-                            # 딕셔너리인 경우 기존 방식 사용
-                            similar_tickets.append({
-                                "id": ticket.get("id"),
-                                "title": ticket.get("title", "제목 없음"),
-                                "similarity_score": ticket.get("similarity_score", 0.0),
-                                "status": ticket.get("status", "알 수 없음"),
-                                "url": f"https://{x_freshdesk_domain}/a/tickets/{ticket.get('id')}" if x_freshdesk_domain else None
-                            })
-                    logger.info(f"티켓 {ticket_id} 유사 티켓 {len(similar_tickets)}개 검색 완료")
-                else:
-                    logger.warning(f"티켓 {ticket_id} 유사 티켓 검색 실패: {similar_result.get('error', '알 수 없는 오류')}")
-            
-            # 지식베이스 문서 결과 처리
-            if include_kb_docs and 'kb_documents' in chain_results:
-                kb_result = chain_results['kb_documents']
-                if kb_result.get('success', False):
-                    # 'data' 대신 'result' 필드 사용 (LLM Router 태스크 구조에 맞춤)
-                    kb_docs_data = kb_result.get('result', [])
-                    logger.info(f"지식베이스 체인 결과 수신: {len(kb_docs_data)}개")
-                    
-                    for doc in kb_docs_data:
-                        # RelatedDocumentItem 객체인 경우 직접 변환
-                        if hasattr(doc, 'id'):
-                            kb_documents.append({
-                                "id": doc.id,
-                                "title": doc.title,
-                                "content_preview": doc.doc_summary,
-                                "similarity_score": doc.similarity_score,
-                                "url": doc.url,
-                                "source_type": doc.source_type
-                            })
-                        else:
-                            # 딕셔너리인 경우 기존 방식 사용
-                            kb_documents.append({
-                                "id": doc.get("id"),
-                                "title": doc.get("title", "제목 없음"),
-                                "content_preview": doc.get("content_preview", "내용 미리보기 없음"),
-                                "similarity_score": doc.get("similarity_score", 0.0),
-                                "url": doc.get("url")
-                            })
-                    logger.info(f"티켓 {ticket_id} 관련 문서 {len(kb_documents)}개 검색 완료")
-                else:
-                    logger.warning(f"티켓 {ticket_id} 지식베이스 검색 실패: {kb_result.get('error', '알 수 없는 오류')}")
-            
+            logger.info(f"🚀 병렬 처리 완료 (ticket_id: {ticket_id}, 총 실행시간: {parallel_execution_time:.2f}초)")
+                            
             # 성능 메트릭 수집
             total_context_time = time.time() - context_start_time
             
-            # 요약 데이터 처리 및 타입 안정성 확보
+            # 요약 데이터 처리 및 타입 안정성 확보 - 원본 마크다운 유지
             processed_summary = None
+            
+
+            
             if ticket_summary:
                 if isinstance(ticket_summary, str):
-                    # 문자열 형태의 요약을 구조화된 형태로 변환
+                    # LLM이 생성한 마크다운 요약을 올바르게 사용
+                    llm_markdown_summary = ticket_summary
+                    
+                    # 키 포인트를 마크다운 요약에서 더 지능적으로 추출
+                    summary_key_points = []
+                    import re
+                    
+                    # 1. 상황 요약 섹션에서 핵심 내용 추출
+                    summary_section = re.search(r'## 📋 상황 요약\n(.*?)(?=\n## |$)', llm_markdown_summary, re.DOTALL)
+                    if summary_section:
+                        summary_content = summary_section.group(1).strip()
+                        # 첫 문장이 가장 중요
+                        first_sentence = summary_content.split('.')[0].strip()
+                        if first_sentence and len(first_sentence) > 15:
+                            summary_key_points.append(first_sentence[:80] + "..." if len(first_sentence) > 80 else first_sentence)
+                    
+                    # 2. 핵심 문제에서 키포인트 추출
+                    problem_section = re.search(r'## 🔍 핵심 문제\n(.*?)(?=\n## |$)', llm_markdown_summary, re.DOTALL)
+                    if problem_section:
+                        problem_content = problem_section.group(1).strip()
+                        if problem_content and len(problem_content) > 10:
+                            clean_problem = problem_content.split('.')[0].strip()
+                            if clean_problem and len(clean_problem) > 10:
+                                summary_key_points.append(f"문제: {clean_problem[:60]}")
+                    
+                    # 3. 조치사항에서 키포인트 추출
+                    action_section = re.search(r'## ⚡ 다음 조치\n(.*?)(?=\n## |$)', llm_markdown_summary, re.DOTALL)
+                    if action_section:
+                        action_content = action_section.group(1).strip()
+                        if action_content and "없음" not in action_content.lower():
+                            clean_action = action_content.split('.')[0].strip()
+                            if clean_action and len(clean_action) > 5:
+                                summary_key_points.append(f"조치: {clean_action[:60]}")
+                    
+                    # 키포인트가 없으면 제목에서 추출
+                    if not summary_key_points:
+                        if hasattr(ticket_data, 'get') and ticket_data.get('subject'):
+                            title = ticket_data.get('subject', '')
+                            title_clean = re.sub(r'\[.*?\]', '', title).strip()
+                            if title_clean and len(title_clean) > 10:
+                                summary_key_points.append(f"주제: {title_clean[:50]}")
+                        
+                        # 최후 수단으로 대화 수 정보
+                        if not summary_key_points:
+                            summary_key_points = [f'총 {len(ticket_conversations)}개 대화 내용 분석 완료']
+                    
+                    # 마크다운 요약에서 감정 상태 추출 시도
+                    sentiment = "중립적"
+                    if "부정적" in llm_markdown_summary or "불만족" in llm_markdown_summary or "긴급" in llm_markdown_summary:
+                        sentiment = "부정적"
+                    elif "긍정적" in llm_markdown_summary or "만족" in llm_markdown_summary:
+                        sentiment = "긍정적"
+                    
+                    # 우선순위 추출 시도
+                    priority = "보통"
+                    if "높음" in llm_markdown_summary or "긴급" in llm_markdown_summary:
+                        priority = "높음"
+                    elif "낮음" in llm_markdown_summary:
+                        priority = "낮음"
+                    
+                    # LLM 마크다운 요약을 ticket_summary 필드에 사용
                     processed_summary = TicketSummaryContent(
-                        ticket_summary=ticket_summary,
-                        key_points=["AI 생성 요약"],
-                        sentiment="중립적",
-                        priority_recommendation="보통",
-                        urgency_level="보통"
+                        ticket_summary=llm_markdown_summary,  # LLM 생성 마크다운 유지
+                        key_points=summary_key_points,
+                        sentiment=sentiment,
+                        priority_recommendation=priority,
+                        urgency_level=priority
                     )
+
                 elif isinstance(ticket_summary, TicketSummaryContent):
                     # 이미 올바른 타입인 경우 그대로 사용
                     processed_summary = ticket_summary
@@ -1349,23 +1820,32 @@ async def get_similar_tickets(
             current_ticket_data = current_ticket_data["metadata"]
         
         # 2. 검색용 쿼리 텍스트 생성
-        search_query = await llm_router.generate_search_query(current_ticket_data)
+        search_query = ""
+        subject = current_ticket_data.get("subject", "")
+        description = current_ticket_data.get("description", current_ticket_data.get("description_text", ""))
+        
+        if subject:
+            search_query += subject
+        if description:
+            search_query += " " + description[:200]  # 처음 200자만 사용
+            
         if not search_query.strip():
             logger.warning(f"티켓 {ticket_id}에 대한 검색 쿼리 텍스트가 비어있습니다.")
             return SimilarTicketsResponse(ticket_id=ticket_id, similar_tickets=[])
         
         # 3. 검색 쿼리 임베딩 생성
         try:
-            query_embedding = await llm_router.generate_embedding(search_query)
+            from core.embedder import generate_embedding
+            query_embedding = await generate_embedding(search_query)
         except Exception as e:
             logger.error(f"임베딩 생성 실패: {e}")
             # 임베딩 생성 실패 시 더미 임베딩 사용 (fallback)
             query_embedding = [0.1] * 1536  # OpenAI embedding 차원에 맞춤
         
-        # 4. 벡터 DB에서 유사 티켓 검색
+        # 벡터 DB에서 유사 티켓 검색
         similar_tickets_result = retriever.retrieve_top_k_docs(
             query_embedding=query_embedding, 
-            top_k=10,  # 더 많이 가져와서 필터링
+            top_k=6,  # 3개 결과를 위해 6개 가져와서 필터링 (현재 티켓 제외)
             doc_type="ticket",
             company_id=company_id
         )
@@ -1450,8 +1930,8 @@ async def get_similar_tickets(
                     ticket_summary=summary  # 기존 호환성을 위해 유지
                 ))
                 
-                # 최대 5개까지만 반환
-                if len(similar_tickets_list) >= 5:
+                # 최대 3개까지만 반환 (성능 최적화)
+                if len(similar_tickets_list) >= 3:
                     break
         
         logger.info(f"티켓 {ticket_id} 유사 티켓 검색 완료: {len(similar_tickets_list)}건")
@@ -1527,28 +2007,37 @@ async def get_related_documents(
             # Qdrant에서 가져온 경우 metadata를 최상위로 올리기
             current_ticket_data = current_ticket_data["metadata"]
         
-        # 2. 검색용 쿼리 텍스트 생성
+        # 3. 검색용 쿼리 텍스트 생성 및 임베딩 (중복 방지 최적화)
         search_query = None
-        try:
-            search_query = await llm_router.generate_search_query(current_ticket_data)
-        except Exception as query_error:
-            logger.error(f"검색 쿼리 생성 실패: {query_error}")
-            # 쿼리 생성 실패 시 티켓 제목과 내용을 사용
-            subject = current_ticket_data.get("subject", "")
-            description = current_ticket_data.get("description", "")
-            search_query = f"{subject} {description[:200]}"
-            
-        if not search_query or not search_query.strip():
-            logger.warning(f"티켓 {ticket_id}에 대한 검색 쿼리 텍스트가 비어있습니다.")
-            return RelatedDocsResponse(ticket_id=ticket_id, related_documents=[])
+        query_embedding = None
         
-        # 3. 검색 쿼리 임베딩 생성
         try:
-            query_embedding = await llm_router.generate_embedding(search_query)
-        except Exception as e:
-            logger.error(f"임베딩 생성 실패: {e}")
-            # 임베딩 생성 실패 시 더미 임베딩 사용 (fallback)
-            query_embedding = [0.1] * 1536  # OpenAI embedding 차원에 맞춤
+            # 간단한 검색 쿼리 생성 (티켓 제목과 내용 조합)
+            subject = current_ticket_data.get("subject", "")
+            description = current_ticket_data.get("description", "") or current_ticket_data.get("description_text", "")
+            search_query = ""
+            if subject:
+                search_query += subject
+            if description:
+                search_query += " " + description[:200]  # 처음 200자만 사용
+            
+            # 생성된 쿼리로 임베딩 생성
+            if search_query and search_query.strip():
+                logger.info(f"⚡ 검색 쿼리 임베딩 생성 시작: '{search_query[:100]}...'")
+                from core.embedder import generate_embedding
+                query_embedding = await generate_embedding(search_query)
+                logger.info("⚡ 검색 쿼리 임베딩 생성 완료")
+            else:
+                logger.warning(f"티켓 {ticket_id}에 대한 검색 쿼리 텍스트가 비어있습니다.")
+        except Exception as query_error:
+            logger.error(f"검색 쿼리 생성 또는 임베딩 실패: {query_error}")
+            # 최종 폴백: 더미 임베딩 사용
+            query_embedding = [0.1] * 1536
+            logger.warning("⚡ 더미 임베딩 사용")
+        
+        if not query_embedding:
+            logger.warning(f"티켓 {ticket_id}에 대한 임베딩을 생성할 수 없어 빈 결과를 반환합니다.")
+            return RelatedDocsResponse(ticket_id=ticket_id, related_documents=[])
         
         # 4. 벡터 DB에서 관련 문서 검색 (KB, FAQ 등)
         related_docs_result = None
@@ -1623,9 +2112,10 @@ async def get_related_documents(
                 # 필터링된 결과 구성
                 related_docs_result = {
                     "documents": documents,
-                    "metadatas": metadatas,                "distances": distances,
-                "ids": ids
-            }
+                    "metadatas": metadatas,
+                    "distances": distances,
+                    "ids": ids
+                }
         except Exception as kb_error:
             logger.error(f"KB 문서 검색 실패: {kb_error}")
             related_docs_result = {
@@ -1701,7 +2191,6 @@ async def get_related_documents(
                     ))
             
             # 기존 방식 (ids 기반)
-            else:
                 for i, doc_id in enumerate(doc_ids):
                     metadata = metadatas[i] if i < len(metadatas) else {}
                     
@@ -1719,44 +2208,44 @@ async def get_related_documents(
                     # 거리/점수 정보 추가
                     distance = distances[i] if i < len(distances) else 0
                     similarity_score = max(0, 1 - distance)  # 거리를 유사도로 변환
-                
-                # KB 문서 URL 생성 또는 개선
-                if not url and (source_type == "kb" or source_type == "1"):
-                    # 원본 문서 ID 추출 (필요한 경우)
-                    article_id = metadata.get("article_id", metadata.get("original_id", doc_id))
-                    if isinstance(article_id, str) and article_id.startswith("kb-"):
-                        article_id = article_id.replace("kb-", "")
                     
-                    # 생성된 URL이 있는지 먼저 확인
-                    url = metadata.get("url", None)
-                    if not url:
-                        # 헤더에서 전달된 Freshdesk 도메인 사용 (iparams 값)
-                        freshdesk_domain = x_freshdesk_domain or os.getenv("FRESHDESK_DOMAIN")
-                        # 도메인 검증 및 URL 구성
-                        if not freshdesk_domain:
-                            logger.warning("Freshdesk 도메인이 헤더나 환경변수에 설정되지 않았습니다.")
-                            url = None
-                        elif freshdesk_domain in ["your-domain.freshdesk.com", "example.freshdesk.com"]:
-                            logger.warning(f"유효하지 않은 기본 도메인 감지: {freshdesk_domain}")
-                            url = None
-                        else:
-                            # 스마트 도메인 파싱 적용 (fetcher 모듈의 함수 사용)
-                            try:
-                                from freshdesk.fetcher import smart_domain_parsing
-                                normalized_domain = smart_domain_parsing(freshdesk_domain)
-                                url = f"https://{normalized_domain}/support/solutions/articles/{article_id}"
-                            except Exception as e:
-                                logger.warning(f"도메인 파싱 실패 ({freshdesk_domain}): {e}")
+                    # KB 문서 URL 생성 또는 개선
+                    if not url and (source_type == "kb" or source_type == "1"):
+                        # 원본 문서 ID 추출 (필요한 경우)
+                        article_id = metadata.get("article_id", metadata.get("original_id", doc_id))
+                        if isinstance(article_id, str) and article_id.startswith("kb-"):
+                            article_id = article_id.replace("kb-", "")
+                        
+                        # 생성된 URL이 있는지 먼저 확인
+                        url = metadata.get("url", None)
+                        if not url:
+                            # 헤더에서 전달된 Freshdesk 도메인 사용 (iparams 값)
+                            freshdesk_domain = x_freshdesk_domain or os.getenv("FRESHDESK_DOMAIN")
+                            # 도메인 검증 및 URL 구성
+                            if not freshdesk_domain:
+                                logger.warning("Freshdesk 도메인이 헤더나 환경변수에 설정되지 않았습니다.")
                                 url = None
-                
-                related_docs_list.append(RelatedDocumentItem(
-                    id=str(doc_id), 
-                    title=title, 
-                    doc_summary=summary, 
-                    url=url, 
-                    source_type="kb",  # 명시적으로 'kb'로 설정
-                    similarity_score=round(similarity_score, 3)
-                ))
+                            elif freshdesk_domain in ["your-domain.freshdesk.com", "example.freshdesk.com"]:
+                                logger.warning(f"유효하지 않은 기본 도메인 감지: {freshdesk_domain}")
+                                url = None
+                            else:
+                                # 스마트 도메인 파싱 적용 (fetcher 모듈의 함수 사용)
+                                try:
+                                    from freshdesk.fetcher import smart_domain_parsing
+                                    normalized_domain = smart_domain_parsing(freshdesk_domain)
+                                    url = f"https://{normalized_domain}/support/solutions/articles/{article_id}"
+                                except Exception as e:
+                                    logger.warning(f"도메인 파싱 실패 ({freshdesk_domain}): {e}")
+                                    url = None
+                    
+                    related_docs_list.append(RelatedDocumentItem(
+                        id=str(doc_id), 
+                        title=title, 
+                        doc_summary=summary, 
+                        url=url, 
+                        source_type="kb",  # 명시적으로 'kb'로 설정
+                        similarity_score=round(similarity_score, 3)
+                    ))
         
         # FAQ 기능이 제거되었습니다 (2025.06.03)
         # 아래 FAQ 관련 코드는 더 이상 사용되지 않으므로 주석 처리
@@ -2051,71 +2540,82 @@ async def search_query(req: QueryRequest, company_id: str = Depends(get_company_
                 search_time_ms=0
             )
         
-        # 1. 검색 쿼리 임베딩 생성
+        # 1. 검색 쿼리 임베딩 생성 (LLM Router 사용으로 중복 방지)
+        logger.info(f"⚡ 검색 쿼리 임베딩 생성 시작: '{req.query[:50]}...'")
         try:
             query_embedding = await llm_router.generate_embedding(req.query)
+            logger.info("⚡ 검색 쿼리 임베딩 생성 완료")
         except Exception as e:
             logger.error(f"임베딩 생성 실패: {e}")
             # 임베딩 생성 실패 시 더미 임베딩 사용 (fallback)
             query_embedding = [0.1] * 1536  # OpenAI embedding 차원에 맞춤
+            logger.warning("⚡ 더미 임베딩 사용")
         
         # 2. 검색할 문서 유형 결정
         search_types = req.search_types if req.search_types and req.search_types != ["all"] else ["ticket", "kb"]
         
         all_results = []
         
-        # 3. 각 문서 유형별로 검색 수행
-        for doc_type in search_types:
+        # 3. 통합 검색 수행 (병렬 처리로 성능 최적화)
+        async def search_by_type(doc_type):
             try:
-                # 티켓 또는 KB 문서 검색
-                    search_result = retriever.retrieve_top_k_docs(
-                        query_embedding=query_embedding,
-                        top_k=req.top_k,
-                        doc_type=doc_type,
-                        company_id=company_id
-                    )
-                    
-                    # 검색 결과 변환
-                    if search_result and search_result.get("ids"):
-                        for i, doc_id in enumerate(search_result["ids"]):
-                            # 유사도 계산
-                            distance = search_result.get("distances", [0])[i] if i < len(search_result.get("distances", [])) else 0
-                            similarity_score = max(0, 1 - distance)  # 거리를 유사도로 변환
-                            
-                            # 최소 유사도 임계값 확인
-                            if similarity_score < req.min_similarity:
-                                continue
-                            
-                            metadata = search_result["metadatas"][i] if i < len(search_result.get("metadatas", [])) else {}
-                            content = search_result["documents"][i] if i < len(search_result.get("documents", [])) else ""
-                            
-                            # 제목 추출
-                            title = (
-                                metadata.get("title") or 
-                                metadata.get("subject") or 
-                                f"{doc_type.upper()} {doc_id}"
-                            )
-                            
-                            # URL 생성
-                            url = metadata.get("url", "")
-                            
-                            # 내용 요약 (300자 제한)
-                            content_summary = content[:300] + ("..." if len(content) > 300 else "")
-                            
-                            all_results.append(QueryResultItem(
-                                id=str(doc_id),
-                                title=title,
-                                content_summary=content_summary,
-                                source_type=doc_type,
-                                url=url,
-                                similarity_score=round(similarity_score, 3),
-                                created_at=metadata.get("created_at"),
-                                metadata=metadata
-                            ))
-                        
+                return retriever.retrieve_top_k_docs(
+                    query_embedding=query_embedding,
+                    top_k=req.top_k,
+                    doc_type=doc_type,
+                    company_id=company_id
+                )
             except Exception as e:
-                logger.error(f"{doc_type} 검색 중 오류 발생: {e}")
-                continue
+                logger.error(f"{doc_type} 검색 실패: {e}")
+                return {"ids": [], "documents": [], "metadatas": [], "distances": []}
+        
+        # 병렬 검색 실행
+        search_tasks = [search_by_type(doc_type) for doc_type in search_types]
+        search_results = await asyncio.gather(*search_tasks)
+        
+        # 4. 검색 결과 통합 및 변환
+        for doc_type, search_result in zip(search_types, search_results):
+            if search_result and search_result.get("ids"):
+                for i, doc_id in enumerate(search_result["ids"]):
+                    try:
+                        # 유사도 계산
+                        distance = search_result.get("distances", [0])[i] if i < len(search_result.get("distances", [])) else 0
+                        similarity_score = max(0, 1 - distance)  # 거리를 유사도로 변환
+                        
+                        # 최소 유사도 임계값 확인
+                        if similarity_score < req.min_similarity:
+                            continue
+                        
+                        metadata = search_result["metadatas"][i] if i < len(search_result.get("metadatas", [])) else {}
+                        content = search_result["documents"][i] if i < len(search_result.get("documents", [])) else ""
+                        
+                        # 제목 추출
+                        title = (
+                            metadata.get("title") or 
+                            metadata.get("subject") or 
+                            f"{doc_type.upper()} {doc_id}"
+                        )
+                        
+                        # URL 생성
+                        url = metadata.get("url", "")
+                        
+                        # 내용 요약 (300자 제한)
+                        content_summary = content[:300] + ("..." if len(content) > 300 else "")
+                        
+                        all_results.append(QueryResultItem(
+                            id=str(doc_id),
+                            title=title,
+                            content_summary=content_summary,
+                            source_type=doc_type,
+                            url=url,
+                            similarity_score=round(similarity_score, 3),
+                            created_at=metadata.get("created_at"),
+                            metadata=metadata
+                        ))
+                    
+                    except Exception as e:
+                        logger.error(f"{doc_type} 검색 중 오류 발생: {e}")
+                        continue
         
         # 4. 결과 정렬 및 필터링
         # 유사도 점수 기준 내림차순 정렬
@@ -2214,7 +2714,7 @@ async def trigger_data_ingestion(
 
 # SSE 스트리밍 지원 함수들
 
-async def get_similar_tickets_data(ticket_id: str, company_id: str, top_k: int = 5) -> SimilarTicketsResponse:
+async def get_similar_tickets_data(ticket_id: str, company_id: str, top_k: int = 3) -> SimilarTicketsResponse:
     """
     유사 티켓 데이터를 가져오는 내부 함수
     
@@ -2251,7 +2751,7 @@ async def get_similar_tickets_data(ticket_id: str, company_id: str, top_k: int =
         # 벡터 DB에서 유사 티켓 검색
         similar_tickets_result = retriever.retrieve_top_k_docs(
             query_embedding=query_embedding, 
-            top_k=min(10, top_k * 2),  # 더 많이 가져와서 필터링
+            top_k=min(6, top_k * 2),  # 3개 결과를 위해 6개 가져와서 필터링 (현재 티켓 제외)
             doc_type="ticket",
             company_id=company_id
         )
@@ -2325,8 +2825,13 @@ async def get_similar_tickets_data(ticket_id: str, company_id: str, top_k: int =
                     issue = "문제 상황 분석 실패"
                     solution = "해결책 분석 실패"
                 else:
-                    issue = res.get("issue", "문제 상황을 분석할 수 없습니다.")
-                    solution = res.get("solution", "해결책을 찾을 수 없습니다.")
+                    # res는 dict 타입인 경우에만 .get() 메서드 사용
+                    if isinstance(res, dict):
+                        issue = res.get("issue", "문제 상황을 분석할 수 없습니다.")
+                        solution = res.get("solution", "해결책을 찾을 수 없습니다.")
+                    else:
+                        issue = "문제 상황을 분석할 수 없습니다."
+                        solution = "해결책을 찾을 수 없습니다."
                 
                 similar_tickets_list.append(SimilarTicketItem(
                     id=info["id"],
@@ -2519,7 +3024,8 @@ async def streaming_query_generator(req: QueryRequest, company_id: str):
         }
         
         query_for_embedding_str = f"{ticket_context_for_query}\n\n사용자 질문: {req.query}" if req.ticket_id else req.query
-        query_embedding = embed_documents([query_for_embedding_str])[0]
+        # ⚡ LLM Router를 통한 최적화된 임베딩 생성 (중복 호출 방지)
+        query_embedding = await llm_router.generate_embedding(query_for_embedding_str)
         
         # 3. 문서 검색 단계
         yield {
@@ -2532,15 +3038,31 @@ async def streaming_query_generator(req: QueryRequest, company_id: str):
         content_types = [t.lower() for t in req.type] if req.type else ["tickets", "solutions", "images", "attachments"]
         top_k_per_type = max(1, req.top_k // len([t for t in content_types if t in ["tickets", "solutions"]]))
         
-        # 티켓 검색
-        ticket_results = {"documents": [], "metadatas": [], "ids": [], "distances": []}
-        if "tickets" in content_types:
-            ticket_results = retrieve_top_k_docs(query_embedding, top_k_per_type, company_id, doc_type="ticket")
+        # ⚡ 병렬 검색 실행 (성능 최적화)
+        search_tasks = []
         
-        # KB 문서 검색
-        kb_results = {"documents": [], "metadatas": [], "ids": [], "distances": []}
+        if "tickets" in content_types:
+            search_tasks.append(asyncio.create_task(
+                asyncio.to_thread(retrieve_top_k_docs, query_embedding, top_k_per_type, company_id, "ticket")
+            ))
+        else:
+            search_tasks.append(asyncio.create_task(
+                asyncio.sleep(0, result={"documents": [], "metadatas": [], "ids": [], "distances": []})
+            ))
+        
         if "solutions" in content_types:
-            kb_results = retrieve_top_k_docs(query_embedding, top_k_per_type, company_id, doc_type="kb")
+            search_tasks.append(asyncio.create_task(
+                asyncio.to_thread(retrieve_top_k_docs, query_embedding, top_k_per_type, company_id, "kb")
+            ))
+        else:
+            search_tasks.append(asyncio.create_task(
+                asyncio.sleep(0, result={"documents": [], "metadatas": [], "ids": [], "distances": []})
+            ))
+        
+        # 병렬 검색 결과 수집
+        ticket_results, kb_results = await asyncio.gather(*search_tasks)
+        
+        logger.info(f"⚡ 스트리밍 병렬 검색 완료 - 티켓: {len(ticket_results.get('documents', []))}건, KB: {len(kb_results.get('documents', []))}건")
         
         # 4. 컨텍스트 구성 단계
         yield {

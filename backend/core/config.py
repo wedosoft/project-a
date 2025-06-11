@@ -25,14 +25,25 @@ logger = logging.getLogger(__name__)
 
 # 환경변수 로드
 backend_dir = Path(__file__).parent.parent  # core 디렉토리의 상위(backend) 디렉토리
-dotenv_path = os.path.join(backend_dir, ".env")
+dotenv_path = backend_dir / ".env"
 load_dotenv(dotenv_path=dotenv_path)
 
 # 환경변수 로드 후 디버그 메시지
 if os.getenv("DEBUG") == "true":
-    print(f".env 파일 로드: {dotenv_path}")
-    print(f"QDRANT_URL: {'설정됨' if os.getenv('QDRANT_URL') else '미설정'}")
-    print(f"OPENAI_API_KEY: {'설정됨' if os.getenv('OPENAI_API_KEY') else '미설정'}")
+    print(f"🔧 [DEBUG] .env 파일 로드: {dotenv_path}")
+    print(f"🔧 [DEBUG] 파일 존재 여부: {dotenv_path.exists()}")
+    print(f"🔧 [DEBUG] QDRANT_URL: {'설정됨' if os.getenv('QDRANT_URL') else '미설정'}")
+    print(f"🔧 [DEBUG] OPENAI_API_KEY: {'설정됨' if os.getenv('OPENAI_API_KEY') else '미설정'}")
+    print(f"🔧 [DEBUG] COMPANY_ID: {'설정됨' if os.getenv('COMPANY_ID') else '미설정'}")
+
+# 환경변수 로드 확인을 위한 추가 디버깅 (개발 환경에서만)
+if not os.getenv("QDRANT_URL") and os.getenv("ENVIRONMENT", "development") == "development":
+    logger.warning(f"⚠️  .env 파일이 제대로 로드되지 않았을 수 있습니다. 경로: {dotenv_path}")
+    logger.warning(f"⚠️  현재 작업 디렉토리: {os.getcwd()}")
+    if dotenv_path.exists():
+        logger.info(f"ℹ️  .env 파일이 존재하지만 환경변수가 로드되지 않았습니다.")
+    else:
+        logger.error(f"❌ .env 파일이 존재하지 않습니다: {dotenv_path}")
 
 
 class Settings(BaseSettings):
@@ -61,6 +72,17 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: Optional[str] = Field(None, description="OpenAI API 키")
     GOOGLE_API_KEY: Optional[str] = Field(None, description="Google Gemini API 키")
     PERPLEXITY_API_KEY: Optional[str] = Field(None, description="Perplexity API 키")
+    DEEPSEEK_API_KEY: Optional[str] = Field(None, description="DeepSeek API 키")
+    
+    # LLM 타임아웃 설정 (초 단위)
+    LLM_GLOBAL_TIMEOUT: float = Field(5.0, description="LLM 전역 타임아웃 (초)")
+    LLM_GEMINI_TIMEOUT: float = Field(8.0, description="Gemini 전용 타임아웃 (초)")
+    LLM_DEEPSEEK_TIMEOUT: float = Field(10.0, description="DeepSeek 전용 타임아웃 (초)")
+    LLM_ANTHROPIC_TIMEOUT: float = Field(5.0, description="Anthropic 전용 타임아웃 (초)")
+    LLM_OPENAI_TIMEOUT: float = Field(5.0, description="OpenAI 전용 타임아웃 (초)")
+    
+    # LLM 재시도 설정
+    LLM_MAX_RETRIES: int = Field(1, description="LLM API 최대 재시도 횟수")
     
     # 애플리케이션 설정
     COMPANY_ID: str = Field(default_factory=lambda: Settings._get_secure_company_id(), description="회사 ID (환경변수 필수)")
@@ -77,10 +99,15 @@ class Settings(BaseSettings):
         """
         company_id = os.getenv("COMPANY_ID")
         
+        # 디버깅 정보 출력
+        if os.getenv("DEBUG") == "true":
+            print(f"COMPANY_ID 환경변수 값: {company_id}")
+        
         # 개발 환경에서는 기본값 제공 (프로덕션에서는 반드시 설정 필요)
         if not company_id:
             # 개발 모드 확인
-            if os.getenv("ENVIRONMENT", "development") == "development":
+            environment = os.getenv("ENVIRONMENT", "development")
+            if environment == "development":
                 logger.warning("개발 환경에서 COMPANY_ID가 설정되지 않았습니다. 기본값을 사용합니다.")
                 return "development-default"
             else:

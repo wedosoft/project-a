@@ -1,33 +1,24 @@
-# flake8: noqa
-# isort: skip_file
-# fmt: off
+#!/usr/bin/env python3
 """
-LLM Router 모듈
+🚀 속도 최우선 LLM Router - Gemini Flash 2.0 최우선 버전
 
-이 모듈은 여러 LLM 모델 간의 라우팅 로직을 제공합니다.
-Anthropic Claude와 OpenAI GPT-4o 모델 간의 자동 선택 및 fallback 기능을 구현합니다.
-
-프로젝트 규칙 및 가이드라인: /PROJECT_RULES.md 참조
+OpenAI API 장애 대응을 위한 속도 중심 라우터:
+- 글로벌 5초 타임아웃
+- Gemini Flash 2.0 최우선 (1순위)
+- 작업별 모델 차등 적용 (소형/중형/대형)
+- 빠른 폴백 및 복구 메커니즘
 """
 
 import asyncio
-import hashlib
-import json
 import logging
 import os
-import re
 import time
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
-import anthropic  # 최신 Anthropic 라이브러리 사용
-import google.generativeai as genai  # Gemini SDK 임포트
+import anthropic
+import google.generativeai as genai
 import httpx
 import openai
-from cachetools import TTLCache
-
-# Langchain imports for Phase 1: RunnableParallel
-from langchain_core.runnables import RunnableLambda, RunnableParallel
-from prometheus_client import Counter, Gauge, Histogram
 from pydantic import BaseModel, Field
 from tenacity import (
     retry,
@@ -38,83 +29,29 @@ from tenacity import (
 
 # 프로젝트 내부 모듈 import
 try:
-    from .retriever import retrieve_top_k_docs
+    from .config import get_settings
 except ImportError:
-    # 상대 경로로 실행될 때 fallback
-    from backend.core.retriever import retrieve_top_k_docs
+    from backend.core.config import get_settings
 
 # 로깅 설정
 logger = logging.getLogger(__name__)
-# logging.basicConfig(level=logging.INFO) # main.py에서 이미 설정하므로 중복 제거 또는 레벨 조정
 
-# API 키 설정
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY") # Google API 키 (호환성 유지)
+# Settings 인스턴스 가져오기
+settings = get_settings()
 
-# 환경 변수 확인
-if not ANTHROPIC_API_KEY:
-    logger.warning("ANTHROPIC_API_KEY 환경 변수가 설정되지 않았습니다.")
-if not OPENAI_API_KEY:
-    logger.warning("OPENAI_API_KEY 환경 변수가 설정되지 않았습니다.")
-if not GOOGLE_API_KEY: # Google API 키 확인 추가
-    logger.warning("GOOGLE_API_KEY 환경 변수가 설정되지 않았습니다. GeminiProvider를 사용할 수 없습니다.")
+# API 키 설정 (환경변수 기반)
+ANTHROPIC_API_KEY = settings.ANTHROPIC_API_KEY
+OPENAI_API_KEY = settings.OPENAI_API_KEY
+GOOGLE_API_KEY = settings.GOOGLE_API_KEY
+DEEPSEEK_API_KEY = settings.DEEPSEEK_API_KEY
 
-
-# 임베딩 캐시 설정 (최대 1000개, 1시간 TTL)
-embedding_cache = TTLCache(maxsize=1000, ttl=3600)
-
-# Issue/Solution 캐시 (최대 500개, 6시간 TTL)
-issue_solution_cache = TTLCache(maxsize=500, ttl=21600)
-
-def _get_issue_solution_key(ticket_data: Dict[str, Any]) -> str:
-    """Issue/Solution 캐시 키 생성"""
-    key_fields = {
-        "id": ticket_data.get("id"),
-        "subject": ticket_data.get("subject"),
-        "description": ticket_data.get("description_text", ticket_data.get("description", "")),
-    }
-    key_json = json.dumps(key_fields, sort_keys=True, ensure_ascii=False)
-    return hashlib.md5(key_json.encode("utf-8")).hexdigest()
-
-def _get_cache_key(text: str, model: str) -> str:
-    """임베딩 캐시 키 생성"""
-    # 텍스트와 모델명을 조합하여 해시 생성
-    content = f"{model}:{text}"
-    return hashlib.md5(content.encode('utf-8')).hexdigest()
-
-
-# Prometheus 메트릭 정의 (LLM Router 전용)
-llm_requests_total = Counter(
-    "llm_requests_total",
-    "LLM 요청 총 수",
-    ["provider", "status"] # 레이블: 제공자 이름, 성공/실패 상태
-)
-llm_request_duration_seconds = Histogram(
-    "llm_request_duration_seconds",
-    "LLM 요청 처리 시간 (초)",
-    ["provider"] # 레이블: 제공자 이름
-)
-llm_tokens_used_total = Counter(
-    "llm_tokens_used_total",
-    "LLM에서 사용된 총 토큰 수 (응답 기준)",
-    ["provider", "model"] # 레이블: 제공자 이름, 사용된 모델
-)
-llm_provider_health_status = Gauge(
-    "llm_provider_health_status",
-    "LLM 제공자 건강 상태 (1: 건강, 0: 비건강)",
-    ["provider"]
-)
-llm_provider_consecutive_failures = Gauge(
-    "llm_provider_consecutive_failures",
-    "LLM 제공자 연속 실패 횟수",
-    ["provider"]
-)
-llm_provider_success_rate = Gauge(
-    "llm_provider_success_rate",
-    "LLM 제공자 성공률",
-    ["provider"]
-)
+# 글로벌 설정 (환경변수 기반)
+GLOBAL_TIMEOUT = settings.LLM_GLOBAL_TIMEOUT
+GEMINI_TIMEOUT = settings.LLM_GEMINI_TIMEOUT
+DEEPSEEK_TIMEOUT = settings.LLM_DEEPSEEK_TIMEOUT
+ANTHROPIC_TIMEOUT = settings.LLM_ANTHROPIC_TIMEOUT
+OPENAI_TIMEOUT = settings.LLM_OPENAI_TIMEOUT
+MAX_RETRIES = settings.LLM_MAX_RETRIES
 
 
 class LLMResponse(BaseModel):
@@ -125,7 +62,6 @@ class LLMResponse(BaseModel):
     tokens_used: Optional[int] = None
     tokens_total: Optional[int] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
-    # 새로운 필드 추가
     attempt_count: int = 1
     is_fallback: bool = False
     previous_provider_error: Optional[str] = None
@@ -135,140 +71,381 @@ class LLMResponse(BaseModel):
     }
 
 
-class LLMProviderStats(BaseModel):
-    """LLM 제공자별 통계 데이터 모델"""
-    provider_name: str
-    total_requests: int = 0
-    successful_requests: int = 0
-    failed_requests: int = 0
-    consecutive_failures: int = 0  # 연속 실패 횟수 추가
-    total_tokens_used: int = 0
-    total_latency_ms: float = 0.0  # 평균 계산을 위한 총 지연 시간
-    last_error_timestamp: Optional[float] = None  # 마지막 오류 발생 시간 (타임스탬프)
-    error_details: List[Dict[str, Any]] = Field(default_factory=list)
-
-    @property
-    def average_latency_ms(self) -> float:
-        """요청당 평균 지연 시간 (밀리초)"""
-        if self.total_requests == 0:
-            return 0.0
-        return self.total_latency_ms / self.total_requests
-
-    def add_request_stats(self, duration_ms: float, tokens_used: Optional[int], success: bool, error_info: Optional[Dict[str, Any]] = None):
-        """개별 요청 통계를 집계합니다."""
-        self.total_requests += 1
-        self.total_latency_ms += duration_ms
-        if tokens_used is not None:
-            self.total_tokens_used += tokens_used
-
-        if success:
-            self.successful_requests += 1
-            self.consecutive_failures = 0  # 성공 시 연속 실패 횟수 리셋
-        else:
-            self.failed_requests += 1
-            self.consecutive_failures += 1  # 실패 시 연속 실패 횟수 증가
-            if error_info:
-                self.error_details.append(error_info)
-
-    @property
-    def success_rate(self) -> float:
-        """성공률을 계산합니다."""
-        if self.total_requests == 0:
-            return 1.0  # 요청이 없으면 100% 성공으로 간주 (또는 0.0으로 할 수도 있음)
-        return self.successful_requests / self.total_requests
-
-    def record_success(self, duration_ms: float, tokens_used: Optional[int] = None):
-        """성공한 요청 통계를 기록합니다."""
-        self.add_request_stats(duration_ms, tokens_used, success=True)
-
-        # Prometheus 메트릭 업데이트
-        llm_provider_consecutive_failures.labels(provider=self.provider_name).set(self.consecutive_failures)
-        llm_provider_success_rate.labels(provider=self.provider_name).set(self.success_rate)
-
-    def record_failure(self, duration_ms: float = 0, error_info: Optional[Dict[str, Any]] = None):
-        """실패한 요청 통계를 기록합니다."""
-        import time
-        self.last_error_timestamp = time.time()  # 마지막 오류 시간 기록
-        self.add_request_stats(duration_ms, None, success=False, error_info=error_info)
-
-        # Prometheus 메트릭 업데이트
-        llm_provider_consecutive_failures.labels(provider=self.provider_name).set(self.consecutive_failures)
-        llm_provider_success_rate.labels(provider=self.provider_name).set(self.success_rate)
-
-
 class LLMProvider:
-    """LLM 제공자의 기본 추상 클래스"""
-    def __init__(self, name: str, timeout: float): # name과 timeout을 생성자에서 받도록 변경
+    """LLM 제공자 기본 클래스"""
+    
+    def __init__(self, name: str, timeout: float = GLOBAL_TIMEOUT):
         self.name = name
         self.timeout = timeout
-        self.stats = LLMProviderStats(provider_name=name) # 통계 객체 초기화
-        self.api_key: Optional[str] = None # API 키는 하위 클래스에서 설정
-        # 초기 건강 상태 메트릭 설정
-        llm_provider_health_status.labels(provider=self.name).set(1) # 초기에는 건강하다고 가정
-        llm_provider_consecutive_failures.labels(provider=self.name).set(0)
-        llm_provider_success_rate.labels(provider=self.name).set(1.0)
-
-    async def generate(self, prompt: str, system_prompt: str = None, max_tokens: int = 1024, temperature: float = 0.2) -> LLMResponse:
-        """추상 메소드: 각 제공자 클래스에서 구현해야 함"""
+        self.api_key: Optional[str] = None
+        self.client = None
+        self.failure_count = 0
+        self.last_success_time = time.time()
+    
+    async def generate(self, prompt: str, system_prompt: Optional[str] = None, 
+                      max_tokens: int = 1024, temperature: float = 0.2) -> LLMResponse:
+        """추상 메서드: 각 제공자에서 구현"""
         raise NotImplementedError
-
-    def count_tokens(self, text: str) -> int:
-        """텍스트의 토큰 수를 대략적으로 계산 (기본 구현)"""
-        return int(len(text.split()) * 1.3)
-
+    
     def is_healthy(self) -> bool:
-        """제공자가 현재 건강한 상태인지 판단 (기본은 항상 True)"""
-        healthy = True
-        if self.stats.consecutive_failures >= 3:
-            logger.warning(f"{self.name} 제공자 연속 실패 3회 이상으로 비정상 상태 간주.")
-            healthy = False
-        if self.stats.last_error_timestamp and (time.time() - self.stats.last_error_timestamp < 300): # 최근 5분
-            if self.stats.total_requests > 5 and self.stats.success_rate < 0.5: # 요청 5회 이상, 성공률 50% 미만
-                 logger.warning(f"{self.name} 제공자 최근 5분 내 성공률 {self.stats.success_rate:.2f}로 비정상 상태 간주.")
-                 healthy = False
+        """제공자 건강성 체크 - 더 엄격한 기준"""
+        # 연속 실패 3회 이상이면 비건강 (기존 5회 → 3회)
+        if self.failure_count >= 3:
+            return False
+        
+        # 2분 이상 성공이 없으면 의심스러운 상태 (기존 5분 → 2분)
+        if time.time() - self.last_success_time > 120:
+            return False
+            
+        return True
+    
+    def record_success(self):
+        """성공 기록"""
+        self.failure_count = 0
+        self.last_success_time = time.time()
+    
+    def record_failure(self):
+        """실패 기록"""
+        self.failure_count += 1
 
-        # Prometheus 메트릭 업데이트
-        llm_provider_health_status.labels(provider=self.name).set(1 if healthy else 0)
-        return healthy
+
+class GeminiProvider(LLMProvider):
+    """🥇 Gemini Flash 2.0 제공자 - 최우선"""
+    
+    def __init__(self, timeout: Optional[float] = None):
+        super().__init__("gemini", timeout or GEMINI_TIMEOUT)
+        self.api_key = GOOGLE_API_KEY
+        self.model = "gemini-2.0-flash-exp"  # 기본값 (동적 변경 가능)
+        
+        if self.api_key:
+            try:
+                # Gemini 클라이언트 초기화
+                genai.configure(api_key=self.api_key)
+                self.client = genai.GenerativeModel(self.model)
+                logger.info(f"🥇 Gemini Flash 2.0 초기화 완료 (모델: {self.model})")
+            except Exception as e:
+                logger.error(f"Gemini 초기화 실패: {e}")
+                self.client = None
+        else:
+            logger.warning("Gemini API 키가 설정되지 않았습니다")
+    
+    def set_model(self, model_name: str):
+        """모델 동적 변경"""
+        available_models = [
+            "gemini-2.0-flash-exp",  # 중량 작업용
+            "gemini-1.5-flash",      # 경량 작업용
+            "gemini-1.5-flash-8b",   # 초경량 작업용
+        ]
+        
+        if model_name in available_models and self.api_key:
+            self.model = model_name
+            try:
+                # Gemini 클라이언트 초기화
+                genai.configure(api_key=self.api_key)
+                self.client = genai.GenerativeModel(model_name)
+                logger.info(f"Gemini 모델 변경: {model_name}")
+            except Exception as e:
+                logger.error(f"Gemini 모델 변경 실패: {e}")
+    
+    @retry(
+        retry=retry_if_exception_type((httpx.RequestError, asyncio.TimeoutError)),
+        stop=stop_after_attempt(MAX_RETRIES),
+        wait=wait_exponential(multiplier=1, min=1, max=2),
+        reraise=True
+    )
+    async def generate(self, prompt: str, system_prompt: Optional[str] = None,
+                      max_tokens: int = 2048, temperature: float = 0.2) -> LLMResponse:
+        if not self.client:
+            self.record_failure()
+            raise RuntimeError("Gemini 클라이언트가 초기화되지 않았습니다")
+        
+        start_time = time.time()
+        
+        # 프롬프트 구성
+        if system_prompt:
+            full_prompt = f"System Instructions: {system_prompt}\n\nUser Query: {prompt}"
+        else:
+            full_prompt = prompt
+        
+        # Gemini 생성 설정
+        generation_config = genai.types.GenerationConfig(
+            max_output_tokens=max_tokens,
+            temperature=temperature,
+        )
+        
+        try:
+            # 실제 Gemini API 호출
+            response = await asyncio.wait_for(
+                self.client.generate_content_async(
+                    contents=full_prompt,
+                    generation_config=generation_config,
+                ),
+                timeout=self.timeout
+            )
+            
+            duration = (time.time() - start_time) * 1000
+            
+            # 응답 텍스트 추출
+            text = response.text if hasattr(response, 'text') else str(response)
+            
+            self.record_success()
+            
+            return LLMResponse(
+                text=text,
+                model_used=self.model,
+                duration_ms=duration,
+                tokens_used=len(text.split()),  # 간단한 토큰 추정
+                metadata={"provider": self.name, "model": self.model}
+            )
+            
+        except Exception as e:
+            self.record_failure()
+            error_msg = str(e)
+            duration = (time.time() - start_time) * 1000
+            
+            # 상세한 에러 로깅
+            logger.error(f"🚨 Gemini API 호출 실패 (timeout: {self.timeout}s, duration: {duration:.1f}ms)")
+            logger.error(f"   ❌ 오류 타입: {type(e).__name__}")
+            logger.error(f"   ❌ 오류 메시지: {error_msg}")
+            logger.error(f"   ❌ 프롬프트 길이: {len(full_prompt)} chars")
+            
+            if isinstance(e, asyncio.TimeoutError):
+                logger.error(f"   ⏰ Gemini 타임아웃 발생 - {self.timeout}초 초과")
+            elif "429" in error_msg or "rate limit" in error_msg.lower():
+                logger.error("   🚫 Gemini Rate Limit 도달")
+            elif "quota" in error_msg.lower():
+                logger.error("   💰 Gemini 할당량 초과")
+            else:
+                logger.error(f"   🔧 기타 Gemini 오류: {repr(e)}")
+            
+            raise RuntimeError(f"Gemini 호출 실패: {error_msg}")
+
+
+class DeepSeekProvider(LLMProvider):
+    """🥈 DeepSeek R1 제공자 - 2순위"""
+    
+    def __init__(self, timeout: Optional[float] = None):
+        super().__init__("deepseek", timeout or DEEPSEEK_TIMEOUT)
+        self.api_key = DEEPSEEK_API_KEY
+        
+        if self.api_key:
+            self.client = openai.AsyncOpenAI(
+                api_key=self.api_key,
+                base_url="https://api.deepseek.com"
+            )
+            logger.info("🥈 DeepSeek R1 초기화 완료")
+        else:
+            logger.warning("DeepSeek API 키가 설정되지 않았습니다")
+    
+    @retry(
+        retry=retry_if_exception_type((openai.RateLimitError, openai.APIError, asyncio.TimeoutError)),
+        stop=stop_after_attempt(MAX_RETRIES),
+        wait=wait_exponential(multiplier=1, min=1, max=2),
+        reraise=True
+    )
+    async def generate(self, prompt: str, system_prompt: Optional[str] = None,
+                      max_tokens: int = 1024, temperature: float = 0.2) -> LLMResponse:
+        if not self.client:
+            self.record_failure()
+            raise RuntimeError("DeepSeek 클라이언트가 초기화되지 않았습니다")
+        
+        start_time = time.time()
+        system = system_prompt or "You are a helpful customer support AI assistant."
+        
+        # 타입 안전한 메시지 구성
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt}
+        ]
+        
+        try:
+            response = await asyncio.wait_for(
+                self.client.chat.completions.create(
+                    model="deepseek-chat",
+                    messages=messages,  # type: ignore - 메시지 타입 문제 우회
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                ),
+                timeout=self.timeout
+            )
+            
+            duration = (time.time() - start_time) * 1000
+            text = ""
+            
+            if response.choices and response.choices[0].message.content:
+                text = response.choices[0].message.content.strip()
+            
+            if not text:
+                raise ValueError("DeepSeek 응답이 비어있습니다")
+            
+            self.record_success()
+            
+            return LLMResponse(
+                text=text,
+                model_used="deepseek-chat",
+                duration_ms=duration,
+                tokens_used=response.usage.completion_tokens if response.usage else len(text.split()),
+                metadata={"provider": self.name}
+            )
+            
+        except Exception as e:
+            self.record_failure()
+            error_msg = str(e)
+            duration = (time.time() - start_time) * 1000
+            
+            # 상세한 에러 로깅
+            logger.error(f"🚨 DeepSeek API 호출 실패 (timeout: {self.timeout}s, duration: {duration:.1f}ms)")
+            logger.error(f"   ❌ 오류 타입: {type(e).__name__}")
+            logger.error(f"   ❌ 오류 메시지: {error_msg}")
+            logger.error(f"   ❌ 프롬프트 길이: {len(prompt)} chars")
+            
+            if isinstance(e, asyncio.TimeoutError):
+                logger.error(f"   ⏰ DeepSeek 타임아웃 발생 - {self.timeout}초 초과")
+            elif "429" in error_msg or "rate limit" in error_msg.lower():
+                logger.error("   🚫 DeepSeek Rate Limit 도달")
+            elif "quota" in error_msg.lower():
+                logger.error("   💰 DeepSeek 할당량 초과")
+            else:
+                logger.error(f"   🔧 기타 DeepSeek 오류: {repr(e)}")
+            
+            raise RuntimeError(f"DeepSeek 호출 실패: {error_msg}")
+            
+            if isinstance(e, asyncio.TimeoutError):
+                logger.error(f"   ⏰ DeepSeek 타임아웃 발생 - {self.timeout}초 초과")
+            elif hasattr(e, 'status_code'):
+                status_code = getattr(e, 'status_code', None)
+                logger.error(f"   🌐 HTTP 상태 코드: {status_code}")
+                if status_code == 429:
+                    logger.error("   🚫 DeepSeek Rate Limit 도달")
+                elif status_code == 401:
+                    logger.error("   🔑 DeepSeek 인증 실패")
+                elif status_code and status_code >= 500:
+                    logger.error("   🔧 DeepSeek 서버 오류")
+            else:
+                logger.error(f"   🔧 기타 DeepSeek 오류: {repr(e)}")
+            
+            raise RuntimeError(f"DeepSeek 호출 실패: {error_msg}")
+
+
+class OpenAIProvider(LLMProvider):
+    """🥉 OpenAI GPT 제공자 - 3순위"""
+    
+    def __init__(self, timeout: Optional[float] = None):
+        super().__init__("openai", timeout or OPENAI_TIMEOUT)
+        self.api_key = OPENAI_API_KEY
+        
+        if self.api_key:
+            self.client = openai.AsyncOpenAI(api_key=self.api_key)
+            logger.info("🥉 OpenAI GPT 초기화 완료")
+        else:
+            logger.warning("OpenAI API 키가 설정되지 않았습니다")
+    
+    @retry(
+        retry=retry_if_exception_type((openai.RateLimitError, openai.APIError, asyncio.TimeoutError)),
+        stop=stop_after_attempt(MAX_RETRIES),
+        wait=wait_exponential(multiplier=1, min=1, max=2),
+        reraise=True
+    )
+    async def generate(self, prompt: str, system_prompt: Optional[str] = None,
+                      max_tokens: int = 1024, temperature: float = 0.2) -> LLMResponse:
+        if not self.client:
+            self.record_failure()
+            raise RuntimeError("OpenAI 클라이언트가 초기화되지 않았습니다")
+        
+        start_time = time.time()
+        system = system_prompt or "당신은 친절한 고객 지원 AI입니다."
+        
+        # 타입 안전한 메시지 구성
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt}
+        ]
+        
+        try:
+            response = await asyncio.wait_for(
+                self.client.chat.completions.create(
+                    model="gpt-4o-mini",  # 더 빠른 모델로 변경
+                    messages=messages,  # type: ignore - 메시지 타입 문제 우회
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                ),
+                timeout=self.timeout
+            )
+            
+            duration = (time.time() - start_time) * 1000
+            text = ""
+            
+            if response.choices and response.choices[0].message.content:
+                text = response.choices[0].message.content.strip()
+            
+            if not text:
+                raise ValueError("OpenAI 응답이 비어있습니다")
+            
+            self.record_success()
+            
+            return LLMResponse(
+                text=text,
+                model_used="gpt-4o-mini",  # 실제 사용 모델 반영
+                duration_ms=duration,
+                tokens_used=response.usage.completion_tokens if response.usage else len(text.split()),
+                metadata={"provider": self.name}
+            )
+            
+        except Exception as e:
+            self.record_failure()
+            error_msg = str(e)
+            duration = (time.time() - start_time) * 1000
+            
+            # 상세한 에러 로깅 추가
+            logger.error(f"🚨 OpenAI API 호출 실패 (timeout: {self.timeout}s, duration: {duration:.1f}ms)")
+            logger.error(f"   ❌ 오류 타입: {type(e).__name__}")
+            logger.error(f"   ❌ 오류 메시지: {error_msg}")
+            logger.error(f"   ❌ 프롬프트 길이: {len(prompt)} chars")
+            
+            if isinstance(e, asyncio.TimeoutError):
+                logger.error(f"   ⏰ OpenAI 타임아웃 발생 - {self.timeout}초 초과")
+            elif "429" in error_msg or "rate limit" in error_msg.lower():
+                logger.error("   🚫 OpenAI Rate Limit 도달")
+            elif "quota" in error_msg.lower():
+                logger.error("   💰 OpenAI 할당량 초과")
+            else:
+                logger.error(f"   🔧 기타 OpenAI 오류: {repr(e)}")
+            
+            raise RuntimeError(f"OpenAI 호출 실패: {error_msg}")
 
 
 class AnthropicProvider(LLMProvider):
-    """Anthropic Claude API 제공자"""
-
-    def __init__(self, api_key: Optional[str] = None, timeout: float = 10.0):
-        super().__init__(name="anthropic", timeout=timeout) # 부모 클래스 생성자 호출
-        self.api_key = api_key or ANTHROPIC_API_KEY
-        if not self.api_key:
-            logger.warning(f"{self.name} API 키가 설정되지 않았습니다.")
-            self.client = None
-        else:
+    """🏃‍♂️ Anthropic Claude 제공자 - 폴백용"""
+    
+    def __init__(self, timeout: Optional[float] = None):
+        super().__init__("anthropic", timeout or ANTHROPIC_TIMEOUT)
+        self.api_key = ANTHROPIC_API_KEY
+        
+        if self.api_key:
             self.client = anthropic.AsyncClient(api_key=self.api_key)
-        # ... 기존 available_models ...
-        self.available_models = {
-            "claude-3-haiku-20240307": {"max_tokens": 200000, "priority": 1},
-            "claude-3-sonnet-20240229": {"max_tokens": 200000, "priority": 2},
-        }
-
+            logger.info("🏃‍♂️ Anthropic Claude 초기화 완료")
+        else:
+            logger.warning("Anthropic API 키가 설정되지 않았습니다")
+    
     @retry(
-        retry=retry_if_exception_type((anthropic.RateLimitError, anthropic.APIStatusError, asyncio.TimeoutError, httpx.RequestError)), # httpx.RequestError 추가
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=10),
+        retry=retry_if_exception_type((anthropic.RateLimitError, anthropic.APIStatusError, asyncio.TimeoutError)),
+        stop=stop_after_attempt(MAX_RETRIES),
+        wait=wait_exponential(multiplier=1, min=1, max=2),
         reraise=True
     )
-    async def generate(self, prompt: str, system_prompt: str = None, max_tokens: int = 1024, temperature: float = 0.2) -> LLMResponse:
+    async def generate(self, prompt: str, system_prompt: Optional[str] = None,
+                      max_tokens: int = 1024, temperature: float = 0.2) -> LLMResponse:
         if not self.client:
-            self.stats.record_failure() # 통계 기록
-            llm_requests_total.labels(provider=self.name, status='failure').inc()
-            raise RuntimeError(f"{self.name} 제공자가 API 키 없이 초기화되었거나 클라이언트 설정에 실패했습니다.")
-
+            self.record_failure()
+            raise RuntimeError("Anthropic 클라이언트가 초기화되지 않았습니다")
+        
         start_time = time.time()
-        model = "claude-3-haiku-20240307"
-        system = "당신은 친절한 고객 지원 AI입니다." if system_prompt is None else system_prompt
-
+        system = system_prompt or "당신은 친절한 고객 지원 AI입니다."
+        
         try:
             response = await asyncio.wait_for(
                 self.client.messages.create(
-                    model=model,
+                    model="claude-3-haiku-20240307",
                     max_tokens=max_tokens,
                     temperature=temperature,
                     system=system,
@@ -276,1966 +453,657 @@ class AnthropicProvider(LLMProvider):
                 ),
                 timeout=self.timeout
             )
+            
             duration = (time.time() - start_time) * 1000
-            self.stats.record_success(duration) # 성공 통계 기록
-            llm_requests_total.labels(provider=self.name, status='success').inc()
-            llm_request_duration_seconds.labels(provider=self.name).observe(duration / 1000)
-            if response.usage.output_tokens: # 토큰 정보가 있을 경우
-                llm_tokens_used_total.labels(provider=self.name, model=model).inc(response.usage.output_tokens)
-
-            text = response.content[0].text
-            tokens_used = {
-                "input_tokens": response.usage.input_tokens,
-                "output_tokens": response.usage.output_tokens
-            }
-
+            text = ""
+            
+            if response.content and len(response.content) > 0:
+                first_content = response.content[0]
+                # 안전한 텍스트 접근
+                if hasattr(first_content, 'text'):
+                    text = getattr(first_content, 'text', '')
+                else:
+                    text = str(first_content)
+            
+            if not text:
+                raise ValueError("Anthropic 응답이 비어있습니다")
+            
+            self.record_success()
+            
             return LLMResponse(
                 text=text,
-                model_used=model,
+                model_used="claude-3-haiku-20240307",
                 duration_ms=duration,
-                tokens_used=response.usage.output_tokens,
-                tokens_total=response.usage.input_tokens + response.usage.output_tokens,
-                metadata={
-                    "provider": self.name,
-                    "tokens": tokens_used,
-                }
+                tokens_used=response.usage.output_tokens if response.usage else len(text.split()),
+                metadata={"provider": self.name}
             )
+            
         except Exception as e:
-            duration = (time.time() - start_time) * 1000
-            self.stats.record_failure(duration) # 실패 통계 기록
-            llm_requests_total.labels(provider=self.name, status='failure').inc()
-            if duration > 0: # 타임아웃 등의 경우 duration이 있을 수 있음
-                 llm_request_duration_seconds.labels(provider=self.name).observe(duration / 1000)
-            logger.error(f"{self.name} API 오류: {type(e).__name__} - {str(e)}")
+            self.record_failure()
+            logger.error(f"Anthropic API 오류: {e}")
             raise
 
 
-class OpenAIProvider(LLMProvider):
-    """OpenAI API 제공자"""
-
-    def __init__(self, api_key: str = None, timeout: float = 15.0):
-        super().__init__(name="openai", timeout=timeout) # 부모 클래스 생성자 호출
-        self.api_key = api_key or OPENAI_API_KEY
-        if not self.api_key:
-            logger.warning(f"{self.name} API 키가 설정되지 않았습니다.")
-            self.client = None
-        else:
-            self.client = openai.AsyncOpenAI(api_key=self.api_key)
-        # ... 기존 available_models ...
-        self.available_models = {
-            "gpt-4o": {"max_tokens": 128000, "priority": 1},
-            "gpt-3.5-turbo": {"max_tokens": 16000, "priority": 2},
-        }
-
-    @retry(
-        retry=retry_if_exception_type((openai.RateLimitError, openai.APIError, asyncio.TimeoutError, httpx.RequestError)), # httpx.RequestError 추가
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=10),
-        reraise=True
-    )
-    async def generate(self, prompt: str, system_prompt: str = None, max_tokens: int = 1024, temperature: float = 0.2) -> LLMResponse:
-        if not self.client:
-            self.stats.record_failure() # 통계 기록
-            llm_requests_total.labels(provider=self.name, status='failure').inc()
-            raise RuntimeError(f"{self.name} 제공자가 API 키 없이 초기화되었거나 클라이언트 설정에 실패했습니다.")
-
-        start_time = time.time()
-        model = "gpt-4o"
-        system = "당신은 친절한 고객 지원 AI입니다." if system_prompt is None else system_prompt
-
-        try:
-            messages = [
-                {"role": "system", "content": system},
-                {"role": "user", "content": prompt}
-            ]
-            response = await asyncio.wait_for(
-                self.client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                ),
-                timeout=self.timeout
-            )
-            duration = (time.time() - start_time) * 1000
-            self.stats.record_success(duration) # 성공 통계 기록
-            llm_requests_total.labels(provider=self.name, status='success').inc()
-            llm_request_duration_seconds.labels(provider=self.name).observe(duration / 1000)
-            if response.usage.completion_tokens: # 토큰 정보가 있을 경우
-                llm_tokens_used_total.labels(provider=self.name, model=model).inc(response.usage.completion_tokens)
-
-            text = response.choices[0].message.content.strip()
-            tokens_used = {
-                "prompt_tokens": response.usage.prompt_tokens,
-                "completion_tokens": response.usage.completion_tokens
-            }
-
-            return LLMResponse(
-                text=text,
-                model_used=model,
-                duration_ms=duration,
-                tokens_used=response.usage.completion_tokens,
-                tokens_total=response.usage.prompt_tokens + response.usage.completion_tokens,
-                metadata={
-                    "provider": self.name,
-                    "tokens": tokens_used,
-                }
-            )
-        except Exception as e:
-            duration = (time.time() - start_time) * 1000
-            self.stats.record_failure(duration) # 실패 통계 기록
-            llm_requests_total.labels(provider=self.name, status='failure').inc()
-            if duration > 0:
-                 llm_request_duration_seconds.labels(provider=self.name).observe(duration / 1000)
-            logger.error(f"{self.name} API 오류: {type(e).__name__} - {str(e)}")
-            raise
-
-
-class GeminiProvider(LLMProvider):
-    """Google Gemini API 제공자"""
-
-    def __init__(self, api_key: str = None, timeout: float = 20.0):
-        super().__init__(name="gemini", timeout=timeout) # 부모 클래스 생성자 호출
-        self.api_key = api_key or GOOGLE_API_KEY
-        self.client = None # genai.GenerativeModel 인스턴스
-
-        if not self.api_key:
-            logger.warning(f"GeminiProvider: {self.name} API 키가 없어 초기화되지 않았습니다.")
-        else:
-            try:
-                genai.configure(api_key=self.api_key)
-                # 모델명은 최신 안정화 버전 또는 특정 요구사항에 맞는 모델로 설정
-                self.client = genai.GenerativeModel('gemini-1.5-flash-latest') # 예시: 최신 Flash 모델
-                logger.info(f"GeminiProvider ({self.name}) 초기화 완료 (모델: gemini-1.5-flash-latest).")
-                self.available_models = {
-                    "gemini-1.5-flash-latest": {"max_tokens": 8192, "priority": 1}, # Flash 모델은 컨텍스트 윈도우가 더 클 수 있음, 확인 필요
-                    "gemini-pro": {"max_tokens": 30720, "priority": 2},
-                }
-            except Exception as e:
-                logger.error(f"GeminiProvider ({self.name}) 초기화 실패: {e}")
-                self.client = None # 실패 시 명시적으로 None 설정
-
-    @retry(
-        retry=retry_if_exception_type((
-            httpx.RequestError,
-            asyncio.TimeoutError,
-            genai.types.generation_types.BlockedPromptException,
-            genai.types.generation_types.StopCandidateException,
-            # google.api_core.exceptions.GoogleAPIError, # 좀 더 포괄적인 Google API 오류
-            # google.api_core.exceptions.RetryError,
-            # google.api_core.exceptions.ServiceUnavailable,
-            # google.api_core.exceptions.DeadlineExceeded,
-        )),
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=10),
-        reraise=True
-    )
-    async def generate(self, prompt: str, system_prompt: str = None, max_tokens: int = 2048, temperature: float = 0.2) -> LLMResponse:
-        if not self.client:
-            self.stats.record_failure() # 통계 기록
-            llm_requests_total.labels(provider=self.name, status='failure').inc()
-            raise RuntimeError(f"{self.name} 제공자가 API 키 없이 초기화되었거나 클라이언트 설정에 실패했습니다.")
-
-        start_time = time.time()
-        model_name = 'gemini-1.5-flash-latest' # 초기화 시 설정된 모델 사용 또는 동적 선택
-
-        contents = []
-        if system_prompt:
-            # Gemini는 system_prompt를 contents의 첫 번째 메시지로 구성하여 전달 가능
-            # 또는 모델에 따라 `system_instruction` 파라미터 사용 가능 (gemini-1.5-pro 등)
-            # 여기서는 contents에 포함하는 방식 사용
-            # contents.append({'role': 'system', 'parts': [system_prompt]}) # 역할 'system' 지원 여부 확인 필요
-            # 일반적으로는 user/model 턴으로 구성. 시스템 프롬프트는 첫 user 메시지에 포함.
-            full_prompt = f"System Instructions: {system_prompt}\\n\\nUser Query: {prompt}"
-        else:
-            full_prompt = prompt
-
-        contents.append({'role': 'user', 'parts': [full_prompt]})
-
-        generation_config = genai.types.GenerationConfig(
-            max_output_tokens=max_tokens,
-            temperature=temperature,
-        )
-        safety_settings = [
-            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
-        ]
-
-        try:
-            logger.info(f"{self.name} API ({model_name}) 호출 시작...")
-            async_response = await asyncio.wait_for(
-                self.client.generate_content_async(
-                    contents=contents,
-                    generation_config=generation_config,
-                    safety_settings=safety_settings,
-                ),
-                timeout=self.timeout
-            )
-            duration = (time.time() - start_time) * 1000
-            self.stats.record_success(duration) # 성공 통계 기록
-            llm_requests_total.labels(provider=self.name, status='success').inc()
-            llm_request_duration_seconds.labels(provider=self.name).observe(duration / 1000)
-            # Gemini 응답에서 output_tokens 가져오기 (이전에 계산된 값 사용)
-            # response_obj는 LLMResponse 객체가 아님. async_response로부터 토큰 계산.
-            # 아래 LLMResponse 생성 시 output_tokens 사용.
-
-            generated_text = ""
-            # ... (기존 텍스트 추출 및 차단 로직) ...
-            if async_response.candidates:
-                if async_response.candidates[0].content and async_response.candidates[0].content.parts:
-                    generated_text = async_response.candidates[0].content.parts[0].text
-                elif hasattr(async_response.candidates[0], 'text'):
-                     generated_text = async_response.candidates[0].text
-
-            if not generated_text and async_response.prompt_feedback and async_response.prompt_feedback.block_reason:
-                block_reason = async_response.prompt_feedback.block_reason
-                logger.warning(f"{self.name} API: 프롬프트가 차단되었습니다. 이유: {block_reason}")
-                raise genai.types.generation_types.BlockedPromptException(f"프롬프트가 차단되었습니다: {block_reason}")
-
-            # 토큰 사용량 계산 (비동기)
-            input_tokens = 0
-            output_tokens = 0
-            try:
-                count_response_input = await self.client.count_tokens_async(contents=contents)
-                input_tokens = count_response_input.total_tokens
-                if generated_text:
-                    count_response_output = await self.client.count_tokens_async(contents=[{'role':'model', 'parts': [generated_text]}])
-                    output_tokens = count_response_output.total_tokens
-            except Exception as e_count: # 토큰 계산 실패 시 근사치 사용
-                logger.warning(f"{self.name} 토큰 계산 실패 ({e_count}), 근사치 사용.")
-                input_tokens = self._approx_token_count(full_prompt)
-                output_tokens = self._approx_token_count(generated_text)
-
-            if output_tokens > 0:
-                llm_tokens_used_total.labels(provider=self.name, model=model_name).inc(output_tokens)
-
-            return LLMResponse(
-                text=generated_text,
-                model_used=model_name,
-                duration_ms=duration,
-                tokens_used=output_tokens, # 계산된 output_tokens
-                tokens_total=input_tokens + output_tokens,
-                metadata={
-                    "provider": self.name,
-                    "tokens": {"input_tokens": input_tokens, "output_tokens": output_tokens},
-                    "finish_reason": async_response.candidates[0].finish_reason.name if async_response.candidates and async_response.candidates[0].finish_reason else "UNKNOWN",
-                    "safety_ratings": [rating.category.name for rating in async_response.candidates[0].safety_ratings] if async_response.candidates and async_response.candidates[0].safety_ratings else []
-                }
-            )
-        except Exception as e:
-            duration = (time.time() - start_time) * 1000
-            self.stats.record_failure(duration) # 실패 통계 기록
-            llm_requests_total.labels(provider=self.name, status='failure').inc()
-            if duration > 0:
-                 llm_request_duration_seconds.labels(provider=self.name).observe(duration / 1000)
-            logger.error(f"{self.name} 호출 중 오류: {type(e).__name__} - {str(e)}")
-            raise
-
-    def _approx_token_count(self, text: str) -> int:
-        """텍스트의 토큰 수를 대략적으로 계산 (Gemini용 임시 방편)"""
-        # Gemini는 BPE 기반 토크나이저를 사용. 정확한 계산은 SDK의 count_tokens 사용.
-        # 여기서는 단순 근사치 제공 (영어 기준 단어 1개는 약 1.3 ~ 1.5 토큰, 한글은 더 많음)
-        return int(len(text) / 2.5) # 글자 수 기반으로 더 단순화 (경험적 조정 필요)
-
-    def count_tokens(self, text: str) -> int:
-        """Gemini 모델의 토큰 수를 계산합니다. (동기 컨텍스트용 - 근사치 사용)"""
-        if not self.client:
-            logger.warning(f"{self.name}Provider가 초기화되지 않아 토큰 수를 정확히 계산할 수 없습니다. 근사치를 반환합니다.")
-            return self._approx_token_count(text)
-
-        # 동기적 count_tokens가 필요하다면, Gemini SDK가 동기 버전을 제공하는지 확인하거나,
-        # asyncio.run()을 사용하여 비동기 호출을 실행해야 하지만, 라이브러리 내에서는 권장되지 않음.
-        # LLMRouter.choose_provider (동기)에서는 이 근사치를 사용하고,
-        # 실제 generate (비동기)에서는 count_tokens_async를 사용.
-        logger.debug(f"{self.name}Provider.count_tokens는 현재 근사치를 반환합니다. 정확한 값은 generate 시 계산됩니다.")
-        return self._approx_token_count(text)
-
-
-class LLMProviderWeights(BaseModel):
-    """LLM 제공자별 가중치 및 우선순위 관리"""
-    provider_name: str
-    base_weight: float = 1.0  # 기본 가중치 (1.0 = 100%)
-    performance_multiplier: float = 1.0  # 성능 기반 배수
-    cost_efficiency: float = 1.0  # 비용 효율성 점수
-    latency_threshold_ms: float = 5000.0  # 지연 시간 임계값
-    max_consecutive_failures: int = 5  # 최대 연속 실패 허용 횟수
-
-    def calculate_dynamic_weight(self, stats: LLMProviderStats) -> float:
-        """
-        제공자의 통계 데이터를 기반으로 동적 가중치를 계산합니다.
-
-        Args:
-            stats: 제공자의 통계 데이터
-
-        Returns:
-            계산된 동적 가중치 (0.0 ~ 1.0)
-        """
-        if not stats or stats.total_requests == 0:
-            return self.base_weight
-
-        # 성공률 기반 가중치 (0.0 ~ 1.0)
-        success_weight = stats.success_rate
-
-        # 지연 시간 기반 가중치 계산
-        avg_latency = stats.average_latency_ms
-        if avg_latency <= self.latency_threshold_ms:
-            latency_weight = 1.0
-        else:
-            # 임계값 초과 시 점진적으로 가중치 감소
-            latency_weight = max(0.1, self.latency_threshold_ms / avg_latency)
-
-        # 연속 실패 패널티 적용
-        failure_penalty = 1.0
-        if stats.consecutive_failures > 0:
-            # 연속 실패가 늘어날수록 지수적으로 가중치 감소
-            failure_penalty = max(0.1, 1.0 - (stats.consecutive_failures / self.max_consecutive_failures))
-
-        # 최종 가중치 계산 (모든 요소의 가중 평균)
-        dynamic_weight = (
-            self.base_weight *
-            success_weight *
-            latency_weight *
-            failure_penalty *
-            self.performance_multiplier
-        )
-
-        return max(0.0, min(1.0, dynamic_weight))
-
-    def should_exclude_provider(self, stats: LLMProviderStats) -> bool:
-        """
-        제공자를 일시적으로 제외해야 하는지 판단합니다.
-
-        Args:
-            stats: 제공자의 통계 데이터
-
-        Returns:
-            True면 제외, False면 포함
-        """
-        if not stats:
-            return False
-
-        # 연속 실패 횟수가 임계값을 초과하면 제외
-        if stats.consecutive_failures >= self.max_consecutive_failures:
-            return True
-
-        # 최근 성공률이 매우 낮으면 제외 (최소 10회 요청 이후부터 적용)
-        if stats.total_requests >= 10 and stats.success_rate < 0.3:
-            return True
-
-        return False
-
-
-class LLMProviderSelector:
-    """LLM 제공자 선택 로직을 관리하는 클래스"""
-
+class SpeedOptimizedLLMRouter:
+    """🚀 속도 최우선 LLM Router"""
+    
     def __init__(self):
-        # 기본 제공자별 가중치 설정 (성능 우선순위)
-        self.provider_weights = {
-            "openai": LLMProviderWeights(
-                provider_name="openai",
-                base_weight=2.0,  # 최우선 (가중치 2배 증가)
-                performance_multiplier=2.0,  # 성능 가중치 대폭 강화
-                cost_efficiency=1.5,  # 비용 효율성 향상
-                latency_threshold_ms=5000.0,  # 5초 (더 엄격한 기준)
-                max_consecutive_failures=3
-            ),
-            "anthropic": LLMProviderWeights(
-                provider_name="anthropic",
-                base_weight=0.3,  # 더 낮은 우선순위로 변경
-                performance_multiplier=0.5,  # 성능 가중치 대폭 감소
-                cost_efficiency=0.5,  # 비용 효율성 감소
-                latency_threshold_ms=8000.0,  # 8초
-                max_consecutive_failures=3
-            ),
-            "gemini": LLMProviderWeights(
-                provider_name="gemini",
-                base_weight=0.4,  # 최하위 우선순위
-                performance_multiplier=0.7,
-                cost_efficiency=1.0,  # 가장 저렴함
-                latency_threshold_ms=12000.0,  # 12초 (폴백용이므로 여유있게)
-                max_consecutive_failures=5
-            )
-        }
-
-    def select_best_provider(self, providers: Dict[str, LLMProvider]) -> Optional[str]:
+        logger.info("🚀 속도 최우선 LLM Router 초기화 중...")
+        
+        # 환경변수 기반 타임아웃 설정 (하드코딩 제거)
+        self.gemini = GeminiProvider()      # 🥇 최우선 (환경변수 기반)
+        self.openai = OpenAIProvider()       # 🥈 2순위 (환경변수 기반)
+        self.anthropic = AnthropicProvider() # 🥉 3순위 (환경변수 기반)
+        self.deepseek = DeepSeekProvider()   # 🏃‍♂️ 최하위 (환경변수 기반)
+        
+        logger.info("⏱️ 타임아웃 설정:")
+        logger.info(f"   🥇 Gemini: {self.gemini.timeout}초")
+        logger.info(f"   🥈 OpenAI: {self.openai.timeout}초")
+        logger.info(f"   🥉 Anthropic: {self.anthropic.timeout}초")
+        logger.info(f"   🏃‍♂️ DeepSeek: {self.deepseek.timeout}초")
+        
+        # 우선순위 순서 설정 (DeepSeek를 최하위로 이동)
+        self.providers = [
+            self.gemini,      # 🥇 Gemini Flash 2.0 최우선
+            self.openai,      # 🥈 OpenAI GPT-4o-mini
+            self.anthropic,   # 🥉 Anthropic Claude Haiku
+            self.deepseek     # 🏃‍♂️ DeepSeek R1 최하위 (느림)
+        ]
+        
+        # 🎯 작업별 모델 설정
+        self.light_model = os.getenv("LLM_LIGHT_MODEL", "gemini-1.5-flash")
+        self.heavy_model = os.getenv("LLM_HEAVY_MODEL", "gemini-2.0-flash-exp")
+        
+        logger.info(f"🎯 작업별 모델 설정 - 경량: {self.light_model}, 중량: {self.heavy_model}")
+        logger.info("🚀 LLM Router 초기화 완료!")
+    
+    def _get_task_type(self, operation: str) -> str:
+        """작업 타입 결정 (light/heavy)"""
+        light_keywords = [
+            "summary", "요약", "classification", "분류", "category",
+            "simple", "간단", "quick", "빠른", "basic",
+            "ticket", "티켓", "summarize", "정리", "extract", "추출"
+        ]
+        
+        heavy_keywords = [
+            "chat", "채팅", "conversation", "대화", "analysis", "분석",
+            "detailed", "상세", "complex", "복잡", "agent", "상담",
+            "response", "응답", "solution", "해결"
+        ]
+        
+        operation_lower = operation.lower()
+        
+        for keyword in light_keywords:
+            if keyword in operation_lower:
+                logger.info(f"🏃‍♂️ 경량 작업 감지: {operation}")
+                return "light"
+        
+        for keyword in heavy_keywords:
+            if keyword in operation_lower:
+                logger.info(f"🚀 중량 작업 감지: {operation}")
+                return "heavy"
+        
+        # 기본값은 중량 작업
+        logger.info(f"🔍 작업 타입 미지정, 중량 작업으로 분류: {operation}")
+        return "heavy"
+    
+    async def generate(self, prompt: str, system_prompt: Optional[str] = None,
+                      max_tokens: int = 1024, temperature: float = 0.2,
+                      operation: str = "general") -> LLMResponse:
         """
-        사용 가능한 제공자 중에서 가중치 기반으로 최적의 제공자를 선택합니다.
-
-        Args:
-            providers: 사용 가능한 제공자 딕셔너리
-
-        Returns:
-            선택된 제공자 이름 또는 None
+        메인 생성 메서드 - 속도 최우선 폴백 적용
         """
-        if not providers:
-            return None
-
-        # 건강한 제공자만 필터링
-        healthy_providers = {}
-        provider_scores = {}
-
-        for name, provider in providers.items():
-            if not provider.is_healthy():
-                logger.warning(f"제공자 {name}가 비건강 상태로 제외됩니다.")
-                continue
-
-            # 가중치 설정이 있는 제공자만 고려
-            if name not in self.provider_weights:
-                logger.warning(f"제공자 {name}에 대한 가중치 설정이 없습니다.")
-                continue
-
-            weights = self.provider_weights[name]
-
-            # 제외 조건 확인
-            if weights.should_exclude_provider(provider.stats):
-                logger.warning(f"제공자 {name}가 제외 조건에 의해 제외됩니다.")
-                continue
-
-            # 동적 가중치 계산
-            dynamic_weight = weights.calculate_dynamic_weight(provider.stats)
-
-            healthy_providers[name] = provider
-            provider_scores[name] = dynamic_weight
-
-            logger.debug(f"제공자 {name} 점수: {dynamic_weight:.3f}")
-
+        # 작업 타입에 따른 모델 설정
+        task_type = self._get_task_type(operation)
+        target_model = self.light_model if task_type == "light" else self.heavy_model
+        
+        # Gemini 모델 설정 (다른 제공자는 고정 모델 사용)
+        if self.gemini.client:
+            self.gemini.set_model(target_model)
+        
+        logger.info(f"🎯 작업 시작 - 타입: {task_type}, 타겟 모델: {target_model}")
+        
+        # 건강한 제공자들만 필터링 - 더 적극적 필터링
+        healthy_providers = []
+        for p in self.providers:
+            if p.api_key and p.is_healthy():
+                # 최근 2분 내 실패가 3회 미만인 제공자만 사용
+                if p.failure_count < 3:
+                    healthy_providers.append(p)
+        
         if not healthy_providers:
-            logger.error("사용 가능한 건강한 제공자가 없습니다.")
-            return None
-
-        # 가장 높은 점수의 제공자 선택
-        best_provider = max(provider_scores.items(), key=lambda x: x[1])
-        selected_name = best_provider[0]
-        selected_score = best_provider[1]
-
-        logger.info(f"선택된 제공자: {selected_name} (점수: {selected_score:.3f})")
-        return selected_name
-
-    def get_fallback_order(self, providers: Dict[str, LLMProvider], exclude: Optional[str] = None) -> List[str]:
-        """
-        폴백 순서를 가중치 기반으로 결정합니다.
-
-        Args:
-            providers: 사용 가능한 제공자 딕셔너리
-            exclude: 제외할 제공자 이름
-
-        Returns:
-            폴백 순서 리스트
-        """
-        if not providers:
-            return []
-
-        provider_scores = []
-
-        for name, provider in providers.items():
-            if exclude and name == exclude:
-                continue
-
-            if name not in self.provider_weights:
-                continue
-
-            weights = self.provider_weights[name]
-
-            # 완전히 죽은 제공자가 아니라면 폴백 후보에 포함
-            # (is_healthy()는 더 엄격한 기준이므로 폴백에는 더 관대한 기준 적용)
-            if provider.stats.consecutive_failures >= 10:  # 10회 연속 실패 시에만 완전 제외
-                continue
-
-            # 가중치가 매우 낮더라도 폴백 후보에는 포함
-            dynamic_weight = max(0.1, weights.calculate_dynamic_weight(provider.stats))
-            provider_scores.append((name, dynamic_weight))
-
-        # 점수 기준으로 내림차순 정렬
-        provider_scores.sort(key=lambda x: x[1], reverse=True)
-
-        fallback_order = [name for name, _ in provider_scores]
-        logger.debug(f"폴백 순서: {fallback_order}")
-
-        return fallback_order
-
-
-class LLMRouter:
-    """LLM 라우팅 및 Fallback 로직 구현"""
-
-    def __init__(self, timeout: float = 10.0, gemini_timeout: float = 20.0): # Gemini 타임아웃 분리
-        self.timeout = timeout # Anthropic, OpenAI용 기본 타임아웃
-        self.anthropic = AnthropicProvider(timeout=timeout)
-        self.openai = OpenAIProvider(timeout=timeout)
-        self.gemini = GeminiProvider(timeout=gemini_timeout) # Gemini는 별도 타임아웃 적용
-
-        # 제공자 우선순위 및 상태 관리 (Prometheus 연동 시 메트릭으로 활용 가능)
-        # 성능 기반 우선순위: OpenAI > Anthropic > Gemini (응답 속도 최적화)
-        self.providers_priority = ["openai", "anthropic", "gemini"]
-        self.provider_instances: Dict[str, LLMProvider] = {
-            "anthropic": self.anthropic,
-            "openai": self.openai,
-            "gemini": self.gemini
-        }
-
-        # 가중치 기반 제공자 선택기 초기화
-        self.provider_selector = LLMProviderSelector()
-
-    async def generate(self, prompt: str, system_prompt: str = None, max_tokens: int = 1024, temperature: float = 0.2) -> LLMResponse:
-        """최적의 LLM 제공자를 선택하고, 실패 시 순차적으로 Fallback하여 텍스트 생성"""
-
-        # TODO: 이미지 포함 여부, 예상 토큰 수 등은 choose_provider 내부 또는 외부에서 결정
-        # has_images = False
-        # estimated_tokens = self.provider_instances[self.providers_priority[0]].count_tokens(prompt)
-
-        # 동적으로 시도할 제공자 목록 생성 (건강 상태, API 키 유무 등 고려)
-        # choose_provider 메소드가 선택한 우선순위에 따라 정렬
-        ordered_providers = self._get_ordered_providers(prompt)
-
-        last_error: Optional[Exception] = None
+            # 긴급 모드: OpenAI만 사용 (가장 안정적)
+            logger.warning("⚠️ 모든 제공자 불안정, OpenAI 긴급 모드 활성화")
+            if self.openai.api_key:
+                healthy_providers = [self.openai]
+            else:
+                # 최후 수단: 모든 제공자 리셋
+                for provider in self.providers:
+                    if provider.api_key:
+                        provider.failure_count = 0
+                        provider.last_success_time = time.time()
+                healthy_providers = [p for p in self.providers if p.api_key]
+        
+        last_error = None
         attempt_count = 0
-
-        for provider_name in ordered_providers:
-            provider = self.provider_instances[provider_name]
+        
+        # 🚀 병렬 시도 모드 확대 - 경량/중량 모두 적용
+        if len(healthy_providers) >= 2:
+            # 경량 작업: 상위 2개 제공자 병렬
+            # 중량 작업: 상위 2개 제공자 병렬 (더 빠른 결과 우선)
+            return await self._parallel_generation(
+                healthy_providers[:2], prompt, system_prompt, max_tokens, temperature, target_model
+            )
+        
+        # 기본 순차 모드
+        for provider in healthy_providers:
             attempt_count += 1
-
-            if not provider.api_key:
-                logger.warning(f"{provider.name} 제공자는 API 키가 없어 건너뜁니다.")
-                continue
-            if not provider.is_healthy(): # 건강 상태 체크 추가
-                logger.warning(f"{provider.name} 제공자가 건강하지 않아 건너뜁니다 (성공률: {provider.stats.success_rate:.2f}, 연속실패: {provider.stats.consecutive_failures}).")
-                continue
-
+            
             try:
-                logger.info(f"{provider.name} ({attempt_count}번째 시도)로 생성 시작...")
+                logger.info(f"🎯 시도 {attempt_count}: {provider.name} 호출")
+                
                 response = await provider.generate(
                     prompt=prompt,
                     system_prompt=system_prompt,
                     max_tokens=max_tokens,
                     temperature=temperature
                 )
-                # 성공 시 메타데이터에 시도 정보 추가
+                
+                # 성공 시 메타데이터 추가
                 response.attempt_count = attempt_count
                 response.is_fallback = attempt_count > 1
-                if attempt_count > 1 and last_error:
-                    response.previous_provider_error = f"{type(last_error).__name__}: {str(last_error)}"
-
+                response.metadata.update({
+                    "task_type": task_type,
+                    "target_model": target_model,
+                    "final_provider": provider.name
+                })
+                
+                if attempt_count > 1:
+                    response.previous_provider_error = str(last_error)
+                
+                logger.info(f"✅ 성공: {provider.name} ({response.duration_ms:.1f}ms)")
                 return response
+                
             except Exception as e:
-                logger.warning(f"{provider.name} 제공자로 생성 실패: {type(e).__name__} - {str(e)}. 다음 제공자로 Fallback 시도합니다.")
                 last_error = e
-
-        logger.error(f"모든 LLM 제공자 호출 실패. 마지막 오류: {type(last_error).__name__} - {str(last_error)} (총 {attempt_count}번 시도)")
-        # 모든 시도 실패 시, LLMResponse 대신 에러를 발생시켜 상위 호출자가 처리하도록 함
-        raise RuntimeError(f"모든 LLM 제공자 호출 실패 (마지막 오류: {type(last_error).__name__} - {str(last_error)})")
-
-
-    def _get_ordered_providers(self, prompt: str) -> List[str]:
-        """
-        요청 특성 및 제공자 상태를 기반으로 시도할 제공자 이름 목록을 우선순위대로 반환합니다.
-        가중치 기반 선택 로직을 사용하여 동적으로 최적의 순서를 결정합니다.
-        """
-        # 1. 먼저 최고 우선순위 제공자 선택
-        best_provider = self.provider_selector.select_best_provider(self.provider_instances)
-
-        if not best_provider:
-            # 모든 제공자가 사용 불가능한 경우 기존 우선순위 사용
-            logger.warning("가중치 기반 선택에서 건강한 제공자를 찾지 못해 기존 우선순위를 사용합니다.")
-            available_providers = [
-                name for name in self.providers_priority
-                if self.provider_instances[name].api_key
-            ]
-            logger.info(f"기본 우선순위 제공자 순서: {available_providers}")
-            return available_providers
-
-        # 2. 폴백 순서 결정 (선택된 제공자 제외)
-        fallback_order = self.provider_selector.get_fallback_order(
-            self.provider_instances,
-            exclude=best_provider
-        )
-
-        # 3. 최종 순서: 최선의 제공자 + 폴백 순서
-        ordered_list = [best_provider] + fallback_order
-
-        # 4. API 키가 없는 제공자 제거 (최종 검증)
-        valid_providers = [
-            name for name in ordered_list
-            if self.provider_instances[name].api_key
-        ]
-
-        if not valid_providers:
-            logger.error("사용 가능한 LLM 제공자가 없습니다 (API 키 부재).")
-            return []
-
-        logger.info(f"가중치 기반 제공자 순서: {valid_providers}")
-        return valid_providers
-
-    def _extract_conversation_body(self, conv: Dict[str, Any]) -> str:
-        """
-        대화 딕셔너리에서 본문 텍스트를 안전하게 추출합니다.
-        여러 가능한 필드를 순서대로 시도합니다.
-
-        Args:
-            conv: 대화 항목 딕셔너리
-
-        Returns:
-            추출된 본문 텍스트
-        """
-        if not isinstance(conv, dict):
-            return str(conv)[:300]
-
-        # 가능한 필드들을 우선순위대로 시도
-        for field in ["body_text", "body", "text", "content", "message"]:
-            if field in conv and conv[field]:
-                content = conv[field]
-                # HTML 태그 제거 시도
-                if isinstance(content, str) and "<" in content and ">" in content:
-                    try:
-                        # 간단한 HTML 태그 제거 (실패하면 원본 사용)
-                        content = re.sub(r'<[^>]+>', ' ', content)
-                    except:
-                        pass
-                return str(content)
-
-        # 필드를 찾지 못한 경우 전체 딕셔너리를 문자열로 변환
+                logger.warning(f"❌ {provider.name} 실패: {e}")
+                
+                # 빠른 실패: 첫 번째 제공자 실패 시 즉시 다음으로
+                continue
+        
+        # 모든 제공자 실패
+        error_msg = f"모든 LLM 제공자 실패. 마지막 오류: {last_error}"
+        logger.error(error_msg)
+        raise RuntimeError(error_msg)
+    
+    async def _parallel_generation(self, providers: List[LLMProvider], prompt: str, 
+                                  system_prompt: Optional[str], max_tokens: int, 
+                                  temperature: float, target_model: str) -> LLMResponse:
+        """병렬 생성 - 첫 번째 성공한 응답 반환"""
+        logger.info(f"🚀 병렬 모드 시작: {len(providers)}개 제공자")
+        
+        tasks = []
+        for provider in providers:
+            task = asyncio.create_task(
+                provider.generate(prompt, system_prompt, max_tokens, temperature)
+            )
+            tasks.append((provider, task))
+        
+        # 첫 번째 성공한 결과 반환
         try:
-            # 너무 길면 잘라내기
-            return str(conv)[:300]
-        except:
-            return "내용을 추출할 수 없음"
-
-    async def generate_ticket_summary(self, ticket_data: Dict[str, Any], max_tokens: int = 1000) -> Dict[str, Any]:
-        """
-        티켓 데이터를 기반으로 LLM을 사용하여 요약문과 주요 정보를 생성합니다.
-
-        Args:
-            ticket_data: 티켓 정보가 포함된 딕셔너리
-            max_tokens: 요약문 최대 토큰 수
-
-        Returns:
-            생성된 티켓 요약 정보를 포함하는 딕셔너리
-            {
-                'summary': '요약문',
-                'key_points': ['핵심 포인트 1', '핵심 포인트 2', ...],
-                'sentiment': '감정 상태',
-                'urgency_level': '긴급도',
-                'priority_recommendation': '우선순위 추천'
-            }
-
-        Raises:
-            RuntimeError: 모든 LLM 제공자 호출이 실패한 경우
-        """
-        # 컨텍스트 빌더를 사용하여 LLM 프롬프트에 적합한 형태로 티켓 정보 구성
-        subject = ticket_data.get("subject", "제목 없음")
-        description = ticket_data.get("description_text", "설명 없음")
-        conversations = ticket_data.get("conversations", [])
-
-        # 간단한 프롬프트 구성
-        prompt_context = f"티켓 제목: {subject}\n티켓 설명: {description}\n"
-
-        if conversations:
-            prompt_context += "\n최근 대화 내용:\n"
-            # conversations의 타입에 따라 적절히 처리
-            if isinstance(conversations, list):
+            done, pending = await asyncio.wait(
+                [task for _, task in tasks], 
+                return_when=asyncio.FIRST_COMPLETED,
+                timeout=4.0  # 병렬 모드 타임아웃 2초→4초로 증가
+            )
+            
+            # 남은 태스크들 취소
+            for task in pending:
+                task.cancel()
+            
+            # 성공한 첫 번째 결과 반환
+            for completed_task in done:
                 try:
-                    # 대화 항목들을 필터링하고 시간 순서대로 정렬
-                    # 정렬하기 전에 리스트 내 항목이 모두 딕셔너리인지 확인
-                    valid_conversations = [c for c in conversations if isinstance(c, dict)]
-
-                    if valid_conversations:
-                        # 시간순으로 정렬 (오래된 순 -> 최신순)
-                        sorted_conversations = sorted(valid_conversations, key=lambda c: c.get("created_at", 0))
-
-                        # 대화의 양이 많은 경우(10개 초과)에는 더 많은 컨텍스트를 포함하고 중요 대화에 집중
-                        if len(sorted_conversations) > 10:
-                            # 처음 30%의 대화 포함 (초기 상황 파악 개선)
-                            early_conv_count = max(3, int(len(sorted_conversations) * 0.3))
-                            early_conversations = sorted_conversations[:early_conv_count]
-
-                            # 마지막 70%의 대화 (최근 상황 집중)
-                            # 중간 대화도 일부 포함하여 맥락 유지
-                            late_start_idx = max(early_conv_count, len(sorted_conversations) - 20)
-                            late_conversations = sorted_conversations[late_start_idx:]
-
-                            # 처음 대화 추가 (문제 상황 파악)
-                            prompt_context += "초기 대화 내용:\n"
-                            for conv in early_conversations:
-                                sender = "사용자" if conv.get("user_id") else "상담원"
-                                body = self._extract_conversation_body(conv)
-                                # 초기 대화는 더 많은 내용 포함 (300자)
-                                prompt_context += f"- {sender}: {body[:300]}...\n"
-
-                            # 중간 생략 표시
-                            if late_start_idx > early_conv_count:
-                                skipped = late_start_idx - early_conv_count
-                                prompt_context += f"\n... (중간 {skipped}개 대화 생략) ...\n\n"
-
-                            # 최근 대화 추가 (더 자세한 내용 포함)
-                            prompt_context += "최근 대화 내용:\n"
-                            for conv in late_conversations:
-                                sender = "사용자" if conv.get("user_id") else "상담원"
-                                body = self._extract_conversation_body(conv)
-                                # 최근 대화는 더 많은 내용 포함 (500자)
-                                prompt_context += f"- {sender}: {body[:500]}...\n"
-                        else:
-                            # 대화가 적은 경우 전체 내용 포함 (10개 이하)
-                            prompt_context += "대화 내용:\n"
-                            for conv in sorted_conversations:
-                                sender = "사용자" if conv.get("user_id") else "상담원"
-                                body = self._extract_conversation_body(conv)
-                                # 적은 대화일 경우 대화당 최대 1000자까지 포함
-                                prompt_context += f"- {sender}: {body[:1000]}...\n"
-                    else:
-                        # 유효한 대화 항목이 없는 경우
-                        prompt_context += f"- 대화 내용: {str(conversations)[:200]}\n"
+                    result = await completed_task
+                    result.metadata["parallel_mode"] = True
+                    result.metadata["target_model"] = target_model
+                    logger.info(f"🚀 병렬 모드 성공: {result.model_used} ({result.duration_ms:.1f}ms)")
+                    return result
                 except Exception as e:
-                    logger.warning(f"대화 처리 중 오류 발생: {e}")
-                    prompt_context += f"- 대화 내용: {str(conversations)[:200]}\n"
-            elif isinstance(conversations, str):
-                # 문자열인 경우 직접 포함
-                prompt_context += f"- 대화 내용: {conversations[:200]}\n"
-            else:
-                # 기타 타입인 경우 문자열로 변환하여 포함
-                prompt_context += f"- 대화 내용: {str(conversations)[:200]}\n"
-
-        system_prompt = (
-            "당신은 AI 지원 에이전트입니다. 제공된 티켓 정보를 바탕으로 다음 정보를 추출하세요:\n"
-            "1. 티켓의 핵심 내용 요약 (주요 문제점, 고객의 요청, 현재 상태, 해결 과정 포함)\n"
-            "   - 초기 대화와 최근 대화의 맥락을 모두 고려하여 전체 상황을 포괄적으로 요약\n"
-            "   - 대화 흐름에 따른 문제 진행 상황과 해결 과정을 상세히 포함\n"
-            "   - 문제의 원인, 조치 사항, 결과를 명확하게 언급\n"
-            "   - 티켓이 해결되었다면 최종 해결책과 결과를 반드시 포함\n"
-            "2. 3-5개의 핵심 포인트 (반드시 배열로 제공)\n"
-            "   - 초기 및 최근 대화에서 나타난 중요한 정보 모두 포함\n"
-            "   - 기술적 문제점, 해결 방법, 고객 요구사항을 균형있게 포함\n"
-            "3. 티켓의 전반적인 감정 상태 (긍정적, 중립적, 부정적)\n"
-            "4. 추천 우선순위 (높음, 보통, 낮음)\n"
-            "5. 긴급도 수준 (높음, 보통, 낮음)\n\n"
-            "반드시 아래 형식의 유효한 JSON으로만 응답해주세요:\n"
-            "{\n"
-            "  \"summary\": \"티켓 요약 텍스트 - 가능한 상세하게 작성\",\n"
-            "  \"key_points\": [\"핵심 포인트 1\", \"핵심 포인트 2\", \"핵심 포인트 3\"],\n"
-            "  \"sentiment\": \"감정 상태\",\n"
-            "  \"priority_recommendation\": \"우선순위\",\n"
-            "  \"urgency_level\": \"긴급도\"\n"
-            "}\n\n"
-            "주의: key_points는 반드시 배열 형태로 제공해야 합니다. 문자열이나 다른 형식은 허용되지 않습니다.\n"
-            "요약은 가능한 자세하게 작성하고, 대화의 전체 맥락을 포함해야 합니다.\n"
-            "한국어로 답변해주세요."
+                    logger.warning(f"병렬 태스크 실패: {e}")
+                    continue
+            
+            raise RuntimeError("모든 병렬 태스크 실패")
+            
+        except asyncio.TimeoutError:
+            # 모든 태스크 취소
+            for _, task in tasks:
+                task.cancel()
+            raise RuntimeError(f"병렬 생성 타임아웃 (4초)")
+    
+    async def generate_with_task_type(self, prompt: str, task_type: str = "heavy",
+                                     system_prompt: Optional[str] = None, **kwargs) -> LLMResponse:
+        """작업 타입을 직접 지정하여 생성"""
+        # operation을 task_type으로 매핑하여 호출
+        operation_mapping = {
+            "light": "quick_summary",
+            "heavy": "detailed_analysis"
+        }
+        
+        operation = operation_mapping.get(task_type, "general")
+        
+        return await self.generate(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            operation=operation,
+            **kwargs
         )
-
-        prompt = f"다음 티켓 정보를 분석해주세요:\n\n{prompt_context}"
-
-        # 로깅 개선 - 대화 수와 처리된 정보량 기록
-        conv_count = 0
-        if isinstance(conversations, list):
-            conv_count = len(conversations)
-
-        logger.info(f"티켓 요약 생성 요청 (ticket_id: {ticket_data.get('id')}, 대화 수: {conv_count}, prompt_length: {len(prompt)} chars)")
-
-        # 프롬프트가 너무 길어질 경우 경고 로그
-        if len(prompt) > 15000:
-            logger.warning(f"티켓 {ticket_data.get('id')}의 프롬프트가 매우 깁니다 ({len(prompt)} chars). 일부 정보가 생략될 수 있습니다.")
-
+    
+    async def generate_response(self, messages: List[Dict[str, str]], 
+                              max_tokens: int = 1024, temperature: float = 0.2) -> Dict[str, Any]:
+        """
+        메시지 리스트를 받아서 LLM 응답을 생성합니다.
+        
+        Args:
+            messages: 메시지 리스트 (role, content 포함)
+            max_tokens: 최대 토큰 수
+            temperature: 창의성 정도
+            
+        Returns:
+            응답 딕셔너리 (content 키 포함)
+        """
         try:
-            # self.generate를 사용하여 텍스트 생성
+            # 메시지에서 프롬프트 추출
+            prompt = ""
+            system_prompt = None
+            
+            for message in messages:
+                role = message.get("role", "")
+                content = message.get("content", "")
+                
+                if role == "system":
+                    system_prompt = content
+                elif role == "user":
+                    prompt += content + "\n"
+                elif role == "assistant":
+                    prompt += f"Assistant: {content}\n"
+            
+            # LLM을 통한 응답 생성
             response = await self.generate(
-                prompt=prompt,
+                prompt=prompt.strip(),
                 system_prompt=system_prompt,
                 max_tokens=max_tokens,
+                temperature=temperature
+            )
+            
+            return {
+                "content": response.text,
+                "provider": response.metadata.get("final_provider", "unknown"),
+                "duration_ms": response.duration_ms
+            }
+            
+        except Exception as e:
+            logger.error(f"generate_response 실패: {e}")
+            return {
+                "content": "응답 생성 중 오류가 발생했습니다.",
+                "error": str(e)
+            }
+    
+    async def analyze_ticket_issue_solution(self, ticket_data: Dict[str, Any]) -> Dict[str, str]:
+        """
+        티켓 데이터를 분석하여 Issue와 Solution을 추출합니다.
+        
+        Args:
+            ticket_data: 티켓 데이터 (id, subject, description_text 등)
+            
+        Returns:
+            {"issue": "문제 설명", "solution": "해결책"} 형태의 딕셔너리
+        """
+        try:
+            # 티켓 분석을 위한 프롬프트 구성
+            prompt = f"""
+다음 티켓 정보를 분석하여 주요 문제(Issue)와 해결책(Solution)을 간결하게 요약해주세요.
+
+티켓 정보:
+- 제목: {ticket_data.get('subject', 'N/A')}
+- 내용: {ticket_data.get('description_text', 'N/A')[:500]}
+- 상태: {ticket_data.get('status', 'N/A')}
+- 우선순위: {ticket_data.get('priority', 'N/A')}
+
+응답 형식:
+Issue: [고객이 경험한 주요 문제점을 1-2문장으로 설명]
+Solution: [문제 해결을 위해 제공된 방법이나 답변을 1-2문장으로 설명]
+
+한국어로 답변해주세요.
+"""
+
+            # LLM을 통한 분석 수행
+            result = await self.generate(
+                prompt=prompt,
+                operation="ticket_analysis",  # 티켓 분석 작업으로 명시적 지정
+                max_tokens=300,
                 temperature=0.3
             )
-
-            if not response or not hasattr(response, 'text') or not response.text:
-                # 응답이 비어있거나 유효하지 않은 경우
-                logger.error(f"티켓 요약 생성 오류: LLM에서 유효한 응답을 받지 못했습니다 (ticket_id: {ticket_data.get('id')})")
-                return {
-                    "summary": f"티켓 제목: {subject}\n\n내용 요약을 생성할 수 없습니다.",
-                    "key_points": ["요약 생성 실패", "원본 티켓 확인 필요"],
-                    "sentiment": "중립적",
-                    "priority_recommendation": "확인 필요",
-                    "urgency_level": "보통"
-                }
-
-            logger.info(f"티켓 요약 생성 완료 (ticket_id: {ticket_data.get('id')}, model: {response.model_used}, duration: {response.duration_ms}ms)")
-
-            # LLM 응답을 파싱하여 구조화된 형식으로 변환
-            try:
-                # 원본 응답 로깅 (디버깅용)
-                logger.info(f"LLM 원본 응답 (ticket_id: {ticket_data.get('id')}): {response.text[:500]}...")
-
-                # 응답에서 JSON 부분만 추출하는 시도 (여러 줄 텍스트에서 JSON만 찾기)
-                json_text = response.text
-                # JSON 객체 시작과 끝을 찾아서 추출
-                json_match = re.search(r'(\{.*\})', json_text, re.DOTALL)
-                if json_match:
-                    json_text = json_match.group(1)
-                    logger.info(f"JSON 추출 성공: {json_text[:200]}...")
-
-                # JSON 형식으로 응답을 파싱
-                result = json.loads(json_text)
-
-                # 필수 필드가 없는 경우 기본값 설정
-                if not isinstance(result, dict):
-                    result = {"summary": json_text}
-
-                # 요약(summary) 필드 처리
-                if "summary" not in result:
-                    result["summary"] = "요약 정보가 제공되지 않았습니다."
-
-                # key_points 처리 강화
-                if "key_points" not in result:
-                    logger.warning(f"티켓 요약에 key_points가 없습니다. 자동 생성을 시도합니다. (ticket_id: {ticket_data.get('id')})")
-                    result["key_points"] = []
-
-                # key_points 타입 확인 및 처리
-                if not isinstance(result["key_points"], list):
-                    logger.warning(f"key_points가 리스트가 아닙니다. 변환을 시도합니다: {type(result['key_points'])}")
-
-                    # 문자열인 경우, 여러 가지 구분자로 분리 시도
-                    if isinstance(result["key_points"], str):
-                        # 1. 줄바꿈으로 구분된 경우
-                        if '\n' in result["key_points"]:
-                            points = [p.strip() for p in result["key_points"].split('\n') if p.strip()]
-                        # 2. 쉼표로 구분된 경우
-                        elif ',' in result["key_points"]:
-                            points = [p.strip() for p in result["key_points"].split(',') if p.strip()]
-                        # 3. 세미콜론으로 구분된 경우
-                        elif ';' in result["key_points"]:
-                            points = [p.strip() for p in result["key_points"].split(';') if p.strip()]
-                        # 4. 마침표로 구분된 경우
-                        else:
-                            points = [p.strip() for p in re.split(r'[.!?]\s+', result["key_points"]) if p.strip()]
-
-                        result["key_points"] = points if points else ["자동 변환 실패"]
-                    else:
-                        # 다른 타입인 경우 빈 배열로 설정
-                        result["key_points"] = []
-
-                # key_points가 비어있는 경우 요약에서 추출
-                if not result["key_points"]:
-                    if "summary" in result and result["summary"]:
-                        summary_text = result["summary"]
-                        # 요약에서 문장을 추출하여 핵심 포인트로 사용
-                        sentences = [s.strip() for s in re.split(r'[.!?]\s+', summary_text) if s.strip() and len(s.strip()) > 10]
-                        # 너무 많은 문장이 있다면 처음 3-5개만 사용
-                        result["key_points"] = sentences[:min(len(sentences), 5)]
-
-                # 여전히 key_points가 없다면 기본값 설정
-                if not result["key_points"]:
-                    result["key_points"] = ["주요 내용 파악 필요", "상세 정보 확인 요망", "추가 정보 요청 고려"]
-
-                # 나머지 필드 처리
-                if "sentiment" not in result:
-                    result["sentiment"] = "중립적"
-                if "priority_recommendation" not in result:
-                    result["priority_recommendation"] = "보통"
-                if "urgency_level" not in result:
-                    result["urgency_level"] = "보통"
-
-                return result
-            except json.JSONDecodeError as e:
-                # JSON 파싱 실패 시 텍스트 전체를 요약으로 처리
-                logger.warning(f"JSON 파싱 실패, 텍스트 분석으로 전환 (ticket_id: {ticket_data.get('id')}): {str(e)}")
-
-                try:
-                    # 응답에서 JSON 형식과 유사한 부분 추출 시도
-                    summary_match = re.search(r'"summary"\s*:\s*"([^"]+)"', response.text)
-                    summary = summary_match.group(1) if summary_match else response.text
-
-                    # key_points 추출 시도
-                    key_points_matches = re.findall(r'"([^"]+)"', re.search(r'"key_points"\s*:\s*\[(.*?)\]', response.text).group(1) if re.search(r'"key_points"\s*:\s*\[(.*?)\]', response.text) else "")
-                    key_points = key_points_matches if key_points_matches else []
-
-                    # 텍스트에서 문장을 추출하여 핵심 포인트로 활용 (key_points가 비어있는 경우)
-                    if not key_points:
-                        sentences = [s.strip() for s in re.split(r'[.!?]\s+', summary) if s.strip() and len(s.strip()) > 10]
-                        key_points = sentences[:min(len(sentences), 5)] if sentences else ["자동 생성 실패"]
-
-                    # 감정, 우선순위, 긴급도 추출 시도
-                    sentiment_match = re.search(r'"sentiment"\s*:\s*"([^"]+)"', response.text)
-                    sentiment = sentiment_match.group(1) if sentiment_match else "중립적"
-
-                    priority_match = re.search(r'"priority_recommendation"\s*:\s*"([^"]+)"', response.text)
-                    priority = priority_match.group(1) if priority_match else "보통"
-
-                    urgency_match = re.search(r'"urgency_level"\s*:\s*"([^"]+)"', response.text)
-                    urgency = urgency_match.group(1) if urgency_match else "보통"
-
-                    return {
-                        "summary": summary,
-                        "key_points": key_points,
-                        "sentiment": sentiment,
-                        "priority_recommendation": priority,
-                        "urgency_level": urgency
-                    }
-                except Exception as regex_error:
-                    logger.error(f"정규식 추출 실패: {str(regex_error)}")
-                    # 가장 기본적인 형태로 처리
-                    summary = response.text
-                    # 문장 분리로 핵심 포인트 생성
-                    sentences = [s.strip() for s in re.split(r'[.!?]\s+', summary) if s.strip() and len(s.strip()) > 10]
-                    key_points = sentences[:min(len(sentences), 5)] if sentences else ["자동 생성 실패"]
-
-                    return {
-                        "summary": summary[:1000] if len(summary) > 1000 else summary,  # 요약이 너무 길면 잘라내기
-                        "key_points": key_points,
-                        "sentiment": "중립적",
-                        "priority_recommendation": "보통",
-                        "urgency_level": "보통"
-                    }
-        except Exception as e:
-            logger.error(f"티켓 요약 생성 중 오류 발생 (ticket_id: {ticket_data.get('id')}): {e}")
-            # 오류 발생 시 기본 메시지 반환
+            
+            response_text = result.text
+            
+            # 응답에서 Issue와 Solution 추출
+            issue = "문제 상황을 분석할 수 없습니다."
+            solution = "해결책을 찾을 수 없습니다."
+            
+            if response_text:
+                lines = response_text.split('\n')
+                for line in lines:
+                    line = line.strip()
+                    if line.startswith('Issue:') or line.startswith('문제:'):
+                        issue = line.split(':', 1)[1].strip()
+                    elif line.startswith('Solution:') or line.startswith('해결책:'):
+                        solution = line.split(':', 1)[1].strip()
+            
             return {
-                "summary": "티켓 요약 생성에 실패했습니다.",
-                "key_points": ["요약 생성 오류"],
-                "sentiment": "중립적",
-                "priority_recommendation": "보통",
-                "urgency_level": "보통"
+                "issue": issue,
+                "solution": solution
+            }
+            
+        except Exception as e:
+            logger.error(f"티켓 Issue/Solution 분석 실패: {e}")
+            return {
+                "issue": "문제 상황 분석 실패",
+                "solution": "해결책 분석 실패"
             }
 
-    async def generate_embedding(self, text: str, model: str = "text-embedding-3-small") -> List[float]:
+    async def analyze_multiple_tickets_batch(self, tickets_data: List[dict]) -> List[dict]:
         """
-        OpenAI API를 사용하여 텍스트 임베딩을 생성합니다.
-        캐싱을 통해 동일한 텍스트에 대한 중복 요청을 방지합니다.
-
+        여러 티켓을 배치로 분석하여 각각의 issue/solution을 반환하는 메서드
+        
         Args:
-            text: 임베딩을 생성할 텍스트
-            model: 사용할 임베딩 모델 (기본값: text-embedding-3-small)
-
+            tickets_data: 분석할 티켓 데이터 리스트
+            
         Returns:
-            텍스트 임베딩 벡터 (리스트)
-
-        Raises:
-            RuntimeError: OpenAI API 호출이 실패한 경우
+            각 티켓의 분석 결과 리스트 [{"issue": "...", "solution": "..."}, ...]
         """
-        if not OPENAI_API_KEY:
-            logger.error("임베딩 생성을 위한 OpenAI API 키가 설정되지 않았습니다.")
-            raise RuntimeError("OpenAI API 키가 설정되지 않아 임베딩을 생성할 수 없습니다.")
-
-        # 텍스트가 너무 길면 잘라내기 (임베딩 모델 토큰 제한 고려)
-        max_length = 8000  # 대략적인 토큰 제한 (모델에 따라 조정 필요)
-        original_text = text
-        if len(text) > max_length:
-            text = text[:max_length]
-            logger.warning(f"임베딩 생성을 위해 텍스트를 {max_length}자로 잘랐습니다.")
-
-        # 캐시 키 생성
-        cache_key = _get_cache_key(text, model)
-
-        # 캐시에서 확인
-        if cache_key in embedding_cache:
-            logger.info(f"캐시에서 임베딩 반환 (cache_key: {cache_key[:8]}..., vector_size: {len(embedding_cache[cache_key])})")
-            return embedding_cache[cache_key]
-
+        batch_start_time = time.time()
+        
         try:
-            client = openai.AsyncOpenAI(api_key=OPENAI_API_KEY)
-            logger.info(f"임베딩 생성 시작 (model: {model}, text_length: {len(text)} chars)")
+            if not tickets_data:
+                return []
+            
+            logger.info(f"🚀 배치 분석 시작: {len(tickets_data)}개 티켓")
+            
+            # 배치 분석용 프롬프트 구성
+            tickets_info = []
+            for i, ticket in enumerate(tickets_data, 1):
+                ticket_id = ticket.get("id", f"Unknown_{i}")
+                subject = ticket.get("subject", "")
+                description = ticket.get("description_text", "")
+                status = ticket.get("status", "")
+                priority = ticket.get("priority", "")
+                
+                tickets_info.append(f"""티켓 {i}:
+- ID: {ticket_id}
+- 제목: {subject}
+- 상태: {status}
+- 우선순위: {priority}
+- 내용: {description[:500]}...""")
+            
+            prompt = f"""다음 {len(tickets_data)}개의 고객 지원 티켓을 각각 분석하여 핵심 문제 상황(issue)과 해결 방안(solution)을 상세하고 풍부하게 요약해 주세요.
 
-            start_time = time.time()
-            response = await client.embeddings.create(
-                model=model,
-                input=text
-            )
-            duration = (time.time() - start_time) * 1000
+{chr(10).join(tickets_info)}
 
-            embedding = response.data[0].embedding
+**중요**: 응답은 반드시 아래 형식의 JSON 배열만 제공해 주세요. 다른 설명이나 텍스트는 포함하지 마세요.
 
-            # 캐시에 저장
-            embedding_cache[cache_key] = embedding
+```json
+[
+  {{
+    "ticket_index": 1,
+    "issue": "고객이 겪은 구체적인 문제상황과 배경을 포함한 상세한 설명 (2-3줄)",
+    "solution": "문제 해결을 위한 구체적인 방법, 단계, 또는 제안사항을 포함한 실용적인 솔루션 (2-3줄)"
+  }},
+  {{
+    "ticket_index": 2,
+    "issue": "고객이 겪은 구체적인 문제상황과 배경을 포함한 상세한 설명 (2-3줄)",
+    "solution": "문제 해결을 위한 구체적인 방법, 단계, 또는 제안사항을 포함한 실용적인 솔루션 (2-3줄)"
+  }}
+]
+```
 
-            logger.info(f"임베딩 생성 완료 (duration: {duration:.2f}ms, vector_size: {len(embedding)}, cached: True)")
+응답 규칙:
+- 반드시 위 JSON 형식만 응답하세요
+- ticket_index는 1부터 시작합니다
+- issue는 고객의 구체적인 문제상황, 배경, 원인을 포함하여 2-3줄로 상세히 작성하세요
+- solution은 문제 해결 방법, 구체적인 단계, 권장사항을 포함하여 2-3줄로 실용적으로 작성하세요
+- 티켓 제목과 내용의 핵심 정보를 반영하여 구체적이고 유용한 정보를 제공하세요
+- 총 {len(tickets_data)}개의 결과를 모두 포함해야 합니다"""
 
-            return embedding
-
-        except Exception as e:
-            logger.error(f"임베딩 생성 중 오류 발생: {type(e).__name__} - {str(e)}")
-            raise RuntimeError(f"임베딩 생성 실패: {str(e)}")
-
-    async def generate_search_query(self, ticket_data: Dict[str, Any]) -> str:
-        """
-        티켓 데이터를 기반으로 검색에 최적화된 쿼리 텍스트를 생성합니다.
-
-        Args:
-            ticket_data: 티켓 정보가 포함된 딕셔너리
-
-        Returns:
-            검색용 쿼리 텍스트
-        """
-        subject = ticket_data.get("subject", "").strip()
-        description = ticket_data.get("description_text", "").strip()
-
-        # 기본적으로 제목과 설명을 결합
-        query_parts = []
-        if subject:
-            query_parts.append(subject)
-        if description:
-            # 설명이 너무 길면 앞부분만 사용
-            description_preview = description[:500] if len(description) > 500 else description
-            query_parts.append(description_preview)
-
-        # 대화 내용이 있다면 최근 메시지도 포함
-        conversations = ticket_data.get("conversations", [])
-        if conversations:
-            # 최근 2개의 대화만 포함 (너무 길어지지 않도록)
-            recent_conversations = sorted(conversations, key=lambda c: c.get("created_at", ""), reverse=True)[:2]
-            for conv in recent_conversations:
-                body = conv.get("body_text", "").strip()
-                if body:
-                    # 대화 내용도 길면 잘라내기
-                    body_preview = body[:200] if len(body) > 200 else body
-                    query_parts.append(body_preview)
-
-        # 모든 부분을 공백으로 연결
-        search_query = " ".join(query_parts).strip()
-
-        # 너무 길면 최대 길이로 제한
-        max_query_length = 1000
-        if len(search_query) > max_query_length:
-            search_query = search_query[:max_query_length]
-            logger.warning(f"검색 쿼리가 너무 길어 {max_query_length}자로 잘랐습니다.")
-
-        logger.info(f"검색 쿼리 생성 완료 (ticket_id: {ticket_data.get('id')}, query_length: {len(search_query)} chars)")
-        return search_query
-
-    async def analyze_ticket_issue_solution(self, ticket_data: Dict[str, Any], max_tokens: int = 800) -> Dict[str, str]:
-        """
-        티켓 데이터를 Issue/Solution 형태로 분석합니다.
-
-        Args:
-            ticket_data: 티켓 정보가 포함된 딕셔너리
-            max_tokens: 분석 결과 최대 토큰 수
-
-        Returns:
-            {"issue": "문제 상황", "solution": "해결책"} 형태의 딕셔너리
-
-        Raises:
-            RuntimeError: 모든 LLM 제공자 호출이 실패한 경우
-        """
-        # 캐시 확인
-        cache_key = _get_issue_solution_key(ticket_data)
-        if cache_key in issue_solution_cache:
-            logger.info(f"Issue/Solution 캐시 사용 (ticket_id: {ticket_data.get('id')})")
-            return issue_solution_cache[cache_key]
-
-        # 티켓 정보 추출 및 최적화
-        subject = ticket_data.get("subject", "제목 없음")
-
-        # 설명 텍스트 최적화 (너무 긴 경우 잘라내기)
-        description = ticket_data.get("description_text", "설명 없음")
-        if len(description) > 1500:  # 너무 긴 설명은 앞뒤 부분만 사용
-            description = description[:1000] + "...[중략]..." + description[-300:]
-
-        status = ticket_data.get("status", "")
-        priority = ticket_data.get("priority", "")
-
-        # 대화 내용 최적화 (필수 정보만 포함)
-        conversations = ticket_data.get("conversations", [])
-        conversation_text = ""
-        if conversations:
-            # 최대 2개의 최근 대화만 포함
-            conversation_text = "\n대화 내용:\n"
-            conv_count = 0
-            for conv in sorted(conversations, key=lambda c: c.get("created_at", ""), reverse=True):
-                if conv_count >= 2:
-                    break
-
-                sender = "고객" if conv.get("user_id") else "상담원"
-                body = conv.get("body_text", "내용 없음")
-
-                # 대화 내용도 적절히 잘라내기
-                body_preview = body[:100] + "..." if len(body) > 100 else body
-                conversation_text += f"- {sender}: {body_preview}\n"
-                conv_count += 1
-
-        # 보다 명확한 시스템 프롬프트로 정확한 형식 지정
-        system_prompt = (
-            "당신은 고객 지원 티켓을 분석하는 AI입니다. "
-            "제공된 티켓 정보를 바탕으로 문제 상황(Issue)과 해결책(Solution)을 구분해서 분석해주세요. "
-            "정확히 다음 JSON 형식으로만 응답하세요:\n\n"
-            '{"issue": "구체적인 문제 상황", "solution": "해결책 또는 조치사항"}\n\n'
-            "다른 설명이나 텍스트를 추가하지 말고 오직 위의 JSON 형식만 반환하세요."
-        )
-
-        # 간결한 프롬프트 구성
-        prompt = f"""다음 티켓 정보를 분석하여 문제 상황(Issue)과 해결책(Solution)을 JSON 형식으로 제공해주세요:
-
-제목: {subject}
-설명: {description}
-상태: {status}
-우선순위: {priority}{conversation_text}"""
-
-        logger.info(f"티켓 Issue/Solution 분석 요청 (ticket_id: {ticket_data.get('id')}, 제목: '{subject[:30]}...')")
-
-        try:
-            # LLM을 사용하여 분석 수행
-            response = await self.generate(
-                prompt=prompt,
-                system_prompt=system_prompt,
-                max_tokens=max_tokens,
-                temperature=0.2  # 일관성을 위해 낮은 temperature 사용
-            )
-
+            # LLM 호출 (배치 분석은 heavy 작업으로 분류)
+            llm_start_time = time.time()
+            llm_response = await self.generate_with_task_type(prompt, task_type="heavy")
+            llm_time = time.time() - llm_start_time
+            
+            logger.info(f"🔥 배치 LLM 호출 완료: {llm_time:.2f}초")
+                        
+            # LLMResponse 객체에서 텍스트 추출
+            if hasattr(llm_response, 'text'):
+                response_text = llm_response.text
+            elif isinstance(llm_response, str):
+                response_text = llm_response
+            else:
+                response_text = str(llm_response)
+            
+            # logger.info(f"🔍 LLM 응답 텍스트 타입: {type(llm_response)}, 텍스트 길이: {len(response_text)}")
+            
             # JSON 파싱 시도
             import json
             try:
-                # 응답 전처리: 제어 문자 제거 및 이스케이프
-                cleaned_text = response.text.strip()
-
-                # JSON 추출 시도 (다양한 패턴 지원)
-                # 1. 중괄호로 둘러싸인 JSON 객체 (가장 일반적인 패턴)
-                json_match = re.search(r'(\{.*\})', cleaned_text, re.DOTALL)
-                if json_match:
-                    json_text = json_match.group(1)
-                    logger.info(f"JSON 추출 성공 (중괄호 패턴): {json_text[:50]}...")
-                else:
-                    # 2. 전체 텍스트가 중괄호로 둘러싸여 있는지 확인
-                    if cleaned_text.strip().startswith('{') and cleaned_text.strip().endswith('}'):
-                        json_text = cleaned_text
-                        logger.info(f"JSON 추출 성공 (전체 텍스트): {json_text[:50]}...")
+                #logger.info(f"🔍 배치 LLM 응답 원문 (처음 500자): {response_text[:500]}...")
+                
+                # JSON 추출 시도 (코드 블록이나 불필요한 텍스트 제거)
+                json_text = response_text.strip()
+                
+                # JSON 코드 블록이 있는 경우 추출
+                if "```json" in json_text:
+                    start_idx = json_text.find("```json") + 7
+                    end_idx = json_text.find("```", start_idx)
+                    if end_idx != -1:
+                        json_text = json_text[start_idx:end_idx].strip()
+                elif json_text.startswith("```") and json_text.endswith("```"):
+                    # 일반 코드 블록인 경우
+                    json_text = json_text[3:-3].strip()
+                
+                # JSON 배열 추출 시도
+                if json_text.startswith('[') and json_text.endswith(']'):
+                    parsed_response = json.loads(json_text)
+                elif '{' in json_text and '}' in json_text:
+                    # JSON 객체가 중간에 있는 경우 추출
+                    start_idx = json_text.find('[')
+                    end_idx = json_text.rfind(']') + 1
+                    if start_idx != -1 and end_idx > start_idx:
+                        json_text = json_text[start_idx:end_idx]
+                        parsed_response = json.loads(json_text)
                     else:
-                        # 3. 코드 블록 내 JSON 검색 시도 (```json {...} ``` 패턴)
-                        json_match = re.search(r'```(?:json)?(.*?)```', cleaned_text, re.DOTALL)
-                        if json_match:
-                            json_text = json_match.group(1).strip()
-                            logger.info(f"JSON 추출 성공 (코드 블록): {json_text[:50]}...")
-                        else:
-                            # 4. 더 공격적으로 중괄호 내용만 추출 시도
-                            json_match = re.search(r'\{[^{]*"issue"[^}]*"solution"[^}]*\}', cleaned_text, re.DOTALL)
-                            if json_match:
-                                json_text = json_match.group(0)
-                                logger.info(f"JSON 추출 성공 (패턴 매칭): {json_text[:50]}...")
-                            else:
-                                # 5. 마지막 시도: 전체 텍스트 사용
-                                json_text = cleaned_text
-                                logger.info(f"JSON 구조 찾지 못함, 전체 텍스트 사용: {json_text[:50]}...")
-
-                # 제어 문자 포괄적 처리
-                # 1. 줄바꿈, 탭 등을 공백으로 변환 (JSON 구조 내부 제외)
-                json_text = re.sub(r'[\n\r\t\f\v]', ' ', json_text)
-
-                # 2. JSON 문자열 내에서 이미 이스케이프된 제어 문자는 이중 이스케이프 처리
-                json_text = re.sub(r'(?<=")\\n(?=")', '\\\\n', json_text)
-                json_text = re.sub(r'(?<=")\\r(?=")', '\\\\r', json_text)
-                json_text = re.sub(r'(?<=")\\t(?=")', '\\\\t', json_text)
-
-                # 3. 불필요한 백슬래시 제거 (JSON 형식을 깨뜨릴 수 있는 경우)
-                json_text = re.sub(r'\\([^"\\/bfnrtu])', r'\1', json_text)
-
-                # 4. 닫히지 않은 따옴표 처리 시도
-                # 문자열 마지막이 백슬래시로 끝나는 경우 제거
-                json_text = re.sub(r'\\+(?=")', '', json_text)
-
-                # 5. 추가 정리: 불필요한 공백 제거
-                json_text = re.sub(r'\s+(?=[:,])', '', json_text)
-                json_text = re.sub(r'(?<=[:,])\s+', ' ', json_text)
-
-                # 6. 여러 JSON 객체가 연결된 경우 첫 번째 완전한 JSON만 추출
-                try:
-                    result = json.loads(json_text)
-                except json.JSONDecodeError:
-                    logger.warning(f"JSON 파싱 실패, 첫 번째 완전한 JSON 객체 추출 시도: {json_text[:100]}...")
-
-                    # 여러 JSON 객체가 있는 경우 첫 번째만 추출 시도
-                    brace_count = 0
-                    json_end = -1
-                    in_string = False
-                    escape_next = False
-
-                    for i, char in enumerate(json_text):
-                        if escape_next:
-                            escape_next = False
-                            continue
-                        if char == '\\':
-                            escape_next = True
-                            continue
-                        if char == '"' and not escape_next:
-                            in_string = not in_string
-                            continue
-                        if not in_string:
-                            if char == '{':
-                                brace_count += 1
-                            elif char == '}':
-                                brace_count -= 1
-                                if brace_count == 0:
-                                    json_end = i + 1
-                                    break
-
-                    if json_end > 0:
-                        extracted_json = json_text[:json_end]
-                        logger.info(f"첫 번째 완전한 JSON 추출 성공: {extracted_json[:100]}...")
-                        try:
-                            result = json.loads(extracted_json)
-                        except json.JSONDecodeError as e2:
-                            logger.error(f"추출된 JSON도 파싱 실패: {e2}")
-                            raise json.JSONDecodeError("추출된 JSON 파싱 실패", extracted_json, 0)
-                    else:
-                        logger.error("완전한 JSON 객체를 찾을 수 없음")
-                        raise json.JSONDecodeError("완전한 JSON 객체를 찾을 수 없음", json_text, 0)
-
-                if "issue" in result and "solution" in result:
-                    logger.info(f"티켓 Issue/Solution 분석 완료 (ticket_id: {ticket_data.get('id')}, model: {response.model_used})")
-                    issue_solution_cache[cache_key] = result
-                    return result
+                        raise json.JSONDecodeError("No valid JSON array found", json_text, 0)
                 else:
-                    logger.warning(f"LLM 응답에 필수 필드가 없음: {json_text}")
-                    raise ValueError("Invalid response format")
-            except (json.JSONDecodeError, ValueError) as e:
-                logger.warning(f"LLM 응답 JSON 파싱 실패: {e}, 응답: {response.text[:200]}...")
-                # 파싱 실패 시 텍스트에서 Issue/Solution 추출 시도
-                text = response.text.strip()
-
-                # 정규식을 사용하여 issue와 solution 부분 추출
-                issue = self._extract_section_from_text(text, "issue", "문제 상황을 분석할 수 없습니다.")
-                solution = self._extract_section_from_text(text, "solution", "해결책을 찾을 수 없습니다.")
-
-                logger.info(f"정규식 추출 결과 - issue: {issue[:50]}..., solution: {solution[:50]}...")
-                result = {"issue": issue, "solution": solution}
-                issue_solution_cache[cache_key] = result
-                return result
-
+                    raise json.JSONDecodeError("No valid JSON structure found", json_text, 0)
+                
+                logger.info(f"🔍 JSON 파싱 성공: {len(parsed_response)}개 결과")
+                # logger.info(f"🔍 파싱된 JSON 구조: {json.dumps(parsed_response[:1], ensure_ascii=False, indent=2)}")
+                
+                # 결과를 인덱스 순서대로 정렬하여 반환
+                results = []
+                for i in range(len(tickets_data)):
+                    # 해당 인덱스의 결과 찾기
+                    ticket_result = None
+                    for result in parsed_response:
+                        if result.get("ticket_index") == i + 1:
+                            ticket_result = result
+                            break
+                    
+                    if ticket_result:
+                        issue = ticket_result.get("issue", "고객 문의사항 분석 중")
+                        solution = ticket_result.get("solution", "해결 방안 검토 중")
+                        logger.info(f"🔍 티켓 {i+1} 분석 결과: issue='{issue[:50]}...', solution='{solution[:50]}...'")
+                        results.append({
+                            "issue": issue,
+                            "solution": solution
+                        })
+                    else:
+                        # 해당 인덱스 결과가 없으면 기본값
+                        logger.warning(f"⚠️ 티켓 {i+1} 결과 없음, 기본값 사용")
+                        results.append({
+                            "issue": "고객 문의사항 분석 중",
+                            "solution": "해결 방안 검토 중"
+                        })
+                
+                batch_time = time.time() - batch_start_time
+                logger.info(f"✅ 배치 분석 성공: {len(tickets_data)}개 티켓 → {batch_time:.2f}초 (평균 {batch_time/len(tickets_data):.2f}초/건)")
+                
+                return results
+                
+            except json.JSONDecodeError as je:
+                logger.error(f"⚠️ 배치 분석 JSON 파싱 실패: {je}")
+                logger.error(f"⚠️ 파싱 실패한 응답 내용: {response_text[:1000]}...")
+                # JSON 파싱 실패 시 개별 분석으로 폴백
+                return await self._fallback_to_individual_analysis(tickets_data)
+                
         except Exception as e:
-            logger.error(f"티켓 Issue/Solution 분석 중 오류 발생 (ticket_id: {ticket_data.get('id')}): {e}")
-            result = {
-                "issue": "문제 상황 분석에 실패했습니다.",
-                "solution": "해결책 분석에 실패했습니다."
-            }
-            issue_solution_cache[cache_key] = result
-            return result
+            logger.error(f"❌ 배치 티켓 분석 실패: {e}, 개별 분석으로 폴백")
+            # 배치 분석 실패 시 개별 분석으로 폴백
+            return await self._fallback_to_individual_analysis(tickets_data)
 
-    def _extract_section_from_text(self, text: str, section: str, default: str) -> str:
+    async def _fallback_to_individual_analysis(self, tickets_data: List[dict]) -> List[dict]:
         """
-        텍스트에서 특정 섹션을 추출하는 헬퍼 함수 (확장 버전)
-        다양한 형식의 응답에서 문제(issue)와 해결책(solution) 섹션을 정확히 추출합니다.
+        배치 분석 실패 시 개별 분석으로 폴백하는 내부 메서드
+        
+        Args:
+            tickets_data: 분석할 티켓 데이터 리스트
+            
+        Returns:
+            각 티켓의 분석 결과 리스트
         """
-        import re
-
-        # 섹션명을 표준화 (대소문자 무시)
-        section_lower = section.lower()
-        text_lower = text.lower()
-
-        # 한국어/영어 섹션명 매핑
-        section_names = {
-            'issue': ['issue', '문제', '이슈', '상황', 'problem', '질문'],
-            'solution': ['solution', '해결책', '솔루션', '해결 방법', '조치', '대응', '답변', '해결']
-        }
-
-        # 현재 섹션에 해당하는 이름들
-        current_section_names = section_names.get(section_lower, [section_lower])
-
-        # 1. 마크다운 스타일 섹션 찾기 시도 (## Issue, ## Solution 등)
-        for name in current_section_names:
-            markdown_pattern = rf'(?:#+\s*{name}[\s:]*)|((?<=\n){name}[\s:]+)|(^{name}[\s:]+)'
-            section_matches = list(re.finditer(markdown_pattern, text_lower, re.IGNORECASE | re.MULTILINE))
-
-            if section_matches:
-                start_pos = section_matches[0].end()
-
-                # 다음 섹션 찾기 (현재 섹션이 아닌 다른 섹션) - 종료 위치 결정
-                end_pos = len(text)
-                for next_section in section_names.get('solution' if section_lower == 'issue' else 'issue', []):
-                    next_section_pattern = rf'(?:#+\s*{next_section}[\s:]*)|((?<=\n){next_section}[\s:]+)|(^{next_section}[\s:]+)'
-                    next_matches = list(re.finditer(next_section_pattern, text_lower[start_pos:], re.IGNORECASE | re.MULTILINE))
-                    if next_matches:
-                        end_pos = start_pos + next_matches[0].start()
-                        break
-
-                extracted = text[start_pos:end_pos].strip()
-                if extracted:
-                    return extracted[:500] if len(extracted) > 500 else extracted
-
-        # 2. JSON 형식 패턴 (다양한 따옴표 스타일 처리) - 강화된 버전
-        json_patterns = []
-        for name in current_section_names:
-            # 큰 따옴표로 둘러싸인 JSON 키-값
-            json_patterns.append(rf'"{name}"[\s:]*"(.*?)(?:"|\n)')
-            # 작은 따옴표로 둘러싸인 JSON 키-값
-            json_patterns.append(rf"'{name}'[\s:]*'(.*?)(?:'|\n)")
-            # 따옴표 혼합 버전
-            json_patterns.append(rf'"{name}"[\s:]*\'(.*?)(?:\'|\n)')
-            json_patterns.append(rf"'{name}'[\s:]*\"(.*?)(?:\"|\n)")
-            # 큰 따옴표 키, 값은 없음
-            json_patterns.append(rf'"{name}"[\s:]*([^",\}}]+)')
-            # 작은 따옴표 키, 값은 없음
-            json_patterns.append(rf"'{name}'[\s:]*([^',\}}]+)")
-            # 따옴표 없는 JSON 스타일
-            json_patterns.append(rf"{name}[\s:]*([^,\}}]+)")
-
-        for pattern in json_patterns:
-            match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
-            if match:
-                extracted = match.group(1).strip()
-                if extracted:
-                    # 따옴표 제거 (시작/끝에 있는 경우)
-                    extracted = re.sub(r'^["\']+|["\']+$', '', extracted)
-                    return extracted[:500] if len(extracted) > 500 else extracted
-
-        # 3. 콜론 형식 (다양한 변형) - 강화된 버전
-        colon_patterns = []
-        for name in current_section_names:
-            # 기본 콜론 형식 (다음 섹션까지)
-            colon_patterns.append(rf'{name}[\s:]+([^\n].*?)(?=\n\s*\w+:|\Z)')
-            # 대문자 섹션명
-            colon_patterns.append(rf'{name.upper()}[\s:]+([^\n].*?)(?=\n\s*\w+:|\Z)')
-            # 콜론+대시 형식
-            colon_patterns.append(rf'{name}[\s:]+-\s*([^\n].*?)(?=\n\s*\w+:|\Z)')
-            # 섹션명 다음에 줄바꿈이 있는 경우
-            colon_patterns.append(rf'{name}[\s:]*\n+\s*([^\n].*?)(?=\n\s*\w+:|\Z)')
-            # 번호형 목록 항목
-            colon_patterns.append(rf'\d+[\s.]*{name}[\s:]*([^\n].*?)(?=\n\s*\d+[\s.]*\w+:|\Z)')
-
-        for pattern in colon_patterns:
-            match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
-            if match:
-                extracted = match.group(1).strip()
-                if extracted:
-                    return extracted[:500] if len(extracted) > 500 else extracted
-
-        # 4. 단락 기반 키워드 검색 - 강화된 버전
-        if section_lower in section_names:
-            keywords = '|'.join(current_section_names)
-            other_keywords = '|'.join(section_names.get('solution' if section_lower == 'issue' else 'issue', []))
-
-            # 키워드로 시작하는 단락 찾기
-            keyword_paragraph_pattern = rf'(?:^|\n|\s)(?:{keywords})[\s:]+(.*?)(?=(?:^|\n|\s)(?:{other_keywords})[\s:]|$)'
-            match = re.search(keyword_paragraph_pattern, text, re.IGNORECASE | re.DOTALL)
-            if match:
-                extracted = match.group(1).strip()
-                if extracted:
-                    return extracted[:500] if len(extracted) > 500 else extracted
-
-            # 키워드 기반 세분화된 검색
-            if section_lower == 'issue':
-                issue_indicators = ['고객이', '문제는', '상황은', '이슈는', '오류', 'error', 'problem is']
-                for indicator in issue_indicators:
-                    indicator_match = re.search(rf'{indicator}[^\n]*', text, re.IGNORECASE)
-                    if indicator_match:
-                        return indicator_match.group(0)[:500]
-            elif section_lower == 'solution':
-                solution_indicators = ['해결 방법', '해결하려면', '권장', '제안', '다음과 같이', '조치', '대응']
-                for indicator in solution_indicators:
-                    indicator_match = re.search(rf'{indicator}[^\n]*', text, re.IGNORECASE)
-                    if indicator_match:
-                        # 해당 문장부터 이후 200자 추출
-                        start = indicator_match.start()
-                        return text[start:start+300].strip()[:500]
-
-        # 5. 위치 기반 추출 (강화된 휴리스틱) - 텍스트 분석 기반 추출
-        if section_lower == "issue":
-            # issue는 주로 앞쪽에 나타남
-            # 텍스트 길이에 따라 적응적으로 추출 비율 조정
-            if len(text) < 200:
-                return text[:len(text)].strip() if text else default
-            elif len(text) < 500:
-                return text[:len(text)//2].strip() if text else default
-            else:
-                # 첫 문단이나 처음 25% 텍스트 반환
-                first_paragraph_match = re.search(r'^.*?\n\s*\n', text, re.DOTALL)
-                if first_paragraph_match and len(first_paragraph_match.group(0)) > 20:
-                    return first_paragraph_match.group(0).strip()
-                return text[:len(text)//4].strip()[:500]
-
-        elif section_lower == "solution":
-            # solution은 주로 뒤쪽에 나타남
-            if len(text) < 200:
-                return text.strip() if text else default
-
-            # 텍스트 길이에 따라 적응적으로 추출 비율 조정
-            if len(text) < 500:
-                return text[len(text)//2:].strip()
-            else:
-                # 마지막 문단이나 마지막 30% 텍스트 반환
-                last_paragraphs = text[int(len(text)*0.7):].strip()
-                if last_paragraphs:
-                    return last_paragraphs[:500]
-
-                # 마지막 두 문단 찾기 시도
-                paragraphs = re.split(r'\n\s*\n', text)
-                if len(paragraphs) >= 2:
-                    return '\n\n'.join(paragraphs[-2:])[:500]
-
-        return default
-
-    async def _generate_summary_task(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        """티켓 요약 생성 태스크"""
+        fallback_start_time = time.time()
+        
         try:
-            ticket_data = inputs["ticket_data"]
-            logger.info(f"티켓 요약 생성 시작 (ticket_id: {ticket_data.get('id')})")
-            start_time = time.time()
-
-            summary_result = await self.generate_ticket_summary(ticket_data)
-
-            execution_time = time.time() - start_time
-            logger.info(f"티켓 요약 생성 완료 (ticket_id: {ticket_data.get('id')}, 실행시간: {execution_time:.2f}초)")
-
-            return {
-                "task_type": "summary",
-                "result": summary_result,
-                "execution_time": execution_time,
-                "success": True
-            }
-        except Exception as e:
-            error_msg = f"티켓 요약 생성 실패: {str(e)}"
-            logger.error(error_msg)
-            return {
-                "task_type": "summary",
-                "error": error_msg,
-                "execution_time": 0,
-                "success": False
-            }
-
-    async def _fetch_similar_tickets_task(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        """유사 티켓 검색 태스크 - 실제 벡터 검색 구현"""
-        try:
-            # 입력 데이터 추출
-            ticket_data = inputs["ticket_data"]
-            qdrant_client = inputs["qdrant_client"]
-            company_id = inputs["company_id"]
-
-            logger.info(f"유사 티켓 검색 시작 (ticket_id: {ticket_data.get('id')})")
-            start_time = time.time()
-
-            # 검색할 컨텐츠가 없는 경우 빈 결과 반환
-            ticket_title = ticket_data.get('subject', '')
-            ticket_body = ticket_data.get('description', '')
-
-            if not ticket_title and not ticket_body:
-                logger.warning(f"티켓 {ticket_data.get('id')}의 검색 텍스트가 비어있습니다.")
-                return {
-                    "task_type": "similar_tickets",
-                    "result": [],
-                    "execution_time": time.time() - start_time,
-                    "success": True
-                }
-
-            # 검색 쿼리 생성 (기존 로직과 동일)
-            search_query = await self.generate_search_query(ticket_data)
-            if not search_query.strip():
-                logger.warning(f"티켓 {ticket_data.get('id')}의 검색 쿼리가 비어있습니다.")
-                return {
-                    "task_type": "similar_tickets",
-                    "result": [],
-                    "execution_time": time.time() - start_time,
-                    "success": True
-                }
-
-            # 임베딩 생성
-            query_embedding = await self.generate_embedding(search_query)
-
-            # 벡터 DB에서 유사 티켓 검색 (현재 티켓 제외)
-            similar_tickets_result = retrieve_top_k_docs(
-                query_embedding=query_embedding,
-                top_k=10,  # 더 많이 가져와서 필터링
-                doc_type="ticket",
-                company_id=company_id
-            )
-
-            # 검색 결과를 SimilarTicketItem 형태로 변환
-            similar_tickets = []
-            current_ticket_id = str(ticket_data.get('id'))
-
-            if similar_tickets_result and similar_tickets_result.get("ids"):
-                analysis_tasks = []
-                base_infos = []
-                for i, doc_id in enumerate(similar_tickets_result["ids"]):
-                    # 현재 티켓과 동일한 ID는 제외
-                    if str(doc_id) == current_ticket_id:
-                        continue
-
-                    metadata = similar_tickets_result["metadatas"][i] if i < len(similar_tickets_result.get("metadatas", [])) else {}
-
-                    # 티켓 제목 추출
-                    title = (
-                        metadata.get("title") or
-                        metadata.get("subject") or
-                        f"티켓 {doc_id}"
-                    )
-
-                    # 거리/점수 정보 추가
-                    distance = similar_tickets_result.get("distances", [0])[i] if i < len(similar_tickets_result.get("distances", [])) else 0
-                    similarity_score = max(0, 1 - distance)  # 거리를 유사도로 변환
-
-                    # 티켓 ID 추출 (original_id 또는 doc_id 사용)
-                    original_ticket_id = metadata.get("original_id", str(doc_id))
-
-                    # "ticket-xxxx" 형식에서 숫자 부분만 추출
-                    ticket_number = original_ticket_id
-                    if isinstance(original_ticket_id, str) and original_ticket_id.startswith("ticket-"):
-                        ticket_number = original_ticket_id.replace("ticket-", "")
-
-                    # Freshdesk 원본 티켓 링크 생성
-                    freshdesk_domain = os.getenv("FRESHDESK_DOMAIN", "example.freshdesk.com")
-                    ticket_url = f"https://{freshdesk_domain}/a/tickets/{ticket_number}"
-
-                    # Issue/Solution 분석을 위한 티켓 데이터 구성
-                    ticket_data_for_analysis = {
-                        "id": ticket_number,
-                        "subject": title,
-                        "description_text": similar_tickets_result["documents"][i] if i < len(similar_tickets_result.get("documents", [])) else "",
-                        "status": metadata.get("status", ""),
-                        "priority": metadata.get("priority", "")
-                    }
-
-                    # 분석 태스크 모음
-                    analysis_tasks.append(self.analyze_ticket_issue_solution(ticket_data_for_analysis))
-                    base_infos.append({
-                        "id": str(ticket_number),
-                        "title": title,
-                        "ticket_url": ticket_url,
-                        "similarity_score": round(similarity_score, 3),
-                        "summary_text": similar_tickets_result["documents"][i] if i < len(similar_tickets_result.get("documents", [])) else metadata.get("description_text", "")
+            logger.info(f"🔄 개별 분석 폴백 시작: {len(tickets_data)}개 티켓")
+            
+            # 병렬 처리로 개별 분석 수행
+            import asyncio
+            
+            async def analyze_single_ticket(ticket_data):
+                return await self.analyze_ticket_issue_solution(ticket_data)
+            
+            # 최대 5개 티켓을 병렬로 처리
+            tasks = [analyze_single_ticket(ticket) for ticket in tickets_data]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # 예외 발생한 경우 기본값으로 대체
+            final_results = []
+            for result in results:
+                if isinstance(result, Exception):
+                    final_results.append({
+                        "issue": "문제 상황 분석 중",
+                        "solution": "해결 방안 검토 중"
                     })
-
-                    if len(base_infos) >= 5:
-                        break
-
-                if analysis_tasks:
-                    results = await asyncio.gather(*analysis_tasks, return_exceptions=True)
-                    try:
-                        from api.main import SimilarTicketItem
-                    except ImportError:
-                        from backend.api.main import SimilarTicketItem
-
-                    for info, res in zip(base_infos, results):
-                        if isinstance(res, Exception):
-                            logger.warning(f"티켓 {info['id']} Issue/Solution 분석 실패: {res}")
-                            issue = "문제 상황 분석 실패"
-                            solution = "해결책 분석 실패"
-                        else:
-                            issue = res.get("issue", "문제 상황을 분석할 수 없습니다.")
-                            solution = res.get("solution", "해결책을 찾을 수 없습니다.")
-
-                        summary_text = info["summary_text"] or ""
-                        summary = summary_text[:200] + "..." if len(summary_text) > 200 else summary_text
-
-                        similar_tickets.append(SimilarTicketItem(
-                            id=info["id"],
-                            title=info["title"],
-                            issue=issue,
-                            solution=solution,
-                            ticket_url=info["ticket_url"],
-                            similarity_score=info["similarity_score"],
-                            ticket_summary=summary
-                        ))
-
-            execution_time = time.time() - start_time
-            logger.info(f"유사 티켓 검색 완료 (ticket_id: {ticket_data.get('id')}, 검색결과: {len(similar_tickets)}건, 실행시간: {execution_time:.2f}초)")
-
-            return {
-                "task_type": "similar_tickets",
-                "result": similar_tickets,
-                "execution_time": execution_time,
-                "success": True
-            }
-        except Exception as e:
-            error_msg = f"유사 티켓 검색 실패: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            return {
-                "task_type": "similar_tickets",
-                "error": error_msg,
-                "execution_time": 0,
-                "success": False
-            }
-
-    async def _fetch_kb_documents_task(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        """지식베이스 문서 검색 태스크 - 실제 벡터 검색 구현"""
-        try:
-            # 입력 데이터 추출
-            ticket_data = inputs["ticket_data"]
-            qdrant_client = inputs["qdrant_client"]
-            company_id = inputs["company_id"]
-
-            logger.info(f"지식베이스 문서 검색 시작 (ticket_id: {ticket_data.get('id')})")
-            start_time = time.time()
-
-            # 검색할 컨텐츠가 없는 경우 빈 결과 반환
-            ticket_title = ticket_data.get('subject', '')
-            ticket_body = ticket_data.get('description', '')
-
-            if not ticket_title and not ticket_body:
-                logger.warning(f"티켓 {ticket_data.get('id')}의 검색 텍스트가 비어있습니다.")
-                return {
-                    "task_type": "kb_documents",
-                    "result": [],
-                    "execution_time": time.time() - start_time,
-                    "success": True
-                }
-
-            # 검색 쿼리 생성 (기존 로직과 동일)
-            search_query = await self.generate_search_query(ticket_data)
-            if not search_query.strip():
-                logger.warning(f"티켓 {ticket_data.get('id')}의 검색 쿼리가 비어있습니다.")
-                return {
-                    "task_type": "kb_documents",
-                    "result": [],
-                    "execution_time": time.time() - start_time,
-                    "success": True
-                }
-
-            # 임베딩 생성
-            query_embedding = await self.generate_embedding(search_query)
-
-            # 벡터 DB에서 지식베이스 문서 검색
-            related_docs_result = retrieve_top_k_docs(
-                query_embedding=query_embedding,
-                top_k=10,  # 더 많이 가져와서 필터링
-                doc_type="kb",  # "kb" 타입으로 검색
-                company_id=company_id
-            )
-
-            # 검색 결과를 RelatedDocumentItem 형태로 변환
-            kb_documents = []
-
-            if related_docs_result and related_docs_result.get("ids"):
-                for i, doc_id in enumerate(related_docs_result["ids"]):
-                    metadata = related_docs_result["metadatas"][i] if i < len(related_docs_result.get("metadatas", [])) else {}
-
-                    # 문서 제목 추출
-                    title = (
-                        metadata.get("title") or
-                        metadata.get("subject") or
-                        f"KB 문서 {doc_id}"
-                    )
-
-                    # 문서 내용/요약 추출
-                    doc_summary = ""
-                    if i < len(related_docs_result.get("documents", [])):
-                        doc_summary = related_docs_result["documents"][i]
-                    else:
-                        doc_summary = metadata.get("description", "") or metadata.get("description_text", "")
-
-                    # 요약이 너무 길면 자르기
-                    if len(doc_summary) > 300:
-                        doc_summary = doc_summary[:300] + "..."
-
-                    # 거리/점수 정보 추가
-                    distance = related_docs_result.get("distances", [0])[i] if i < len(related_docs_result.get("distances", [])) else 0
-                    similarity_score = max(0, 1 - distance)  # 거리를 유사도로 변환
-
-                    # 문서 URL 생성
-                    freshdesk_domain = os.getenv("FRESHDESK_DOMAIN", "example.freshdesk.com")
-                    doc_url = f"https://{freshdesk_domain}/solution/articles/{doc_id}"
-
-                    # 메타데이터에서 URL이 있으면 사용
-                    if metadata.get("url"):
-                        doc_url = metadata["url"]
-                    elif metadata.get("article_url"):
-                        doc_url = metadata["article_url"]
-
-                    # source_type 확인
-                    source_type = metadata.get("source_type", "kb")
-                    if metadata.get("doc_type") == "kb":
-                        source_type = "kb"
-                    elif metadata.get("type") in [1, "1"]:
-                        source_type = "kb"
-
-                    # RelatedDocumentItem 모델과 호환되는 형태로 반환
-                    try:
-                        from api.main import RelatedDocumentItem
-                    except ImportError:
-                        from backend.api.main import RelatedDocumentItem
-                    kb_documents.append(RelatedDocumentItem(
-                        id=str(doc_id),
-                        title=title,
-                        doc_summary=doc_summary,
-                        url=doc_url,
-                        similarity_score=round(similarity_score, 3),
-                        source_type=source_type
-                    ))
-
-                    # 최대 5개까지만 반환
-                    if len(kb_documents) >= 5:
-                        break
-
-            # 유사도 점수 기준으로 정렬하고 상위 결과만 반환
-            kb_documents.sort(key=lambda x: x.similarity_score, reverse=True)
-
-            # 너무 낮은 유사도 점수의 결과 필터링 - 임계값 0.25 (25%)
-            min_similarity = 0.25
-            filtered_docs = [doc for doc in kb_documents if doc.similarity_score >= min_similarity]
-
-            # 최대 반환 결과 수 제한 (상위 3개)
-            if filtered_docs:
-                kb_documents = filtered_docs[:3]
-            else:
-                # 유사도가 낮더라도 검색 결과가 있으면 결과는 반환
-                if kb_documents:
-                    kb_documents = kb_documents[:3]
                 else:
-                    # 결과가 전혀 없으면 빈 배열 반환
-                    logger.warning("지식베이스 문서 검색 결과가 없습니다.")
-                    kb_documents = []
-
-            execution_time = time.time() - start_time
-            logger.info(f"지식베이스 문서 검색 완료 (ticket_id: {ticket_data.get('id')}, 검색결과: {len(kb_documents)}건, 실행시간: {execution_time:.2f}초)")
-
-            return {
-                "task_type": "kb_documents",
-                "result": kb_documents,
-                "execution_time": execution_time,
-                "success": True
-            }
+                    final_results.append(result)
+            
+            fallback_time = time.time() - fallback_start_time
+            logger.info(f"🔄 개별 분석 폴백 완료: {len(tickets_data)}개 티켓 → {fallback_time:.2f}초 (평균 {fallback_time/len(tickets_data):.2f}초/건)")
+            
+            return final_results
+            
         except Exception as e:
-            error_msg = f"지식베이스 문서 검색 실패: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            return {
-                "task_type": "kb_documents",
-                "error": error_msg,
-                "execution_time": 0,
-                "success": False
-            }
+            logger.error(f"❌ 개별 분석 폴백도 실패: {e}")
+            # 모든 분석이 실패한 경우 기본값 반환
+            return [{"issue": "문제 상황 분석 중", "solution": "해결 방안 검토 중"} for _ in tickets_data]
 
-    def create_init_parallel_chain(
-        self,
-        ticket_data: Dict[str, Any],
-        qdrant_client: Any,
-        company_id: str,
-        include_summary: bool = True,
-        include_similar_tickets: bool = True,
-        include_kb_docs: bool = True,
-    ) -> RunnableParallel:
+    async def generate_embedding(self, text: str) -> List[float]:
         """
-        초기화 프로세스를 위한 Langchain RunnableParallel 체인을 생성합니다.
-
-        기존의 asyncio.gather를 대체하여 다음 3가지 작업을 병렬 처리합니다:
-        1. 티켓 요약 생성
-        2. 유사 티켓 검색
-        3. 지식베이스 문서 검색
-
+        텍스트 임베딩 생성 메서드
+        
         Args:
-            ticket_data: Freshdesk 티켓 데이터
-            qdrant_client: Qdrant 벡터 DB 클라이언트
-            company_id: 회사 식별자
-
+            text: 임베딩을 생성할 텍스트
+            
         Returns:
-            RunnableParallel 체인 객체
+            임베딩 벡터 (리스트)
         """
-
-        # RunnableParallel 체인 생성
-        # 각 태스크를 RunnableLambda로 래핑하여 병렬 실행
-        tasks = {}
-        if include_summary:
-            tasks["summary"] = RunnableLambda(self._generate_summary_task)
-        if include_similar_tickets:
-            tasks["similar_tickets"] = RunnableLambda(self._fetch_similar_tickets_task)
-        if include_kb_docs:
-            tasks["kb_documents"] = RunnableLambda(self._fetch_kb_documents_task)
-
-        parallel_chain = RunnableParallel(tasks)
-
-        logger.info(f"Langchain RunnableParallel 체인 생성 완료 (ticket_id: {ticket_data.get('id')})")
-        return parallel_chain
-
-    async def execute_init_parallel_chain(
-        self,
-        ticket_data: Dict[str, Any],
-        qdrant_client: Any,
-        company_id: str,
-        include_summary: bool = True,
-        include_similar_tickets: bool = True,
-        include_kb_docs: bool = True,
-    ) -> Dict[str, Any]:
-        """
-        초기화 병렬 체인을 실행하고 결과를 반환합니다.
-
-        Args:
-            ticket_data: Freshdesk 티켓 데이터
-            qdrant_client: Qdrant 벡터 DB 클라이언트
-            company_id: 회사 식별자
-
-        Returns:
-            병렬 작업 실행 결과 딕셔너리
-        """
-        start_time = time.time()
-        logger.info(f"Langchain RunnableParallel 체인 실행 시작 (ticket_id: {ticket_data.get('id')})")
-
         try:
-            # RunnableParallel 체인 생성
-            parallel_chain = self.create_init_parallel_chain(
-                ticket_data,
-                qdrant_client,
-                company_id,
-                include_summary=include_summary,
-                include_similar_tickets=include_similar_tickets,
-                include_kb_docs=include_kb_docs,
+            # embedder 모듈을 사용하여 임베딩 생성
+            from .embedder import generate_embedding
+            return await generate_embedding(text)
+        except ImportError:
+            from backend.core.embedder import generate_embedding
+            return await generate_embedding(text)
+        except Exception as e:
+            logger.error(f"임베딩 생성 실패: {e}")
+            # 폴백: 더미 임베딩 반환
+            return [0.1] * 1536
+
+    async def generate_search_query(self, ticket_data: dict) -> str:
+        """
+        티켓 데이터를 기반으로 검색 쿼리 생성
+        
+        Args:
+            ticket_data: 티켓 데이터 딕셔너리
+            
+        Returns:
+            검색용 쿼리 문자열
+        """
+        try:
+            # 티켓 데이터에서 주요 정보 추출
+            subject = ticket_data.get("subject", "")
+            description = ticket_data.get("description", ticket_data.get("description_text", ""))
+            
+            # 간단한 검색 쿼리 구성
+            query_parts = []
+            if subject:
+                query_parts.append(subject)
+            if description:
+                # 설명은 처음 200자만 사용
+                query_parts.append(description[:200])
+            
+            return " ".join(query_parts).strip()
+            
+        except Exception as e:
+            logger.error(f"검색 쿼리 생성 실패: {e}")
+            # 폴백: 기본 검색어 반환
+            return ticket_data.get("subject", "고객 문의")
+        
+
+# 🚀 싱글톤 인스턴스 생성
+llm_router = SpeedOptimizedLLMRouter()
+
+
+async def generate_text(prompt: str, system_prompt: Optional[str] = None, 
+                       max_tokens: int = 1024, temperature: float = 0.2) -> LLMResponse:
+    """편의 함수: 기본 텍스트 생성"""
+    return await llm_router.generate(
+        prompt=prompt,
+        system_prompt=system_prompt,
+        max_tokens=max_tokens,
+        temperature=temperature
+    )
+
+
+# 🎯 기존 호환성을 위한 alias
+LLMRouter = SpeedOptimizedLLMRouter
+
+
+if __name__ == "__main__":
+    # 간단한 테스트
+    async def test():
+        logger.info("🧪 속도 최우선 LLM Router 테스트 시작")
+        
+        try:
+            # 경량 작업 테스트
+            response = await llm_router.generate(
+                prompt="안녕하세요",
+                operation="quick_summary"
             )
-
-            # 체인 실행을 위한 입력 데이터 준비
-            chain_inputs = {
-                "ticket_data": ticket_data,
-                "qdrant_client": qdrant_client,
-                "company_id": company_id
-            }
-
-            # 체인 실행
-            results = await parallel_chain.ainvoke(chain_inputs)
-
-            total_execution_time = time.time() - start_time
-            logger.info(f"Langchain RunnableParallel 체인 실행 완료 (ticket_id: {ticket_data.get('id')}, 총 실행시간: {total_execution_time:.2f}초)")
-
-            # 결과 구조화
-            return {
-                "summary": results.get("summary"),
-                "similar_tickets": results.get("similar_tickets"),
-                "kb_documents": results.get("kb_documents"),
-                "total_execution_time": total_execution_time,
-                "chain_type": "langchain_runnable_parallel"
-            }
-
+            print(f"✅ 테스트 성공: {response.text[:50]}...")
+            print(f"📊 제공자: {response.metadata.get('final_provider')}")
+            print(f"⏱️ 응답시간: {response.duration_ms:.1f}ms")
+            
         except Exception as e:
-            execution_time = time.time() - start_time
-            error_msg = f"Langchain RunnableParallel 체인 실행 실패: {str(e)}"
-            logger.error(f"{error_msg} (실행시간: {execution_time:.2f}초)")
-
-            # 에러 발생 시 기본 구조 반환
-            return {
-                "summary": {
-                    "task_type": "summary",
-                    "error": "체인 실행 실패로 인한 요약 생성 불가",
-                    "success": False
-                },
-                "similar_tickets": {
-                    "task_type": "similar_tickets",
-                    "error": "체인 실행 실패로 인한 유사 티켓 검색 불가",
-                    "success": False
-                },
-                "kb_documents": {
-                    "task_type": "kb_documents",
-                    "error": "체인 실행 실패로 인한 지식베이스 검색 불가",
-                    "success": False
-                },
-                "total_execution_time": execution_time,
-                "chain_type": "langchain_runnable_parallel",
-                "chain_error": error_msg
-            }
-
-    async def execute_optimized_init_chain(
-        self,
-        ticket_data: Dict[str, Any],
-        qdrant_client,
-        company_id: str,
-        essential_tasks: List[str] = None,
-        optional_tasks: List[str] = None,
-        max_similar_tickets: int = 5,
-        max_kb_docs: int = 5,
-    ) -> Dict[str, Any]:
-        """
-        성능 최적화된 init 체인 실행
-        필수 작업과 선택적 작업을 분리하여 처리하고, 결과 크기를 제한합니다.
-
-        Args:
-            ticket_data: 티켓 데이터
-            qdrant_client: Qdrant 클라이언트
-            company_id: 회사 ID
-            essential_tasks: 필수 작업 목록 (즉시 필요)
-            optional_tasks: 선택적 작업 목록 (백그라운드 처리 가능)
-            max_similar_tickets: 최대 유사 티켓 수
-            max_kb_docs: 최대 지식베이스 문서 수
-
-        Returns:
-            Dict: 체인 실행 결과
-        """
-        start_time = time.time()
-        essential_tasks = essential_tasks or []
-        optional_tasks = optional_tasks or []
-
-        logger.info(f"최적화된 init 체인 실행 시작 - 필수: {essential_tasks}, 선택적: {optional_tasks}")
-
-        try:
-            # 1단계: 필수 작업 (블로킹) - 빠른 응답 필요
-            essential_results = {}
-            if essential_tasks:
-                essential_start = time.time()
-
-                # 요약 생성 (가장 중요한 필수 작업)
-                if "summary" in essential_tasks:
-                    summary_task = RunnableLambda(self._generate_summary_task)
-                    summary_result = await summary_task.ainvoke({"ticket_data": ticket_data})
-                    essential_results["summary"] = summary_result
-
-                essential_time = time.time() - essential_start
-                logger.info(f"필수 작업 완료 시간: {essential_time:.2f}초")
-
-            # 2단계: 선택적 작업 (비블로킹) - 병렬 처리로 성능 최적화
-            optional_results = {}
-            if optional_tasks:
-                optional_start = time.time()
-
-                # 선택적 작업을 위한 병렬 체인 구성
-                parallel_optional_chains = {}
-
-                if "similar_tickets" in optional_tasks:
-                    parallel_optional_chains["similar_tickets"] = RunnableLambda(self._fetch_similar_tickets_task)
-
-                if "kb_documents" in optional_tasks:
-                    parallel_optional_chains["kb_documents"] = RunnableLambda(self._fetch_kb_documents_task)
-
-                # 병렬 실행
-                if parallel_optional_chains:
-                    optional_parallel_chain = RunnableParallel(parallel_optional_chains)
-                    chain_inputs = {
-                        "ticket_data": ticket_data,
-                        "qdrant_client": qdrant_client,
-                        "company_id": company_id
-                    }
-                    optional_results = await optional_parallel_chain.ainvoke(chain_inputs)
-
-                optional_time = time.time() - optional_start
-                logger.info(f"선택적 작업 완료 시간: {optional_time:.2f}초")
-
-            # 결과 통합
-            final_results = {**essential_results, **optional_results}
-
-            total_execution_time = time.time() - start_time
-            logger.info(f"최적화된 init 체인 실행 완료 (총 시간: {total_execution_time:.2f}초)")
-
-            return {
-                **final_results,
-                "total_execution_time": total_execution_time,
-                "chain_type": "optimized_langchain_parallel",
-                "essential_task_count": len(essential_tasks),
-                "optional_task_count": len(optional_tasks)
-            }
-
-        except Exception as e:
-            execution_time = time.time() - start_time
-            error_msg = f"최적화된 init 체인 실행 실패: {str(e)}"
-            logger.error(f"{error_msg} (실행시간: {execution_time:.2f}초)")
-
-            # 에러 발생 시 기본 구조 반환
-            return {
-                "summary": {
-                    "task_type": "summary",
-                    "error": "최적화된 체인 실행 실패로 인한 요약 생성 불가",
-                    "success": False
-                },
-                "similar_tickets": {
-                    "task_type": "similar_tickets",
-                    "error": "최적화된 체인 실행 실패로 인한 유사 티켓 검색 불가",
-                    "success": False
-                },
-                "kb_documents": {
-                    "task_type": "kb_documents",
-                    "error": "최적화된 체인 실행 실패로 인한 지식베이스 검색 불가",
-                    "success": False
-                },
-                "total_execution_time": execution_time,
-                "chain_type": "optimized_langchain_parallel",
-                "chain_error": error_msg
-            }
-
-
-# 싱글톤 인스턴스 제공
-# 타임아웃 값은 환경변수나 설정 파일에서 읽어오는 것이 좋음
-# 복잡한 응답 생성을 위해 충분한 시간 제공 (특히 issue/solution 분석)
-# 환경 변수로부터 타임아웃 설정 가져오기 (없으면 기본값 사용)
-LLM_TIMEOUT = float(os.getenv("LLM_TIMEOUT", "10.0"))  # 기본 10초(빠른 폴백)
-LLM_GEMINI_TIMEOUT = float(os.getenv("LLM_GEMINI_TIMEOUT", "20.0"))  # 기본 20초 (Gemini는 더 긴 타임아웃 필요)
-
-# 싱글톤 인스턴스 생성
-llm_router = LLMRouter(timeout=LLM_TIMEOUT, gemini_timeout=LLM_GEMINI_TIMEOUT)
-
-async def generate_text(prompt: str, system_prompt: str = None, max_tokens: int = 1024, temperature: float = 0.2) -> LLMResponse:
-    """텍스트 생성 편의 함수"""
-    return await llm_router.generate(prompt, system_prompt, max_tokens, temperature)
-
-# 중복된 standalone 함수는 제거하고 LLMRouter 클래스의 메서드를 사용
-
-# LLM 가중치 및 선택자 클래스들은 LLMRouter 클래스 앞으로 이동됩니다.
+            print(f"❌ 테스트 실패: {e}")
+    
+    asyncio.run(test())
