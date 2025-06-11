@@ -37,37 +37,17 @@ echo -e "${GREEN}의존성 설치 완료.${NC}"
 # .env 파일 설정
 echo -e "\n${YELLOW}4. .env 파일 설정 중...${NC}"
 if [ ! -f "backend/.env" ]; then
-    echo -e "${YELLOW}backend/.env 파일이 없습니다. 기본 설정으로 생성합니다.${NC}"
-    # config.py를 참고하여 필수 환경변수 설정
-    cat > backend/.env << EOL
-FRESHDESK_API_KEY=your_freshdesk_api_key
-# FRESHDESK_DOMAIN: 도메인 이름만 입력 (예: "your-company") 또는 전체 도메인 (예: "your-company.freshdesk.com")
-# 시스템에서 자동으로 company_id를 추출하여 X-Company-ID 헤더에 사용합니다
-FRESHDESK_DOMAIN=your_freshdesk_domain
-
-# =================================================================
-# Qdrant Cloud 벡터 데이터베이스 설정
-# =================================================================
-QDRANT_URL=https://your-qdrant-url
-QDRANT_API_KEY=your_qdrant_api_key
-
-# =================================================================
-# LLM API 키 설정 (Multi-LLM Router용)
-# =================================================================
-ANTHROPIC_API_KEY=your_anthropic_api_key
-OPENAI_API_KEY=your_openai_api_key
-GOOGLE_API_KEY=your_google_api_key
-
-# =================================================================
-# 애플리케이션 설정
-# =================================================================
-COMPANY_ID=your_company_id
-PROCESS_ATTACHMENTS=true
-EMBEDDING_MODEL=text-embedding-3-small
-LOG_LEVEL=INFO
-MAX_TOKENS=4096
-EOL
-    echo -e "${GREEN}backend/.env 파일 생성 완료. 파일을 열어 API 키 등 필수 정보를 입력해주세요.${NC}"
+    echo -e "${YELLOW}backend/.env 파일이 없습니다. 템플릿에서 복사합니다.${NC}"
+    if [ -f "backend/.env.example" ]; then
+        cp backend/.env.example backend/.env
+        if [ $? -ne 0 ]; then
+            echo -e "${YELLOW}backend/.env 파일 복사에 실패했습니다. 수동으로 생성해주세요.${NC}"
+            exit 1
+        fi
+        echo -e "${GREEN}backend/.env 파일이 backend/.env.example에서 생성되었습니다.${NC}"
+    else
+        echo -e "${YELLOW}backend/.env.example 파일을 찾을 수 없습니다. 수동으로 생성해주세요.${NC}"
+    fi
 else
     echo -e "${GREEN}backend/.env 파일이 이미 존재합니다.${NC}"
 fi
