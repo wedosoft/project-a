@@ -131,6 +131,16 @@ docker-compose down
 ./taskmaster.sh load-env
 ```
 
+### 테스트 실행
+
+`pytest`를 사용하여 백엔드 테스트를 실행할 수 있습니다.
+
+```bash
+pytest backend/tests/
+```
+
+테스트에는 `FRESHDESK_DOMAIN`, `FRESHDESK_API_KEY`, `QDRANT_URL`, `QDRANT_API_KEY` 환경변수가 필요합니다. 환경 변수가 없으면 `pytest`가 자동으로 모든 테스트를 건너뜁니다.
+
 ### 문제 해결
 
 Task Master가 API 키를 인식하지 못하는 경우:
