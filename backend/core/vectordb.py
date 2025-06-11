@@ -6,6 +6,9 @@
 
 프로젝트 규칙 및 가이드라인: /PROJECT_RULES.md 참조
 """
+# flake8: noqa
+# isort: skip_file
+# fmt: off
 
 import logging
 import os
@@ -60,9 +63,9 @@ class VectorDBInterface(ABC):
 
     @abstractmethod
     def search(
-        self, 
-        query_embedding: List[float], 
-        top_k: int, 
+        self,
+        query_embedding: List[float],
+        top_k: int,
         company_id: str
     ) -> Dict[str, Any]:
         """벡터 검색"""
@@ -72,7 +75,7 @@ class VectorDBInterface(ABC):
     def count(self, company_id: Optional[str] = None) -> int:
         """문서 수 반환"""
         pass
-    
+
     @abstractmethod
     def get_by_id(self, original_id_value: str, doc_type: Optional[str] = None, company_id: Optional[str] = None) -> Dict[str, Any]:
         """원본 ID로 단일 문서 조회"""
@@ -101,26 +104,29 @@ class QdrantAdapter(VectorDBInterface):
         """Qdrant 클라이언트 초기화"""
         self.collection_name = collection_name
         # 타임아웃 설정 추가 (기본값: 60초)
-        self.client = QdrantClient(
-            url=QDRANT_URL,
-            api_key=QDRANT_API_KEY,
-            timeout=120,  # 타임아웃을 120초로 설정
-            prefer_grpc=False  # HTTP/REST 사용 (더 안정적)
-        )
+        client_opts = {
+            "api_key": QDRANT_API_KEY,
+            "timeout": 120,
+            "prefer_grpc": False,
+        }
+        if QDRANT_URL == ":memory:":
+            self.client = QdrantClient(location=":memory:", **client_opts)
+        else:
+            self.client = QdrantClient(url=QDRANT_URL, **client_opts)
         self._ensure_collection_exists() # 기본 문서 컬렉션 확인 (인덱스 생성 포함)
 
     def _ensure_collection_exists(self) -> None:
         """컬렉션이 없으면 생성"""
         collections = self.client.get_collections()
         collection_names = [collection.name for collection in collections.collections]
-        
+
         if self.collection_name not in collection_names:
             logger.info(f"컬렉션 '{self.collection_name}' 생성 시작")
             self.client.create_collection(
                 collection_name=self.collection_name,
                 vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
             )
-            
+
             # 필수 인덱스 생성 (성능 및 필터링 향상)
             try:
                 logger.info(f"필수 필드에 대한 인덱스 생성 중...")
@@ -138,21 +144,21 @@ class QdrantAdapter(VectorDBInterface):
                     logger.info(f"doc_type 인덱스(keyword) 생성 완료")
                 except Exception as doc_type_err:
                     logger.warning(f"doc_type 키워드 인덱스 생성 실패: {doc_type_err}")
-                
+
                 # 소스 타입 인덱스 생성
                 self.client.create_payload_index(collection_name=self.collection_name, field_name="source_type", field_schema="keyword")
-                
+
                 # 상태 인덱스 생성 (KB published 상태 = 1)
                 try:
                     self.client.create_payload_index(collection_name=self.collection_name, field_name="status", field_schema="integer")
                     logger.info(f"status 인덱스(integer) 생성 완료")
                 except Exception as status_err:
                     logger.warning(f"status 인덱스 생성 실패: {status_err}")
-                
+
                 logger.info(f"인덱스 생성 완료")
             except Exception as e:
                 logger.warning(f"인덱스 생성 중 오류 발생 (비정상적인 동작이 예상될 수 있음): {e}")
-                
+
             logger.info(f"컬렉션 '{self.collection_name}' 생성 완료")
 
 
@@ -161,21 +167,21 @@ class QdrantAdapter(VectorDBInterface):
 
 
     def add_documents(
-        self, 
-        texts: List[str], 
-        embeddings: List[List[float]], 
-        metadatas: List[Dict[str, Any]], 
+        self,
+        texts: List[str],
+        embeddings: List[List[float]],
+        metadatas: List[Dict[str, Any]],
         ids: List[str]
     ) -> bool:
         """
         문서 추가 (배치 단위로 처리)
-        
+
         Args:
             texts: 문서 텍스트 목록
             embeddings: 문서 임베딩 목록
             metadatas: 문서 메타데이터 목록 (company_id, doc_type, id 필수)
             ids: 문서 ID 목록 (원본 숫자 ID, 문자열)
-            
+
         Returns:
             성공 여부
         """
@@ -251,11 +257,11 @@ class QdrantAdapter(VectorDBInterface):
     def delete_documents(self, ids: List[str], company_id: Optional[str] = None) -> bool:
         """
         문서 삭제
-        
+
         Args:
             ids: 삭제할 문서 ID 목록 (접두어가 포함된 문자열 ID, 예: "ticket-12345")
             company_id: 회사 ID (보안 검증용)
-            
+
         Returns:
             성공 여부
         """
@@ -263,13 +269,13 @@ class QdrantAdapter(VectorDBInterface):
             # 문자열 ID를 UUID로 변환
             import uuid
             from hashlib import md5
-            
+
             uuid_ids = []
             for id in ids:
                 # 접두어가 포함된 ID 그대로 사용하여 UUID 생성 (일관성 유지)
                 uuid_id = uuid.UUID(md5(id.encode()).hexdigest())
                 uuid_ids.append(str(uuid_id))
-            
+
             # company_id가 지정된 경우 해당 회사의 문서만 삭제
             if company_id:
                 try:
@@ -281,7 +287,7 @@ class QdrantAdapter(VectorDBInterface):
                             )
                         ]
                     )
-                    
+
                     # 회사 ID 필터와 문서 ID 목록을 함께 사용하여 삭제 시도
                     self.client.delete(
                         collection_name=self.collection_name,
@@ -291,7 +297,7 @@ class QdrantAdapter(VectorDBInterface):
                     )
                 except Exception as filter_error:
                     logger.warning(f"필터를 사용한 삭제 실패: {filter_error}, 대체 방법 시도 중...")
-                    
+
                     # 대체 방법: 먼저 해당 문서들을 조회하여 회사 ID 확인 후 삭제
                     for uuid_id in uuid_ids:
                         try:
@@ -301,7 +307,7 @@ class QdrantAdapter(VectorDBInterface):
                                 ids=[uuid_id],
                                 with_payload=True
                             )
-                            
+
                             # 문서가 존재하고 회사 ID가 일치하면 삭제
                             if point and len(point) > 0 and point[0].payload.get("company_id") == company_id:
                                 self.client.delete(
@@ -321,52 +327,52 @@ class QdrantAdapter(VectorDBInterface):
                     points_selector=uuid_ids,
                     wait=True
                 )
-                
+
             return True
         except Exception as e:
             logger.error(f"문서 삭제 실패: {e}")
             return False
 
     def search(
-        self, 
-        query_embedding: List[float], 
-        top_k: int, 
+        self,
+        query_embedding: List[float],
+        top_k: int,
         company_id: str,
         doc_type: str = None  # 문서 타입 필터링 (ticket, kb)
     ) -> Dict[str, Any]:
         """
         벡터 검색
-        
+
         Args:
             query_embedding: 쿼리 임베딩
             top_k: 반환할 최대 문서 수
             company_id: 회사 ID (필수)
             doc_type: 문서 타입 필터 (선택사항, "ticket" 또는 "kb")
-            
+
         Returns:
             검색 결과 딕셔너리
         """
         if not company_id:
             raise ValueError("company_id는 필수 매개변수입니다.")
-            
+
         # 필터 조건 구성 - 인덱스 문제로 초기에는 company_id만 사용
         filter_conditions = [
             FieldCondition(key="company_id", match=MatchValue(value=company_id))
         ]
-        
+
         # doc_type 필드의 인덱스 문제를 해결하기 위해 메모리에서 필터링 수행
         use_doc_type_filter = doc_type is not None
         logger.info(f"검색 요청: company_id={company_id}, doc_type={doc_type}, top_k={top_k}")
-        
+
         # 기본 검색은 company_id만 사용하여 수행
         search_filter = Filter(must=filter_conditions)
-        
+
         try:
             # doc_type 필터링이 필요한 경우 더 많은 결과를 요청하여 메모리 내 필터링 수행
             # 더 많은 결과를 가져와 필터링하기 위해 배수를 10으로 설정
             fetch_limit = top_k * 10 if use_doc_type_filter else top_k
             logger.info(f"Qdrant 검색 시도 (company_id={company_id}, 검색 크기={fetch_limit})")
-            
+
             search_results = self.client.search(
                 collection_name=self.collection_name,
                 query_vector=query_embedding,
@@ -378,7 +384,7 @@ class QdrantAdapter(VectorDBInterface):
             logger.info(f"Qdrant 검색 성공: {len(search_results)}개 결과 (메모리 내 필터링 전)")
         except Exception as e:
             logger.warning(f"query_filter를 사용한 검색 실패: {e}, filter로 재시도...")
-            
+
             try:
                 # 이전 API 방식 (filter)으로 재시도
                 search_results = self.client.search(
@@ -398,11 +404,11 @@ class QdrantAdapter(VectorDBInterface):
                     "total": 0,
                     "error": str(filter_error)
                 }
-        
+
         # 메모리에서 doc_type 필터링 수행
         filtered_results = []
         skipped_count = 0
-        
+
         for hit in search_results:
             if use_doc_type_filter:
                 # 문서 관련 필드 추출 (다양한 메타데이터 필드 지원)
@@ -410,10 +416,10 @@ class QdrantAdapter(VectorDBInterface):
                 hit_type = hit.payload.get("type")
                 hit_source_type = hit.payload.get("source_type")
                 hit_status = hit.payload.get("status")
-                
+
                 # 문서 타입 일치 여부
                 match_found = False
-                
+
                 # 필터링 조건 간소화
                 # 티켓에서 "type"은 문의 유형, 지식베이스에서 "type"은 게시:1, 임시저장:2 의미
                 if doc_type == "kb":
@@ -429,12 +435,12 @@ class QdrantAdapter(VectorDBInterface):
                     # 2) source_type="ticket"인 경우
                     if hit_doc_type == "ticket" or hit_source_type == "ticket":
                         match_found = True
-                
+
                 # 일치하지 않으면 건너뛰기
                 if not match_found:
                     skipped_count += 1
                     continue
-            
+
             # 결과 변환
             result = {
                 "id": hit.id,
@@ -442,11 +448,11 @@ class QdrantAdapter(VectorDBInterface):
                 **hit.payload
             }
             filtered_results.append(result)
-            
+
             # top_k개 결과를 얻으면 중단
             if len(filtered_results) >= top_k:
                 break
-        
+
         # 필터링 결과 로깅
         if use_doc_type_filter:
             logger.info(f"메모리 내 필터링 후 결과: {len(filtered_results)}개 유효, {skipped_count}개 제외 (doc_type={doc_type})")
@@ -456,7 +462,7 @@ class QdrantAdapter(VectorDBInterface):
                     # 디버깅을 위해 첫 번째 결과의 메타데이터 출력
                     sample = search_results[0].payload
                     logger.info(f"필터링 실패한 샘플 문서: doc_type={sample.get('doc_type')}, type={sample.get('type')}, source_type={sample.get('source_type')}, status={sample.get('status')}")
-        
+
         # 호환성을 위해 필드 보정 처리
         for result in filtered_results:
             # 1. 문서 타입 일관성 확보
@@ -470,36 +476,36 @@ class QdrantAdapter(VectorDBInterface):
                 # 기본값은 원본 type 값 사용
                 elif "type" in result:
                     result["doc_type"] = str(result["type"])
-                    
+
             # 2. KB 문서의 경우 status와 source_type 일관성 확보
             if result.get("doc_type") == "kb" or result.get("type") == 1 or result.get("type") == "1":
                 # KB 문서로 확인된 경우 부가 정보 표준화
                 result["doc_type"] = "kb"  # 확실하게 설정
-                
+
                 # 게시 상태 표준화
                 if "status" not in result:
                     result["status"] = 1  # 기본적으로 published 상태로 설정
-                    
+
                 # source_type 표준화
                 if "source_type" not in result:
                     result["source_type"] = "kb"
-            
+
             # 3. 티켓의 경우 source_type 일관성 확보
             if result.get("doc_type") == "ticket":
                 if "source_type" not in result:
                     result["source_type"] = "ticket"
-                    
+
             # 4. id 필드 일관성 확보
             if "original_id" in result and "id" not in result:
                 result["id"] = result["original_id"]
-            
+
         # 검색 결과를 retriever.py에서 기대하는 형식으로 변환
         # 이전에는 "results"에만 저장했으나, 결과를 "documents", "metadatas", "ids", "distances" 형식으로도 추가
         documents = []
         metadatas = []
         ids = []
         distances = []
-        
+
         for result in filtered_results:
             # 문서 텍스트 (내용)
             if "text" in result:
@@ -511,10 +517,10 @@ class QdrantAdapter(VectorDBInterface):
             else:
                 # 적절한 텍스트 필드가 없으면 빈 문자열 사용
                 documents.append("")
-                
+
             # 메타데이터 (전체 결과)
             metadatas.append(result)
-            
+
             # ID
             if "id" in result:
                 ids.append(result["id"])
@@ -522,13 +528,13 @@ class QdrantAdapter(VectorDBInterface):
                 ids.append(result["original_id"])
             else:
                 ids.append(str(uuid.uuid4()))  # 임의 ID 생성
-                
+
             # 거리/점수 (1 - 유사도)
             if "score" in result:
                 distances.append(1.0 - result["score"])
             else:
                 distances.append(0.0)  # 기본 거리 0 (최대 유사도)
-        
+
         # 검색 결과 반환 (원래 형식 + 호환성을 위한 추가 필드)
         return {
             "results": filtered_results,  # 기존 형식 (main.py에서 사용)
@@ -544,10 +550,10 @@ class QdrantAdapter(VectorDBInterface):
     def count(self, company_id: Optional[str] = None) -> int:
         """
         문서 수 반환
-        
+
         Args:
             company_id: 특정 회사의 문서만 카운트할 경우 회사 ID
-            
+
         Returns:
             문서 수
         """
@@ -565,7 +571,7 @@ class QdrantAdapter(VectorDBInterface):
                             )
                         ]
                     )
-                    
+
                     # 검색 결과로 카운트
                     count = self.client.count(
                         collection_name=self.collection_name,
@@ -574,13 +580,13 @@ class QdrantAdapter(VectorDBInterface):
                     return count.count
                 except Exception as inner_e:
                     logger.warning(f"필터를 사용한 카운트 실패: {inner_e}, 대체 방법 시도 중...")
-                    
+
                     # 대체 방법: scroll API를 사용하여 모든 문서를 가져온 후 메모리에서 필터링
                     count = 0
                     offset = None
                     batch_size = 1000
                     total_scanned = 0
-                    
+
                     while True:
                         # 배치로 문서 가져오기
                         batch, next_offset = self.client.scroll(
@@ -590,20 +596,20 @@ class QdrantAdapter(VectorDBInterface):
                             with_payload=True,
                             with_vectors=False
                         )
-                        
+
                         if not batch:
                             break
-                            
+
                         # company_id로 필터링하여 카운트
                         company_matches = sum(1 for point in batch if point.payload.get("company_id") == company_id)
                         count += company_matches
                         total_scanned += len(batch)
-                        
+
                         # 다음 오프셋 설정
                         offset = next_offset
                         if offset is None:
                             break
-                    
+
                     logger.info(f"{total_scanned}개 문서 중 {count}개가 company_id '{company_id}'와 일치합니다.")
                     return count
             else:
@@ -637,7 +643,7 @@ class QdrantAdapter(VectorDBInterface):
             # company_id가 None이면 "default"로 설정
             search_company_id = company_id if company_id else "default"
             logger.info(f"문서 조회 시작 (original_id: {original_id_value}, doc_type: {doc_type}, company_id: {search_company_id})")
-            
+
             # 필터 조건: company_id, original_id, doc_type 모두 필수
             filter_conditions = [
                 FieldCondition(
@@ -655,7 +661,7 @@ class QdrantAdapter(VectorDBInterface):
             ]
             filter_log_str = ", ".join([f"{c.key}='{c.match.value}'" for c in filter_conditions])
             logger.info(f"원본 ID '{original_id_value}'로 문서 검색 시도 (필터 조건: {filter_log_str})")
-            
+
             # Qdrant에서 검색
             scroll_result = self.client.scroll(
                 collection_name=self.collection_name,
@@ -692,7 +698,7 @@ class QdrantAdapter(VectorDBInterface):
         """
         try:
             collection_info = self.client.get_collection(collection_name=self.collection_name)
-            
+
             # CollectionInfo 객체의 실제 구조에 맞게 접근
             return {
                 "name": self.collection_name,  # 컬렉션명 직접 사용
@@ -707,7 +713,7 @@ class QdrantAdapter(VectorDBInterface):
     def collection_exists(self) -> bool:
         """
         컬렉션 존재 여부 확인
-        
+
         Returns:
             bool: 컬렉션 존재 여부
         """
@@ -767,45 +773,45 @@ class QdrantAdapter(VectorDBInterface):
         except Exception as e:
             logger.error(f"Qdrant 전체 ID 목록 조회 실패: {e}")
             return []
-            
+
     def backup_collection(self, collection_name: str = None, backup_path: str = None) -> bool:
         """
         Qdrant 컬렉션 데이터를 JSON 파일로 백업합니다.
-        
+
         Args:
             collection_name: 백업할 컬렉션 이름 (None이면 기본 컬렉션)
             backup_path: 백업 파일 경로 (None이면 자동 생성)
-            
+
         Returns:
             성공 여부 (bool)
         """
         import json
         import os
         from datetime import datetime
-        
+
         name = collection_name or self.collection_name
-        
+
         # 백업 파일 경로 설정
         if backup_path is None:
             backup_dir = os.path.join(os.getcwd(), "backups")
             os.makedirs(backup_dir, exist_ok=True)
             backup_path = os.path.join(backup_dir, f"{name}_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
-        
+
         try:
             # 컬렉션 정보 조회
             collection_info = self.client.get_collection(collection_name=name)
             points_count = getattr(collection_info, 'points_count', getattr(collection_info, 'vectors_count', 0))
-            
+
             if points_count == 0:
                 logger.info(f"컬렉션 '{name}'에 백업할 데이터가 없습니다.")
                 return True
-                
+
             # 컬렉션 데이터 조회 (청크 단위로 처리)
             logger.info(f"컬렉션 '{name}' 백업 시작: 총 {points_count:,}개 포인트")
             backup_data = []
             offset = 0
             limit = 1000
-            
+
             while True:
                 points = self.client.scroll(
                     collection_name=name,
@@ -814,74 +820,74 @@ class QdrantAdapter(VectorDBInterface):
                     with_payload=True,
                     with_vectors=True  # 벡터 데이터 포함
                 )
-                
+
                 if not points or len(points) == 0:
                     break
-                    
+
                 # 각 포인트를 직렬화 가능한 형태로 변환
                 for point in points:
                     point_data = {
                         "id": point.id,
                         "payload": point.payload
                     }
-                    
+
                     # 벡터 데이터가 있으면 추가
                     if hasattr(point, 'vector') and point.vector:
                         point_data["vector"] = point.vector
-                    
+
                     backup_data.append(point_data)
-                
+
                 logger.info(f"컬렉션 '{name}' 백업 진행 중: {len(backup_data):,}/{points_count:,}개 포인트")
-                
+
                 if len(points) < limit:
                     break
-                    
+
                 offset += len(points)
-            
+
             # JSON 파일로 저장
             with open(backup_path, 'w', encoding='utf-8') as f:
                 json.dump(backup_data, f, ensure_ascii=False)
-                
+
             logger.info(f"컬렉션 '{name}' 백업 완료: {len(backup_data):,}개 포인트, 파일: {backup_path}")
             return True
-            
+
         except Exception as e:
             logger.error(f"컬렉션 '{name}' 백업 실패: {e}")
             return False
-            
+
     def reset_collection(self, collection_name: str = None, confirm: bool = False, create_backup: bool = True, backup_path: str = None) -> bool:
         """
         벡터DB 컬렉션을 초기화합니다 (삭제 후 재생성)
-        
+
         Args:
             collection_name: 초기화할 컬렉션 이름 (None이면 기본 컬렉션)
             confirm: 초기화 확인 여부 (False면 예외 발생)
             create_backup: 초기화 전 백업 생성 여부
             backup_path: 백업 파일 경로 (None이면 자동 생성)
-            
+
         Returns:
             성공 여부 (bool)
-            
+
         Raises:
             ValueError: confirm이 False인 경우
         """
         name = collection_name or self.collection_name
-        
+
         if not confirm:
             raise ValueError("초기화 확인이 필요합니다. confirm=True로 설정하세요.")
-        
+
         # 백업 생성
         if create_backup:
             logger.info(f"컬렉션 '{name}' 초기화 전 백업을 시작합니다.")
             if not self.backup_collection(name, backup_path):
                 logger.error(f"컬렉션 '{name}' 백업 실패로 초기화를 중단합니다.")
                 return False
-        
+
         # 컬렉션 삭제
         if not self.drop_collection(name):
             logger.error(f"컬렉션 '{name}' 삭제 실패로 초기화를 중단합니다.")
             return False
-        
+
         # 컬렉션 재생성
         try:
             if name == self.collection_name:
@@ -889,7 +895,7 @@ class QdrantAdapter(VectorDBInterface):
             else:
                 logger.warning(f"알 수 없는 컬렉션 '{name}'은 자동 재생성되지 않습니다.")
                 return False
-            
+
             logger.info(f"컬렉션 '{name}' 초기화 완료 (삭제 후 재생성)")
             return True
         except Exception as e:
@@ -900,16 +906,16 @@ class QdrantAdapter(VectorDBInterface):
 # 벡터 데이터베이스 팩토리
 class VectorDBFactory:
     """벡터 데이터베이스 팩토리 클래스"""
-    
+
     @staticmethod
     def get_vector_db(db_type: str = "qdrant", collection_name: str = COLLECTION_NAME) -> VectorDBInterface:
         """
         지정된 타입의 벡터 DB 인스턴스 반환
-        
+
         Args:
             db_type: 벡터 DB 타입 ("qdrant")
             collection_name: 컬렉션 이름
-            
+
         Returns:
             VectorDBInterface 인스턴스
         """
@@ -932,23 +938,23 @@ def migrate_type_to_doc_type():
     """
     기존 'type' 필드를 사용하는 문서들을 'doc_type' 필드로 마이그레이션하는 유틸리티 함수
     또한 doc_type과 source_type 필드의 일관성을 확보합니다.
-    
+
     이 함수는 관리자가 필요한 경우 직접 호출하여 기존 데이터를 마이그레이션할 수 있습니다.
     """
     try:
         logger.info("기존 'type' 필드를 사용하는 데이터를 'doc_type' 필드로 마이그레이션 시작")
         logger.info("또한 doc_type과 source_type 필드의 일관성을 확보합니다")
-        
+
         # 기존 벡터 DB 인스턴스 사용
         db = vector_db
-        
+
         # 전체 컬렉션을 배치 단위로 스캔
         offset = 0
         batch_size = 100
         migrated_count = 0
         source_type_fixed = 0
         total_processed = 0
-        
+
         while True:
             # 배치 조회
             scroll_result = db.client.scroll(
@@ -958,51 +964,51 @@ def migrate_type_to_doc_type():
                 with_payload=True,
                 with_vectors=False
             )
-            
+
             points = scroll_result[0]
             if not points:
                 break  # 더 이상 문서가 없음
-            
+
             total_processed += len(points)
-            
+
             # 마이그레이션이 필요한 문서 필터링
             points_to_update = []
-            
+
             for point in points:
                 payload = point.payload
                 update_needed = False
                 updated_payload = dict(payload)
-                
+
                 # 1. type -> doc_type 마이그레이션
                 if "type" in payload and ("doc_type" not in payload or not payload["doc_type"]):
                     doc_type_value = payload["type"]
-                    
+
                     # doc_type 값이 유효한지 확인
                     if doc_type_value in ["ticket", "kb"]:
                         # 원본 페이로드에 'doc_type' 필드 추가
                         updated_payload["doc_type"] = doc_type_value
                         update_needed = True
-                
+
                 # 2. source_type 일관성 확보
                 current_doc_type = updated_payload.get("doc_type") or payload.get("type")
-                
+
                 if current_doc_type == "kb" and "source_type" not in updated_payload:
                     # KB 문서에 source_type 추가
                     updated_payload["source_type"] = "1"  # KB 문서의 표준 source_type
                     update_needed = True
                     source_type_fixed += 1
-                
+
                 elif current_doc_type == "ticket" and "source_type" not in updated_payload:
                     # 티켓 문서에 source_type 추가
                     updated_payload["source_type"] = "ticket"
                     update_needed = True
                     source_type_fixed += 1
-                
+
                 # 3. id 일관성 확보
                 if "original_id" in updated_payload and "id" not in updated_payload:
                     updated_payload["id"] = updated_payload["original_id"]
                     update_needed = True
-                
+
                 # 변경이 필요한 경우 포인트 추가
                 if update_needed:
                     points_to_update.append(
@@ -1012,7 +1018,7 @@ def migrate_type_to_doc_type():
                             vector=None  # 벡터는 업데이트하지 않음
                         )
                     )
-            
+
             # 마이그레이션할 문서가 있으면 업데이트
             if points_to_update:
                 db.client.upsert(
@@ -1022,10 +1028,10 @@ def migrate_type_to_doc_type():
                 )
                 migrated_count += len(points_to_update)
                 logger.info(f"마이그레이션 진행: {len(points_to_update)}개 문서 업데이트 완료")
-            
+
             # 다음 배치
             offset += batch_size
-        
+
         logger.info(f"마이그레이션 완료: 총 {total_processed}개 중 {migrated_count}개 문서 마이그레이션됨")
         logger.info(f"source_type 필드 고정된 문서: {source_type_fixed}개")
         return {

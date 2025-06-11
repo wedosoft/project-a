@@ -16,7 +16,7 @@ REQUIRED_ENV_VARS = [
 DEFAULTS = {
     "FRESHDESK_DOMAIN": "example.freshdesk.com",
     "FRESHDESK_API_KEY": "dummy",
-    "QDRANT_URL": "http://localhost:6333",
+    "QDRANT_URL": ":memory:",
     "QDRANT_API_KEY": "dummy",
     "OPENAI_API_KEY": "dummy",
     "COMPANY_ID": "development-default",
