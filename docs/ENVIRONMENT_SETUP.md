@@ -35,6 +35,9 @@ cp .env.example .env
 - **OpenAI GPT**: [platform.openai.com](https://platform.openai.com)
 - **Google Gemini**: [ai.google.dev](https://ai.google.dev)
 
+LLM 호출 지연 시 빠르게 다른 모델로 전환하려면 `LLM_TIMEOUT`(기본 10초)과
+`LLM_GEMINI_TIMEOUT`(기본 20초) 값을 조정하세요.
+
 ### 3. GitHub Actions Secrets 설정 (CI/CD용)
 
 GitHub Repository → **Settings** → **Secrets and variables** → **Actions**
@@ -48,6 +51,8 @@ QDRANT_API_KEY
 ANTHROPIC_API_KEY
 OPENAI_API_KEY
 GOOGLE_API_KEY
+LLM_TIMEOUT
+LLM_GEMINI_TIMEOUT
 ```
 
 ### 4. 환경변수 검증
