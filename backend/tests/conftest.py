@@ -46,9 +46,9 @@ _SKIP_REASON = None
 
 def pytest_configure(config):
     global _SKIP_REASON
-    missing = [var for var in REQUIRED_ENV_VARS if not os.getenv(var)]
     for key, value in DEFAULTS.items():
         os.environ.setdefault(key, value)
+    missing = [var for var in REQUIRED_ENV_VARS if not os.getenv(var)]
     reason_parts = []
     if missing:
         reason_parts.append("Missing environment variables: " + ", ".join(missing))
