@@ -58,6 +58,8 @@ def pytest_configure(config):
         _SKIP_REASON = "; ".join(reason_parts)
 
 
-def pytest_sessionstart(session):
+def pytest_collection_modifyitems(config, items):
     if _SKIP_REASON:
-        pytest.exit(_SKIP_REASON, returncode=0)
+        skip_marker = pytest.mark.skip(reason=_SKIP_REASON)
+        for item in items:
+            item.add_marker(skip_marker)
