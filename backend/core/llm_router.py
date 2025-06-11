@@ -941,34 +941,42 @@ class LLMRouter:
                         
                         # 대화의 양이 많은 경우(10개 초과)에는 더 많은 컨텍스트를 포함하고 중요 대화에 집중
                         if len(sorted_conversations) > 10:
-                            # 처음 30%의 대화 포함 (초기 상황 파악 개선)
-                            early_conv_count = max(3, int(len(sorted_conversations) * 0.3))
-                            early_conversations = sorted_conversations[:early_conv_count]
-                            
-                            # 마지막 70%의 대화 (최근 상황 집중)
-                            # 중간 대화도 일부 포함하여 맥락 유지
-                            late_start_idx = max(early_conv_count, len(sorted_conversations) - 20)
-                            late_conversations = sorted_conversations[late_start_idx:]
-                            
-                            # 처음 대화 추가 (문제 상황 파악)
+                            conv_len = len(sorted_conversations)
+                            seg_size = max(2, int(conv_len * 0.2))
+
+                            early_convs = sorted_conversations[:seg_size]
+                            mid_start = max(seg_size, conv_len // 2 - seg_size // 2)
+                            middle_convs = sorted_conversations[mid_start:mid_start + seg_size]
+                            late_convs = sorted_conversations[-seg_size:]
+
                             prompt_context += "초기 대화 내용:\n"
-                            for conv in early_conversations:
+                            for conv in early_convs:
                                 sender = "사용자" if conv.get("user_id") else "상담원"
                                 body = self._extract_conversation_body(conv)
-                                # 초기 대화는 더 많은 내용 포함 (300자)
                                 prompt_context += f"- {sender}: {body[:300]}...\n"
-                            
-                            # 중간 생략 표시
-                            if late_start_idx > early_conv_count:
-                                skipped = late_start_idx - early_conv_count
-                                prompt_context += f"\n... (중간 {skipped}개 대화 생략) ...\n\n"
-                            
-                            # 최근 대화 추가 (더 자세한 내용 포함)
-                            prompt_context += "최근 대화 내용:\n"
-                            for conv in late_conversations:
+
+                            skipped_first = max(0, mid_start - seg_size)
+                            if skipped_first:
+                                prompt_context += (
+                                    f"\n... (중간 {skipped_first}개 대화 생략) ...\n\n"
+                                )
+
+                            prompt_context += "중간 주요 대화 내용:\n"
+                            for conv in middle_convs:
                                 sender = "사용자" if conv.get("user_id") else "상담원"
                                 body = self._extract_conversation_body(conv)
-                                # 최근 대화는 더 많은 내용 포함 (500자)
+                                prompt_context += f"- {sender}: {body[:300]}...\n"
+
+                            skipped_second = max(0, conv_len - seg_size - (mid_start + seg_size))
+                            if skipped_second:
+                                prompt_context += (
+                                    f"\n... (중간 {skipped_second}개 대화 생략) ...\n\n"
+                                )
+
+                            prompt_context += "최근 대화 내용:\n"
+                            for conv in late_convs:
+                                sender = "사용자" if conv.get("user_id") else "상담원"
+                                body = self._extract_conversation_body(conv)
                                 prompt_context += f"- {sender}: {body[:500]}...\n"
                         else:
                             # 대화가 적은 경우 전체 내용 포함 (10개 이하)
