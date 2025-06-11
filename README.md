@@ -27,7 +27,7 @@ Code Interpreter 환경에서는 가상환경 없이 바로 사용할 수 있습
 
 # 자동 검증 항목:
 # ✅ 환경변수 설정 상태 (7개)
-# ✅ 라이브러리 설치 상태 (13개) 
+# ✅ 라이브러리 설치 상태 (13개)
 # ✅ 백엔드 모듈 임포트 (7개)
 # ✅ 클라이언트 연결 테스트
 ```
@@ -71,6 +71,8 @@ cd backend && ./activate.sh
 
 # 필요한 패키지 설치
 pip install -r backend/requirements.txt
+# 환경변수 파일 자동 생성
+./setup_agent_env.sh
 
 # 서버 실행
 cd backend && python main.py
@@ -78,6 +80,9 @@ cd backend && python main.py
 # 가상환경 비활성화
 deactivate
 ```
+
+`setup_agent_env.sh` 스크립트는 `backend/.env`가 없을 경우
+`backend/.env.example`을 복사해 자동으로 생성합니다.
 
 #### Docker 환경 사용
 
