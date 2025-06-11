@@ -35,7 +35,7 @@
 
 | 목적 | 명령어 | 설명 |
 | :--- | :--- | :--- |
-| **환경 설정** | `source .venv/bin/activate` | 가상환경을 활성화합니다. |
+| **환경 설정** | `source backend/venv/bin/activate` | 가상환경을 활성화합니다. |
 | **의존성 설치** | `pip install -r backend/requirements.txt` | 백엔드 개발에 필요한 라이브러리를 설치합니다. |
 | **백엔드 실행**| `uvicorn backend.api.main:app --reload` | FastAPI 개발 서버를 실행합니다. |
 | **전체 테스트** | `pytest backend/tests/` | 프로젝트의 모든 테스트를 실행합니다. |
@@ -53,4 +53,3 @@
 5.  **PR 제안**: 모든 테스트가 통과하면, 변경 사항에 대한 명확한 설명과 함께 Pull Request를 제안합니다.
 
 > ⚠️ **중요**: 에이전트는 `OPENAI_API_KEY`와 같은 민감 정보를 코드에 직접 하드코딩해서는 안 됩니다. 항상 `backend/core/config.py`의 설정 모델을 통해 환경변수에서 값을 참조해야 합니다.
-
