@@ -955,6 +955,8 @@ class LLMRouter:
                                 body = self._extract_conversation_body(conv)
                                 prompt_context += f"- {sender}: {body[:300]}...\n"
 
+                            # Calculate the number of conversations skipped before the middle segment.
+                            # This ensures a non-negative value by using max(0, ...).
                             skipped_first = max(0, mid_start - seg_size)
                             if skipped_first:
                                 prompt_context += (
