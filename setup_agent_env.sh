@@ -21,15 +21,16 @@ echo -e "${GREEN}Python 버전 확인 완료.${NC}"
 
 # 가상환경 설정
 echo -e "\n${YELLOW}2. Python 가상환경 설정 중...${NC}"
-if [ ! -d ".venv" ]; then
-    python3 -m venv .venv
-    echo -e "${GREEN}가상환경(.venv) 생성 완료.${NC}"
+if [ ! -d "backend/venv" ]; then
+    mkdir -p backend
+    python3 -m venv backend/venv
+    echo -e "${GREEN}가상환경(backend/venv) 생성 완료.${NC}"
 else
-    echo -e "${GREEN}기존 가상환경(.venv)을 사용합니다.${NC}"
+    echo -e "${GREEN}기존 가상환경(backend/venv)을 사용합니다.${NC}"
 fi
 
 # 가상환경 활성화 및 의존성 설치
-source .venv/bin/activate
+source backend/venv/bin/activate
 echo -e "\n${YELLOW}3. 백엔드 의존성 라이브러리 설치 중... (requirements.txt)${NC}"
 pip install -r backend/requirements.txt
 echo -e "${GREEN}의존성 설치 완료.${NC}"
@@ -55,5 +56,5 @@ fi
 echo -e "\n${GREEN}✅ 에이전트 환경 설정이 완료되었습니다!${NC}"
 echo -e "다음 단계를 진행하세요:"
 echo -e "1. ${YELLOW}backend/.env${NC} 파일을 열어 ${YELLOW}API 키와 도메인 정보${NC}를 입력하세요."
-echo -e "2. 다음 명령어로 가상환경을 활성화하세요: ${CYAN}source .venv/bin/activate${NC}"
+echo -e "2. 다음 명령어로 가상환경을 활성화하세요: ${CYAN}source backend/venv/bin/activate${NC}"
 echo -e "3. 다음 명령어로 백엔드 서버를 실행하세요: ${CYAN}uvicorn backend.api.main:app --reload${NC}"
