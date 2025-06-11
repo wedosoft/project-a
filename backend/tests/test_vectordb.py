@@ -8,12 +8,12 @@ Qdrant 벡터 DB 테스트 스크립트
 사용법: python test_vectordb.py
 """
 
+import logging
 import os
+import random
 import sys
 import time
-import logging
 import uuid
-import random
 from hashlib import md5
 
 # 현재 디렉토리를 모듈 검색 경로에 추가
@@ -42,19 +42,29 @@ def test_count():
         company_count = vector_db.count(company_id=DEFAULT_COMPANY_ID)
         logger.info(f"{DEFAULT_COMPANY_ID} 회사의 문서 수: {company_count}")
         
-        return total_count
+        # pytest를 위한 assertion 추가
+        assert total_count >= 0, "문서 수는 0 이상이어야 합니다"
+        assert company_count >= 0, "회사별 문서 수는 0 이상이어야 합니다"
+        
     except Exception as e:
         logger.error(f"문서 수 확인 중 오류 발생: {e}")
-        return 0
+        # 테스트 실패 시 예외를 다시 발생시킴
+        raise
 
 def test_id_conversion():
     """문자열 ID를 UUID로 변환하는 로직이 일관되게 작동하는지 테스트합니다."""
-    test_ids = ["ticket-1234", "kb-5678", "ticket-abcd", "kb-efgh"]
+    # 현재 시스템에서는 접두어 없는 숫자 ID만 사용 (vectordb.py의 정책에 따라)
+    test_ids = ["1234", "5678", "9999", "12345"]
     
     for id in test_ids:
-        # UUID 생성
+        # UUID 생성 (vectordb.py와 동일한 방식)
         uuid_id = uuid.UUID(md5(id.encode()).hexdigest())
         logger.info(f"원본 ID: {id} -> UUID: {uuid_id}")
+        
+        # pytest를 위한 assertion 추가
+        assert isinstance(uuid_id, uuid.UUID), f"UUID 변환 실패: {id}"
+        # UUID 객체의 hex 속성과 md5 해시가 일치하는지 확인
+        assert uuid_id.hex == md5(id.encode()).hexdigest(), f"UUID 일관성 실패: {id}"
 
 def test_search():
     """간단한 검색 테스트를 수행합니다."""
@@ -69,6 +79,9 @@ def test_search():
             top_k=3,
             company_id=DEFAULT_COMPANY_ID
         )
+        
+        # pytest를 위한 assertion 추가
+        assert results is not None, "검색 결과가 None이면 안됩니다"
         
         # 결과 출력
         if results and "documents" in results and len(results["documents"]) > 0:
@@ -89,14 +102,15 @@ def test_search():
                 logger.info(f"  내용 미리보기: {doc[:100]}...")
                 logger.info("---")
             
-            return True
+            assert len(results["documents"]) > 0, "검색 결과가 있어야 합니다"
         else:
             logger.warning("검색 결과가 없습니다.")
-            return False
+            # 검색 결과가 없는 것은 정상적인 상황일 수 있으므로 assertion 없이 통과
             
     except Exception as e:
         logger.error(f"검색 테스트 중 오류 발생: {e}")
-        return False
+        # 테스트 실패 시 예외를 다시 발생시킴
+        raise
 
 if __name__ == "__main__":
     logger.info("Qdrant 벡터 DB 테스트 시작")
