@@ -74,12 +74,13 @@ class Settings(BaseSettings):
     PERPLEXITY_API_KEY: Optional[str] = Field(None, description="Perplexity API 키")
     DEEPSEEK_API_KEY: Optional[str] = Field(None, description="DeepSeek API 키")
     
-    # LLM 타임아웃 설정 (초 단위)
-    LLM_GLOBAL_TIMEOUT: float = Field(5.0, description="LLM 전역 타임아웃 (초)")
-    LLM_GEMINI_TIMEOUT: float = Field(8.0, description="Gemini 전용 타임아웃 (초)")
-    LLM_DEEPSEEK_TIMEOUT: float = Field(10.0, description="DeepSeek 전용 타임아웃 (초)")
-    LLM_ANTHROPIC_TIMEOUT: float = Field(5.0, description="Anthropic 전용 타임아웃 (초)")
-    LLM_OPENAI_TIMEOUT: float = Field(5.0, description="OpenAI 전용 타임아웃 (초)")
+    # LLM 타임아웃 설정 (초 단위) - 안정성 향상을 위해 증가
+    LLM_GLOBAL_TIMEOUT: float = Field(10.0, description="LLM 전역 타임아웃 (초) - 기존 5초→10초")
+    LLM_GEMINI_TIMEOUT: float = Field(12.0, description="Gemini 전용 타임아웃 (초) - 기존 8초→12초")
+    LLM_DEEPSEEK_TIMEOUT: float = Field(15.0, description="DeepSeek 전용 타임아웃 (초) - 기존 10초→15초")
+    LLM_ANTHROPIC_TIMEOUT: float = Field(8.0, description="Anthropic 전용 타임아웃 (초) - 기존 5초→8초")
+    LLM_OPENAI_TIMEOUT: float = Field(8.0, description="OpenAI 전용 타임아웃 (초) - 기존 5초→8초")
+    LLM_PARALLEL_TIMEOUT: float = Field(12.0, description="병렬 모드 타임아웃 (초)")
     
     # LLM 재시도 설정
     LLM_MAX_RETRIES: int = Field(1, description="LLM API 최대 재시도 횟수")
@@ -90,6 +91,19 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = Field("text-embedding-3-small", description="임베딩 모델 이름")
     LOG_LEVEL: str = Field("INFO", description="로깅 레벨")
     MAX_TOKENS: int = Field(4096, description="LLM 최대 토큰 수")
+    
+    # 첨부파일 처리 설정
+    MAX_FILE_SIZE: int = Field(20 * 1024 * 1024, description="최대 파일 크기 (바이트, 기본값: 20MB)")
+    IMAGE_MIN_SIZE: int = Field(1000, description="OCR용 이미지 최소 크기 (픽셀)")
+    CONTRAST_ENHANCEMENT: float = Field(2.0, description="이미지 대비 향상 배율")
+    OCR_THRESHOLD: int = Field(150, description="OCR 이진화 임계값")
+    
+    # 캐시 설정
+    CACHE_TTL: int = Field(600, description="캐시 TTL (초)")
+    CACHE_SIZE: int = Field(100, description="캐시 최대 항목 수")
+    
+    # HTTP 클라이언트 타임아웃 설정
+    HTTP_TIMEOUT: float = Field(30.0, description="HTTP 클라이언트 타임아웃 (초)")
     
     @staticmethod
     def _get_secure_company_id() -> str:
@@ -124,16 +138,34 @@ class Settings(BaseSettings):
         
         return company_id
     
-    # 개발 환경 설정
+    # 서버 설정 - 환경변수 우선, 기본값은 개발환경용
     DEBUG: bool = Field(False, description="디버그 모드 활성화 여부")
-    HOST: str = Field("0.0.0.0", description="서버 호스트")
+    SERVER_HOST: str = Field("0.0.0.0", description="서버 호스트", alias="HOST")
     PORT: int = Field(8000, description="서버 포트")
     
-    # 캐싱 설정
-    CACHE_TTL: int = Field(600, description="캐시 TTL (초)")
-    CACHE_SIZE: int = Field(100, description="캐시 최대 항목 수")
+    # 네트워크 및 요청 설정
+    REQUEST_DELAY: float = Field(0.5, description="Freshdesk API 요청 간 지연 (초)")
+    MAX_RETRIES: int = Field(10, description="API 요청 최대 재시도 횟수")  
+    RETRY_DELAY: float = Field(2.0, description="재시도 간 지연 시간 (초)")
     
-    # Pydantic V2에서는 위의 model_config를 사용합니다
+    # 청크 처리 설정
+    CHUNK_SIZE: int = Field(5000, description="데이터 청크 크기")
+    SAVE_INTERVAL: int = Field(500, description="저장 간격")
+    DAYS_PER_CHUNK: int = Field(14, description="청크당 일수")
+    
+    # 작업별 모델 설정 - 환경변수에서 로드
+    LLM_LIGHT_MODEL: str = Field("gemini-1.5-flash", description="가벼운 작업용 모델")
+    LLM_HEAVY_MODEL: str = Field("gemini-1.5-pro", description="복잡한 작업용 모델")
+    
+    # 캐시 설정 확장
+    TICKET_SUMMARY_CACHE_TTL: int = Field(3600, description="티켓 요약 캐시 TTL (초)")
+    TICKET_SUMMARY_CACHE_MAXSIZE: int = Field(100, description="티켓 요약 캐시 최대 크기")
+    TICKET_CONTEXT_CACHE_TTL: int = Field(3600, description="티켓 컨텍스트 캐시 TTL (초)")
+    TICKET_CONTEXT_CACHE_MAXSIZE: int = Field(1000, description="티켓 컨텍스트 캐시 최대 크기")
+    EMBEDDING_CACHE_TTL: int = Field(3600, description="임베딩 캐시 TTL (초)")
+    EMBEDDING_CACHE_MAXSIZE: int = Field(1000, description="임베딩 캐시 최대 크기")
+    ISSUE_SOLUTION_CACHE_TTL: int = Field(21600, description="이슈 솔루션 캐시 TTL (초)")
+    ISSUE_SOLUTION_CACHE_MAXSIZE: int = Field(500, description="이슈 솔루션 캐시 최대 크기")
     
     # CORS 설정
     CORS_ORIGINS: List[str] = Field(

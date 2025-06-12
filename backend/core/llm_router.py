@@ -502,13 +502,28 @@ class SpeedOptimizedLLMRouter:
         logger.info(f"   🥉 Anthropic: {self.anthropic.timeout}초")
         logger.info(f"   🏃‍♂️ DeepSeek: {self.deepseek.timeout}초")
         
-        # 우선순위 순서 설정 (DeepSeek를 최하위로 이동)
+        # 우선순위 순서 설정 (동적 조정 가능)
         self.providers = [
-            self.gemini,      # 🥇 Gemini Flash 2.0 최우선
-            self.openai,      # 🥈 OpenAI GPT-4o-mini
-            self.anthropic,   # 🥉 Anthropic Claude Haiku
-            self.deepseek     # 🏃‍♂️ DeepSeek R1 최하위 (느림)
+            self.anthropic,   # 🥇 Anthropic Claude 최우선 (안정성 우수)
+            self.gemini,      # 🥈 Gemini Flash 2.0 (속도 우수)
+            self.openai,      # 🥉 OpenAI GPT-4o-mini (장애 시 후순위)
+            # self.deepseek   # 🚫 DeepSeek 임시 비활성화 (느림)
         ]
+        
+        # OpenRouter 비활성화됨 (코드 유지, 향후 재활성화 가능)
+        # self.openrouter = OpenRouterProvider()  # 🔄 성능 재검토 후 활성화 예정
+        
+        # 동적 우선순위 조정을 위한 메트릭 저장소
+        self.provider_metrics = {
+            provider.name: {
+                "success_count": 0,
+                "failure_count": 0,
+                "avg_response_time": 0.0,
+                "last_success_time": time.time(),
+                "consecutive_failures": 0,
+                "health_score": 100.0
+            } for provider in self.providers
+        }
         
         # 🎯 작업별 모델 설정
         self.light_model = os.getenv("LLM_LIGHT_MODEL", "gemini-1.5-flash")
@@ -609,6 +624,9 @@ class SpeedOptimizedLLMRouter:
                     temperature=temperature
                 )
                 
+                # 성공 메트릭 업데이트
+                self._update_provider_metrics(provider.name, True, response.duration_ms)
+                
                 # 성공 시 메타데이터 추가
                 response.attempt_count = attempt_count
                 response.is_fallback = attempt_count > 1
@@ -622,11 +640,19 @@ class SpeedOptimizedLLMRouter:
                     response.previous_provider_error = str(last_error)
                 
                 logger.info(f"✅ 성공: {provider.name} ({response.duration_ms:.1f}ms)")
+                
+                # 우선순위 동적 조정 (5번 호출마다)
+                if (attempt_count % 5) == 0:
+                    self.adjust_provider_priority()
+                
                 return response
                 
             except Exception as e:
                 last_error = e
                 logger.warning(f"❌ {provider.name} 실패: {e}")
+                
+                # 실패 메트릭 업데이트
+                self._update_provider_metrics(provider.name, False)
                 
                 # 빠른 실패: 첫 번째 제공자 실패 시 즉시 다음으로
                 continue
@@ -654,7 +680,7 @@ class SpeedOptimizedLLMRouter:
             done, pending = await asyncio.wait(
                 [task for _, task in tasks], 
                 return_when=asyncio.FIRST_COMPLETED,
-                timeout=4.0  # 병렬 모드 타임아웃 2초→4초로 증가
+                timeout=settings.LLM_PARALLEL_TIMEOUT  # 환경변수에서 병렬 모드 타임아웃 로드
             )
             
             # 남은 태스크들 취소
@@ -665,6 +691,13 @@ class SpeedOptimizedLLMRouter:
             for completed_task in done:
                 try:
                     result = await completed_task
+                    
+                    # 성공한 제공자 찾기
+                    for provider, task in tasks:
+                        if task == completed_task:
+                            self._update_provider_metrics(provider.name, True, result.duration_ms)
+                            break
+                    
                     result.metadata["parallel_mode"] = True
                     result.metadata["target_model"] = target_model
                     logger.info(f"🚀 병렬 모드 성공: {result.model_used} ({result.duration_ms:.1f}ms)")
@@ -679,7 +712,7 @@ class SpeedOptimizedLLMRouter:
             # 모든 태스크 취소
             for _, task in tasks:
                 task.cancel()
-            raise RuntimeError(f"병렬 생성 타임아웃 (4초)")
+            raise RuntimeError(f"병렬 생성 타임아웃 (8초)")
     
     async def generate_with_task_type(self, prompt: str, task_type: str = "heavy",
                                      system_prompt: Optional[str] = None, **kwargs) -> LLMResponse:
@@ -962,7 +995,7 @@ Solution: [문제 해결을 위해 제공된 방법이나 답변을 1-2문장으
             except json.JSONDecodeError as je:
                 logger.error(f"⚠️ 배치 분석 JSON 파싱 실패: {je}")
                 logger.error(f"⚠️ 파싱 실패한 응답 내용: {response_text[:1000]}...")
-                # JSON 파싱 실패 시 개별 분석으로 폴백
+                # JSON 파싱 실패 시 개별 분석로 폴백
                 return await self._fallback_to_individual_analysis(tickets_data)
                 
         except Exception as e:
@@ -1068,6 +1101,106 @@ Solution: [문제 해결을 위해 제공된 방법이나 답변을 1-2문장으
             # 폴백: 기본 검색어 반환
             return ticket_data.get("subject", "고객 문의")
         
+    def _update_provider_metrics(self, provider_name: str, success: bool, response_time: float = 0.0):
+        """제공자 메트릭을 업데이트합니다"""
+        if provider_name not in self.provider_metrics:
+            return
+        
+        metrics = self.provider_metrics[provider_name]
+        
+        if success:
+            metrics["success_count"] += 1
+            metrics["consecutive_failures"] = 0
+            metrics["last_success_time"] = time.time()
+            
+            # 평균 응답 시간 업데이트 (이동 평균)
+            if metrics["avg_response_time"] == 0:
+                metrics["avg_response_time"] = response_time
+            else:
+                metrics["avg_response_time"] = (metrics["avg_response_time"] * 0.8) + (response_time * 0.2)
+        else:
+            metrics["failure_count"] += 1
+            metrics["consecutive_failures"] += 1
+        
+        # 건강 점수 계산 (0-100)
+        metrics["health_score"] = self._calculate_health_score(metrics)
+        
+        logger.debug(f"📊 {provider_name} 메트릭 업데이트 - 건강점수: {metrics['health_score']:.1f}")
+    
+    def _calculate_health_score(self, metrics: Dict[str, Any]) -> float:
+        """제공자의 건강 점수를 계산합니다 (0-100)"""
+        score = 100.0
+        
+        # 연속 실패에 따른 점수 감소
+        consecutive_failures = metrics.get("consecutive_failures", 0)
+        if consecutive_failures > 0:
+            score -= min(consecutive_failures * 25, 75)  # 최대 75점 감소
+        
+        # 성공률 기반 점수 조정
+        total_calls = metrics.get("success_count", 0) + metrics.get("failure_count", 0)
+        if total_calls > 0:
+            success_rate = metrics.get("success_count", 0) / total_calls
+            score = score * success_rate
+        
+        # 최근 성공 시간 기반 점수 조정
+        last_success = metrics.get("last_success_time", time.time())
+        time_since_success = time.time() - last_success
+        if time_since_success > 300:  # 5분 이상 성공 없음
+            score *= 0.5
+        elif time_since_success > 120:  # 2분 이상 성공 없음
+            score *= 0.8
+        
+        # 응답 시간 기반 점수 조정
+        avg_time = metrics.get("avg_response_time", 0)
+        if avg_time > 10000:  # 10초 이상
+            score *= 0.7
+        elif avg_time > 5000:  # 5초 이상
+            score *= 0.9
+        
+        return max(0.0, min(100.0, score))
+    
+    def adjust_provider_priority(self):
+        """제공자 우선순위를 동적으로 조정합니다"""
+        try:
+            # 건강 점수 기반으로 제공자 정렬
+            sorted_providers = sorted(
+                [p for p in self.providers if p.api_key],
+                key=lambda p: self.provider_metrics.get(p.name, {}).get("health_score", 0),
+                reverse=True
+            )
+            
+            if sorted_providers != self.providers[:len(sorted_providers)]:
+                old_order = [p.name for p in self.providers if p.api_key]
+                new_order = [p.name for p in sorted_providers]
+                
+                logger.info(f"🔄 제공자 우선순위 조정")
+                logger.info(f"   이전: {' → '.join(old_order)}")
+                logger.info(f"   변경: {' → '.join(new_order)}")
+                
+                # 우선순위 업데이트
+                self.providers = sorted_providers + [p for p in self.providers if not p.api_key]
+                
+        except Exception as e:
+            logger.error(f"❌ 우선순위 조정 실패: {e}")
+    
+    def get_provider_status(self) -> Dict[str, Any]:
+        """모든 제공자의 상태를 반환합니다"""
+        status = {}
+        for provider in self.providers:
+            metrics = self.provider_metrics.get(provider.name, {})
+            status[provider.name] = {
+                "healthy": provider.is_healthy(),
+                "has_api_key": bool(provider.api_key),
+                "failure_count": provider.failure_count,
+                "health_score": metrics.get("health_score", 0),
+                "avg_response_time": metrics.get("avg_response_time", 0),
+                "consecutive_failures": metrics.get("consecutive_failures", 0),
+                "last_success": metrics.get("last_success_time", 0)
+            }
+        return status
+
+    # ...existing code...
+
 
 # 🚀 싱글톤 인스턴스 생성
 llm_router = SpeedOptimizedLLMRouter()

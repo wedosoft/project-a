@@ -9,12 +9,30 @@ Freshdesk 데이터 가져오기 모듈
 import asyncio
 import logging
 import os
+import re
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
-from dotenv import load_dotenv
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
+
+# 설정 로드
+try:
+    from ..core.config import get_settings
+    settings = get_settings()
+except ImportError:
+    # Docker 컨테이너 내에서는 절대 경로로 import
+    from core.config import get_settings
+    settings = get_settings()
 
 # .env 파일 로드
+from dotenv import load_dotenv
+
 load_dotenv()
 
 # 로깅 설정
@@ -666,7 +684,7 @@ async def fetch_ticket_details(ticket_id: int, domain: Optional[str] = None, api
     
     logger.info(f"티켓 {ticket_id} 상세 정보 가져오기 시작 - 도메인: {domain or DEFAULT_FRESHDESK_DOMAIN}")
     
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=settings.HTTP_TIMEOUT) as client:
         try:
             # 티켓 기본 정보 가져오기
             ticket_url = f"{base_url}/tickets/{ticket_id}"

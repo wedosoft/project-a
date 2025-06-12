@@ -47,9 +47,12 @@ app = FastAPI()
 # 첨부파일 라우터 등록
 app.include_router(attachments_router)
 
-# 인메모리 캐시 설정 (TTL: 10분, 최대 100개 항목)
+# 인메모리 캐시 설정 (환경변수에서 가져옴)
 # 회사 ID와 요청 매개변수를 기반으로 캐시 키를 생성합니다.
-cache = TTLCache(maxsize=100, ttl=600)
+cache = TTLCache(
+    maxsize=int(os.getenv("CACHE_MAXSIZE", "100")), 
+    ttl=int(os.getenv("CACHE_TTL", "600"))
+)
 
 # 🛡️ 안전한 티켓 요약 캐시 (구조화된 데이터로 관리)
 ticket_summary_cache = {}
@@ -233,7 +236,10 @@ async def health_check():
 
 
 # 티켓 초기화 컨텍스트 캐시 (티켓 ID를 키로 사용)
-ticket_context_cache = TTLCache(maxsize=1000, ttl=3600)  # 1시간 유효
+ticket_context_cache = TTLCache(
+    maxsize=int(os.getenv("TICKET_CONTEXT_CACHE_MAXSIZE", "1000")), 
+    ttl=int(os.getenv("TICKET_CONTEXT_CACHE_TTL", "3600"))
+)  # 환경변수에서 설정 가져옴
 
 
 # 요청/응답 모델 정의를 _query_cache_key 함수보다 위로 이동
@@ -391,9 +397,6 @@ class SimilarTicketItem(BaseModel):
     solution: Optional[str] = Field(default=None, description="해결책 요약")
     ticket_url: Optional[str] = Field(default=None, description="원본 티켓 링크")
     similarity_score: Optional[float] = Field(default=None, description="유사도 점수 (0.0 ~ 1.0)")
-    
-    # 기존 호환성을 위한 필드 (deprecated)
-    ticket_summary: Optional[str] = Field(default=None, description="유사 티켓의 내용 요약 (deprecated)")
 
 
 class RelatedDocumentItem(BaseModel):
@@ -865,8 +868,11 @@ class GenerateReplyRequest(BaseModel):
     include_greeting: bool = True  # 인사말 포함 여부
     include_signature: bool = True  # 서명 포함 여부
 
-# 캐시 설정: 티켓 요약 캐시 (최대 100개, 1시간 TTL)
-ticket_summary_cache = TTLCache(maxsize=100, ttl=3600)
+# 캐시 설정: 티켓 요약 캐시 (환경변수에서 설정 가져옴)
+ticket_summary_cache = TTLCache(
+    maxsize=int(os.getenv("TICKET_SUMMARY_CACHE_MAXSIZE", "100")), 
+    ttl=int(os.getenv("TICKET_SUMMARY_CACHE_TTL", "3600"))
+)
 
 @app.get("/init/{ticket_id}", response_model=InitResponse)
 async def get_initial_context(
@@ -1926,8 +1932,7 @@ async def get_similar_tickets(
                     issue=issue,
                     solution=solution,
                     ticket_url=ticket_url,
-                    similarity_score=round(similarity_score, 3),
-                    ticket_summary=summary  # 기존 호환성을 위해 유지
+                    similarity_score=round(similarity_score, 3)
                 ))
                 
                 # 최대 3개까지만 반환 (성능 최적화)
@@ -2822,24 +2827,28 @@ async def get_similar_tickets_data(ticket_id: str, company_id: str, top_k: int =
             for info, res in zip(base_infos, results):
                 if isinstance(res, Exception):
                     logger.warning(f"티켓 {info['id']} Issue/Solution 분석 실패: {res}")
-                    issue = "문제 상황 분석 실패"
-                    solution = "해결책 분석 실패"
+                    # 원본 티켓 요약과 동일한 형태로 마크다운 헤더와 이모지 추가
+                    issue = "## 🔍 Issue\n\n문제 상황 분석 실패"
+                    solution = "## ⚡ Solution\n\n해결책 분석 실패"
                 else:
                     # res는 dict 타입인 경우에만 .get() 메서드 사용
                     if isinstance(res, dict):
-                        issue = res.get("issue", "문제 상황을 분석할 수 없습니다.")
-                        solution = res.get("solution", "해결책을 찾을 수 없습니다.")
+                        # 원본 티켓 요약과 동일한 형태로 Issue와 Solution에 마크다운 헤더와 이모지 추가
+                        raw_issue = res.get("issue", "문제 상황을 분석할 수 없습니다.")
+                        raw_solution = res.get("solution", "해결책을 찾을 수 없습니다.")
+                        
+                        issue = f"## 🔍 Issue\n\n{raw_issue}"
+                        solution = f"## ⚡ Solution\n\n{raw_solution}"
                     else:
-                        issue = "문제 상황을 분석할 수 없습니다."
-                        solution = "해결책을 찾을 수 없습니다."
+                        issue = "## 🔍 Issue\n\n문제 상황을 분석할 수 없습니다."
+                        solution = "## ⚡ Solution\n\n해결책을 찾을 수 없습니다."
                 
                 similar_tickets_list.append(SimilarTicketItem(
                     id=info["id"],
                     title=info["title"],
                     issue=issue,
                     solution=solution,
-                    similarity_score=info["similarity_score"],
-                    ticket_summary=info["ticket_summary"]
+                    similarity_score=info["similarity_score"]
                 ))
         
         return SimilarTicketsResponse(ticket_id=ticket_id, similar_tickets=similar_tickets_list)

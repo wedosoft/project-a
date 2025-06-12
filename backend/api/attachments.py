@@ -85,7 +85,7 @@ async def get_freshdesk_attachment_url(
                 ticket_url = f"{BASE_URL}/tickets/{ticket_id}"
                 logger.info(f"티켓 {ticket_id}에서 첨부파일 {attachment_id} 정보 조회 중...")
                 
-                response = await client.get(ticket_url, auth=auth, timeout=30.0)
+                response = await client.get(ticket_url, auth=auth, timeout=settings.HTTP_TIMEOUT)
                 response.raise_for_status()
                 ticket_data = response.json()
                 
@@ -109,7 +109,7 @@ async def get_freshdesk_attachment_url(
                 conv_url = f"{BASE_URL}/conversations/{conversation_id}"
                 logger.info(f"대화 {conversation_id}에서 첨부파일 {attachment_id} 정보 조회 중...")
                 
-                response = await client.get(conv_url, auth=auth, timeout=30.0)
+                response = await client.get(conv_url, auth=auth, timeout=settings.HTTP_TIMEOUT)
                 response.raise_for_status()
                 conv_data = response.json()
                 

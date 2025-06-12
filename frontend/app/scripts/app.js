@@ -921,7 +921,28 @@ function displaySimilarTickets(similarTickets) {
           }
         </div>
         ${
-          similarTicket.description_text || similarTicket.description
+          similarTicket.issue || similarTicket.solution
+            ? `
+          <div class="list-item-excerpt">
+            ${
+              similarTicket.issue
+                ? `<div class="mb-2">🔍 <strong>문제:</strong> ${truncateText(
+                    similarTicket.issue,
+                    100
+                  )}</div>`
+                : ""
+            }
+            ${
+              similarTicket.solution
+                ? `<div>💡 <strong>해결책:</strong> ${truncateText(
+                    similarTicket.solution,
+                    100
+                  )}</div>`
+                : ""
+            }
+          </div>
+        `
+            : similarTicket.description_text || similarTicket.description
             ? `
           <div class="list-item-excerpt">
             ${truncateText(

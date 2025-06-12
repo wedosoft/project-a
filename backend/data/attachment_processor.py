@@ -7,20 +7,36 @@
 프로젝트 규칙 및 가이드라인: /PROJECT_RULES.md 참조
 """
 
-import os
-import tempfile
 import asyncio
-import httpx
-import logging
-from typing import Dict, Any, List, Optional, Tuple
-import mimetypes
-import re
-from PIL import Image, ImageEnhance, ImageFilter
-import io
-from datetime import datetime, timedelta
 import hashlib
+import io
 import json
+import logging
+import mimetypes
+import os
+import re
 import sys
+import tempfile
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional, Tuple
+
+import httpx
+from PIL import Image, ImageEnhance, ImageFilter
+
+# 설정 로드
+try:
+    from ..core.config import get_settings
+
+    settings = get_settings()
+except ImportError:
+    # 테스트 환경에서는 기본값 사용
+    class DefaultSettings:
+        MAX_FILE_SIZE = 20 * 1024 * 1024  # 20MB
+        IMAGE_MIN_SIZE = 1000
+        CONTRAST_ENHANCEMENT = 2.0
+        OCR_THRESHOLD = 150
+
+    settings = DefaultSettings()
 
 # 추가 라이브러리 - 필요시 설치 필요
 try:
@@ -69,8 +85,8 @@ DOCUMENT_TYPES = [
 ]
 PROCESSABLE_TYPES = IMAGE_TYPES + DOCUMENT_TYPES
 
-# 최대 처리 파일 크기 (20MB - Freshdesk 제한과 동일)
-MAX_FILE_SIZE = 20 * 1024 * 1024
+# 최대 처리 파일 크기 (환경변수 또는 기본값 사용)
+MAX_FILE_SIZE = getattr(settings, "MAX_FILE_SIZE", 20 * 1024 * 1024)
 
 
 # 처리 결과 캐싱
@@ -156,21 +172,23 @@ def preprocess_image_for_ocr(img: Image.Image) -> Image.Image:
 
         # 이미지 크기 조정 (너무 작은 경우 확대)
         width, height = img.size
-        if width < 1000 or height < 1000:
-            ratio = max(1000 / width, 1000 / height)
+        if width < settings.IMAGE_MIN_SIZE or height < settings.IMAGE_MIN_SIZE:
+            ratio = max(
+                settings.IMAGE_MIN_SIZE / width, settings.IMAGE_MIN_SIZE / height
+            )
             new_width = int(width * ratio)
             new_height = int(height * ratio)
             img = img.resize((new_width, new_height), Image.LANCZOS)
 
         # 이미지 선명도 향상
         enhancer = ImageEnhance.Contrast(img)
-        img = enhancer.enhance(2.0)  # 대비 증가
+        img = enhancer.enhance(settings.CONTRAST_ENHANCEMENT)  # 대비 증가
 
         # 노이즈 제거
         img = img.filter(ImageFilter.MedianFilter(size=3))
 
         # 이진화 (흑백)
-        threshold = 150
+        threshold = settings.OCR_THRESHOLD
         img = img.point(lambda p: 255 if p > threshold else 0)
 
         return img
@@ -358,7 +376,7 @@ async def process_attachment_stream(
     """
     첨부파일을 스트리밍 방식으로 처리하여 콘텐츠를 추출합니다.
     (pre-signed URL은 저장하지 않고, id/메타데이터만 반환)
-    
+
     Args:
         client: HTTP 클라이언트
         attachment: 첨부파일 정보

@@ -8,17 +8,19 @@ import asyncio
 import json
 import logging
 import os
-import shutil
+import time
 from datetime import datetime, timedelta
-from pathlib import Path
-from turtle import Turtle
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import httpx
-from dotenv import load_dotenv
 
-# .env 파일 로드
-load_dotenv()
+# 설정 로드
+try:
+    from ..core.config import get_settings
+    settings = get_settings()
+except ImportError:
+    from backend.core.config import get_settings
+    settings = get_settings()
 
 # 공통 로깅 모듈 사용 (core/logger.py)
 from core.logger import get_logger
@@ -128,7 +130,7 @@ class OptimizedFreshdeskFetcher:
         self.KB_CHUNK_SIZE = KB_CHUNK_SIZE
         
     async def __aenter__(self):
-        self.client = httpx.AsyncClient(timeout=30.0)
+        self.client = httpx.AsyncClient(timeout=settings.HTTP_TIMEOUT)
         return self
         
     async def __aexit__(self, exc_type, exc_val, exc_tb):
