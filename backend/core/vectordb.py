@@ -338,50 +338,60 @@ class QdrantAdapter(VectorDBInterface):
         query_embedding: List[float],
         top_k: int,
         company_id: str,
-        doc_type: str = None  # 문서 타입 필터링 (ticket, kb)
+        doc_type: str = None  # 문서 타입 필터링 (권장: "ticket" 또는 "kb")
     ) -> Dict[str, Any]:
         """
-        벡터 검색
+        벡터 검색 (DB 레벨 필터링 전용)
 
         Args:
             query_embedding: 쿼리 임베딩
             top_k: 반환할 최대 문서 수
             company_id: 회사 ID (필수)
-            doc_type: 문서 타입 필터 (선택사항, "ticket" 또는 "kb")
+            doc_type: 문서 타입 필터 (권장, "ticket" 또는 "kb")
+                     None인 경우 경고 후 전체 검색 수행 (성능 저하)
 
         Returns:
             검색 결과 딕셔너리
+            
+        Raises:
+            ValueError: company_id가 누락된 경우
         """
         if not company_id:
             raise ValueError("company_id는 필수 매개변수입니다.")
-
-        # 필터 조건 구성 - 인덱스 문제로 초기에는 company_id만 사용
-        filter_conditions = [
-            FieldCondition(key="company_id", match=MatchValue(value=company_id))
-        ]
-
-        # doc_type 필드의 인덱스 문제를 해결하기 위해 메모리에서 필터링 수행
-        use_doc_type_filter = doc_type is not None
-        logger.info(f"검색 요청: company_id={company_id}, doc_type={doc_type}, top_k={top_k}")
-
-        # 기본 검색은 company_id만 사용하여 수행
+            
+        # doc_type이 None인 경우 경고 출력 (에러는 발생시키지 않음)
+        if not doc_type or not str(doc_type).strip():
+            logger.warning(f"⚠️ doc_type이 명시되지 않았습니다. 성능 최적화를 위해 'ticket' 또는 'kb'를 지정하는 것을 권장합니다. (company_id={company_id})")
+            filter_conditions = [
+                FieldCondition(key="company_id", match=MatchValue(value=company_id))
+            ]
+            logger.info(f"🔍 전체 검색: company_id={company_id}, top_k={top_k}")
+        else:
+            if doc_type not in ["ticket", "kb"]:
+                logger.warning(f"⚠️ 알 수 없는 doc_type: {doc_type}. 'ticket' 또는 'kb'를 권장합니다.")
+            
+            # DB 레벨 필터링 조건 구성 - company_id와 doc_type 모두 포함
+            filter_conditions = [
+                FieldCondition(key="company_id", match=MatchValue(value=company_id)),
+                FieldCondition(key="doc_type", match=MatchValue(value=doc_type))
+            ]
+            logger.info(f"🎯 DB 레벨 필터링: company_id={company_id}, doc_type={doc_type}, top_k={top_k}")
+        
         search_filter = Filter(must=filter_conditions)
 
         try:
-            # doc_type 필터링이 필요한 경우 더 많은 결과를 요청하여 메모리 내 필터링 수행
-            # 검색 효율성 향상을 위해 배수를 3으로 줄임 (100개 → 30개로 감소)
-            fetch_limit = top_k * 3 if use_doc_type_filter else top_k
-            logger.info(f"⚡ Qdrant 검색 시도 (company_id={company_id}, 검색 크기={fetch_limit} ← 최적화됨)")
+            # 🚀 DB 레벨 필터링으로 정확한 결과만 요청 (메모리 내 필터링 완전 제거)
+            logger.info(f"⚡ Qdrant 검색 시도 (DB 레벨 필터링, 검색 크기={top_k})")
 
             search_results = self.client.search(
                 collection_name=self.collection_name,
                 query_vector=query_embedding,
                 query_filter=search_filter,  # 최신 API: query_filter 사용
-                limit=fetch_limit,  # doc_type 필터링이 필요하면 더 많은 결과 요청
+                limit=top_k,  # DB 레벨 필터링으로 정확한 수량 요청
                 with_payload=True,
                 with_vectors=False  # 성능 최적화: 벡터 반환 비활성화
             )
-            logger.info(f"Qdrant 검색 성공: {len(search_results)}개 결과 (메모리 내 필터링 전)")
+            logger.info(f"✅ Qdrant 검색 성공: {len(search_results)}개 결과 (DB 레벨 필터링 완료)")
         except Exception as e:
             logger.warning(f"query_filter를 사용한 검색 실패: {e}, filter로 재시도...")
 
@@ -391,160 +401,37 @@ class QdrantAdapter(VectorDBInterface):
                     collection_name=self.collection_name,
                     query_vector=query_embedding,
                     filter=search_filter,  # 이전 API: filter 사용
-                    limit=fetch_limit,
+                    limit=top_k,
                     with_payload=True,
                     with_vectors=False
                 )
-                logger.info(f"filter 방식으로 검색 성공: {len(search_results)}개 결과 (메모리 내 필터링 전)")
+                logger.info(f"✅ filter 방식으로 검색 성공: {len(search_results)}개 결과")
             except Exception as filter_error:
                 logger.error(f"검색 실패: {filter_error}")
-                # 오류 발생 시 빈 결과 반환
                 return {
                     "results": [],
                     "total": 0,
                     "error": str(filter_error)
                 }
 
-        # 메모리에서 doc_type 필터링 수행
-        filtered_results = []
-        skipped_count = 0
+        # 🚀 DB 레벨 필터링 완료 - 단순한 결과 변환만 수행 (메모리 필터링 완전 제거)
+        final_results = []
 
         for hit in search_results:
-            if use_doc_type_filter:
-                # 문서 관련 필드 추출 (다양한 메타데이터 필드 지원)
-                hit_doc_type = hit.payload.get("doc_type")
-                hit_type = hit.payload.get("type")
-                hit_source_type = hit.payload.get("source_type")
-                hit_status = hit.payload.get("status")
-
-                # 문서 타입 일치 여부
-                match_found = False
-
-                # 필터링 조건 간소화
-                # 티켓에서 "type"은 문의 유형, 지식베이스에서 "type"은 게시:1, 임시저장:2 의미
-                if doc_type == "kb":
-                    # 지식베이스 문서 확인 - KB 문서 조건을 명확하게 정의
-                    # 1) doc_type="kb"인 경우
-                    # 2) type=1 또는 type="1"인 경우 (게시된 KB 문서)
-                    # 3) status=1 또는 status="1"인 경우 (게시 상태)
-                    if hit_doc_type == "kb" or hit_type in [1, "1"] or hit_status in [1, "1"]:
-                        match_found = True
-                elif doc_type == "ticket":
-                    # 티켓 문서 확인 - 티켓 조건을 명확하게 정의
-                    # 1) doc_type="ticket"인 경우
-                    # 2) source_type="ticket"인 경우
-                    if hit_doc_type == "ticket" or hit_source_type == "ticket":
-                        match_found = True
-
-                # 일치하지 않으면 건너뛰기
-                if not match_found:
-                    skipped_count += 1
-                    continue
-
-            # 결과 변환
+            # 기본 결과 변환 (ID, 점수, 페이로드)
             result = {
                 "id": hit.id,
                 "score": hit.score,
                 **hit.payload
             }
-            filtered_results.append(result)
+            final_results.append(result)
 
-            # top_k개 결과를 얻으면 중단
-            if len(filtered_results) >= top_k:
-                break
+        logger.info(f"✅ DB 레벨 필터링 완료: {len(final_results)}개 결과 반환")
 
-        # 필터링 결과 로깅
-        if use_doc_type_filter:
-            logger.info(f"메모리 내 필터링 후 결과: {len(filtered_results)}개 유효, {skipped_count}개 제외 (doc_type={doc_type})")
-            if len(filtered_results) == 0:
-                logger.warning("검색 결과가 0개입니다. 필터링 로직을 확인하세요.")
-                if len(search_results) > 0:
-                    # 디버깅을 위해 첫 번째 결과의 메타데이터 출력
-                    sample = search_results[0].payload
-                    logger.info(f"필터링 실패한 샘플 문서: doc_type={sample.get('doc_type')}, type={sample.get('type')}, source_type={sample.get('source_type')}, status={sample.get('status')}")
-
-        # 호환성을 위해 필드 보정 처리
-        for result in filtered_results:
-            # 1. 문서 타입 일관성 확보
-            if "doc_type" not in result:
-                # KB 문서인 경우
-                if result.get("type") == 1 or result.get("type") == "1" or result.get("status") == 1 or result.get("status") == "1":
-                    result["doc_type"] = "kb"
-                # 티켓인 경우
-                elif result.get("type") == "ticket" or result.get("source_type") == "ticket":
-                    result["doc_type"] = "ticket"
-                # 기본값은 원본 type 값 사용
-                elif "type" in result:
-                    result["doc_type"] = str(result["type"])
-
-            # 2. KB 문서의 경우 status와 source_type 일관성 확보
-            if result.get("doc_type") == "kb" or result.get("type") == 1 or result.get("type") == "1":
-                # KB 문서로 확인된 경우 부가 정보 표준화
-                result["doc_type"] = "kb"  # 확실하게 설정
-
-                # 게시 상태 표준화
-                if "status" not in result:
-                    result["status"] = 1  # 기본적으로 published 상태로 설정
-
-                # source_type 표준화
-                if "source_type" not in result:
-                    result["source_type"] = "kb"
-
-            # 3. 티켓의 경우 source_type 일관성 확보
-            if result.get("doc_type") == "ticket":
-                if "source_type" not in result:
-                    result["source_type"] = "ticket"
-
-            # 4. id 필드 일관성 확보
-            if "original_id" in result and "id" not in result:
-                result["id"] = result["original_id"]
-
-        # 검색 결과를 retriever.py에서 기대하는 형식으로 변환
-        # 이전에는 "results"에만 저장했으나, 결과를 "documents", "metadatas", "ids", "distances" 형식으로도 추가
-        documents = []
-        metadatas = []
-        ids = []
-        distances = []
-
-        for result in filtered_results:
-            # 문서 텍스트 (내용)
-            if "text" in result:
-                documents.append(result["text"])
-            elif "description" in result:
-                documents.append(result["description"])
-            elif "content" in result:
-                documents.append(result["content"])
-            else:
-                # 적절한 텍스트 필드가 없으면 빈 문자열 사용
-                documents.append("")
-
-            # 메타데이터 (전체 결과)
-            metadatas.append(result)
-
-            # ID
-            if "id" in result:
-                ids.append(result["id"])
-            elif "original_id" in result:
-                ids.append(result["original_id"])
-            else:
-                ids.append(str(uuid.uuid4()))  # 임의 ID 생성
-
-            # 거리/점수 (1 - 유사도)
-            if "score" in result:
-                distances.append(1.0 - result["score"])
-            else:
-                distances.append(0.0)  # 기본 거리 0 (최대 유사도)
-
-        # 검색 결과 반환 (원래 형식 + 호환성을 위한 추가 필드)
+        # 간소화된 결과 반환 (DB 레벨 필터링으로 정확한 결과만 포함)
         return {
-            "results": filtered_results,  # 기존 형식 (main.py에서 사용)
-            "documents": documents,       # 호환성 형식 (retriever.py에서 사용)
-            "metadatas": metadatas,       # 호환성 형식
-            "ids": ids,                   # 호환성 형식
-            "distances": distances,       # 호환성 형식
-            "total": len(filtered_results),
-            "filtered_by_doc_type": use_doc_type_filter,
-            "skipped_count": skipped_count if use_doc_type_filter else 0
+            "results": final_results,
+            "total": len(final_results)
         }
 
     def count(self, company_id: Optional[str] = None) -> int:

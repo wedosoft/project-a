@@ -1,0 +1,132 @@
+{
+    "folders": [
+        {
+            "name": "🏠 Project Root",
+            "path": "."
+        },
+        {
+            "name": "🧠 Backend (Python)",
+            "path": "./backend"
+        },
+        {
+            "name": "🎨 Frontend (FDK)",
+            "path": "./frontend"
+        },
+        {
+            "name": "📋 Tasks",
+            "path": "./tasks"
+        },
+        {
+            "name": "📚 Documentation",
+            "path": "./docs"
+        },
+        {
+            "name": "🔧 Scripts",
+            "path": "./scripts"
+        }
+    ],
+    "settings": {
+        "github.copilot.chat.defaultMode": "freshdesk-dev",
+        "github.copilot.chat.enableContextualChat": true,
+        "github.copilot.advanced": {
+            "inlineCompletionTrigger": "automatic",
+            "listCount": 5,
+            "length": "short"
+        },
+        "task.allowAutomaticTasks": "on",
+        "task.showDecorations": true
+    },
+    "tasks": {
+        "version": "2.0.0",
+        "tasks": [
+            {
+                "label": "🚀 Start Backend Development",
+                "type": "shell",
+                "command": "cd backend && source venv/bin/activate && python -m uvicorn api.main:app --reload --host 0.0.0.0 --port 8000",
+                "group": "build",
+                "presentation": {
+                    "echo": true,
+                    "reveal": "always",
+                    "focus": false,
+                    "panel": "new"
+                },
+                "problemMatcher": [],
+                "isBackground": true
+            },
+            {
+                "label": "🎨 Start Frontend Development",
+                "type": "shell",
+                "command": "cd frontend && fdk run",
+                "group": "build",
+                "presentation": {
+                    "echo": true,
+                    "reveal": "always",
+                    "focus": false,
+                    "panel": "new"
+                },
+                "problemMatcher": [],
+                "isBackground": true
+            },
+            {
+                "label": "📦 Validate FDK App",
+                "type": "shell",
+                "command": "cd frontend && fdk validate",
+                "group": "test",
+                "presentation": {
+                    "echo": true,
+                    "reveal": "always",
+                    "focus": true,
+                    "panel": "shared"
+                }
+            },
+            {
+                "label": "🔍 Run Task Master Status",
+                "type": "shell",
+                "command": "npx @taskmaster-ai/mcp-server get-tasks --projectRoot=/Users/alan/GitHub/project-a",
+                "group": "build",
+                "presentation": {
+                    "echo": true,
+                    "reveal": "always",
+                    "focus": true,
+                    "panel": "shared"
+                }
+            }
+        ]
+    },
+    "launch": {
+        "version": "0.2.0",
+        "configurations": [
+            {
+                "name": "🧠 Debug Backend API",
+                "type": "python",
+                "request": "launch",
+                "module": "uvicorn",
+                "args": [
+                    "api.main:app",
+                    "--reload",
+                    "--host",
+                    "0.0.0.0",
+                    "--port",
+                    "8000"
+                ],
+                "cwd": "${workspaceFolder}/backend",
+                "env": {
+                    "PYTHONPATH": "${workspaceFolder}/backend"
+                },
+                "console": "integratedTerminal"
+            }
+        ]
+    },
+    "extensions": {
+        "recommendations": [
+            "github.copilot",
+            "github.copilot-chat",
+            "ms-python.python",
+            "ms-python.flake8",
+            "ms-python.black-formatter",
+            "bradlc.vscode-tailwindcss",
+            "esbenp.prettier-vscode",
+            "ms-vscode.vscode-json"
+        ]
+    }
+}

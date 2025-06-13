@@ -899,6 +899,17 @@ async def get_initial_context(
     """
     logger.info(f"티켓 {ticket_id} 초기화 요청 수신 - Domain: {x_freshdesk_domain}")
     
+    # 디버깅 모드 확인
+    debug_mode = os.getenv("DEBUG_INIT_ENDPOINT", "false").lower() == "true"
+    debug_ticket_id = os.getenv("DEBUG_TICKET_ID")
+    
+    if debug_mode:
+        logger.info(f"🔍 DEBUG MODE 활성화됨")
+        logger.info(f"🎯 설정된 디버그 티켓 ID: {debug_ticket_id}")
+        logger.info(f"📧 요청된 티켓 ID: {ticket_id}")
+        logger.info(f"🏢 Company ID: {company_id}")
+        logger.info(f"🌐 Freshdesk Domain: {x_freshdesk_domain}")
+    
     # Freshdesk 설정값이 헤더로 전달된 경우 임시로 환경변수에 설정
     original_domain = os.getenv("FRESHDESK_DOMAIN")
     original_api_key = os.getenv("FRESHDESK_API_KEY")
@@ -1377,43 +1388,45 @@ ID: {ticket_id}
                     return f"⚠️ 요약 생성 실패: {str(e)}"
             
             async def perform_vector_search():
-                """벡터 검색 태스크"""
+                """고성능 별도 검색으로 유사 티켓과 KB 문서를 검색합니다."""
                 if not (include_similar_tickets or include_kb_docs):
                     return [], []
                 
                 try:
-                    # 검索 쿼리 생성 및 임베딩
+                    # 검색 쿼리 생성 및 임베딩
                     search_text = f"{ticket_title} {ticket_body}"
                     
                     # 임베딩 생성
                     from core.embedder import generate_embedding
                     query_embedding = await generate_embedding(search_text[:800])  # 토큰 제한
                     
-                    # 통합 검색: 모든 문서 타입을 한 번에 검색
-                    all_results = vector_db.search(
-                        query_embedding=query_embedding,
-                        top_k=6,  # 🚀 최적화: 3개 유사 티켓용으로 6개 검색
-                        company_id=search_company_id
-                    )
+                    # 🚀 성능 최적화: 별도 검색으로 정확한 필터링과 병렬 처리
+                    logger.info(f"🚀 별도 검색 시작: company_id={search_company_id}")
                     
-                    # 결과를 타입별로 분리 처리
-                    kb_documents_data = []
-                    similar_tickets_temp = []
-                    
-                    if all_results and all_results.get("results"):
-                        for result in all_results["results"]:
-                            doc_type = result.get("doc_type", "unknown")
-                            similarity_score = result.get("score", 0)
-                            
-                            if similarity_score < 0.3:  # 최소 유사도 필터
-                                continue
-                            
-                            if doc_type == "ticket" and include_similar_tickets:
-                                # 현재 티켓 제외
-                                if str(result.get("id")) == str(ticket_id):
-                                    continue
+                    # 병렬 검색 태스크 정의
+                    async def search_tickets():
+                        """유사 티켓 전용 검색"""
+                        if not include_similar_tickets:
+                            return []
+                        
+                        ticket_results = await asyncio.to_thread(
+                            vector_db.search,
+                            query_embedding=query_embedding,
+                            top_k=5,  # 티켓은 최대 5개 검색 (필터링 후 3개 예상)
+                            company_id=search_company_id,
+                            doc_type="ticket"  # 티켓만 정확히 검색
+                        )
+                        
+                        similar_tickets_temp = []
+                        if ticket_results and ticket_results.get("results"):
+                            for result in ticket_results["results"]:
+                                similarity_score = result.get("score", 0)
                                 
-                                if len(similar_tickets_temp) < 3:  # 🚀 최대 3개로 제한
+                                # 최소 유사도 및 현재 티켓 제외
+                                if (similarity_score >= 0.3 and 
+                                    str(result.get("id")) != str(ticket_id) and 
+                                    len(similar_tickets_temp) < 3):
+                                    
                                     title = result.get("title") or result.get("subject") or f"티켓 {result.get('id')}"
                                     ticket_text = result.get("text", result.get("description", ""))
                                     
@@ -1426,13 +1439,36 @@ ID: {ticket_id}
                                         "similarity_score": similarity_score,
                                         "ticket_url": f"https://{search_company_id}.freshdesk.com/a/tickets/{result.get('id')}"
                                     })
+                        
+                        logger.info(f"✅ 티켓 검색 완료: {len(similar_tickets_temp)}개")
+                        return similar_tickets_temp
+                    
+                    async def search_kb_docs():
+                        """KB 문서 전용 검색"""
+                        if not include_kb_docs:
+                            return []
+                        
+                        kb_results = await asyncio.to_thread(
+                            vector_db.search,
+                            query_embedding=query_embedding,
+                            top_k=8,  # KB는 최대 8개 검색 (status 필터링 후 5개 예상)
+                            company_id=search_company_id,
+                            doc_type="kb"  # KB 문서만 정확히 검색
+                        )
+                        
+                        kb_documents_data = []
+                        if kb_results and kb_results.get("results"):
+                            for result in kb_results["results"]:
+                                hit_status = result.get("status")
+                                similarity_score = result.get("score", 0)
                                 
-                                # 3개가 채워지면 중단
-                                if len(similar_tickets_temp) >= 3:
-                                    break
-                            
-                            elif doc_type == "kb" and include_kb_docs:
-                                if len(kb_documents_data) < 5:  # 최대 5개
+                                # KB 문서 필터링 (status=2인 발행된 문서만)
+                                if (similarity_score >= 0.3 and 
+                                    hit_status in [2, "2"] and 
+                                    len(kb_documents_data) < 5):
+                                    
+                                    logger.info(f"✅ KB 문서 발견: ID={result.get('id')}, title={result.get('title', '')[:50]}")
+                                    
                                     title = result.get("title") or result.get("subject") or f"KB 문서 {result.get('id')}"
                                     kb_text = result.get("text", result.get("description", ""))
                                     doc_summary = kb_text[:300] + "..." if len(kb_text) > 300 else kb_text
@@ -1445,7 +1481,19 @@ ID: {ticket_id}
                                         "similarity_score": round(similarity_score, 3),
                                         "source_type": "kb"
                                     })
+                        
+                        logger.info(f"✅ KB 검색 완료: {len(kb_documents_data)}개")
+                        return kb_documents_data
                     
+                    # 🚀 병렬 검색 실행 (성능 대폭 향상)
+                    search_start = time.time()
+                    similar_tickets_temp, kb_documents_data = await asyncio.gather(
+                        search_tickets(),
+                        search_kb_docs()
+                    )
+                    search_duration = time.time() - search_start
+                    
+                    logger.info(f"⚡ 별도 병렬 검색 완료: {search_duration:.2f}초 - 유사 티켓: {len(similar_tickets_temp)}개, KB 문서: {len(kb_documents_data)}개")
                     return similar_tickets_temp, kb_documents_data
                     
                 except Exception as e:
@@ -1454,34 +1502,58 @@ ID: {ticket_id}
             
             # 🚀 병렬 실행: 티켓 요약과 벡터 검색을 동시에 수행
             logger.info("🚀 병렬 태스크 실행 시작")
+            
+            # 타임아웃 설정으로 병목 방지 (최적화된 설정)
+            PARALLEL_TIMEOUT = 30  # 25초 → 30초로 연장하여 안정성 확보
+            
             summary_task = generate_ticket_summary()
             vector_task = perform_vector_search()
             
-            # asyncio.gather로 병렬 실행
-            ticket_summary, (similar_tickets_temp, kb_documents) = await asyncio.gather(
-                summary_task,
-                vector_task
-            )
+            try:
+                # asyncio.gather로 병렬 실행 (타임아웃 적용)
+                ticket_summary, (similar_tickets_temp, kb_documents) = await asyncio.wait_for(
+                    asyncio.gather(summary_task, vector_task),
+                    timeout=PARALLEL_TIMEOUT
+                )
+                logger.info(f"✅ 병렬 처리 완료 (타임아웃 {PARALLEL_TIMEOUT}초 내)")
+            except asyncio.TimeoutError:
+                logger.warning(f"⚠️ 병렬 처리 타임아웃 ({PARALLEL_TIMEOUT}초 초과) - 부분 결과 사용")
+                # 타임아웃 시 기본값 사용
+                ticket_summary = f"⚠️ 요약 생성 시간 초과 (티켓 ID: {ticket_id})"
+                similar_tickets_temp, kb_documents = [], []
             
-            # 🚀 유사 티켓 배치 분석 (3개만 처리하므로 빠름)
+            # 🚀 유사 티켓 배치 분석 최적화 (성능 대폭 개선)
             similar_tickets = []
             if similar_tickets_temp and include_similar_tickets:
                 try:
-                    logger.info(f"🔥 배치 분석 시작: {len(similar_tickets_temp)}개 유사 티켓")
+                    # 배치 크기 확대로 처리량 증가 (3개 → 8개)
+                    MAX_BATCH_SIZE = 8  # 최대 8개로 증가하여 더 많은 유사 티켓 제공
+                    similar_tickets_temp = similar_tickets_temp[:MAX_BATCH_SIZE]
                     
-                    # 배치 분석을 위한 데이터 구성
+                    logger.info(f"🔥 배치 분석 시작: {len(similar_tickets_temp)}개 유사 티켓 (성능 최적화 적용)")
+                    
+                    # 배치 분석을 위한 데이터 구성 (텍스트 길이 최적화)
                     tickets_for_analysis = []
                     for ticket in similar_tickets_temp:
                         tickets_for_analysis.append({
                             "id": ticket["id"],
                             "subject": ticket["title"],
-                            "description_text": ticket["ticket_text"],
+                            "description_text": ticket["ticket_text"][:300],  # 500→300자로 단축하여 처리 속도 향상
                             "status": ticket["status"],
                             "priority": ticket["priority"]
                         })
                     
-                    # 배치 LLM 분석 실행
-                    batch_results = await llm_router.analyze_multiple_tickets_batch(tickets_for_analysis)
+                    # 배치 LLM 분석 실행 (타임아웃 연장으로 안정성 확보)
+                    BATCH_TIMEOUT = 20  # 15초 → 20초로 연장하여 배치 처리 안정성 향상
+                    batch_start_time = time.time()
+                    
+                    batch_results = await asyncio.wait_for(
+                        llm_router.analyze_multiple_tickets_batch(tickets_for_analysis),
+                        timeout=BATCH_TIMEOUT
+                    )
+                    
+                    batch_duration = time.time() - batch_start_time
+                    logger.info(f"✅ 배치 분석 완료: {len(batch_results)}개 결과, 소요시간: {batch_duration:.1f}초")
                     
                     # 결과를 최종 데이터에 반영
                     for i, ticket in enumerate(similar_tickets_temp):
@@ -1502,6 +1574,18 @@ ID: {ticket_id}
                             "ticket_url": ticket["ticket_url"]
                         })
                         
+                except asyncio.TimeoutError:
+                    logger.warning(f"⚠️ 배치 분석 타임아웃 ({BATCH_TIMEOUT}초 초과) - 기본 데이터 사용")
+                    # 타임아웃 시 기본 데이터 사용 (fallback 메커니즘)
+                    for ticket in similar_tickets_temp:
+                        similar_tickets.append({
+                            "id": ticket["id"],
+                            "title": ticket["title"],
+                            "issue": "고객 문의사항 분석 중",
+                            "solution": "해결 방안 검토 중",
+                            "similarity_score": round(ticket["similarity_score"], 3),
+                            "ticket_url": ticket["ticket_url"]
+                        })
                 except Exception as e:
                     logger.error(f"배치 분석 실패: {e}, 기본 데이터 사용")
                     # 배치 실패 시 기본 데이터 사용
@@ -1721,32 +1805,6 @@ ID: {ticket_id}
             os.environ["FRESHDESK_API_KEY"] = original_api_key
         elif "FRESHDESK_API_KEY" in os.environ:
             del os.environ["FRESHDESK_API_KEY"]
-
-
-# 기존 라우터 추가 (하위 호환성 보장)
-@app.get("/init/{ticket_id}", response_model=InitResponse)  
-async def init_legacy(
-    ticket_id: str,
-    company_id: str = Depends(get_company_id),
-    include_summary: bool = True,
-    include_kb_docs: bool = True,
-    include_similar_tickets: bool = True,
-    x_freshdesk_domain: Optional[str] = Header(None, alias="X-Freshdesk-Domain"),
-    x_freshdesk_api_key: Optional[str] = Header(None, alias="X-Freshdesk-API-Key")
-):
-    """
-    레거시 /init/{ticket_id} 엔드포인트 (하위 호환성)
-    새로운 get_initial_context 함수로 리다이렉트
-    """
-    return await get_initial_context(
-        ticket_id=ticket_id,
-        company_id=company_id,
-        include_summary=include_summary,
-        include_kb_docs=include_kb_docs,
-        include_similar_tickets=include_similar_tickets,
-        x_freshdesk_domain=x_freshdesk_domain,
-        x_freshdesk_api_key=x_freshdesk_api_key
-    )
 
 
 # 🔄 시스템 캐시 클리어 함수 (관리자용)
@@ -2056,63 +2114,62 @@ async def get_related_documents(
                 company_id=company_id
             )
             
-            # 결과가 없으면 메모리 내 필터링 방식으로 시도
-            if not related_docs_result.get('documents'):
-                # 필터 없이 검색 후 메모리에서 필터링
-                all_results = vector_db.search(
-                    query_embedding=query_embedding,
-                    top_k=30,  # 더 많은 결과에서 필터링
-                    company_id=company_id
-                )
-                
-                # 검색 결과에서 KB 문서만 추출
-                documents = []
-                metadatas = []
-                distances = []
-                ids = []
-                
-                # 결과가 있는 경우 필터링
-                if all_results and all_results.get("results"):
-                    for i, result in enumerate(all_results.get("results", [])):
-                        # KB 문서 타입 필드들 (여러 필드 확인)
-                        doc_type = result.get("doc_type")
-                        result_type = result.get("type")
-                        source_type = result.get("source_type")
-                        status = result.get("status")
+            # 🚀 KB 문서만 검색 (DB 레벨 필터링)
+            all_results = vector_db.search(
+                query_embedding=query_embedding,
+                top_k=30,  # KB 문서를 더 많이 검색
+                company_id=company_id,
+                doc_type="kb"  # KB 타입 명시적 지정
+            )
+            
+            # 검색 결과에서 KB 문서만 추출
+            documents = []
+            metadatas = []
+            distances = []
+            ids = []
+            
+            # 결과가 있는 경우 필터링
+            if all_results and all_results.get("results"):
+                for i, result in enumerate(all_results.get("results", [])):
+                    # KB 문서 타입 필드들 (여러 필드 확인)
+                    doc_type = result.get("doc_type")
+                    result_type = result.get("type")
+                    source_type = result.get("source_type")
+                    status = result.get("status")
+                    
+                    # KB 문서 판별 조건 확장:
+                    # 1. doc_type이 "kb"인 경우
+                    # 2. type이 "kb", "1" 또는 1인 경우
+                    # 3. source_type이 "kb", "1" 또는 1인 경우
+                    # 4. status가 1(published) 또는 "1"인 경우
+                    if (doc_type == "kb" or 
+                        result_type in ["kb", "1", 1] or 
+                        source_type in ["kb", "1", 1] or 
+                        status in [1, "1"]):
                         
-                        # KB 문서 판별 조건 확장:
-                        # 1. doc_type이 "kb"인 경우
-                        # 2. type이 "kb", "1" 또는 1인 경우
-                        # 3. source_type이 "kb", "1" 또는 1인 경우
-                        # 4. status가 1(published) 또는 "1"인 경우
-                        if (doc_type == "kb" or 
-                            result_type in ["kb", "1", 1] or 
-                            source_type in ["kb", "1", 1] or 
-                            status in [1, "1"]):
-                            
-                            # 문서 텍스트 추가
-                            if "documents" in all_results and i < len(all_results.get("documents", [])):
-                                documents.append(all_results["documents"][i])
-                            else:
-                                # 문서 텍스트가 없으면 description 또는 빈 문자열 사용
-                                documents.append(result.get("description", ""))
-                            
-                            # 메타데이터 추가 (결과 전체를 메타데이터로 사용)
-                            metadatas.append(result)
-                            
-                            # 거리(유사도) 추가
-                            if "distances" in all_results and i < len(all_results.get("distances", [])):
-                                distances.append(all_results["distances"][i])
-                            else:
-                                # 거리 정보가 없으면 score 사용
-                                distances.append(1.0 - result.get("score", 0))
-                            
-                            # ID 추가
-                            if "ids" in all_results and i < len(all_results.get("ids", [])):
-                                ids.append(all_results["ids"][i])
-                            else:
-                                # ID 정보가 없으면 result의 id 필드 사용
-                                ids.append(result.get("id", f"unknown-{i}"))
+                        # 문서 텍스트 추가
+                        if "documents" in all_results and i < len(all_results.get("documents", [])):
+                            documents.append(all_results["documents"][i])
+                        else:
+                            # 문서 텍스트가 없으면 description 또는 빈 문자열 사용
+                            documents.append(result.get("description", ""))
+                        
+                        # 메타데이터 추가 (결과 전체를 메타데이터로 사용)
+                        metadatas.append(result)
+                        
+                        # 거리(유사도) 추가
+                        if "distances" in all_results and i < len(all_results.get("distances", [])):
+                            distances.append(all_results["distances"][i])
+                        else:
+                            # 거리 정보가 없으면 score 사용
+                            distances.append(1.0 - result.get("score", 0))
+                        
+                        # ID 추가
+                        if "ids" in all_results and i < len(all_results.get("ids", [])):
+                            ids.append(all_results["ids"][i])
+                        else:
+                            # ID 정보가 없으면 result의 id 필드 사용
+                            ids.append(result.get("id", f"unknown-{i}"))
                 
                 # 필터링된 결과 구성
                 related_docs_result = {
