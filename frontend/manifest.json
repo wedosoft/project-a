@@ -24,7 +24,7 @@
       "functions": {},
       "requests": {
         "backendApi": {
-          "root": "https://df49-61-73-3-53.ngrok-free.app",
+          "root": "https://eb73-61-73-3-53.ngrok-free.app",
           "endpoints": {
             "init": "/init/{{ticket_id}}",
             "query": "/query"

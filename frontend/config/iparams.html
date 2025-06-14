@@ -4,7 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Prompt Canvas - 관리자 설정</title>
-    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://stackpath.boot
+                              
+                <button type="button" class="btn btn-primary" onclick="testConnection()">
+                    연결 테스트
+                </button>       <div class="form-group">
+                    <label class="form-label" for="company_id">회사 ID</label>
+                    <input type="text" class="form-control" id="company_id" name="company_id"
+                           placeholder="고유한 회사 식별자를 입력하세요"
+                           value="">
+                    <small class="form-text">벡터 DB에서 데이터 분리를 위한 고유 식별자</small>
+                </div>otstrap/4.5.2/css/bootstrap.min.css">
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -223,33 +233,37 @@
                 
                 <div class="form-group">
                     <label class="form-label" for="freshdesk_domain">Freshdesk 도메인</label>
-                    <input type="text" class="form-control" id="freshdesk_domain" 
+                    <input type="text" class="form-control" id="freshdesk_domain" name="freshdesk_domain"
                            placeholder="예: yourcompany.freshdesk.com"
-                           value="">
+                           value=""
+                           required>
                     <small class="form-text">귀하의 Freshdesk 도메인을 입력하세요 (https:// 제외)</small>
                 </div>
                 
                 <div class="form-group">
                     <label class="form-label" for="freshdesk_api_key">Freshdesk API 키</label>
-                    <input type="password" class="form-control" id="freshdesk_api_key" 
+                    <input type="password" class="form-control" id="freshdesk_api_key" name="freshdesk_api_key"
                            placeholder="API 키를 입력하세요"
-                           value="">
+                           value=""
+                           required>
                     <small class="form-text">Freshdesk 관리자 → API 설정에서 확인할 수 있습니다</small>
                 </div>
                 
                 <div class="form-group">
                     <label class="form-label" for="backend_url">백엔드 API URL</label>
-                    <input type="text" class="form-control" id="backend_url" 
+                    <input type="text" class="form-control" id="backend_url" name="backend_url"
                            placeholder="예: https://your-backend.amazonaws.com"
-                           value="">
+                           value=""
+                           required>
                     <small class="form-text">Backend URL을 입력하세요</small>
                 </div>
                 
                 <div class="form-group">
                     <label class="form-label" for="company_id">회사 ID</label>
-                    <input type="text" class="form-control" id="company_id" 
+                    <input type="text" class="form-control" id="company_id" name="company_id"
                            placeholder="고유한 회사 식별자를 입력하세요"
-                           value="">
+                           value=""
+                           required>
                     <small class="form-text">벡터 DB에서 데이터 분리를 위한 고유 식별자</small>
                 </div>
                 

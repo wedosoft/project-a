@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>환경 디버그 정보</title>
+    <style>
+        body { 
+            font-family: monospace; 
+            margin: 20px; 
+            background: #f5f5f5; 
+        }
+        .debug-section { 
+            background: white; 
+            padding: 15px; 
+            margin: 10px 0; 
+            border-radius: 5px; 
+            border-left: 4px solid #007bff; 
+        }
+        .key { 
+            font-weight: bold; 
+            color: #333; 
+        }
+        .value { 
+            color: #666; 
+        }
+        .success { 
+            color: #28a745; 
+        }
+        .error { 
+            color: #dc3545; 
+        }
+    </style>
+</head>
+<body>
+    <h1>🔍 프론트엔드 환경 디버그 정보</h1>
+    
+    <div class="debug-section">
+        <h3>📊 환경 정보</h3>
+        <div id="environment-info"></div>
+    </div>
+    
+    <div class="debug-section">
+        <h3>⚙️ 설정 정보</h3>
+        <div id="config-info"></div>
+    </div>
+    
+    <div class="debug-section">
+        <h3>📝 테스트 로그</h3>
+        <div id="test-logs"></div>
+    </div>
+
+    <script src="scripts/config.js"></script>
+    <script>
+        // 환경 정보 표시
+        function displayEnvironmentInfo() {
+            const envInfo = window.config?.getEnvironmentInfo();
+            const envDiv = document.getElementById('environment-info');
+            
+            if (envInfo) {
+                envDiv.innerHTML = `
+                    <div><span class="key">Environment:</span> <span class="value ${envInfo.isDevelopment ? 'success' : 'error'}">${envInfo.environment}</span></div>
+                    <div><span class="key">Hostname:</span> <span class="value">${envInfo.hostname}</span></div>
+                    <div><span class="key">URL:</span> <span class="value">${envInfo.href}</span></div>
+                    <div><span class="key">Port:</span> <span class="value">${envInfo.port || '기본값'}</span></div>
+                    <div><span class="key">Is Ngrok Tunnel:</span> <span class="value ${envInfo.isNgrokTunnel ? 'success' : 'error'}">${envInfo.isNgrokTunnel ? '✅ 예' : '❌ 아니오'}</span></div>
+                    <div><span class="key">Is Development:</span> <span class="value ${envInfo.isDevelopment ? 'success' : 'error'}">${envInfo.isDevelopment}</span></div>
+                    <div><span class="key">Is Production:</span> <span class="value ${envInfo.isProduction ? 'success' : 'error'}">${envInfo.isProduction}</span></div>
+                `;
+            } else {
+                envDiv.innerHTML = '<div class="error">환경 정보를 불러올 수 없습니다.</div>';
+            }
+        }
+        
+        // 설정 정보 표시
+        function displayConfigInfo() {
+            const configDiv = document.getElementById('config-info');
+            const devConfig = window.config?.DEVELOPMENT_CONFIG;
+            
+            if (devConfig) {
+                configDiv.innerHTML = `
+                    <div><span class="key">Backend URL:</span> <span class="value">${devConfig.backendUrl}</span></div>
+                    <div><span class="key">Freshdesk Domain:</span> <span class="value">${devConfig.freshdeskDomain}</span></div>
+                    <div><span class="key">API Key:</span> <span class="value">***${devConfig.freshdeskApiKey ? '설정됨' : '미설정'}***</span></div>
+                    <div><span class="key">Company ID:</span> <span class="value">${devConfig.companyId}</span></div>
+                `;
+            } else {
+                configDiv.innerHTML = '<div class="error">설정 정보를 불러올 수 없습니다.</div>';
+            }
+        }
+        
+        // 테스트 로그
+        function addTestLog(message, type = 'info') {
+            const logsDiv = document.getElementById('test-logs');
+            const timestamp = new Date().toLocaleTimeString();
+            const logClass = type === 'success' ? 'success' : type === 'error' ? 'error' : 'value';
+            
+            logsDiv.innerHTML += `<div>[${timestamp}] <span class="${logClass}">${message}</span></div>`;
+        }
+        
+        // 초기화
+        document.addEventListener('DOMContentLoaded', function() {
+            displayEnvironmentInfo();
+            displayConfigInfo();
+            addTestLog('디버그 페이지 로드 완료', 'success');
+        });
+    </script>
+</body>
+</html>
