@@ -2,8 +2,8 @@
   "backendApi": {
     "schema": {
       "method": "GET",
-      "protocol": "https",
-      "host": "eb73-61-73-3-53.ngrok-free.app",
+      "protocol": "${context.backend_protocol}",
+      "host": "${context.backend_host}",
       "path": "/${context.path}",
       "headers": {
         "Content-Type": "application/json",
@@ -16,8 +16,8 @@
   "backendApiPost": {
     "schema": {
       "method": "POST",
-      "protocol": "https",
-      "host": "eb73-61-73-3-53.ngrok-free.app", 
+      "protocol": "${context.backend_protocol}",
+      "host": "${context.backend_host}",
       "path": "/${context.path}",
       "headers": {
         "Content-Type": "application/json",
