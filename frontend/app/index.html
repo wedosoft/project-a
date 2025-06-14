@@ -113,7 +113,7 @@
       max-height: 50px;
       overflow: hidden;
     }
-    
+
     /* Chat interface styles */
     .chat-interface {
       height: 100%;
@@ -163,7 +163,7 @@
       0% { transform: rotate(0deg); }
       100% { transform: rotate(360deg); }
     }
-    
+
     /* Detail view styles */
     .detail-content {
       background-color: #f8f9fa;
@@ -191,7 +191,7 @@
       font-size: 11px;
       margin-right: 5px;
     }
-    
+
     /* List item styles */
     .list-item {
       border: 1px solid #e9ecef;
@@ -246,6 +246,7 @@
 </head>
 <body>
   <div class="container-fluid p-0">
+    <div id="global-error-message" class="alert alert-danger m-2" style="display:none"></div>
     <!-- Top section - Ticket Information -->
     <div class="ticket-info">
       <h5>📋 Ticket Information</h5>
@@ -270,19 +271,19 @@
         <span>백엔드에서 데이터를 가져오는 중...</span>
       </div>
     </div>
-    
+
     <!-- Bottom section - Tabbed Interface -->
     <ul class="nav nav-tabs" id="ticketTabs" role="tablist">
       <li class="nav-item" role="presentation">
-        <button class="nav-link active" id="similar-tickets-tab" data-bs-toggle="tab" data-bs-target="#similar-tickets" 
+        <button class="nav-link active" id="similar-tickets-tab" data-bs-toggle="tab" data-bs-target="#similar-tickets"
           type="button" role="tab" aria-controls="similar-tickets" aria-selected="true">Similar Tickets</button>
       </li>
       <li class="nav-item" role="presentation">
-        <button class="nav-link" id="suggested-solutions-tab" data-bs-toggle="tab" data-bs-target="#suggested-solutions" 
+        <button class="nav-link" id="suggested-solutions-tab" data-bs-toggle="tab" data-bs-target="#suggested-solutions"
           type="button" role="tab" aria-controls="suggested-solutions" aria-selected="false">Suggested Solutions</button>
       </li>
       <li class="nav-item" role="presentation">
-        <button class="nav-link" id="copilot-tab" data-bs-toggle="tab" data-bs-target="#copilot" 
+        <button class="nav-link" id="copilot-tab" data-bs-toggle="tab" data-bs-target="#copilot"
           type="button" role="tab" aria-controls="copilot" aria-selected="false">Copilot</button>
       </li>
     </ul>
@@ -379,7 +380,7 @@
       location: window.location.href,
       timestamp: new Date().toISOString()
     });
-    
+
     // FDK 환경 체크
     if (typeof app !== 'undefined') {
       console.log("✅ Freshdesk app 객체 감지됨");
@@ -387,20 +388,20 @@
       console.warn("⚠️ Freshdesk app 객체를 찾을 수 없습니다. FDK 환경에서 실행 중인지 확인하세요.");
     }
   </script>
-  
+
   <!-- 로드 순서 중요: utils -> config -> api -> ui -> app 순으로 로드 -->
   <script src="scripts/utils.js"></script>
   <script src="scripts/config.js"></script>
   <script src="scripts/api.js"></script>
   <script src="scripts/ui.js"></script>
   <script src="scripts/app.js"></script>
-  
+
   <script>
     // 모든 스크립트 로드 후 최종 체크
     console.log("🏁 모든 스크립트 로드 완료");
     console.log("📦 모듈 로드 상태:", {
       utils: typeof window.utils !== 'undefined',
-      config: typeof window.config !== 'undefined', 
+      config: typeof window.config !== 'undefined',
       api: typeof window.api !== 'undefined',
       ui: typeof window.ui !== 'undefined',
       initializeApp: typeof window.initializeApp !== 'undefined'

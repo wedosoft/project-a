@@ -36,6 +36,9 @@
       }
     }
   },
+  "features": {
+    "requestTemplates": "./config/requests.json"
+  },
   "platform-version": "3.0",
   "engines": {
     "node": "18.18.2",
