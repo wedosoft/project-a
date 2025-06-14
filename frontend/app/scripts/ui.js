@@ -78,20 +78,20 @@ function hideQuickLoadingIndicator() {
 
 /**
  * 알림 메시지 표시 함수
- * @param {string} message - 표시할 메시지 
+ * @param {string} message - 표시할 메시지
  * @param {string} type - 알림 타입 ('success', 'error', 'warning', 'info')
  * @param {number} duration - 표시 시간 (밀리초)
  */
 function showNotification(message, type = 'info', duration = 3000) {
   // 기존 알림 컨테이너 찾기 또는 생성
   let notificationContainer = document.getElementById('notification-container');
-  
+
   if (!notificationContainer) {
     notificationContainer = document.createElement('div');
     notificationContainer.id = 'notification-container';
     document.body.appendChild(notificationContainer);
   }
-  
+
   // 새 알림 요소 생성
   const notification = document.createElement('div');
   notification.className = `notification notification-${type}`;
@@ -103,15 +103,15 @@ function showNotification(message, type = 'info', duration = 3000) {
       <span class="notification-message">${message}</span>
     </div>
   `;
-  
+
   // 알림 컨테이너에 추가
   notificationContainer.appendChild(notification);
-  
+
   // 애니메이션 효과
   setTimeout(() => {
     notification.classList.add('show');
   }, 10);
-  
+
   // 지정된 시간 후 알림 제거
   setTimeout(() => {
     notification.classList.remove('show');
@@ -123,14 +123,25 @@ function showNotification(message, type = 'info', duration = 3000) {
 
 /**
  * 에러 메시지 표시 함수
- * @param {string} message - 에러 메시지 
+ * @param {string} message - 에러 메시지
  * @param {Error} error - 에러 객체 (선택사항)
  */
 function showError(message, error = null) {
   console.error(`❌ ${message}`, error);
-  
+
   // 에러 메시지 표시
   showNotification(message, 'error', 5000);
+}
+
+// 전역 오류 배너 표시
+function showGlobalError(message) {
+  const banner = document.getElementById('global-error-message');
+  if (banner) {
+    banner.textContent = message;
+    banner.style.display = 'block';
+  } else {
+    showError(message);
+  }
 }
 
 /**
@@ -143,13 +154,13 @@ function switchTab(tabId) {
   tabContents.forEach(tab => {
     tab.classList.remove('active');
   });
-  
+
   // 모든 탭 버튼 비활성화
   const tabButtons = document.querySelectorAll('.tab-button');
   tabButtons.forEach(button => {
     button.classList.remove('active');
   });
-  
+
   // 선택한 탭 컨텐츠 및 버튼 활성화
   document.getElementById(tabId).classList.add('active');
   document.querySelector(`[data-tab="${tabId}"]`).classList.add('active');
@@ -162,9 +173,9 @@ function switchTab(tabId) {
  */
 function renderTicketSummary(summary, container) {
   if (!summary || !container) return;
-  
+
   console.log("🖥️ 티켓 요약 렌더링:", summary);
-  
+
   container.innerHTML = `
     <div class="ticket-summary-card">
       <div class="ticket-summary-header">
@@ -184,9 +195,9 @@ function renderTicketSummary(summary, container) {
  */
 function renderSimilarTickets(tickets, container) {
   if (!tickets || !container) return;
-  
+
   console.log("🖥️ 유사 티켓 렌더링:", tickets);
-  
+
   // 유사 티켓이 없을 경우
   if (tickets.length === 0) {
     container.innerHTML = `
@@ -196,7 +207,7 @@ function renderSimilarTickets(tickets, container) {
     `;
     return;
   }
-  
+
   // 유사 티켓 목록 렌더링
   const ticketsHtml = tickets.map(ticket => `
     <div class="similar-ticket-card" data-ticket-id="${ticket.id || ''}">
@@ -217,9 +228,9 @@ function renderSimilarTickets(tickets, container) {
       </div>
     </div>
   `).join('');
-  
+
   container.innerHTML = ticketsHtml;
-  
+
   // 상세 보기 버튼 이벤트 처리
   container.querySelectorAll('.btn-view-details').forEach(button => {
     button.addEventListener('click', (event) => {
@@ -227,7 +238,7 @@ function renderSimilarTickets(tickets, container) {
       showTicketDetails(ticketId, tickets.find(t => t.id == ticketId));
     });
   });
-  
+
   // 답변 사용 버튼 이벤트 처리
   container.querySelectorAll('.btn-use-solution').forEach(button => {
     button.addEventListener('click', (event) => {
@@ -244,9 +255,9 @@ function renderSimilarTickets(tickets, container) {
  */
 function renderRecommendedSolutions(solutions, container) {
   if (!solutions || !container) return;
-  
+
   console.log("🖥️ 추천 솔루션 렌더링:", solutions);
-  
+
   // 추천 솔루션이 없을 경우
   if (solutions.length === 0) {
     container.innerHTML = `
@@ -256,7 +267,7 @@ function renderRecommendedSolutions(solutions, container) {
     `;
     return;
   }
-  
+
   // 추천 솔루션 목록 렌더링
   const solutionsHtml = solutions.map(solution => `
     <div class="solution-card" data-solution-id="${solution.id || ''}">
@@ -277,9 +288,9 @@ function renderRecommendedSolutions(solutions, container) {
       </div>
     </div>
   `).join('');
-  
+
   container.innerHTML = solutionsHtml;
-  
+
   // 상세 보기 버튼 이벤트 처리
   container.querySelectorAll('.btn-view-details').forEach(button => {
     button.addEventListener('click', (event) => {
@@ -287,7 +298,7 @@ function renderRecommendedSolutions(solutions, container) {
       showSolutionDetails(solutionId, solutions.find(s => s.id == solutionId));
     });
   });
-  
+
   // 답변 사용 버튼 이벤트 처리
   container.querySelectorAll('.btn-use-solution').forEach(button => {
     button.addEventListener('click', (event) => {
@@ -307,16 +318,16 @@ function showTicketDetails(ticketId, ticket) {
     showError("티켓 정보를 찾을 수 없습니다.");
     return;
   }
-  
+
   // 모달 생성
   const modalId = `ticket-modal-${ticketId}`;
-  
+
   // 기존 모달이 있으면 제거
   const existingModal = document.getElementById(modalId);
   if (existingModal) {
     existingModal.remove();
   }
-  
+
   // 새 모달 생성
   const modal = document.createElement('div');
   modal.id = modalId;
@@ -338,7 +349,7 @@ function showTicketDetails(ticketId, ticket) {
         <div class="ticket-detail-content">
           <h4>티켓 내용</h4>
           <div class="content-box">${ticket.description || '내용 없음'}</div>
-          
+
           ${ticket.notes && ticket.notes.length > 0 ? `
             <h4>노트 (${ticket.notes.length})</h4>
             <div class="notes-container">
@@ -353,7 +364,7 @@ function showTicketDetails(ticketId, ticket) {
               `).join('')}
             </div>
           ` : ''}
-          
+
           ${ticket.attachments && ticket.attachments.length > 0 ? `
             <h4>첨부파일 (${ticket.attachments.length})</h4>
             <div class="attachments-container">
@@ -374,23 +385,23 @@ function showTicketDetails(ticketId, ticket) {
       </div>
     </div>
   `;
-  
+
   // 모달을 body에 추가
   document.body.appendChild(modal);
-  
+
   // 모달 닫기 버튼 이벤트
   modal.querySelectorAll('.modal-close').forEach(button => {
     button.addEventListener('click', () => {
       modal.remove();
     });
   });
-  
+
   // 답변으로 사용하기 버튼 이벤트
   modal.querySelector('.btn-use-as-reply').addEventListener('click', () => {
     useTicketSolution(ticketId, ticket);
     modal.remove();
   });
-  
+
   // ESC 키로 모달 닫기
   const escHandler = (e) => {
     if (e.key === 'Escape') {
@@ -399,7 +410,7 @@ function showTicketDetails(ticketId, ticket) {
     }
   };
   document.addEventListener('keydown', escHandler);
-  
+
   // 배경 클릭으로 모달 닫기
   modal.querySelector('.modal-backdrop').addEventListener('click', () => {
     modal.remove();
@@ -421,16 +432,16 @@ function showSolutionDetails(solutionId, solution) {
     showError("솔루션 정보를 찾을 수 없습니다.");
     return;
   }
-  
+
   // 모달 생성
   const modalId = `solution-modal-${solutionId}`;
-  
+
   // 기존 모달이 있으면 제거
   const existingModal = document.getElementById(modalId);
   if (existingModal) {
     existingModal.remove();
   }
-  
+
   // 새 모달 생성
   const modal = document.createElement('div');
   modal.id = modalId;
@@ -451,7 +462,7 @@ function showSolutionDetails(solutionId, solution) {
         <div class="solution-detail-content">
           <h4>솔루션 내용</h4>
           <div class="content-box">${solution.content || '내용 없음'}</div>
-          
+
           ${solution.tags && solution.tags.length > 0 ? `
             <div class="solution-tags">
               <h4>태그</h4>
@@ -468,23 +479,23 @@ function showSolutionDetails(solutionId, solution) {
       </div>
     </div>
   `;
-  
+
   // 모달을 body에 추가
   document.body.appendChild(modal);
-  
+
   // 모달 닫기 버튼 이벤트
   modal.querySelectorAll('.modal-close').forEach(button => {
     button.addEventListener('click', () => {
       modal.remove();
     });
   });
-  
+
   // 답변으로 사용하기 버튼 이벤트
   modal.querySelector('.btn-use-as-reply').addEventListener('click', () => {
     useSolution(solutionId, solution);
     modal.remove();
   });
-  
+
   // ESC 키로 모달 닫기
   const escHandler = (e) => {
     if (e.key === 'Escape') {
@@ -493,7 +504,7 @@ function showSolutionDetails(solutionId, solution) {
     }
   };
   document.addEventListener('keydown', escHandler);
-  
+
   // 배경 클릭으로 모달 닫기
   modal.querySelector('.modal-backdrop').addEventListener('click', () => {
     modal.remove();
@@ -515,14 +526,14 @@ function useTicketSolution(ticketId, ticket) {
     showError("티켓 정보를 찾을 수 없습니다.");
     return;
   }
-  
+
   try {
     // 티켓에서 응답 템플릿 생성
     const responseTemplate = generateResponseFromTicket(ticket);
-    
+
     // Freshdesk 리플라이 박스에 응답 삽입
     insertResponseToReplyBox(responseTemplate);
-    
+
     showNotification("응답이 리플라이 박스에 삽입되었습니다.", "success");
   } catch (error) {
     showError("응답 생성 중 오류가 발생했습니다.", error);
@@ -539,14 +550,14 @@ function useSolution(solutionId, solution) {
     showError("솔루션 정보를 찾을 수 없습니다.");
     return;
   }
-  
+
   try {
     // 솔루션에서 응답 템플릿 생성
     const responseTemplate = generateResponseFromSolution(solution);
-    
+
     // Freshdesk 리플라이 박스에 응답 삽입
     insertResponseToReplyBox(responseTemplate);
-    
+
     showNotification("응답이 리플라이 박스에 삽입되었습니다.", "success");
   } catch (error) {
     showError("응답 생성 중 오류가 발생했습니다.", error);
@@ -561,21 +572,21 @@ function useSolution(solutionId, solution) {
 function generateResponseFromTicket(ticket) {
   // 관련 노트에서 해결 방법 찾기
   let solution = "";
-  
+
   if (ticket.notes && ticket.notes.length > 0) {
     // 가장 최근의 비공개 노트 또는 마지막 노트 사용
     const relevantNote = ticket.notes.find(note => note.private === true) || ticket.notes[ticket.notes.length - 1];
-    
+
     if (relevantNote) {
       solution = relevantNote.body || "";
     }
   }
-  
+
   if (!solution && ticket.description) {
     solution = ticket.description;
   }
-  
-  return `안녕하세요, 
+
+  return `안녕하세요,
 
 문의하신 내용과 유사한 케이스를 참고하여 해결 방법을 안내해 드립니다:
 
@@ -592,7 +603,7 @@ ${solution}
  * @returns {string} - 생성된 응답 템플릿
  */
 function generateResponseFromSolution(solution) {
-  return `안녕하세요, 
+  return `안녕하세요,
 
 문의하신 내용에 대한 해결 방법을 안내해 드립니다:
 
@@ -625,12 +636,12 @@ function insertResponseToReplyBox(response) {
  */
 function formatFileSize(bytes) {
   if (!bytes || isNaN(bytes)) return "알 수 없음";
-  
+
   const sizes = ["Bytes", "KB", "MB", "GB", "TB"];
   if (bytes === 0) return "0 Bytes";
-  
+
   const i = parseInt(Math.floor(Math.log(bytes) / Math.log(1024)));
-  
+
   return Math.round(bytes / Math.pow(1024, i)) + " " + sizes[i];
 }
 
@@ -642,6 +653,7 @@ window.ui = {
   hideQuickLoadingIndicator,
   showNotification,
   showError,
+  showGlobalError,
   switchTab,
   renderTicketSummary,
   renderSimilarTickets,

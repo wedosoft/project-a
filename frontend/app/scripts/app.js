@@ -21,33 +21,29 @@ let appConfig = null; // 앱 설정 객체
  */
 async function initializeApp() {
   console.log("🎯 앱 초기화 시작");
-  
+
   // 환경 정보 로깅 (디버깅용)
   if (typeof window.config?.getEnvironmentInfo === 'function') {
     const envInfo = window.config.getEnvironmentInfo();
     console.log("🌍 환경 정보:", envInfo);
   }
-  
+
   if (isInitialized) {
     console.log("⚠️ 앱이 이미 초기화되었습니다.");
     return;
   }
-  
+
   try {
-    // 로딩 인디케이터 표시
-    if (typeof window.ui?.showLoadingIndicator === 'function') {
-      window.ui.showLoadingIndicator();
-    }
-    
+
     // Freshdesk 클라이언트 초기화
     console.log("🔗 Freshdesk 클라이언트 초기화");
     if (typeof app === 'undefined') {
       throw new Error("Freshdesk app 객체를 찾을 수 없습니다. FDK 환경에서 실행 중인지 확인해주세요.");
     }
-    
+
     client = await app.initialized();
     console.log("✅ Freshdesk 앱 클라이언트 초기화 완료");
-    
+
     // 앱 설정 초기화 (환경별 설정 처리)
     if (typeof window.config?.initializeConfig === 'function') {
       appConfig = await window.config.initializeConfig(client);
@@ -59,48 +55,45 @@ async function initializeApp() {
     } else {
       throw new Error("앱 설정을 초기화할 수 없습니다. config.js 파일을 확인해주세요.");
     }
-    
+
     // 설정 검증
     if (!appConfig || !appConfig.backendUrl) {
       throw new Error("백엔드 URL이 설정되지 않았습니다. 관리자 설정을 확인해주세요.");
     }
-    
+
     // DOM 요소 초기화
     setupDomElements();
-    
+
     // 이벤트 리스너 등록
     registerEventListeners();
-    
+
     // 백엔드 데이터 로드
     console.log("📊 백엔드 데이터 로드 시작");
     const ticketData = await loadCurrentTicketData();
     console.log("✅ 백엔드 데이터 로드 완료");
-    
+
     // 티켓 정보 렌더링
     renderTicketInfo(ticketData);
-    
+
     // 탭 데이터 프리로딩
     preloadAllTabData(ticketData);
-    
+
     // 초기화 완료
     isInitialized = true;
     console.log("✅ 앱 초기화 완료");
-    
+
     // 성공 알림
     if (typeof window.ui?.showNotification === 'function') {
       window.ui.showNotification("AI 지원 시스템이 준비되었습니다.", "success");
     }
-    
+
   } catch (error) {
     console.error("❌ 앱 초기화 실패:", error);
-    
-    if (typeof window.ui?.showError === 'function') {
-      window.ui.showError("앱 초기화 중 오류가 발생했습니다. 페이지를 새로고침해 주세요.");
-    }
-  } finally {
-    // 로딩 인디케이터 숨기기
-    if (typeof window.ui?.hideLoadingIndicator === 'function') {
-      window.ui.hideLoadingIndicator();
+
+    if (typeof window.ui?.showGlobalError === 'function') {
+      window.ui.showGlobalError('데이터 로딩 오류: 페이지를 새로고침해 주세요.');
+    } else if (typeof window.ui?.showError === 'function') {
+      window.ui.showError('데이터 로딩 오류: 페이지를 새로고침해 주세요.');
     }
   }
 }
@@ -111,7 +104,7 @@ async function initializeApp() {
  */
 function setupDomElements() {
   console.log("🔧 DOM 요소 초기화 중...");
-  
+
   // 탭 클릭 이벤트 설정 (Bootstrap 탭 이벤트)
   const tabs = document.querySelectorAll('[data-bs-toggle="tab"]');
   tabs.forEach(tab => {
@@ -121,7 +114,7 @@ function setupDomElements() {
       handleTabSwitch(targetPaneId);
     });
   });
-  
+
   // 유사 티켓 탭 버튼 이벤트
   const refreshSimilarTicketsBtn = document.getElementById('refresh-similar-tickets');
   if (refreshSimilarTicketsBtn) {
@@ -130,7 +123,7 @@ function setupDomElements() {
       await refreshSimilarTicketsData();
     });
   }
-  
+
   // 추천 솔루션 탭 버튼 이벤트
   const refreshSolutionsBtn = document.getElementById('refresh-solutions');
   if (refreshSolutionsBtn) {
@@ -139,48 +132,48 @@ function setupDomElements() {
       await refreshSolutionsData();
     });
   }
-  
+
   // 채팅 관련 이벤트
   const chatSearchButton = document.getElementById('chat-search-button');
   const chatInput = document.getElementById('chat-input');
   const clearChatBtn = document.getElementById('clear-chat');
-  
+
   if (chatSearchButton && chatInput) {
     chatSearchButton.addEventListener('click', async () => {
       await handleChatQuery();
     });
-    
+
     chatInput.addEventListener('keypress', async (e) => {
       if (e.key === 'Enter') {
         await handleChatQuery();
       }
     });
   }
-  
+
   if (clearChatBtn) {
     clearChatBtn.addEventListener('click', () => {
       clearChatHistory();
     });
   }
-  
+
   // 백 버튼 이벤트
   const backToSimilarListBtn = document.getElementById('back-to-similar-list');
   const backToSolutionsListBtn = document.getElementById('back-to-solutions-list');
-  
+
   if (backToSimilarListBtn) {
     backToSimilarListBtn.addEventListener('click', () => {
       document.getElementById('similar-tickets-detail-view').style.display = 'none';
       document.getElementById('similar-tickets-list-view').style.display = 'block';
     });
   }
-  
+
   if (backToSolutionsListBtn) {
     backToSolutionsListBtn.addEventListener('click', () => {
       document.getElementById('solutions-detail-view').style.display = 'none';
       document.getElementById('solutions-list-view').style.display = 'block';
     });
   }
-  
+
   console.log("✅ DOM 요소 초기화 완료");
 }
 
@@ -190,20 +183,16 @@ function setupDomElements() {
  */
 function registerEventListeners() {
   console.log("🔧 Freshdesk 이벤트 리스너 등록 중...");
-  
+
   // Freshdesk 앱 이벤트 리스너
   client.events.on('app.activated', () => {
-    console.log("🔄 앱 활성화 이벤트 발생");
-    // 앱이 다시 활성화되면 데이터 새로고침
-    refreshAllData();
+    console.log("🔄 앱 활성화 이벤트 발생 (재호출 없음)");
   });
-  
+
   client.events.on('ticket.propertiesUpdated', () => {
-    console.log("🔄 티켓 속성 변경 이벤트 발생");
-    // 티켓이 변경되면 데이터 새로고침
-    refreshAllData();
+    console.log("🔄 티켓 속성 변경 이벤트 발생 (재호출 없음)");
   });
-  
+
   console.log("✅ Freshdesk 이벤트 리스너 등록 완료");
 }
 
@@ -212,23 +201,23 @@ function registerEventListeners() {
  */
 async function refreshAllData() {
   console.log("🔄 전체 데이터 새로고침 중...");
-  
+
   try {
     showQuickLoadingIndicator();
-    
+
     // 백엔드에서 최신 데이터 가져오기
     const ticketData = await loadCurrentTicketData();
-    
+
     // 티켓 정보 업데이트
     renderTicketInfo(ticketData);
-    
+
     // 현재 활성 탭에 따라 해당 데이터만 업데이트
     const activeTab = document.querySelector('.nav-link.active');
     if (activeTab) {
       const targetPaneId = activeTab.getAttribute('data-bs-target');
       handleTabSwitch(targetPaneId);
     }
-    
+
     showNotification("데이터가 새로고침되었습니다.", "success");
   } catch (error) {
     console.error("❌ 전체 데이터 새로고침 실패:", error);
@@ -244,13 +233,13 @@ async function refreshAllData() {
  */
 async function loadCurrentTicketData() {
   console.log("⏳ 현재 티켓 정보 로드 중...");
-  
+
   try {
     // 현재 티켓 ID 가져오기
     const context = await client.data.get("ticket");
     const ticketId = context.ticket.id;
     console.log("🎫 현재 티켓 ID:", ticketId);
-    
+
     // 백엔드에서 티켓 데이터 가져오기
     const ticketData = await loadTicketInitData(ticketId, appConfig);
     return ticketData;
@@ -266,25 +255,25 @@ async function loadCurrentTicketData() {
  */
 function renderTicketInfo(ticketData) {
   console.log("🎨 티켓 정보 렌더링 중...");
-  
+
   if (!ticketData || !ticketData.ticket_info) {
     console.warn("⚠️ 렌더링할 티켓 정보가 없습니다.");
     return;
   }
-  
+
   const ticketInfo = ticketData.ticket_info;
-  
+
   // 상단 티켓 정보 카드 업데이트
   const subjectElement = document.getElementById('ticket-subject');
   const statusElement = document.getElementById('ticket-status');
   const priorityElement = document.getElementById('ticket-priority');
   const typeElement = document.getElementById('ticket-type');
-  
+
   if (subjectElement) subjectElement.textContent = ticketInfo.subject || '제목 없음';
   if (statusElement) statusElement.textContent = getStatusText(ticketInfo.status) || '상태 정보 없음';
   if (priorityElement) priorityElement.textContent = getPriorityText(ticketInfo.priority) || '우선순위 정보 없음';
   if (typeElement) typeElement.textContent = ticketInfo.type || '유형 정보 없음';
-  
+
   console.log("✅ 티켓 정보 렌더링 완료");
 }
 
@@ -295,7 +284,7 @@ function renderTicketInfo(ticketData) {
  */
 function preloadAllTabData(ticketData) {
   console.log("📦 모든 탭 데이터 사전 로딩 중...");
-  
+
   try {
     // 유사 티켓 데이터 준비
     if (ticketData.similar_tickets && ticketData.similar_tickets.length > 0) {
@@ -305,17 +294,17 @@ function preloadAllTabData(ticketData) {
     } else {
       console.log("⚠️ 유사 티켓 데이터가 없습니다.");
     }
-    
+
     // 추천 솔루션 데이터 준비
     if (ticketData.recommended_solutions && ticketData.recommended_solutions.length > 0) {
       console.log(`✅ 추천 솔루션 ${ticketData.recommended_solutions.length}개 준비 완료`);
     } else {
       console.log("⚠️ 추천 솔루션 데이터가 없습니다.");
     }
-    
+
     // 채팅 탭 초기화 (웰컴 메시지 등)
     initializeChatTab();
-    
+
     console.log("✅ 모든 탭 데이터 사전 로딩 완료");
   } catch (error) {
     console.error("❌ 탭 데이터 사전 로딩 실패:", error);
@@ -329,35 +318,35 @@ function preloadAllTabData(ticketData) {
  */
 function handleTabSwitch(targetPaneId) {
   console.log(`🔄 탭 전환 처리: ${targetPaneId}`);
-  
+
   const ticketData = getGlobalTicketData();
-  
+
   switch (targetPaneId) {
     case '#similar-tickets':
       if (ticketData && ticketData.similar_tickets) {
         renderSimilarTickets(ticketData.similar_tickets);
       } else {
         console.warn("⚠️ 유사 티켓 데이터가 없습니다.");
-        document.getElementById('similar-tickets-list').innerHTML = 
+        document.getElementById('similar-tickets-list').innerHTML =
           '<div class="placeholder-text">유사 티켓 데이터가 없습니다.</div>';
       }
       break;
-      
+
     case '#suggested-solutions':
       if (ticketData && ticketData.recommended_solutions) {
         renderRecommendedSolutions(ticketData.recommended_solutions);
       } else {
         console.warn("⚠️ 추천 솔루션 데이터가 없습니다.");
-        document.getElementById('suggested-solutions-list').innerHTML = 
+        document.getElementById('suggested-solutions-list').innerHTML =
           '<div class="placeholder-text">추천 솔루션 데이터가 없습니다.</div>';
       }
       break;
-      
+
     case '#copilot':
       // 채팅 탭은 이미 초기화되어 있음
       console.log("💬 채팅 탭 활성화");
       break;
-      
+
     default:
       console.log(`🔄 알 수 없는 탭: ${targetPaneId}`);
   }
@@ -368,13 +357,13 @@ function handleTabSwitch(targetPaneId) {
  */
 async function refreshSimilarTicketsData() {
   console.log("🔄 유사 티켓 데이터 새로고침 중...");
-  
+
   try {
     showQuickLoadingIndicator();
-    
+
     // 현재 티켓 데이터 다시 로드
     const ticketData = await loadCurrentTicketData();
-    
+
     // 유사 티켓만 다시 렌더링
     if (ticketData && ticketData.similar_tickets) {
       renderSimilarTickets(ticketData.similar_tickets);
@@ -393,13 +382,13 @@ async function refreshSimilarTicketsData() {
  */
 async function refreshSolutionsData() {
   console.log("🔄 추천 솔루션 데이터 새로고침 중...");
-  
+
   try {
     showQuickLoadingIndicator();
-    
+
     // 현재 티켓 데이터 다시 로드
     const ticketData = await loadCurrentTicketData();
-    
+
     // 추천 솔루션만 다시 렌더링
     if (ticketData && ticketData.recommended_solutions) {
       renderRecommendedSolutions(ticketData.recommended_solutions);
@@ -419,40 +408,40 @@ async function refreshSolutionsData() {
 async function handleChatQuery() {
   const chatInput = document.getElementById('chat-input');
   const query = chatInput.value.trim();
-  
+
   if (!query) {
     showNotification("질문을 입력해 주세요.", "warning");
     return;
   }
-  
+
   console.log("💬 채팅 쿼리 처리:", query);
-  
+
   try {
     // 사용자 메시지 추가
     addChatMessage(query, 'user');
-    
+
     // 입력창 초기화
     chatInput.value = '';
-    
+
     // 로딩 메시지 추가
     const loadingMsgId = addChatMessage("답변을 생성하고 있습니다...", 'assistant', true);
-    
+
     // 선택된 검색 옵션 가져오기
     const searchTypes = getSelectedSearchTypes();
-    
+
     // 백엔드 쿼리 API 호출
     const response = await sendQuery({
       query: query,
       content_types: searchTypes,
       ticket_context: getTicketContext()
     }, appConfig);
-    
+
     // 로딩 메시지 제거
     removeChatMessage(loadingMsgId);
-    
+
     // AI 응답 추가
     addChatMessage(response.message || "답변을 생성할 수 없습니다.", 'assistant');
-    
+
   } catch (error) {
     console.error("❌ 채팅 쿼리 처리 실패:", error);
     addChatMessage("죄송합니다. 오류가 발생했습니다.", 'assistant');
@@ -464,12 +453,12 @@ async function handleChatQuery() {
  */
 function getSelectedSearchTypes() {
   const searchTypes = [];
-  
+
   if (document.getElementById('search-tickets').checked) searchTypes.push('tickets');
   if (document.getElementById('search-solutions').checked) searchTypes.push('solutions');
   if (document.getElementById('search-images').checked) searchTypes.push('images');
   if (document.getElementById('search-attachments').checked) searchTypes.push('attachments');
-  
+
   return searchTypes;
 }
 
@@ -479,20 +468,20 @@ function getSelectedSearchTypes() {
 function addChatMessage(message, sender, isLoading = false) {
   const chatContainer = document.getElementById('chat-messages');
   const messageId = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-  
+
   const messageElement = document.createElement('div');
   messageElement.className = `chat-message ${sender}`;
   messageElement.id = messageId;
-  
+
   if (isLoading) {
     messageElement.classList.add('loading-message');
   }
-  
+
   messageElement.innerHTML = `<strong>${sender === 'user' ? '상담원' : 'AI'}:</strong> ${message}`;
-  
+
   chatContainer.appendChild(messageElement);
   chatContainer.scrollTop = chatContainer.scrollHeight;
-  
+
   return messageId;
 }
 
@@ -512,10 +501,10 @@ function removeChatMessage(messageId) {
 function clearChatHistory() {
   const chatContainer = document.getElementById('chat-messages');
   chatContainer.innerHTML = '';
-  
+
   // 초기 안내 메시지 다시 추가
   addChatMessage("안녕하세요! 이 티켓에 대해 어떤 도움이 필요하신가요?", 'assistant');
-  
+
   showNotification("채팅 기록이 초기화되었습니다.", "info");
 }
 
@@ -524,19 +513,19 @@ function clearChatHistory() {
  */
 function initializeChatTab() {
   console.log("� 채팅 탭 초기화 중...");
-  
+
   const chatContainer = document.getElementById('chat-messages');
   if (!chatContainer) {
     console.warn("⚠️ 채팅 컨테이너를 찾을 수 없습니다.");
     return;
   }
-  
+
   // 채팅 기록 초기화
   chatContainer.innerHTML = '';
-  
+
   // 초기 안내 메시지 추가
   addChatMessage("안녕하세요! 이 티켓에 대해 어떤 도움이 필요하신가요?", 'assistant');
-  
+
   console.log("✅ 채팅 탭 초기화 완료");
 }
 
@@ -546,7 +535,7 @@ function initializeChatTab() {
  */
 function getTicketContext() {
   const ticketData = getGlobalTicketData();
-  
+
   if (!ticketData) {
     console.warn("⚠️ 글로벌 티켓 데이터가 없습니다.");
     return {
@@ -556,7 +545,7 @@ function getTicketContext() {
       include_context: true
     };
   }
-  
+
   // 필요한 티켓 정보만 추출하여 반환
   return {
     ticket_id: ticketData.cached_ticket_id || '',
