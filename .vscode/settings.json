@@ -46,11 +46,20 @@
         "plaintext": true,
         "markdown": true,
         "python": true,
+        "javascript": true,
         "json": true,
-        "dockerfile": true
+        "dockerfile": true,
+        "jsonc": true
     },
     "github.copilot.chat.welcomeMessage": "never",
     "github.copilot.editor.enableAutoCompletions": true,
+    "github.copilot.chat.codeGeneration.instructions": ".copilot-instructions.md",
+    "github.copilot.chat.codeGeneration.useInstructionFiles": true,
+    "github.copilot.advanced": {
+        "inlineCompletionTrigger": "automatic",
+        "listCount": 5,
+        "length": "short"
+    },
     // 파일 연관성 (Docker, ENV 파일)
     "files.associations": {
         "*.py": "python",
@@ -82,5 +91,16 @@
         "PYTHONPATH": "${workspaceFolder}/backend"
     },
     // MCP 설정 추가
-    "chat.mcp.enabled": true
+    "chat.mcp.enabled": true,
+    "chat.mcp.serverSampling": {
+        "🏠 Project Root/.vscode/mcp.json: shell": {
+            "allowedModels": [
+                "github.copilot-chat/gpt-4.1",
+                "github.copilot-chat/claude-opus-4",
+                "github.copilot-chat/claude-sonnet-4",
+                "github.copilot-chat/gemini-2.0-flash-001",
+                "github.copilot-chat/gemini-2.5-pro"
+            ]
+        }
+    }
 }

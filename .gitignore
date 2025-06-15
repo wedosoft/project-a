@@ -139,6 +139,10 @@ cython_debug/
 !.vscode/extensions.json
 !.vscode/launch.json
 
+# GitHub Copilot 지침 파일 보호 (절대 ignore하지 않음)
+!.copilot-instructions.md
+!.github/instructions/
+
 
 # Docker
 .dockerignore

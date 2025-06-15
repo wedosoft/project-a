@@ -166,6 +166,39 @@
             },
             "python": "${workspaceFolder}/backend/venv/bin/python",
             "preLaunchTask": "Activate Virtual Environment"
+        },
+        {
+            "name": "FDK in Freshdesk (실제 환경)",
+            "type": "chrome",
+            "request": "launch",
+            "url": "https://wedosoft.freshdesk.com/a/tickets/12092?dev=true",
+            "webRoot": "${workspaceFolder}/frontend/app",
+            "sourceMapPathOverrides": {
+                "webpack:///./*": "${webRoot}/*",
+                "webpack:///src/*": "${webRoot}/*",
+                "webpack:///*": "*",
+                "https://localhost:10001/*": "${webRoot}/*",
+                "/./*": "${webRoot}/*",
+                "/static/js/*": "${webRoot}/*",
+                "/app/*": "${webRoot}/*",
+                "*": "${webRoot}/*"
+            },
+            "userDataDir": "${workspaceFolder}/.vscode/chrome-debug-profile",
+            "runtimeArgs": [
+                "--allow-running-insecure-content",
+                "--disable-features=VizDisplayCompositor",
+                "--remote-debugging-port=9222"
+            ],
+            "trace": true,
+            "disableNetworkCache": true,
+            "sourceMaps": true,
+            "showAsyncStacks": true,
+            "smartStep": true,
+            "skipFiles": [
+                "<node_internals>/**",
+                "**/node_modules/**",
+                "${workspaceFolder}/frontend/node_modules/**"
+            ]
         }
     ]
 }

@@ -3,7 +3,7 @@
     "schema": {
       "method": "GET",
       "protocol": "https",
-      "host": "eb73-61-73-3-53.ngrok-free.app",
+      "host": "906c-61-73-3-53.ngrok-free.app",
       "path": "/${context.path}",
       "headers": {
         "Content-Type": "application/json",
@@ -17,7 +17,7 @@
     "schema": {
       "method": "POST",
       "protocol": "https",
-      "host": "eb73-61-73-3-53.ngrok-free.app", 
+      "host": "906c-61-73-3-53.ngrok-free.app",
       "path": "/${context.path}",
       "headers": {
         "Content-Type": "application/json",
