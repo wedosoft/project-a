@@ -38,6 +38,10 @@ cp .env.example .env
 LLM 호출 지연 시 빠르게 다른 모델로 전환하려면 `LLM_TIMEOUT`(기본 10초)과
 `LLM_GEMINI_TIMEOUT`(기본 20초) 값을 조정하세요.
 
+#### ⚡ 초고속 초기화 모드
+
+`FAST_INIT_MODE=true`로 설정하면 `/init` 엔드포인트에서 LLM 호출을 생략하고 간단한 로컬 요약을 사용합니다. 데모나 성능 테스트에 유용합니다.
+
 ### 3. GitHub Actions Secrets 설정 (CI/CD용)
 
 GitHub Repository → **Settings** → **Secrets and variables** → **Actions**

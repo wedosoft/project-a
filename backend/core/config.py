@@ -13,7 +13,7 @@ import os
 import sys
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 # 환경변수 로드 - 명시적으로 .env 파일 경로를 지정
 from dotenv import load_dotenv
@@ -41,7 +41,7 @@ if not os.getenv("QDRANT_URL") and os.getenv("ENVIRONMENT", "development") == "d
     logger.warning(f"⚠️  .env 파일이 제대로 로드되지 않았을 수 있습니다. 경로: {dotenv_path}")
     logger.warning(f"⚠️  현재 작업 디렉토리: {os.getcwd()}")
     if dotenv_path.exists():
-        logger.info(f"ℹ️  .env 파일이 존재하지만 환경변수가 로드되지 않았습니다.")
+        logger.info("ℹ️  .env 파일이 존재하지만 환경변수가 로드되지 않았습니다.")
     else:
         logger.error(f"❌ .env 파일이 존재하지 않습니다: {dotenv_path}")
 
@@ -49,31 +49,30 @@ if not os.getenv("QDRANT_URL") and os.getenv("ENVIRONMENT", "development") == "d
 class Settings(BaseSettings):
     """
     애플리케이션 설정을 관리하는 클래스입니다.
-    
-    모든 설정은 환경변수 또는 .env 파일에서 로드되며, 
+
+    모든 설정은 환경변수 또는 .env 파일에서 로드되며,
     타입 힌트와 기본값을 통해 안전한 설정 관리를 제공합니다.
     """
+
     # Pydantic V2 스타일의 설정
     model_config = SettingsConfigDict(
-        env_file=dotenv_path,
-        env_file_encoding="utf-8",
-        extra="ignore"  # 추가 환경변수 무시
+        env_file=dotenv_path, env_file_encoding="utf-8", extra="ignore"  # 추가 환경변수 무시
     )
     # Freshdesk API 설정
     FRESHDESK_API_KEY: str = Field(..., description="Freshdesk API 키")
     FRESHDESK_DOMAIN: str = Field(..., description="Freshdesk 도메인 (예: company.freshdesk.com)")
-    
+
     # Qdrant Cloud 설정
     QDRANT_URL: str = Field(..., description="Qdrant Cloud URL")
     QDRANT_API_KEY: str = Field(..., description="Qdrant Cloud API 키")
-    
+
     # LLM API 키 설정
     ANTHROPIC_API_KEY: Optional[str] = Field(None, description="Anthropic API 키")
     OPENAI_API_KEY: Optional[str] = Field(None, description="OpenAI API 키")
     GOOGLE_API_KEY: Optional[str] = Field(None, description="Google Gemini API 키")
     PERPLEXITY_API_KEY: Optional[str] = Field(None, description="Perplexity API 키")
     DEEPSEEK_API_KEY: Optional[str] = Field(None, description="DeepSeek API 키")
-    
+
     # LLM 타임아웃 설정 (초 단위) - 안정성 향상을 위해 증가
     LLM_GLOBAL_TIMEOUT: float = Field(10.0, description="LLM 전역 타임아웃 (초) - 기존 5초→10초")
     LLM_GEMINI_TIMEOUT: float = Field(12.0, description="Gemini 전용 타임아웃 (초) - 기존 8초→12초")
@@ -81,30 +80,32 @@ class Settings(BaseSettings):
     LLM_ANTHROPIC_TIMEOUT: float = Field(8.0, description="Anthropic 전용 타임아웃 (초) - 기존 5초→8초")
     LLM_OPENAI_TIMEOUT: float = Field(8.0, description="OpenAI 전용 타임아웃 (초) - 기존 5초→8초")
     LLM_PARALLEL_TIMEOUT: float = Field(12.0, description="병렬 모드 타임아웃 (초)")
-    
+
     # LLM 재시도 설정
     LLM_MAX_RETRIES: int = Field(1, description="LLM API 최대 재시도 횟수")
-    
+
     # 애플리케이션 설정
-    COMPANY_ID: str = Field(default_factory=lambda: Settings._get_secure_company_id(), description="회사 ID (환경변수 필수)")
+    COMPANY_ID: str = Field(
+        default_factory=lambda: Settings._get_secure_company_id(), description="회사 ID (환경변수 필수)"
+    )
     PROCESS_ATTACHMENTS: bool = Field(True, description="첨부 파일 처리 여부")
     EMBEDDING_MODEL: str = Field("text-embedding-3-small", description="임베딩 모델 이름")
     LOG_LEVEL: str = Field("INFO", description="로깅 레벨")
     MAX_TOKENS: int = Field(4096, description="LLM 최대 토큰 수")
-    
+
     # 첨부파일 처리 설정
     MAX_FILE_SIZE: int = Field(20 * 1024 * 1024, description="최대 파일 크기 (바이트, 기본값: 20MB)")
     IMAGE_MIN_SIZE: int = Field(1000, description="OCR용 이미지 최소 크기 (픽셀)")
     CONTRAST_ENHANCEMENT: float = Field(2.0, description="이미지 대비 향상 배율")
     OCR_THRESHOLD: int = Field(150, description="OCR 이진화 임계값")
-    
+
     # 캐시 설정
     CACHE_TTL: int = Field(600, description="캐시 TTL (초)")
     CACHE_SIZE: int = Field(100, description="캐시 최대 항목 수")
-    
+
     # HTTP 클라이언트 타임아웃 설정
     HTTP_TIMEOUT: float = Field(30.0, description="HTTP 클라이언트 타임아웃 (초)")
-    
+
     @staticmethod
     def _get_secure_company_id() -> str:
         """
@@ -112,11 +113,11 @@ class Settings(BaseSettings):
         개발 환경에서는 선택적으로 설정 가능
         """
         company_id = os.getenv("COMPANY_ID")
-        
+
         # 디버깅 정보 출력
         if os.getenv("DEBUG") == "true":
             print(f"COMPANY_ID 환경변수 값: {company_id}")
-        
+
         # 개발 환경에서는 기본값 제공 (프로덕션에서는 반드시 설정 필요)
         if not company_id:
             # 개발 모드 확인
@@ -126,37 +127,43 @@ class Settings(BaseSettings):
                 return "development-default"
             else:
                 raise ValueError("COMPANY_ID 환경변수가 설정되지 않았습니다. 멀티테넌트 보안을 위해 반드시 설정해야 합니다.")
-        
+
         # 예시 또는 테스트용 company_id 거부
-        invalid_ids = ["example-company", "test-company", "your-company", "demo-company", "sample-company"]
+        invalid_ids = [
+            "example-company",
+            "test-company",
+            "your-company",
+            "demo-company",
+            "sample-company",
+        ]
         if company_id in invalid_ids:
             raise ValueError(f"유효하지 않은 company_id입니다: {company_id}. 실제 고객사 ID를 사용해주세요.")
-        
+
         # 최소 길이 검증
         if len(company_id) < 3:
             raise ValueError(f"company_id가 너무 짧습니다: {company_id}. 최소 3자 이상이어야 합니다.")
-        
+
         return company_id
-    
+
     # 서버 설정 - 환경변수 우선, 기본값은 개발환경용
     DEBUG: bool = Field(False, description="디버그 모드 활성화 여부")
     SERVER_HOST: str = Field("0.0.0.0", description="서버 호스트", alias="HOST")
     PORT: int = Field(8000, description="서버 포트")
-    
+
     # 네트워크 및 요청 설정
     REQUEST_DELAY: float = Field(0.5, description="Freshdesk API 요청 간 지연 (초)")
-    MAX_RETRIES: int = Field(10, description="API 요청 최대 재시도 횟수")  
+    MAX_RETRIES: int = Field(10, description="API 요청 최대 재시도 횟수")
     RETRY_DELAY: float = Field(2.0, description="재시도 간 지연 시간 (초)")
-    
+
     # 청크 처리 설정
     CHUNK_SIZE: int = Field(5000, description="데이터 청크 크기")
     SAVE_INTERVAL: int = Field(500, description="저장 간격")
     DAYS_PER_CHUNK: int = Field(14, description="청크당 일수")
-    
+
     # 작업별 모델 설정 - 환경변수에서 로드
     LLM_LIGHT_MODEL: str = Field("gemini-1.5-flash", description="가벼운 작업용 모델")
     LLM_HEAVY_MODEL: str = Field("gemini-1.5-pro", description="복잡한 작업용 모델")
-    
+
     # 캐시 설정 확장
     TICKET_SUMMARY_CACHE_TTL: int = Field(3600, description="티켓 요약 캐시 TTL (초)")
     TICKET_SUMMARY_CACHE_MAXSIZE: int = Field(100, description="티켓 요약 캐시 최대 크기")
@@ -166,21 +173,23 @@ class Settings(BaseSettings):
     EMBEDDING_CACHE_MAXSIZE: int = Field(1000, description="임베딩 캐시 최대 크기")
     ISSUE_SOLUTION_CACHE_TTL: int = Field(21600, description="이슈 솔루션 캐시 TTL (초)")
     ISSUE_SOLUTION_CACHE_MAXSIZE: int = Field(500, description="이슈 솔루션 캐시 최대 크기")
-    
+
+    # 초고속 초기화 모드 설정 - LLM 호출 생략
+    FAST_INIT_MODE: bool = Field(False, description="/init 엔드포인트에서 LLM 호출을 생략하고 빠른 요약을 사용")
+
     # CORS 설정
-    CORS_ORIGINS: List[str] = Field(
-        ["*"], description="CORS 허용 오리진 리스트"
-    )
-    
+    CORS_ORIGINS: List[str] = Field(["*"], description="CORS 허용 오리진 리스트")
+
     # 애플리케이션 경로 설정
     APP_ROOT_PATH: str = Field("", description="API 루트 경로")
-    
+
     @field_validator("FRESHDESK_DOMAIN")
     def validate_freshdesk_domain(cls, v):
         """Freshdesk 도메인에 'https://' 또는 'http://'가 포함되어 있으면 제거합니다."""
         if v.startswith(("http://", "https://")):
             # URL에서 도메인 부분만 추출
             from urllib.parse import urlparse
+
             parsed_url = urlparse(v)
             return parsed_url.netloc
         return v
@@ -189,24 +198,25 @@ class Settings(BaseSettings):
     def extracted_company_id(self) -> str:
         """
         FRESHDESK_DOMAIN에서 company_id를 자동으로 추출합니다.
-        
+
         Returns:
             str: 추출된 company_id
         """
         domain = self.FRESHDESK_DOMAIN
-        
+
         # .freshdesk.com이 포함된 경우 제거
         if ".freshdesk.com" in domain:
             company_id = domain.replace(".freshdesk.com", "")
         else:
             company_id = domain
-        
+
         # https:// 또는 http://가 포함된 경우 제거 (validator에서 이미 처리되지만 안전장치)
         if company_id.startswith(("https://", "http://")):
             from urllib.parse import urlparse
+
             parsed_url = urlparse(company_id)
             company_id = parsed_url.netloc.replace(".freshdesk.com", "")
-        
+
         return company_id
 
     @property
@@ -214,14 +224,11 @@ class Settings(BaseSettings):
         """
         Freshdesk API 호출에 사용할 헤더를 반환합니다.
         X-Company-ID가 자동으로 포함됩니다.
-        
+
         Returns:
             Dict[str, str]: API 호출용 헤더
         """
-        return {
-            "Content-Type": "application/json",
-            "X-Company-ID": self.extracted_company_id
-        }
+        return {"Content-Type": "application/json", "X-Company-ID": self.extracted_company_id}
 
     # Pydantic V2에서는 model_config를 사용하며, Config 클래스는 더 이상 사용하지 않습니다.
 
@@ -230,34 +237,34 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """
     설정을 로드하고 캐싱된 인스턴스를 반환합니다.
-    
+
     환경변수 'ENV_PATH'가 설정되어 있으면 해당 경로의 .env 파일을 사용합니다.
-    
+
     Returns:
         Settings: 환경 설정 인스턴스
     """
     env_path = os.environ.get("ENV_PATH")
-    
+
     if env_path:
         return Settings(_env_file=env_path)
-    
+
     # 기본 경로에서 .env 파일 찾기
     base_dir = Path(__file__).parent.parent
     default_env_path = base_dir / ".env"
-    
+
     if default_env_path.exists():
         return Settings(_env_file=str(default_env_path))
-    
+
     return Settings()
 
 
 def export_settings_for_taskmaster():
     """
     Task Master에 사용할 환경 변수를 내보냅니다.
-    
+
     이 함수는 명령줄에서 직접 실행될 때 유용합니다:
     python -m core.config
-    
+
     현재 .env 파일에서 로드된 설정을 환경 변수로 내보냅니다.
     """
     try:
@@ -265,18 +272,18 @@ def export_settings_for_taskmaster():
         config = get_settings()
         # 설정을 딕셔너리로 변환
         settings_dict = config.dict()
-        
+
         # 환경 변수로 내보내고 결과 출력
         print("Task Master에 사용할 환경 변수를 내보냅니다...\n")
         print("# 다음 명령어를 실행하여 환경 변수를 설정할 수 있습니다:")
-        
+
         # Bash 스크립트용 명령어 생성
         for key, value in settings_dict.items():
             if value is not None:
                 if isinstance(value, list):
                     value = json.dumps(value)
                 print(f'export {key}="{value}"')
-        
+
         print("\n✅ 환경 변수가 준비되었습니다.")
     except Exception as e:
         print(f"⚠️  설정을 내보내는 중 오류가 발생했습니다: {str(e)}")
