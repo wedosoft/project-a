@@ -38,14 +38,101 @@
 // 중복 초기화 방지 플래그
 let isAppInitialized = false;
 
-app
-  .initialized()
-  .then((c) => {
-    // 중복 초기화 방지
-    if (isAppInitialized) {
-      console.log('⚠️ 앱이 이미 초기화되었습니다. 중복 실행을 방지합니다.');
+/**
+ * 🎯 FDK 네이티브 모달 호출 함수 (백엔드 호출 없는 버전)
+ * 
+ * 복잡한 DOM 조작이나 백엔드 API 호출 없이 FDK 내장 기능만 활용하여 모달을 표시합니다.
+ * index.html을 템플릿으로 사용하여 안정적인 모달 표시를 보장합니다.
+ * 
+ * ✅ 페이지 로딩 시: 1회만 백엔드 호출 (백그라운드에서)
+ * 🚫 모달 띄울 때: 별도 백엔드 호출 금지 (캐시된 데이터만 사용)
+ * 🚫 모달 이후: 불필요한 액션 제거
+ */
+async function showFDKModal(ticketId, hasCachedData = false) {
+  try {
+    console.log('🎭 FDK 네이티브 모달 호출 시작 (백엔드 호출 없음)');
+    console.log('   → 모달 띄울 때는 별도 백엔드 호출하지 않음');
+    console.log('   → 캐시된 데이터만 전달하여 즉시 모달 표시');
+    
+    // 클라이언트 준비 확인
+    const client = GlobalState.getClient();
+    if (!client) {
+      console.error('❌ FDK 클라이언트가 준비되지 않음');
       return;
     }
+    
+    // 티켓 데이터 가져오기 (로컬에서만, 백엔드 호출 없음)
+    const ticketData = await client.data.get('ticket');
+    const ticket = ticketData?.ticket;
+    
+    // 모달 설정 구성 (백엔드 호출 없이 캐시된 데이터만 전달)
+    const modalConfig = {
+      title: "Copilot Canvas - AI 상담사 지원",
+      template: "index.html", // 기본 index.html 사용
+      data: {
+        ticketId: ticketId,
+        ticket: ticket,
+        hasCachedData: hasCachedData,
+        timestamp: new Date().toISOString(),
+        // 백엔드 호출 금지 플래그 추가
+        noBackendCall: true
+      },
+      size: {
+        width: "900px",
+        height: "700px"
+      },
+      noBackdrop: true
+    };
+
+    console.log('🔧 FDK 모달 설정 (백엔드 호출 없음):', modalConfig);
+    await client.interface.trigger("showModal", modalConfig);
+    console.log('✅ FDK 모달 열림 완료 - 추가 백엔드 호출이나 액션 없음');
+    
+  } catch (error) {
+    console.error('❌ FDK 모달 오류:', error);
+    
+    // 폴백: 간단한 알림으로 대체 (백엔드 호출 없음)
+    try {
+      const client = GlobalState.getClient();
+      if (client) {
+        await client.interface.trigger("showNotify", {
+          type: "warning",
+          message: "AI 지원 기능을 불러오는 중 오류가 발생했습니다."
+        });
+      }
+    } catch (notifyError) {
+      console.error('❌ 알림도 실패:', notifyError);
+    }
+  }
+}
+
+// FDK 모달 컨텍스트 감지 (전역 변수 사용)
+// isFDKModal 변수는 index.html에서 이미 선언됨
+
+// FDK 모달에서는 최소한의 초기화만 수행
+if (typeof window.isFDKModal !== 'undefined' && window.isFDKModal) {
+  console.log('🎭 FDK 모달 컨텍스트 감지 - 앱 초기화 건너뛰기');
+  // 모달에서는 app.initialized()를 호출하지 않음
+} else {
+  // 표준 앱 모드에서만 전체 초기화 실행
+  app
+    .initialized()
+    .then((c) => {
+      // 중복 초기화 방지
+      if (isAppInitialized) {
+        console.log('⚠️ 앱이 이미 초기화되었습니다. 중복 실행을 방지합니다.');
+        return;
+      }
+      
+      console.log('📋 표준 앱 모드 - 전체 앱 초기화 시작');
+      
+      // 모듈 로딩 상태 최종 확인
+      console.log('📦 모듈 로딩 최종 상태:');
+      console.log('   - window.API:', !!window.API, window.API ? '(로드됨)' : '(미로드)');
+      console.log('   - window.GlobalState:', !!window.GlobalState, window.GlobalState ? '(로드됨)' : '(미로드)');
+      console.log('   - window.Data:', !!window.Data, window.Data ? '(로드됨)' : '(미로드)');
+      console.log('   - window.UI:', !!window.UI, window.UI ? '(로드됨)' : '(미로드)');
+      console.log('   - window.Events:', !!window.Events, window.Events ? '(로드됨)' : '(미로드)');
     
     // 전역 상태 관리 시스템 초기화 (한 번만 실행)
     if (typeof GlobalState !== 'undefined' && !GlobalState.getInitialized()) {
@@ -63,7 +150,17 @@ app
 
     // ① 백그라운드 데이터 준비 - 안전한 호출로 변경 (한 번만 실행)
     // 사용자가 모달을 열기 전에 미리 데이터를 로드하여 응답 속도를 향상시킵니다
-    Data.preloadTicketDataOnPageLoad(client);
+    console.log('🎯 페이지 로딩 시 최초 1회 백엔드 호출 시작');
+    console.log('   → 이후 모든 모달/액션에서는 백엔드 호출 금지');
+    Data.preloadTicketDataOnPageLoad(client).then((result) => {
+      if (result) {
+        console.log('✅ 페이지 로딩 시 백엔드 호출 성공 완료');
+      } else {
+        console.warn('⚠️ 페이지 로딩 시 백엔드 호출 실패 또는 스킵됨');
+      }
+    }).catch((error) => {
+      console.error('❌ 페이지 로딩 시 백엔드 호출 중 예외 발생:', error);
+    });
 
     // ② 상단 네비게이션 앱 아이콘 클릭 시 처리 (캐시된 데이터로 즉시 모달 표시)
     // Freshdesk 상단 네비게이션의 앱 아이콘을 클릭했을 때 실행되는 이벤트 핸들러
@@ -92,13 +189,11 @@ app
             globalData.summary &&
             GlobalState.isGlobalDataValid()
           ) {
-            console.log('⚡ 캐시된 데이터 발견 → 즉시 모달 표시 (0ms 지연)');
-            await UI.showModal('<p>캐시된 데이터를 불러오는 중...</p>', '티켓 분석');
+            console.log('⚡ 캐시된 데이터 발견 → 즉시 FDK 모달 표시');
+            await showFDKModal(currentTicketId, true);
           } else {
-            console.log('ℹ️ 새 티켓이거나 캐시 없음 → 빈 상태로 모달 표시 (백엔드 호출 없음)');
-
-            // 백엔드 호출 없이 즉시 모달 열기
-            await UI.showModal('<p>티켓 정보를 로딩 중...</p>', '티켓 분석');
+            console.log('ℹ️ 새 티켓이거나 캐시 없음 → FDK 모달 표시');
+            await showFDKModal(currentTicketId, false);
           }
 
           // 모달 표시 후 이벤트 설정 (한 번만)
@@ -120,24 +215,32 @@ app
       }
     });
 
-    // ③ 모달이 열린 후 DOM 요소에 데이터 렌더링
+    // ③ 모달이 열린 후 DOM 요소에 데이터 렌더링 (백엔드 호출 완전 금지)
     client.events.on('template.render', () => {
       try {
         console.log('🎭 모달 템플릿 렌더링 완료');
 
-        // DOM이 완전히 로드되도록 짧은 지연 후 캐시된 데이터로 UI 업데이트
+        // FDK 모달에서는 백엔드 호출이나 복잡한 로직 완전 금지
         setTimeout(() => {
-          // 캐시된 데이터로 UI 업데이트
+          console.log('🚫 모달에서 백엔드 호출 금지 - 캐시된 데이터만 사용');
+          
+          // 캐시된 데이터만 사용하여 간단한 UI 업데이트 (백엔드 호출 없음)
           const globalData = GlobalState.getGlobalTicketData();
           if (globalData.summary) {
+            console.log('📋 모달에서 캐시된 데이터로 UI 업데이트 (백엔드 호출 없음)');
             UI.updateUIWithCachedData();
+          } else {
+            console.log('ℹ️ 모달에서 캐시된 데이터 없음 - 기본 상태 유지 (백엔드 호출 없음)');
           }
 
-          // 이벤트 설정 (한 번만)
+          // 모달에서는 최소한의 이벤트 설정만 (추가 백엔드 호출 없음)
           if (!GlobalState.isInitialized()) {
+            console.log('🔧 모달에서 최소 이벤트 설정 (백엔드 호출 없음)');
             Events.setupTabEvents(client);
             GlobalState.setInitialized(true);
           }
+          
+          console.log('✅ 모달 렌더링 처리 완료 - 추가 액션 없음');
         }, 100);
       } catch (err) {
         console.error('template.render 오류', err);
@@ -150,52 +253,6 @@ app
 
 // 전역 상태는 app.initialized() 콜백에서 한 번만 초기화됨
 // 중복 초기화 방지를 위해 여기서의 GlobalState.init() 호출 제거됨
-
-/**
- * 🔍 앱 검증 및 초기화 메인 함수
- *
- * 앱 시작 시 모든 모듈의 의존성을 검증하고 초기화를 수행하는 핵심 함수입니다.
- * 모듈 간 의존성 문제나 초기화 오류를 사전에 감지하여 안정적인 앱 실행을 보장합니다.
- *
- * 실행 과정:
- * 1. 모든 필수 모듈(GlobalState, Utils, API, Data, UI, Events)의 로딩 상태 확인
- * 2. 각 모듈의 의존성 관계 검증 (예: UI는 GlobalState와 Utils에 의존)
- * 3. 검증 통과 시 메인 앱 초기화 진행
- * 4. 실패 시 사용자에게 친화적인 에러 메시지 표시
- *
- * @returns {Promise<boolean>} 초기화 성공 여부
- * @throws {Error} 모듈 의존성 문제 또는 초기화 실패 시
- */
-async function validateAndInitializeApp() {
-  try {
-    // 1. 모듈 의존성 검증
-    // 모든 필수 모듈이 올바르게 로드되었는지 확인
-    console.log('[APP] 모듈 의존성 검증 시작...');
-    const validationResult = await Data.ModuleValidator.validateBeforeStart();
-
-    if (!validationResult.isValid) {
-      console.error('[APP] 모듈 검증 실패:', validationResult.report);
-      UI.showToast('앱 초기화 중 모듈 로딩 오류가 발생했습니다.', 'error');
-      return false;
-    }
-
-    console.log('[APP] 모듈 검증 완료:', validationResult.report);
-
-    // 2. 앱 초기화 진행
-    // 검증 통과 후 실제 앱 초기화 실행
-    await initializeApp();
-
-    console.log('[APP] 앱 초기화 완료');
-    return true;
-  } catch (error) {
-    console.error('[APP] 앱 초기화 중 오류:', error);
-    GlobalState.ErrorHandler.handleError(error, {
-      context: 'app_initialization',
-      userMessage: '앱을 시작하는 중 문제가 발생했습니다.',
-    });
-    return false;
-  }
-}
 
 /**
  * 🎯 메인 앱 초기화 함수
@@ -214,81 +271,6 @@ async function validateAndInitializeApp() {
  * @returns {Promise<void>} 초기화 완료를 나타내는 Promise
  * @throws {Error} 초기화 과정에서 오류 발생 시
  */
-async function initializeApp() {
-  try {
-    console.log('🚀 메인 앱 초기화 시작');
-
-    // 성능 최적화 시스템 초기화
-    console.log('⚡ 성능 최적화 시스템 초기화 중...');
-
-    // Data 모듈 메모이제이션 설정
-    if (window.Data && window.Data.setupMemoization) {
-      window.Data.setupMemoization();
-      console.log('🧠 Data 모듈 메모이제이션 설정 완료');
-    }
-
-    // Events 모듈 최적화 설정
-    if (window.Events) {
-      window.Events.setupOptimizedRefreshButton();
-      window.Events.setupOptimizedSearchInput();
-      window.Events.setupKeyboardShortcuts();
-      window.Events.setupPerformanceMonitoring();
-      console.log('⚡ Events 모듈 최적화 설정 완료');
-    }
-
-    // API 서버 상태 확인
-    if (window.API && window.API.healthCheck) {
-      try {
-        const serverOnline = await window.API.healthCheck();
-        console.log(`🌐 API 서버 상태: ${serverOnline ? '온라인' : '오프라인'}`);
-      } catch (error) {
-        console.warn('🌐 API 서버 상태 확인 실패:', error.message);
-      }
-    }
-
-    // FDK 클라이언트 초기화
-    client = await app.initialized();
-
-    // 컨텍스트에서 현재 티켓 정보 가져오기
-    const context = await client.context.get();
-
-    if (context && context.ticket && context.ticket.id) {
-      const ticketId = context.ticket.id;
-      console.log(`🎫 현재 티켓 ID: ${ticketId}`);
-
-      // 현재 티켓 데이터 사전 로드
-      if (window.Data && window.Data.preloadTicketData) {
-        await window.Data.preloadTicketData(client, ticketId);
-      }
-
-      // UI 초기화 및 데이터 표시
-      if (window.UI && window.UI.initializeMainView) {
-        await window.UI.initializeMainView();
-      }
-
-      // 이벤트 핸들러 설정
-      if (window.Events && window.Events.setupAllEventHandlers) {
-        window.Events.setupAllEventHandlers();
-      }
-    } else {
-      console.warn('⚠️ 티켓 컨텍스트를 가져올 수 없습니다.');
-      if (window.UI && window.UI.showError) {
-        window.UI.showError('티켓 정보를 가져올 수 없습니다.');
-      }
-    }
-
-    console.log('✅ 메인 앱 초기화 완료');
-  } catch (error) {
-    console.error('[APP] 앱 시작 중 예외 발생:', error);
-    if (window.GlobalState && window.GlobalState.ErrorHandler) {
-      window.GlobalState.ErrorHandler.handleError(error, {
-        context: 'app_startup',
-        userMessage: '앱을 시작할 수 없습니다. 페이지를 새로고침해주세요.',
-      });
-    }
-  }
-}
-
 /**
  * 📅 FDK 기반 앱 초기화 완료
  *
@@ -391,3 +373,13 @@ setTimeout(() => {
 // getFreshdeskConfigFromIparams 함수는 api-client.js로 분리됨
 
 // smartDomainParsingFrontend 및 extractCompanyIdFromDomain 함수들은 api-client.js로 분리됨
+
+// App 객체 정의 (네임스페이스 컨테이너로만 사용)
+window.App = window.App || {
+  initialize: function() {
+    console.log('🎯 App.initialize() 호출됨 - FDK 모달에서는 실행하지 않음');
+  }
+};
+
+// 표준 앱 모드에서만 실행되는 코드 블록 닫기
+}

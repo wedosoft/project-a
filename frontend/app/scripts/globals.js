@@ -60,7 +60,7 @@ let globalTicketData = {
  * 전역 에러 상태 관리
  * @type {Object}
  */
-let globalErrorState = {
+const globalErrorState = {
   hasError: false, // 에러 발생 여부
   errorMessage: null, // 에러 메시지
   errorCode: null, // 에러 코드
@@ -659,19 +659,23 @@ window.GlobalState.ErrorHandler = {
 
 // 글로벌 에러 핸들러 등록
 window.addEventListener('error', (event) => {
-  ErrorHandler.handleError(event.error, {
-    type: 'javascript',
-    filename: event.filename,
-    lineno: event.lineno,
-    colno: event.colno,
-  });
+  if (window.GlobalState && window.GlobalState.ErrorHandler) {
+    window.GlobalState.ErrorHandler.handleError(event.error, {
+      type: 'javascript',
+      filename: event.filename,
+      lineno: event.lineno,
+      colno: event.colno,
+    });
+  }
 });
 
 window.addEventListener('unhandledrejection', (event) => {
-  ErrorHandler.handleError(event.reason, {
-    type: 'promise',
-    source: 'unhandledPromise',
-  });
+  if (window.GlobalState && window.GlobalState.ErrorHandler) {
+    window.GlobalState.ErrorHandler.handleError(event.reason, {
+      type: 'promise',
+      source: 'unhandledPromise',
+    });
+  }
 });
 
 console.log('🛡️ 글로벌 에러 처리 시스템 초기화 완료');
@@ -718,12 +722,20 @@ const ModuleDependencyManager = {
    *
    * @param {string} moduleName - 등록할 모듈명
    * @param {number} exportCount - export된 함수/객체 개수
+   * @param {Array<string>} dependencies - 이 모듈이 의존하는 모듈들
    *
    * @example
    * ModuleDependencyManager.registerModule('utils', 5);
+   * ModuleDependencyManager.registerModule('ui', 10, ['data']);
    */
-  registerModule(moduleName, exportCount = 0) {
+  registerModule(moduleName, exportCount = 0, dependencies = []) {
     this.loadedModules.add(moduleName);
+    
+    // 의존성 정보 저장
+    if (dependencies.length > 0) {
+      this.dependencies[moduleName] = dependencies;
+    }
+    
     console.log(`📦 [${moduleName.toUpperCase()}] 모듈 로드 완료 (exports: ${exportCount}개)`);
 
     // 의존성 검증
@@ -731,7 +743,7 @@ const ModuleDependencyManager = {
     if (dependencyCheck.success) {
       console.log(`✅ [${moduleName.toUpperCase()}] 의존성 검증 성공`);
     } else {
-      console.warn(`⚠️ [${moduleName.toUpperCase()}] 의존성 누락:`, dependencyCheck.missing);
+      console.warn(`❌ [${moduleName.toUpperCase()}] 의존성 누락:`, dependencyCheck.missing);
     }
   },
 
@@ -1789,5 +1801,8 @@ window.PerformanceOptimizer = new PerformanceOptimizer();
 // 디버깅 도구와 의존성 관리자를 전역으로 export
 window.DebugTools = DebugTools;
 window.ModuleDependencyManager = ModuleDependencyManager;
+
+// GlobalState에도 ModuleDependencyManager 추가 (일관성을 위해)
+window.GlobalState.ModuleDependencyManager = ModuleDependencyManager;
 
 console.log('🚀 globals.js 전체 로드 완료 - 모든 시스템 준비됨');

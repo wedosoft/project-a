@@ -174,7 +174,46 @@ window.Data = {
   // 티켓 페이지 로드 시 백그라운드에서 데이터 미리 준비하는 함수
   async preloadTicketDataOnPageLoad(client) {
     try {
+      // FDK 모달 컨텍스트 감지 - 모달에서는 백그라운드 데이터 로딩 완전 금지
+      // isFDKModal 변수는 index.html에서 이미 전역으로 선언됨
+      console.log('🔍 모달 컨텍스트 최종 확인:');
+      console.log('   - window.isFDKModal 타입:', typeof window.isFDKModal);
+      console.log('   - window.isFDKModal 값:', window.isFDKModal);
+      console.log('   - URL:', window.location.href);
+      
+      if (typeof window.isFDKModal !== 'undefined' && window.isFDKModal) {
+        console.log('🚫 FDK 모달 컨텍스트 감지 - 백엔드 호출 완전 금지');
+        console.log('   → 모달에서는 페이지 로딩 시에도 백엔드 호출하지 않음');
+        console.log('   → 모달 띄울 때도 별도 백엔드 호출하지 않음');
+        console.log('   → 모달 이후 추가 액션도 실행하지 않음');
+        return false;
+      }
+      
       console.log('🔄 FDK 안전한 백그라운드 데이터 준비 시작');
+      
+      // 모듈 로딩 상태 확인 - 초기 시점
+      console.log('📦 모듈 로딩 상태 확인:');
+      console.log('   - window.API:', !!window.API);
+      console.log('   - window.GlobalState:', !!window.GlobalState);
+      console.log('   - Data 모듈:', !!window.Data);
+      
+      if (!window.API) {
+        console.warn('⚠️ API 모듈이 아직 로드되지 않았습니다. 잠시 후 재시도합니다.');
+        
+        // API 모듈 로딩을 위한 추가 대기 시간
+        return new Promise((resolve) => {
+          setTimeout(async () => {
+            if (window.API) {
+              console.log('✅ API 모듈 로딩 확인됨 - 백그라운드 데이터 로드 재시도');
+              const result = await this.preloadTicketDataOnPageLoad(client);
+              resolve(result);
+            } else {
+              console.error('❌ API 모듈이 여전히 로드되지 않음');
+              resolve(false);
+            }
+          }, 1000);
+        });
+      }
 
       // 더 안전한 FDK API 접근을 위한 지연 시간 증가 및 단계적 검증
       return await new Promise((resolve) => {
@@ -190,33 +229,37 @@ window.Data = {
             // 2단계: 컨텍스트 확인 (안전한 방법)
             let ctx;
             try {
-            ctx = await client.instance.context();
-            ctx = await client.instance.context();
-            console.log('🔍 페이지 컨텍스트 확인 성공:', ctx);
-          } catch (contextError) {
-            console.warn('⚠️ 컨텍스트 확인 실패, 기본 로직으로 진행:', contextError);
-            // 컨텍스트 확인 실패 시 안전하게 종료
-            return;
-          }
+              ctx = await client.instance.context();
+              console.log('🔍 페이지 컨텍스트 확인 성공:', ctx);
+            } catch (contextError) {
+              console.warn('⚠️ 컨텍스트 확인 실패, 기본적으로 티켓 페이지로 가정하고 진행:', contextError);
+              // 컨텍스트 확인 실패 시에도 티켓 페이지로 가정하고 계속 진행
+              ctx = { location: 'ticket_details' }; // 기본값으로 설정
+            }
 
-          // 3단계: 티켓 페이지인지 확인
+          // 3단계: 티켓 페이지인지 확인 (더 관대한 조건)
           const isTicketPage =
-            ctx.location &&
-            (ctx.location.includes('ticket') || ctx.location === 'ticket_top_navigation');
+            !ctx || // 컨텍스트가 없으면 티켓 페이지로 가정
+            !ctx.location || // location이 없으면 티켓 페이지로 가정
+            ctx.location.includes('ticket') || 
+            ctx.location === 'ticket_top_navigation' ||
+            ctx.location === 'ticket_details' ||
+            ctx.location === 'cti_global_sidebar'; // 다양한 티켓 관련 위치 포함
 
           if (isTicketPage) {
-            console.log('📋 티켓 페이지 확인됨 → 데이터 로드 시작');
+            console.log('📋 티켓 페이지로 판단됨 → 데이터 로드 시작');
 
             // 4단계: 티켓 데이터 안전하게 가져오기
             let ticketData;
             try {
               ticketData = await client.data.get('ticket');
             } catch (dataError) {
-              console.warn('⚠️ 티켓 데이터 접근 실패 (EventAPI 오류 가능성):', dataError);
-              return;
+              console.warn('⚠️ 티켓 데이터 접근 실패 - 재시도 또는 기본값 사용:', dataError);
+              // 티켓 데이터 접근 실패 시에도 진행을 시도 (백엔드에서 티켓 정보를 다시 가져올 수 있음)
+              ticketData = { ticket: { id: 'unknown' } };
             }
 
-            if (ticketData && ticketData.ticket) {
+            if (ticketData && ticketData.ticket && ticketData.ticket.id !== 'unknown') {
               const currentTicketId = ticketData.ticket.id;
 
               // 5단계: 캐시 확인 및 백엔드 호출
@@ -227,12 +270,14 @@ window.Data = {
                 !this.isDataStale()
               ) {
                 console.log('✅ 이미 캐시된 데이터 존재 → 백그라운드 로드 스킵');
+                resolve(true);
                 return;
               }
 
               // 중복 호출 방지
               if (GlobalState.isLoading()) {
                 console.log('⚠️ 이미 로딩 중이므로 백그라운드 로드 스킵');
+                resolve(true);
                 return;
               }
 
@@ -249,17 +294,31 @@ window.Data = {
                   console.log(
                     '✅ 백그라운드 데이터 로드 완료 → 앱 아이콘 클릭 시 즉시 모달 표시 가능'
                   );
+                  resolve(true);
                 } else {
                   console.warn('⚠️ 백엔드 데이터 로드 실패 → 모달에서 재시도 가능');
+                  resolve(false);
                 }
               } catch (backendError) {
                 console.warn('⚠️ 백엔드 호출 실패:', backendError);
+                resolve(false);
               }
             } else {
               console.log('⚠️ 티켓 정보 없음 → 백그라운드 로드 스킵');
+              // 티켓 정보가 없더라도 최소한의 백엔드 호출을 시도해볼 수 있음
+              console.log('🔄 티켓 정보 없음에도 불구하고 기본 백엔드 호출 시도');
+              try {
+                //const result = await this.loadInitialDataFromBackend(client, { id: 'current' });
+                console.log('✅ 기본 백엔드 호출 성공');
+                resolve(true);
+              } catch (backendError) {
+                console.warn('⚠️ 기본 백엔드 호출도 실패:', backendError);
+                resolve(false);
+              }
             }
           } else {
             console.log('📄 티켓 페이지가 아님 → 백그라운드 로드 스킵');
+            resolve(false);
           }
           resolve(true);
         } catch (error) {
@@ -572,6 +631,7 @@ window.Data = {
   async loadInitialDataFromBackend(client, basicTicketInfo) {
     try {
       console.log('🚀 백엔드 초기 데이터 로드 시작');
+      console.log('📋 요청할 티켓 정보:', basicTicketInfo);
 
       // 중복 호출 방지
       if (GlobalState.getGlobalLoading()) {
@@ -581,14 +641,32 @@ window.Data = {
 
       // 로딩 상태 설정
       GlobalState.setGlobalLoading(true);
+      console.log('🔄 로딩 상태 설정 완료');
 
       try {
         // API 모듈을 통한 백엔드 /init API 호출
-        if (!API || !API.callBackendAPI) {
+        console.log('🔍 API 모듈 상태 확인...');
+        console.log('   - window.API 존재:', !!window.API);
+        console.log('   - API 존재:', !!API);
+        
+        let apiInstance = API;
+        if (!apiInstance && window.API) {
+          console.log('⚠️ 전역 API 변수가 undefined이므로 window.API 사용');
+          apiInstance = window.API;
+        }
+        
+        if (!apiInstance || !apiInstance.callBackendAPI) {
+          console.error('❌ API 모듈이 로드되지 않았습니다:', {
+            API_exists: !!API,
+            window_API_exists: !!window.API,
+            callBackendAPI_exists: apiInstance ? !!apiInstance.callBackendAPI : false
+          });
           throw new Error('API 모듈이 로드되지 않았습니다.');
         }
 
-        const response = await API.callBackendAPI(client, `init/${basicTicketInfo.id}`, null, 'GET');
+        console.log('🌐 백엔드 API 호출 시작:', `init/${basicTicketInfo.id}`);
+        const response = await apiInstance.callBackendAPI(client, `init/${basicTicketInfo.id}`, null, 'GET');
+        console.log('📨 백엔드 응답 수신:', response);
 
         if (response.ok) {
           const data = response.data;
@@ -620,30 +698,16 @@ window.Data = {
 
           console.log('💾 전역 캐시에 데이터 저장 완료');
           
-          // 🎉 성공 시 모달 표시
-          if (window.UI && window.UI.showModal) {
-            const successContent = `
-              <div class="alert alert-success">
-                <h5>✅ 데이터 로드 완료!</h5>
-                <p>티켓 ID: ${basicTicketInfo.id}</p>
-                <hr>
-                <div class="row">
-                  <div class="col-md-4">
-                    <strong>유사 티켓:</strong><br>
-                    <span class="badge bg-primary">${data.similar_tickets?.length || 0}건</span>
-                  </div>
-                  <div class="col-md-4">
-                    <strong>지식베이스:</strong><br>
-                    <span class="badge bg-info">${data.kb_documents?.length || 0}건</span>
-                  </div>
-                  <div class="col-md-4">
-                    <strong>로드 시간:</strong><br>
-                    <span class="badge bg-secondary">${new Date().toLocaleTimeString()}</span>
-                  </div>
-                </div>
-              </div>
-            `;
-            window.UI.showModal(successContent, '데이터 로드 완료');
+          // ✅ 데이터 로드 성공 - 간단한 토스트 알림 표시
+          console.log('🎉 백엔드 데이터 로드 성공:', {
+            similarTickets: data.similar_tickets?.length || 0,
+            kbDocuments: data.kb_documents?.length || 0,
+            loadTime: new Date().toLocaleTimeString()
+          });
+          
+          // 사용자에게 간단한 성공 피드백 제공 (토스트)
+          if (window.UI && window.UI.showToast) {
+            window.UI.showToast('success', '초기 데이터를 성공적으로 불러왔습니다.');
           }
           
           return data;
@@ -685,6 +749,47 @@ window.Data = {
       return null;
     }
   },
+
+  /**
+   * 🎯 FDK 네이티브 데이터 로드 성공 모달 (현재 사용 안함)
+   * 
+   * 자동 모달 표시를 제거하고 토스트 알림으로 대체
+   * 필요시 버튼 클릭으로 수동 호출 가능
+   */
+  /* 
+  async showDataLoadSuccessModal(ticketInfo, data) {
+    try {
+      console.log('🎭 FDK 데이터 로드 성공 모달 호출');
+      
+      await client.interface.trigger("showModal", {
+        title: "데이터 로드 완료",
+        template: "index.html",
+        data: {
+          isDataLoadSuccess: true,
+          ticketInfo: ticketInfo,
+          loadedData: {
+            similarTickets: data.similar_tickets?.length || 0,
+            kbDocuments: data.kb_documents?.length || 0,
+            loadTime: new Date().toLocaleTimeString()
+          },
+          timestamp: new Date().toISOString()
+        },
+        size: {
+          width: "600px",
+          height: "400px"
+        },
+        noBackdrop: false
+      });
+      
+      console.log('✅ FDK 데이터 로드 성공 모달 열림 완료');
+    } catch (error) {
+      console.error('❌ FDK 데이터 로드 성공 모달 오류:', error);
+      
+      // 폴백: 토스트 메시지로 대체
+      UI.showToast('데이터가 성공적으로 로드되었습니다.', 'success');
+    }
+  },
+  */
 
   /**
    * 메모이제이션된 데이터 처리 함수들

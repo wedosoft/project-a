@@ -74,7 +74,8 @@ window.Events = {
         const response = await Data.sendPrompt(prompt);
 
         if (response && response.content) {
-          UI.showModal(response.content);
+          // FDK 네이티브 방식으로 응답 표시
+          await window.UI.showModal(response.content);
           UI.showToast('응답이 생성되었습니다.', 'success');
           promptInput.value = ''; // 입력 필드 클리어
         } else {
@@ -773,10 +774,12 @@ window.Events = {
 
           console.log('[이벤트] 데이터 새로고침 완료');
         } catch (error) {
-          window.ErrorHandler.handleError(error, {
-            context: 'refresh_button',
-            userMessage: '데이터 새로고침 중 오류가 발생했습니다.',
-          });
+          if (window.GlobalState && window.GlobalState.ErrorHandler) {
+            window.GlobalState.ErrorHandler.handleError(error, {
+              context: 'refresh_button',
+              userMessage: '데이터 새로고침 중 오류가 발생했습니다.',
+            });
+          }
         } finally {
           // 버튼 복원
           refreshBtn.disabled = false;
@@ -806,155 +809,28 @@ window.Events = {
             if (window.UI && window.UI.renderOptimizedTicketList) {
               const container = this.getDOMElement('#tickets-list');
               if (container) {
-                await window.UI.renderOptimizedTicketList(results, container);
+                window.UI.renderOptimizedTicketList(container, results);
               }
             }
           }
-        },
-        {
-          debounceMs: 300,
-          minLength: 2,
-          placeholder: '티켓 검색... (최소 2글자)',
         }
       );
     }
-  },
-
-  /**
-   * 무한 스크롤 설정
-   */
-  setupInfiniteScroll(container, loadMoreCallback, options = {}) {
-    const { threshold = 100, batchSize = 20 } = options;
-
-    let isLoading = false;
-
-    const scrollHandler = window.PerformanceOptimizer.throttle(async () => {
-      if (isLoading) return;
-
-      const { scrollTop, scrollHeight, clientHeight } = container;
-      const distanceToBottom = scrollHeight - scrollTop - clientHeight;
-
-      if (distanceToBottom < threshold) {
-        isLoading = true;
-
-        try {
-          const hasMore = await loadMoreCallback(batchSize);
-          if (!hasMore) {
-            // 더 이상 로드할 데이터가 없으면 스크롤 리스너 제거
-            container.removeEventListener('scroll', scrollHandler);
-          }
-        } catch (error) {
-          window.ErrorHandler.handleError(error, {
-            context: 'infinite_scroll',
-            userMessage: '추가 데이터 로드 중 오류가 발생했습니다.',
-          });
-        } finally {
-          isLoading = false;
-        }
-      }
-    }, 100);
-
-    this.addOptimizedEventListener(container, 'scroll', scrollHandler, { passive: true });
-  },
-
-  /**
-   * 키보드 단축키 설정
-   */
-  setupKeyboardShortcuts() {
-    const shortcuts = {
-      r: () => this.getDOMElement('#refresh-btn')?.click(), // R키로 새로고침
-      '/': () => this.getDOMElement('#search-input')?.focus(), // /키로 검색 포커스
-      Escape: () => {
-        // ESC키로 모달 닫기 및 검색 초기화
-        const searchInput = this.getDOMElement('#search-input');
-        if (searchInput && document.activeElement === searchInput) {
-          searchInput.value = '';
-          searchInput.blur();
-        }
-      },
-    };
-
-    this.addOptimizedEventListener(document, 'keydown', (e) => {
-      // 입력 필드에서는 단축키 비활성화
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
-        if (e.key !== 'Escape') return;
-      }
-
-      const handler = shortcuts[e.key];
-      if (handler) {
-        e.preventDefault();
-        handler();
-      }
-    });
-  },
-
-  /**
-   * 성능 모니터링 이벤트 설정
-   */
-  setupPerformanceMonitoring() {
-    // 페이지 가시성 변경 감지
-    this.addOptimizedEventListener(document, 'visibilitychange', () => {
-      if (document.hidden) {
-        console.log('[성능] 페이지가 백그라운드로 이동');
-        // 불필요한 작업 일시 중단
-        if (window.DebugTools && window.DebugTools.pausePeriodicChecks) {
-          window.DebugTools.pausePeriodicChecks();
-        }
-      } else {
-        console.log('[성능] 페이지가 다시 활성화됨');
-        // 작업 재개
-        if (window.DebugTools && window.DebugTools.resumePeriodicChecks) {
-          window.DebugTools.resumePeriodicChecks();
-        }
-      }
-    });
-
-    // 메모리 부족 경고 감지
-    this.addOptimizedEventListener(window, 'beforeunload', () => {
-      this.cleanupEventListeners();
-      if (window.PerformanceOptimizer) {
-        window.PerformanceOptimizer.performMemoryCleanup();
-      }
-    });
-  },
-
-  /**
-   * 의존성 확인 함수
-   *
-   * Events 모듈이 정상적으로 사용 가능한지 확인합니다.
-   * 필요한 의존성 모듈들의 로드 상태를 검사합니다.
-   *
-   * @returns {boolean} 모듈 사용 가능 여부
-   */
-  isAvailable: function () {
-    try {
-      const dependencies = {
-        GlobalState: typeof GlobalState !== 'undefined' && !!GlobalState.ErrorHandler,
-        UI: typeof UI !== 'undefined' && typeof UI.showToast === 'function',
-        Data: typeof Data !== 'undefined' && typeof Data.sendPrompt === 'function',
-      };
-
-      const availableDeps = Object.entries(dependencies).filter(([, available]) => available);
-      const missingDeps = Object.entries(dependencies).filter(([, available]) => !available);
-
-      if (missingDeps.length > 0) {
-        console.warn(
-          '[EVENTS] 누락된 의존성:',
-          missingDeps.map(([key]) => key)
-        );
-      }
-
-      return availableDeps.length >= 2; // 최소 2개 이상의 의존성이 충족되어야 함
-    } catch (error) {
-      console.error('[EVENTS] 의존성 확인 중 오류:', error);
-      return false;
-    }
-  },
+  }
 };
 
-console.log('🎭 Events 모듈 로드 완료 - 9개 함수 export됨');
-
-// 모듈 의존성 시스템에 등록 (ui, data 모듈에 의존)
-if (typeof ModuleDependencyManager !== 'undefined') {
-  ModuleDependencyManager.registerModule('events', Object.keys(Events).length, ['ui', 'data']);
+// === 모듈 등록 ===
+// 모듈 의존성 시스템에 events 모듈 등록
+if (typeof window.GlobalState !== 'undefined' && 
+    typeof window.GlobalState.ModuleDependencyManager !== 'undefined') {
+  window.GlobalState.ModuleDependencyManager.registerModule('events', Object.keys(window.Events).length);
+  console.log('✅ Events 모듈 등록 완료');
+} else if (typeof window.ModuleDependencyManager !== 'undefined') {
+  window.ModuleDependencyManager.registerModule('events', Object.keys(window.Events).length);
+  console.log('✅ Events 모듈 등록 완료 (fallback)');
+} else if (typeof ModuleDependencyManager !== 'undefined') {
+  ModuleDependencyManager.registerModule('events', Object.keys(window.Events).length);
+  console.log('✅ Events 모듈 등록 완료 (global)');
+} else {
+  console.warn('⚠️ ModuleDependencyManager를 찾을 수 없어 Events 모듈 등록을 건너뜁니다.');
 }

@@ -28,7 +28,8 @@
       }
     }
     
-    /* 기존 스타일들 */
+    /* 모달 스타일 */
+    .modal {
         max-width: none !important;
         max-height: none !important;
         margin: 0 !important;
@@ -58,7 +59,6 @@
         min-width: 800px !important;
         min-height: 600px !important;
       }
-    }
     
     /* 모달 강제 표시 스타일 - 디버깅 및 fallback용 */
     .modal.show {
@@ -293,6 +293,7 @@
       margin-top: 8px;
       display: -webkit-box;
       -webkit-line-clamp: 2;
+      line-clamp: 2;
       -webkit-box-orient: vertical;
       overflow: hidden;
     }
@@ -454,9 +455,89 @@
   <script src="scripts/globals.js"></script>
   <script src="scripts/utils.js"></script>
   <script src="scripts/api.js"></script>
-  <script src="scripts/ui.js"></script>
   <script src="scripts/data.js"></script>
+  <script src="scripts/ui.js"></script>
   <script src="scripts/events.js"></script>
   <script src="scripts/app.js"></script>
+
+  <!-- 🎯 FDK 모달 전용 간소화 스크립트 -->
+  <script>
+    // FDK 모달 컨텍스트 감지 (전역 변수로 선언)
+    // 주의: Freshdesk 앱은 항상 iframe에서 실행되므로 parent 체크는 제외
+    window.isFDKModal = (
+      window.location.search.includes('modal=true') ||
+      window.location.search.includes('isModal=true') ||
+      (typeof window.modalData !== 'undefined' && window.modalData)
+    );
+    
+    // FDK 모달에서 전달된 데이터 처리 (최소화 버전)
+    document.addEventListener('DOMContentLoaded', function() {
+      console.log('🔍 FDK 컨텍스트 상세 분석:');
+      console.log('   - URL 검색 파라미터:', window.location.search);
+      console.log('   - modal=true 포함:', window.location.search.includes('modal=true'));
+      console.log('   - isModal=true 포함:', window.location.search.includes('isModal=true'));
+      console.log('   - window.modalData 존재:', typeof window.modalData !== 'undefined' && !!window.modalData);
+      console.log('   - 최종 isFDKModal 값:', window.isFDKModal);
+      
+      if (window.isFDKModal) {
+        console.log('🎯 FDK 모달 모드 - 최소 처리만 실행');
+        handleFDKModalMode();
+      } else {
+        console.log('📋 표준 앱 모드 - 전체 앱 초기화 실행');
+        initializeFullApp();
+      }
+    });
+    
+    // FDK 모달 모드 처리 (백엔드 호출 완전 금지)
+    function handleFDKModalMode() {
+      console.log('🚫 FDK 모달 모드: 백엔드 호출 완전 금지');
+      
+      // 모달에서는 절대 백엔드 API 호출하지 않음
+      // 오직 전달받은 modalData나 기본 UI만 표시
+      
+      if (typeof window.modalData !== 'undefined' && window.modalData) {
+        console.log('📦 FDK 모달 데이터 처리 (백엔드 호출 없음):', window.modalData);
+        
+        // 모달 타입별 간단 처리 (로컬 데이터만 사용)
+        if (window.modalData.isResponse) {
+          displayModalContent('💬 AI 응답', window.modalData.responseContent);
+        } else if (window.modalData.modalContent) {
+          displayModalContent('🎨 커스텀 모달', window.modalData.modalContent);
+        } else if (window.modalData.hasCachedData) {
+          displayModalContent('⚡ 캐시된 데이터', '이미 로드된 데이터를 표시합니다.');
+        } else {
+          displayModalContent('🎯 FDK 모달', '모달이 실행되었습니다.');
+        }
+      } else {
+        console.log('📋 FDK 모달 데이터 없음 - 기본 UI만 표시 (백엔드 호출 없음)');
+        displayModalContent('🎭 FDK 모달', '모달이 준비되었습니다. 백엔드 데이터는 메인 앱에서 미리 로드됩니다.');
+      }
+      
+      // 모달에서는 추가적인 초기화나 데이터 로딩 작업 금지
+      console.log('✅ FDK 모달 처리 완료 - 추가 액션 없음');
+    }
+    
+    // 모달 컨텐츠 표시
+    function displayModalContent(title, content) {
+      const container = document.getElementById('ticket-summary-content');
+      if (container) {
+        container.innerHTML = `
+          <div class="alert alert-info">
+            <h5>${title}</h5>
+            <div>${content || '내용 없음'}</div>
+            <small class="text-muted">시간: ${new Date().toLocaleString()}</small>
+          </div>
+        `;
+      }
+    }
+    
+    // 전체 앱 초기화 (표준 모드에서만)
+    function initializeFullApp() {
+      // 기존 앱 초기화 로직
+      if (typeof window.App !== 'undefined' && window.App.initialize) {
+        window.App.initialize();
+      }
+    }
+  </script>
 </body>
 </html>
