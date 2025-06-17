@@ -50,10 +50,6 @@ let isAppInitialized = false;
  */
 async function showFDKModal(ticketId, hasCachedData = false) {
   try {
-    console.log('🎭 FDK 네이티브 모달 호출 시작 (백엔드 호출 없음)');
-    console.log('   → 모달 띄울 때는 별도 백엔드 호출하지 않음');
-    console.log('   → 캐시된 데이터만 전달하여 즉시 모달 표시');
-    
     // 클라이언트 준비 확인
     const client = GlobalState.getClient();
     if (!client) {
@@ -84,9 +80,7 @@ async function showFDKModal(ticketId, hasCachedData = false) {
       noBackdrop: true
     };
 
-    console.log('🔧 FDK 모달 설정 (백엔드 호출 없음):', modalConfig);
     await client.interface.trigger("showModal", modalConfig);
-    console.log('✅ FDK 모달 열림 완료 - 추가 백엔드 호출이나 액션 없음');
     
   } catch (error) {
     console.error('❌ FDK 모달 오류:', error);
@@ -120,19 +114,14 @@ if (typeof window.isFDKModal !== 'undefined' && window.isFDKModal) {
     .then((c) => {
       // 중복 초기화 방지
       if (isAppInitialized) {
-        console.log('⚠️ 앱이 이미 초기화되었습니다. 중복 실행을 방지합니다.');
         return;
       }
       
-      console.log('📋 표준 앱 모드 - 전체 앱 초기화 시작');
-      
-      // 모듈 로딩 상태 최종 확인
-      console.log('📦 모듈 로딩 최종 상태:');
-      console.log('   - window.API:', !!window.API, window.API ? '(로드됨)' : '(미로드)');
-      console.log('   - window.GlobalState:', !!window.GlobalState, window.GlobalState ? '(로드됨)' : '(미로드)');
-      console.log('   - window.Data:', !!window.Data, window.Data ? '(로드됨)' : '(미로드)');
-      console.log('   - window.UI:', !!window.UI, window.UI ? '(로드됨)' : '(미로드)');
-      console.log('   - window.Events:', !!window.Events, window.Events ? '(로드됨)' : '(미로드)');
+      // 모듈 로딩 상태 확인만 (로그 최소화)
+      if (!window.API || !window.GlobalState || !window.Data || !window.UI || !window.Events) {
+        console.error('❌ 필수 모듈이 로드되지 않았습니다');
+        return;
+      }
     
     // 전역 상태 관리 시스템 초기화 (한 번만 실행)
     if (typeof GlobalState !== 'undefined' && !GlobalState.getInitialized()) {
@@ -145,13 +134,9 @@ if (typeof window.isFDKModal !== 'undefined' && window.isFDKModal) {
     isAppInitialized = true;
 
     const client = GlobalState.getClient();
-    console.log('✅ 앱 초기화 완료');
-    console.log('📱 클라이언트 객체:', client);
 
     // ① 백그라운드 데이터 준비 - 안전한 호출로 변경 (한 번만 실행)
     // 사용자가 모달을 열기 전에 미리 데이터를 로드하여 응답 속도를 향상시킵니다
-    console.log('🎯 페이지 로딩 시 최초 1회 백엔드 호출 시작');
-    console.log('   → 이후 모든 모달/액션에서는 백엔드 호출 금지');
     Data.preloadTicketDataOnPageLoad(client).then((result) => {
       if (result) {
         console.log('✅ 페이지 로딩 시 백엔드 호출 성공 완료');
@@ -168,14 +153,8 @@ if (typeof window.isFDKModal !== 'undefined' && window.isFDKModal) {
       try {
         const ctx = await client.instance.context();
 
-        // 디버깅: 실제 location 값 확인
-        console.log('앱 활성화 - 컨텍스트:', ctx);
-        console.log('현재 location:', ctx.location);
-
         // 상단 네비게이션에서의 동작: 스마트 캐싱 전략 적용
         if (ctx.location === 'ticket_top_navigation') {
-          console.log('🚀 상단 네비게이션 아이콘 클릭 → 스마트 캐싱 전략 시작');
-
           // 현재 티켓 정보 가져오기 (이 시점에서는 FDK가 안전함)
           const ticketData = await client.data.get('ticket');
           const currentTicketId = ticketData?.ticket?.id;
@@ -189,10 +168,8 @@ if (typeof window.isFDKModal !== 'undefined' && window.isFDKModal) {
             globalData.summary &&
             GlobalState.isGlobalDataValid()
           ) {
-            console.log('⚡ 캐시된 데이터 발견 → 즉시 FDK 모달 표시');
             await showFDKModal(currentTicketId, true);
           } else {
-            console.log('ℹ️ 새 티켓이거나 캐시 없음 → FDK 모달 표시');
             await showFDKModal(currentTicketId, false);
           }
 
@@ -203,7 +180,6 @@ if (typeof window.isFDKModal !== 'undefined' && window.isFDKModal) {
           }
         } else {
           // 예상치 못한 위치에서의 호출
-          console.warn('예상치 못한 위치에서 앱 활성화:', ctx.location);
           if (!GlobalState.isInitialized()) {
             await Data.loadTicketDetails(client);
             Events.setupTabEvents(client);

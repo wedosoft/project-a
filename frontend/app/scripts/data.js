@@ -175,36 +175,16 @@ window.Data = {
   async preloadTicketDataOnPageLoad(client) {
     try {
       // FDK 모달 컨텍스트 감지 - 모달에서는 백그라운드 데이터 로딩 완전 금지
-      // isFDKModal 변수는 index.html에서 이미 전역으로 선언됨
-      console.log('🔍 모달 컨텍스트 최종 확인:');
-      console.log('   - window.isFDKModal 타입:', typeof window.isFDKModal);
-      console.log('   - window.isFDKModal 값:', window.isFDKModal);
-      console.log('   - URL:', window.location.href);
-      
       if (typeof window.isFDKModal !== 'undefined' && window.isFDKModal) {
-        console.log('🚫 FDK 모달 컨텍스트 감지 - 백엔드 호출 완전 금지');
-        console.log('   → 모달에서는 페이지 로딩 시에도 백엔드 호출하지 않음');
-        console.log('   → 모달 띄울 때도 별도 백엔드 호출하지 않음');
-        console.log('   → 모달 이후 추가 액션도 실행하지 않음');
-        return false;
+        return false; // 모달에서는 어떤 백엔드 호출도 하지 않음
       }
       
-      console.log('🔄 FDK 안전한 백그라운드 데이터 준비 시작');
-      
       // 모듈 로딩 상태 확인 - 초기 시점
-      console.log('📦 모듈 로딩 상태 확인:');
-      console.log('   - window.API:', !!window.API);
-      console.log('   - window.GlobalState:', !!window.GlobalState);
-      console.log('   - Data 모듈:', !!window.Data);
-      
       if (!window.API) {
-        console.warn('⚠️ API 모듈이 아직 로드되지 않았습니다. 잠시 후 재시도합니다.');
-        
         // API 모듈 로딩을 위한 추가 대기 시간
         return new Promise((resolve) => {
           setTimeout(async () => {
             if (window.API) {
-              console.log('✅ API 모듈 로딩 확인됨 - 백그라운드 데이터 로드 재시도');
               const result = await this.preloadTicketDataOnPageLoad(client);
               resolve(result);
             } else {
@@ -308,27 +288,24 @@ window.Data = {
               // 티켓 정보가 없더라도 최소한의 백엔드 호출을 시도해볼 수 있음
               console.log('🔄 티켓 정보 없음에도 불구하고 기본 백엔드 호출 시도');
               try {
+                // 백엔드 호출은 주석 처리됨 - 필요 시 활성화
                 //const result = await this.loadInitialDataFromBackend(client, { id: 'current' });
-                console.log('✅ 기본 백엔드 호출 성공');
                 resolve(true);
               } catch (backendError) {
-                console.warn('⚠️ 기본 백엔드 호출도 실패:', backendError);
                 resolve(false);
               }
             }
           } else {
-            console.log('📄 티켓 페이지가 아님 → 백그라운드 로드 스킵');
+            // 티켓 페이지가 아닌 경우 백그라운드 로드 스킵
             resolve(false);
           }
           resolve(true);
         } catch (error) {
-          console.warn('⚠️ 백그라운드 데이터 로드 중 예외 발생:', error);
           resolve(false);
         }
       }, 2000); // 2초로 지연 시간 증가하여 FDK 완전 초기화 대기
       });
     } catch (error) {
-      console.warn('⚠️ 백그라운드 데이터 준비 초기화 실패:', error);
       return false;
     }
   },
@@ -1160,7 +1137,9 @@ Data.isAvailable = function () {
   return typeof GlobalState !== 'undefined' && typeof API !== 'undefined';
 };
 
-console.log('📊 Data 모듈 로드 완료 - 7개 함수 export됨');
+if (window.location.hostname === 'localhost') {
+  console.log('📊 Data 모듈 로드 완료 - 7개 함수 export됨');
+}
 
 // 모듈 의존성 시스템에 등록
 if (typeof ModuleDependencyManager !== 'undefined') {

@@ -824,13 +824,21 @@ window.Events = {
 if (typeof window.GlobalState !== 'undefined' && 
     typeof window.GlobalState.ModuleDependencyManager !== 'undefined') {
   window.GlobalState.ModuleDependencyManager.registerModule('events', Object.keys(window.Events).length);
-  console.log('✅ Events 모듈 등록 완료');
+  if (window.location.hostname === 'localhost') {
+    console.log('✅ Events 모듈 등록 완료');
+  }
 } else if (typeof window.ModuleDependencyManager !== 'undefined') {
   window.ModuleDependencyManager.registerModule('events', Object.keys(window.Events).length);
-  console.log('✅ Events 모듈 등록 완료 (fallback)');
+  if (window.location.hostname === 'localhost') {
+    console.log('✅ Events 모듈 등록 완료 (fallback)');
+  }
 } else if (typeof ModuleDependencyManager !== 'undefined') {
   ModuleDependencyManager.registerModule('events', Object.keys(window.Events).length);
-  console.log('✅ Events 모듈 등록 완료 (global)');
+  if (window.location.hostname === 'localhost') {
+    console.log('✅ Events 모듈 등록 완료 (global)');
+  }
 } else {
-  console.warn('⚠️ ModuleDependencyManager를 찾을 수 없어 Events 모듈 등록을 건너뜁니다.');
+  if (window.location.hostname === 'localhost') {
+    console.warn('⚠️ ModuleDependencyManager를 찾을 수 없어 Events 모듈 등록을 건너뜁니다.');
+  }
 }

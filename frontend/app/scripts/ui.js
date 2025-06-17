@@ -1397,7 +1397,9 @@ window.hideModal = function() {
   }
 };
 
-console.log('🎨 UI 모듈 로드 완료 - FDK 네이티브 방식으로 단순화됨');
+if (window.location.hostname === 'localhost') {
+  console.log('🎨 UI 모듈 로드 완료 - FDK 네이티브 방식으로 단순화됨');
+}
 
 // 모듈 의존성 시스템에 등록 (data 의존성 명시)
 if (typeof ModuleDependencyManager !== 'undefined') {

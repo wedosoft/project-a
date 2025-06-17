@@ -411,7 +411,9 @@ API.isAvailable = function () {
   return true;
 };
 
-console.log('📡 최적화된 API 모듈 로드 완료 - 향상된 성능 및 캐싱 지원');
+if (window.location.hostname === 'localhost') {
+  console.log('📡 최적화된 API 모듈 로드 완료 - 향상된 성능 및 캐싱 지원');
+}
 
 // 모듈 의존성 시스템에 등록
 if (typeof window.ModuleDependencyManager !== 'undefined') {

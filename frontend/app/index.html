@@ -340,14 +340,6 @@
       </div>
     </div>
     
-    <!-- Modal Test Section (개발용) -->
-    <div class="alert alert-info p-2 mb-3" style="font-size: 12px;">
-      <strong>모달 테스트:</strong>
-      <button class="btn btn-sm btn-success ms-2" id="test-modal-btn">응답 모달 테스트</button>
-      <button class="btn btn-sm btn-danger ms-1" id="test-error-modal-btn">에러 모달 테스트</button>
-      <span class="ms-2 text-muted">모달이 제대로 표시되는지 확인용</span>
-    </div>
-    
     <!-- Bottom section - Tabbed Interface -->
     <div class="tab-container">
       <ul class="nav nav-tabs" id="ticketTabs" role="tablist">
@@ -472,18 +464,24 @@
     
     // FDK 모달에서 전달된 데이터 처리 (최소화 버전)
     document.addEventListener('DOMContentLoaded', function() {
-      console.log('🔍 FDK 컨텍스트 상세 분석:');
-      console.log('   - URL 검색 파라미터:', window.location.search);
-      console.log('   - modal=true 포함:', window.location.search.includes('modal=true'));
-      console.log('   - isModal=true 포함:', window.location.search.includes('isModal=true'));
-      console.log('   - window.modalData 존재:', typeof window.modalData !== 'undefined' && !!window.modalData);
-      console.log('   - 최종 isFDKModal 값:', window.isFDKModal);
+      if (window.location.hostname === 'localhost') {
+        console.log('🔍 FDK 컨텍스트 상세 분석:');
+        console.log('   - URL 검색 파라미터:', window.location.search);
+        console.log('   - modal=true 포함:', window.location.search.includes('modal=true'));
+        console.log('   - isModal=true 포함:', window.location.search.includes('isModal=true'));
+        console.log('   - window.modalData 존재:', typeof window.modalData !== 'undefined' && !!window.modalData);
+        console.log('   - 최종 isFDKModal 값:', window.isFDKModal);
+      }
       
       if (window.isFDKModal) {
-        console.log('🎯 FDK 모달 모드 - 최소 처리만 실행');
+        if (window.location.hostname === 'localhost') {
+          console.log('🎯 FDK 모달 모드 - 최소 처리만 실행');
+        }
         handleFDKModalMode();
       } else {
-        console.log('📋 표준 앱 모드 - 전체 앱 초기화 실행');
+        if (window.location.hostname === 'localhost') {
+          console.log('📋 표준 앱 모드 - 전체 앱 초기화 실행');
+        }
         initializeFullApp();
       }
     });

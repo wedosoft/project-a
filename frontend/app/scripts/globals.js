@@ -81,7 +81,9 @@ function setClient(newClient) {
     return;
   }
   client = newClient;
-  console.log('✅ FDK 클라이언트 설정 완료');
+  if (window.location.hostname === 'localhost') {
+    console.log('✅ FDK 클라이언트 설정 완료');
+  }
 }
 
 /**
@@ -103,7 +105,9 @@ function getClient() {
  */
 function setInitialized(state) {
   isInitialized = Boolean(state);
-  console.log(`🔄 앱 초기화 상태: ${isInitialized ? '완료' : '대기중'}`);
+  if (window.location.hostname === 'localhost') {
+    console.log(`🔄 앱 초기화 상태: ${isInitialized ? '완료' : '대기중'}`);
+  }
 }
 
 /**
@@ -419,7 +423,9 @@ if (window.location.hostname === 'localhost' || window.location.hostname.include
   console.log('🛠️ 개발 모드: GlobalDebug 객체가 window에 등록되었습니다.');
 }
 
-console.log('✅ globals.js 모듈 로드 완료 - 전역 상태 관리 준비됨');
+if (window.location.hostname === 'localhost') {
+  console.log('✅ globals.js 모듈 로드 완료 - 전역 상태 관리 준비됨');
+}
 
 // 글로벌 에러 처리 시스템 개선
 window.GlobalState.ErrorHandler = {
@@ -736,7 +742,9 @@ const ModuleDependencyManager = {
       this.dependencies[moduleName] = dependencies;
     }
     
-    console.log(`📦 [${moduleName.toUpperCase()}] 모듈 로드 완료 (exports: ${exportCount}개)`);
+    if (window.location.hostname === 'localhost') {
+      console.log(`📦 [${moduleName.toUpperCase()}] 모듈 로드 완료 (exports: ${exportCount}개)`);
+    }
 
     // 의존성 검증
     const dependencyCheck = this.checkDependencies(moduleName);
@@ -1474,13 +1482,15 @@ const DebugTools = {
 if (DebugTools.isDebugMode) {
   DebugTools.registerConsoleCommands();
 
-  // 주기적 상태 모니터링 (5분마다)
-  setInterval(() => {
-    const report = DebugTools.checkAppHealth();
-    if (report.overall === 'critical') {
-      console.warn('🚨 앱 상태가 심각합니다! 에러 로그 및 상태를 확인하세요.');
-    }
-  }, 300000);
+  // 주기적 상태 모니터링 (5분마다) - 개발 모드에서만 활성화
+  if (window.location.hostname === 'localhost' || window.location.hostname.includes('dev')) {
+    setInterval(() => {
+      const report = DebugTools.checkAppHealth();
+      if (report.overall === 'critical') {
+        console.warn('🚨 앱 상태가 심각합니다! 에러 로그 및 상태를 확인하세요.');
+      }
+    }, 300000);
+  }
 }
 
 // === 성능 최적화 및 캐싱 시스템 ===
@@ -1643,7 +1653,8 @@ class PerformanceOptimizer {
    * 메모리 사용량 모니터링
    */
   setupMemoryMonitoring() {
-    if ('memory' in performance) {
+    // 메모리 모니터링은 개발 모드에서만 활성화
+    if (('memory' in performance) && (window.location.hostname === 'localhost' || window.location.hostname.includes('dev'))) {
       setInterval(() => {
         const memInfo = performance.memory;
         if (memInfo.usedJSHeapSize > this.memoryThreshold) {
@@ -1805,4 +1816,6 @@ window.ModuleDependencyManager = ModuleDependencyManager;
 // GlobalState에도 ModuleDependencyManager 추가 (일관성을 위해)
 window.GlobalState.ModuleDependencyManager = ModuleDependencyManager;
 
-console.log('🚀 globals.js 전체 로드 완료 - 모든 시스템 준비됨');
+if (window.location.hostname === 'localhost') {
+  console.log('🚀 globals.js 전체 로드 완료 - 모든 시스템 준비됨');
+}
