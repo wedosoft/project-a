@@ -44,6 +44,17 @@ from pydantic import BaseModel, Field, field_validator
 # FastAPI 앱 생성
 app = FastAPI()
 
+# CORS 미들웨어 설정 - Freshdesk FDK 환경에서의 크로스 도메인 요청 허용
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 개발용: 모든 도메인 허용 (운영시에는 특정 도메인으로 제한)
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],  # OPTIONS 메서드 허용 (preflight 요청)
+    allow_headers=["*"],  # 모든 헤더 허용
+)
+
 # 첨부파일 라우터 등록
 app.include_router(attachments_router)
 
@@ -926,6 +937,15 @@ async def get_initial_context(
         # Freshdesk API 호출을 위한 파라미터 준비
         company_id_from_header = x_freshdesk_domain  # iparams에서 받은 company_id
         api_key = x_freshdesk_api_key or os.getenv("FRESHDESK_API_KEY")
+        
+        # 개발 환경에서 헤더가 없는 경우 환경변수 폴백
+        if not company_id_from_header:
+            company_id_from_header = os.getenv("FRESHDESK_DOMAIN")
+            logger.info(f"개발 환경: 환경변수에서 도메인 사용 - {company_id_from_header}")
+        
+        if not api_key:
+            api_key = os.getenv("FRESHDESK_API_KEY")
+            logger.info("개발 환경: 환경변수에서 API 키 사용")
         
         # Freshdesk API 호출을 위한 전체 도메인 구성
         if company_id_from_header:

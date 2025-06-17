@@ -179,7 +179,7 @@ const API = {
         });
 
         // 성공한 결과 캐싱 (GET 요청 또는 명시적 허용)
-        if ((method === 'GET' || options.useCache) && result.ok) {
+        if ((method === 'GET' || options.useCache) && result && result.ok) {
           const ttl = options.cacheTTL || 300000; // 기본 5분
           window.PerformanceOptimizer.cacheApiResult(cacheKey, result, ttl);
         }
@@ -233,8 +233,19 @@ const API = {
       // iparams에서 Freshdesk 설정값 가져오기
       const config = await getFreshdeskConfigFromIparams(client);
 
+      // 개발 환경에서 iparams가 없는 경우 환경변수 또는 기본값 사용
+      let finalConfig = config;
       if (!config || !config.domain || !config.apiKey) {
         console.warn('⚠️ iparams에서 Freshdesk 설정값을 가져올 수 없습니다. 환경변수 폴백 시도...');
+        
+        // 개발 환경용 기본값 설정 (실제 운영에서는 iparams에서 가져와야 함)
+        if (window.location.hostname === 'localhost' || window.location.hostname.includes('10001')) {
+          finalConfig = {
+            domain: 'wedosoft.freshdesk.com', // 개발용 기본값
+            apiKey: 'Ug9H1cKCZZtZ4haamBy', // 개발용 기본값
+          };
+          console.log('🛠️ 개발 환경: 기본 Freshdesk 설정 사용');
+        }
       }
 
       // 요청 설정
@@ -242,11 +253,19 @@ const API = {
         method: method,
         headers: {
           'Content-Type': 'application/json',
-          ...(config?.domain && { 'X-Freshdesk-Domain': config.domain }),
-          ...(config?.apiKey && { 'X-Freshdesk-API-Key': config.apiKey }),
+          ...(finalConfig?.domain && { 'X-Freshdesk-Domain': finalConfig.domain }),
+          ...(finalConfig?.apiKey && { 'X-Freshdesk-API-Key': finalConfig.apiKey }),
         },
         ...(data && { body: JSON.stringify(data) }),
       };
+
+      // 헤더 로깅 (개발용)
+      if (window.location.hostname === 'localhost') {
+        console.log('📤 전송할 헤더:', {
+          'X-Freshdesk-Domain': finalConfig?.domain,
+          'X-Freshdesk-API-Key': finalConfig?.apiKey ? '***' + finalConfig.apiKey.slice(-4) : 'none',
+        });
+      }
 
       // 성능 측정
       const performanceKey = `API-${method}-${endpoint}`;
@@ -259,6 +278,9 @@ const API = {
 
       if (!response.ok) {
         const errorBody = await response.text();
+        console.error(`❌ HTTP 응답 실패: ${response.status} ${response.statusText}`);
+        console.error(`❌ 에러 응답 본문:`, errorBody);
+        
         const error = new Error(`API 호출 실패: ${response.status} ${response.statusText}`);
         error.status = response.status;
         error.body = errorBody;
@@ -266,8 +288,27 @@ const API = {
       }
 
       const result = await response.json();
+      
+      // 🔍 응답 데이터 상세 디버깅
+      console.log(`✅ API 응답 성공 (${response.status})`);
+      console.log(`🔍 [DEBUG] API 응답 데이터:`, {
+        endpoint: endpoint,
+        method: method,
+        responseSize: JSON.stringify(result).length,
+        hasTicketSummary: !!result.ticket_summary,
+        hasSimilarTickets: !!result.similar_tickets,
+        hasKbDocuments: !!result.kb_documents,
+        dataKeys: Object.keys(result),
+        fullData: result
+      });
 
-      return result;
+      // 일관된 응답 구조 반환
+      return {
+        ok: true,
+        status: response.status,
+        statusText: response.statusText,
+        data: result
+      };
     } catch (error) {
       if (window.GlobalState && window.GlobalState.ErrorHandler) {
         window.GlobalState.ErrorHandler.handleError(error, {
@@ -292,14 +333,14 @@ const API = {
    * 기존 호환성을 위한 래퍼 함수
    */
   async callBackendAPI(client, endpoint, data = null, method = 'GET') {
-    return this.callBackendAPIWithCache(client, endpoint, data, method);
+    return await this.callBackendAPIWithCache(client, endpoint, data, method);
   },
 
   /**
    * 백엔드에서 초기 데이터를 로드하는 함수
    */
   async loadInitData(client, ticketId) {
-    return this.callBackendAPIWithCache(client, `init/${ticketId}`, null, 'GET', {
+    return await this.callBackendAPIWithCache(client, `init/${ticketId}`, null, 'GET', {
       cacheTTL: 600000, // 10분 캐시
       loadingContext: '초기 데이터 로드',
     });
@@ -309,7 +350,7 @@ const API = {
    * 자연어 쿼리 실행
    */
   async executeQuery(client, queryData) {
-    return this.callBackendAPIWithCache(client, 'query', queryData, 'POST', {
+    return await this.callBackendAPIWithCache(client, 'query', queryData, 'POST', {
       useCache: false, // POST 요청은 기본적으로 캐시하지 않음
       loadingContext: '쿼리 실행',
     });
@@ -319,7 +360,7 @@ const API = {
    * 모든 티켓 목록 가져오기
    */
   async getAllTickets(client) {
-    return this.callBackendAPIWithCache(client, 'tickets/all', null, 'GET', {
+    return await this.callBackendAPIWithCache(client, 'tickets/all', null, 'GET', {
       cacheTTL: 900000, // 15분 캐시
       loadingContext: '티켓 목록 조회',
     });

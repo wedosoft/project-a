@@ -347,6 +347,103 @@ window.Utils = {
     this._cacheTimestamp = null;
   },
 
+  /**
+   * 🔒 안전한 FDK 접근 함수
+   *
+   * Cross-origin 제한을 고려하여 FDK API에 안전하게 접근하는 함수입니다.
+   * 개발 환경과 프로덕션 환경을 구분하여 처리합니다.
+   *
+   * @param {string} property - 접근하려는 FDK 속성 경로 (예: 'app.instance.context')
+   * @param {any} defaultValue - 접근 실패 시 반환할 기본값
+   * @returns {Promise<any>} FDK 속성값 또는 기본값
+   *
+   * @example
+   * // FDK context 안전하게 가져오기
+   * const context = await Utils.safeFDKAccess('app.instance.context', {});
+   *
+   * // FDK iparams 안전하게 가져오기
+   * const iparams = await Utils.safeFDKAccess('app.iparams.get', {});
+   */
+  async safeFDKAccess(property, defaultValue = null) {
+    try {
+      const isDevelopment = window.location.hostname === 'localhost';
+      
+      if (isDevelopment) {
+        console.warn('[UTILS] 개발 환경에서는 FDK 접근이 제한됩니다:', property);
+        return defaultValue;
+      }
+
+      // 상위 프레임 존재 여부 확인
+      if (window.parent === window) {
+        console.warn('[UTILS] FDK 환경이 아닙니다 (상위 프레임 없음)');
+        return defaultValue;
+      }
+
+      // 안전한 속성 접근
+      const propertyPath = property.split('.');
+      let current = window.parent;
+
+      for (const prop of propertyPath) {
+        if (!current || typeof current[prop] === 'undefined') {
+          console.warn(`[UTILS] FDK 속성 없음: ${property}`);
+          return defaultValue;
+        }
+        current = current[prop];
+      }
+
+      // 함수인 경우 호출, 아닌 경우 값 반환
+      if (typeof current === 'function') {
+        return await current();
+      } else {
+        return current;
+      }
+    } catch (error) {
+      console.warn(`[UTILS] FDK 접근 실패: ${property}`, error.message);
+      return defaultValue;
+    }
+  },
+
+  /**
+   * 🔍 FDK 환경 감지 함수
+   *
+   * 현재 실행 환경이 FDK 환경인지 안전하게 확인합니다.
+   *
+   * @returns {Object} 환경 정보 객체
+   *
+   * @example
+   * const env = Utils.detectFDKEnvironment();
+   * if (env.isFDK) {
+   *   // FDK 환경 전용 로직
+   * }
+   */
+  detectFDKEnvironment() {
+    const isDevelopment = window.location.hostname === 'localhost';
+    const hasParentFrame = window.parent !== window;
+    let hasFDKAPI = false;
+    let accessError = null;
+
+    if (hasParentFrame && !isDevelopment) {
+      try {
+        hasFDKAPI = typeof window.parent.app !== 'undefined';
+      } catch (error) {
+        accessError = error.message;
+      }
+    }
+
+    return {
+      isDevelopment,
+      hasParentFrame,
+      hasFDKAPI,
+      isFDK: hasParentFrame && (hasFDKAPI || isDevelopment),
+      accessError,
+      recommendation: isDevelopment 
+        ? 'Freshdesk에서 ?dev=true로 접근하세요'
+        : hasFDKAPI 
+          ? 'FDK 환경 정상'
+          : 'FDK 환경이 아닙니다'
+    };
+  },
+
   // 의존성 확인 함수 - 다른 모듈에서 Utils 모듈 사용 가능 여부 체크
   isAvailable: function () {
     return typeof GlobalState !== 'undefined';

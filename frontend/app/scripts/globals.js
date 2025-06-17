@@ -56,6 +56,17 @@ let globalTicketData = {
   lastLoadTime: null, // 마지막 로드 시간
 };
 
+/**
+ * 전역 에러 상태 관리
+ * @type {Object}
+ */
+let globalErrorState = {
+  hasError: false, // 에러 발생 여부
+  errorMessage: null, // 에러 메시지
+  errorCode: null, // 에러 코드
+  lastErrorTime: null, // 마지막 에러 발생 시간
+};
+
 // === 전역 변수 접근자 함수들 ===
 
 /**
@@ -220,6 +231,58 @@ function getGlobalLoading() {
   return globalTicketData.isLoading;
 }
 
+// === 에러 상태 관리 함수 ===
+
+/**
+ * 전역 에러 상태 설정
+ * @param {boolean} hasError - 에러 발생 여부
+ * @param {string} errorMessage - 에러 메시지
+ * @param {string|number} [errorCode] - 에러 코드
+ */
+function setGlobalError(hasError, errorMessage = null, errorCode = null) {
+  globalErrorState.hasError = Boolean(hasError);
+  globalErrorState.errorMessage = errorMessage;
+  globalErrorState.errorCode = errorCode;
+  globalErrorState.lastErrorTime = hasError ? new Date() : null;
+  
+  if (hasError) {
+    console.error(`🚨 전역 에러 설정: ${errorMessage}`, { 
+      code: errorCode, 
+      time: globalErrorState.lastErrorTime 
+    });
+  } else {
+    console.log('✅ 전역 에러 상태 클리어됨');
+  }
+}
+
+/**
+ * 전역 에러 상태 클리어
+ */
+function clearGlobalError() {
+  setGlobalError(false, null, null);
+}
+
+/**
+ * 전역 에러 상태 확인
+ * @returns {boolean} 에러 발생 여부
+ */
+function hasGlobalError() {
+  return globalErrorState.hasError;
+}
+
+/**
+ * 전역 에러 정보 반환
+ * @returns {Object} 에러 정보 객체
+ */
+function getGlobalError() {
+  return {
+    hasError: globalErrorState.hasError,
+    message: globalErrorState.errorMessage,
+    code: globalErrorState.errorCode,
+    time: globalErrorState.lastErrorTime,
+  };
+}
+
 // === 디버깅 및 개발 지원 함수 ===
 
 /**
@@ -232,6 +295,7 @@ function debugGlobalState() {
   console.log('📊 티켓 데이터 캐시:', globalTicketData);
   console.log('⏰ 마지막 업데이트:', globalTicketData.lastLoadTime);
   console.log('🔄 로딩 상태:', globalTicketData.isLoading);
+  console.log('🚨 에러 상태:', globalErrorState);
   console.groupEnd();
 }
 
@@ -246,9 +310,10 @@ function validateGlobalState() {
     hasTicketData: !!globalTicketData.cached_ticket_id,
     isDataFresh: isGlobalDataValid(),
     isLoading: globalTicketData.isLoading,
+    hasError: globalErrorState.hasError,
   };
 
-  validation.isHealthy = validation.hasClient && validation.isInitialized && !validation.isLoading;
+  validation.isHealthy = validation.hasClient && validation.isInitialized && !validation.isLoading && !validation.hasError;
 
   return validation;
 }
@@ -287,6 +352,32 @@ function validateGlobalState() {
  * @global
  */
 window.GlobalState = {
+  // 시스템 초기화
+  init() {
+    console.log('🔄 GlobalState 초기화 시작');
+    
+    // 전역 상태 초기화
+    isInitialized = false;
+    client = null;
+    
+    // 티켓 데이터 캐시 초기화
+    globalTicketData.summary = null;
+    globalTicketData.similar_tickets = [];
+    globalTicketData.recommended_solutions = [];
+    globalTicketData.cached_ticket_id = null;
+    globalTicketData.ticket_info = null;
+    globalTicketData.isLoading = false;
+    globalTicketData.lastLoadTime = null;
+    
+    // 에러 상태 초기화
+    globalErrorState.hasError = false;
+    globalErrorState.errorMessage = null;
+    globalErrorState.errorCode = null;
+    globalErrorState.lastErrorTime = null;
+    
+    console.log('✅ GlobalState 초기화 완료');
+  },
+
   // 클라이언트 관리
   setClient,
   getClient,
@@ -304,6 +395,13 @@ window.GlobalState = {
   // 로딩 상태 관리
   setGlobalLoading,
   getGlobalLoading,
+  isLoading: getGlobalLoading, // data.js에서 사용하는 함수명과 호환성을 위한 별칭
+
+  // 에러 상태 관리
+  setGlobalError,
+  clearGlobalError,
+  hasGlobalError,
+  getGlobalError,
 
   // 디버깅 및 검증
   debugGlobalState,
@@ -955,7 +1053,7 @@ const DebugTools = {
   },
 
   /**
-   * FDK 연결 상태 검사
+   * FDK 연결 상태 검사 (안전한 Cross-Origin 접근)
    */
   checkFDKStatus() {
     const fdkStatus = {
@@ -964,22 +1062,42 @@ const DebugTools = {
     };
 
     try {
-      const hasParentApp = typeof window.parent !== 'undefined' && window.parent !== window;
-      const hasAppObject = hasParentApp && typeof window.parent.app !== 'undefined';
+      const isDevelopment = window.location.hostname === 'localhost';
+      const hasParentWindow = window.parent !== window;
+      let hasAppObject = false;
+      let accessError = null;
+
+      // 안전한 FDK 접근 시도
+      if (hasParentWindow && !isDevelopment) {
+        try {
+          // Freshdesk 환경에서만 접근 시도
+          hasAppObject = typeof window.parent.app !== 'undefined';
+        } catch (crossOriginError) {
+          // Cross-origin 오류는 예상된 상황 (localhost 개발 환경)
+          accessError = crossOriginError.message;
+          hasAppObject = false;
+        }
+      }
+
       const client = GlobalState.getClient();
 
       fdkStatus.details = {
-        hasParentWindow: hasParentApp,
+        hasParentWindow: hasParentWindow,
         hasAppObject: hasAppObject,
         hasClient: !!client,
-        isDevelopment: window.location.hostname === 'localhost',
+        isDevelopment: isDevelopment,
         currentUrl: window.location.href,
+        accessError: accessError,
       };
 
-      // FDK 상태 판정
-      if (fdkStatus.details.isDevelopment || (hasParentApp && hasAppObject && client)) {
+      // FDK 상태 판정 (개발 환경 고려)
+      if (isDevelopment) {
+        // 개발 환경에서는 Cross-Origin 제한이 정상적임
         fdkStatus.status = 'healthy';
-      } else if (hasParentApp) {
+        fdkStatus.details.note = 'Development environment - Cross-origin restrictions expected';
+      } else if (hasParentWindow && hasAppObject && client) {
+        fdkStatus.status = 'healthy';
+      } else if (hasParentWindow) {
         fdkStatus.status = 'warning';
       } else {
         fdkStatus.status = 'critical';
@@ -1300,7 +1418,7 @@ const DebugTools = {
   /**
    * 캐시 성능 테스트
    */
-  async benchmarkCachePerformance() {
+  benchmarkCachePerformance() {
     if (!window.PerformanceOptimizer) {
       return '❌ PerformanceOptimizer를 사용할 수 없습니다.';
     }
@@ -1481,6 +1599,8 @@ class PerformanceOptimizer {
                 element.setAttribute(key, value);
               });
             }
+            // fragment에 먼저 추가
+            fragment.appendChild(element);
             elements.push({ element, parent: update.parent });
           } else if (update.type === 'modify') {
             const element = update.element;
@@ -1495,7 +1615,9 @@ class PerformanceOptimizer {
 
         // 실제 DOM에 적용
         elements.forEach(({ element, parent }) => {
-          if (parent) {
+          if (parent && fragment.contains(element)) {
+            // fragment에서 제거하고 실제 부모에 추가
+            fragment.removeChild(element);
             parent.appendChild(element);
           }
         });

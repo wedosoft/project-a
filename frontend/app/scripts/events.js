@@ -263,22 +263,22 @@ window.Events = {
         // 탭에 따른 적절한 함수 호출
         switch (tabId) {
           case 'similar-tickets-tab':
-            handleSimilarTicketsTab(client);
+            this.handleSimilarTicketsTab(client);
             break;
           case 'suggested-solutions-tab':
-            handleSuggestedSolutionsTab(client);
+            this.handleSuggestedSolutionsTab(client);
             break;
           case 'copilot-tab':
-            handleCopilotTab(client);
+            this.handleCopilotTab(client);
             break;
         }
       });
     });
 
     // 각 탭의 버튼 이벤트 설정
-    setupSimilarTicketsEvents(client);
-    setupSuggestedSolutionsEvents(client);
-    setupCopilotEvents(client);
+    this.setupSimilarTicketsEvents(client);
+    this.setupSuggestedSolutionsEvents(client);
+    this.setupCopilotEvents(client);
   },
 
   // 유사 티켓 탭 처리 함수
@@ -406,7 +406,7 @@ window.Events = {
 
     // 코파일럿 이벤트가 이미 설정되어 있는지 확인하고, 없으면 설정
     if (!window.copilotEventsSetup) {
-      setupCopilotEvents(client);
+      this.setupCopilotEvents(client);
       window.copilotEventsSetup = true;
     }
   },
@@ -824,7 +824,7 @@ window.Events = {
    * 무한 스크롤 설정
    */
   setupInfiniteScroll(container, loadMoreCallback, options = {}) {
-    const { threshold = 100, debounceMs = 100, batchSize = 20 } = options;
+    const { threshold = 100, batchSize = 20 } = options;
 
     let isLoading = false;
 
@@ -934,8 +934,8 @@ window.Events = {
         Data: typeof Data !== 'undefined' && typeof Data.sendPrompt === 'function',
       };
 
-      const availableDeps = Object.entries(dependencies).filter(([key, available]) => available);
-      const missingDeps = Object.entries(dependencies).filter(([key, available]) => !available);
+      const availableDeps = Object.entries(dependencies).filter(([, available]) => available);
+      const missingDeps = Object.entries(dependencies).filter(([, available]) => !available);
 
       if (missingDeps.length > 0) {
         console.warn(
@@ -954,7 +954,7 @@ window.Events = {
 
 console.log('🎭 Events 모듈 로드 완료 - 9개 함수 export됨');
 
-// 모듈 의존성 시스템에 등록
+// 모듈 의존성 시스템에 등록 (ui, data 모듈에 의존)
 if (typeof ModuleDependencyManager !== 'undefined') {
-  ModuleDependencyManager.registerModule('events', Object.keys(Events).length);
+  ModuleDependencyManager.registerModule('events', Object.keys(Events).length, ['ui', 'data']);
 }

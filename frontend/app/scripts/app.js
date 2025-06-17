@@ -34,12 +34,28 @@
  * 3. 앱 활성화 이벤트 리스너 등록
  * 4. 렌더링 완료 후 이벤트 핸들러 설정
  */
+
+// 중복 초기화 방지 플래그
+let isAppInitialized = false;
+
 app
   .initialized()
   .then((c) => {
+    // 중복 초기화 방지
+    if (isAppInitialized) {
+      console.log('⚠️ 앱이 이미 초기화되었습니다. 중복 실행을 방지합니다.');
+      return;
+    }
+    
+    // 전역 상태 관리 시스템 초기화 (한 번만 실행)
+    if (typeof GlobalState !== 'undefined' && !GlobalState.getInitialized()) {
+      GlobalState.init();
+    }
+    
     // 전역 상태 관리 시스템을 통해 클라이언트 설정
     GlobalState.setClient(c);
     GlobalState.setInitialized(true);
+    isAppInitialized = true;
 
     const client = GlobalState.getClient();
     console.log('✅ 앱 초기화 완료');
@@ -77,18 +93,18 @@ app
             GlobalState.isGlobalDataValid()
           ) {
             console.log('⚡ 캐시된 데이터 발견 → 즉시 모달 표시 (0ms 지연)');
-            await UI.showModal();
+            await UI.showModal('<p>캐시된 데이터를 불러오는 중...</p>', '티켓 분석');
           } else {
             console.log('ℹ️ 새 티켓이거나 캐시 없음 → 빈 상태로 모달 표시 (백엔드 호출 없음)');
 
             // 백엔드 호출 없이 즉시 모달 열기
-            await UI.showModal();
+            await UI.showModal('<p>티켓 정보를 로딩 중...</p>', '티켓 분석');
           }
 
           // 모달 표시 후 이벤트 설정 (한 번만)
-          if (!GlobalState.isInitialized()) {
+          if (!Events.isInitialized) {
             Events.setupTabEvents(client);
-            GlobalState.setInitialized(true);
+            Events.isInitialized = true;
           }
         } else {
           // 예상치 못한 위치에서의 호출
@@ -132,8 +148,8 @@ app
     console.error('앱 초기화 실패:', error);
   });
 
-// 전역 상태 초기화
-GlobalState.init();
+// 전역 상태는 app.initialized() 콜백에서 한 번만 초기화됨
+// 중복 초기화 방지를 위해 여기서의 GlobalState.init() 호출 제거됨
 
 /**
  * 🔍 앱 검증 및 초기화 메인 함수
@@ -274,35 +290,13 @@ async function initializeApp() {
 }
 
 /**
- * 📅 DOM 로딩 완료 이벤트 핸들러
+ * 📅 FDK 기반 앱 초기화 완료
  *
- * 브라우저에서 DOM 구조가 완전히 로드되면 자동으로 실행되는 이벤트 핸들러입니다.
- * 이는 모든 HTML 요소가 준비된 후 JavaScript 로직을 안전하게 실행하기 위한
- * 표준적인 초기화 패턴입니다.
- *
- * 실행 순서:
- * 1. DOM 로딩 완료 감지
- * 2. 앱 검증 및 초기화 함수 호출
- * 3. 초기화 결과에 따른 적절한 처리
- * 4. 에러 발생 시 사용자 친화적 메시지 표시
+ * DOM 로드 이벤트 핸들러는 제거되었습니다.
+ * 모든 초기화는 app.initialized() 이벤트를 통해 수행됩니다.
+ * 
+ * 이는 Freshdesk FDK의 표준 패턴입니다.
  */
-// 앱 시작
-document.addEventListener('DOMContentLoaded', async function () {
-  console.log('[APP] DOM 로딩 완료, 앱 시작...');
-
-  try {
-    const success = await validateAndInitializeApp();
-    if (!success) {
-      console.error('[APP] 앱 초기화 실패');
-    }
-  } catch (error) {
-    console.error('[APP] 앱 시작 중 예외 발생:', error);
-    GlobalState.ErrorHandler.handleError(error, {
-      context: 'app_startup',
-      userMessage: '앱을 시작할 수 없습니다. 페이지를 새로고침해주세요.',
-    });
-  }
-});
 
 // 모든 모듈이 로드된 후 시스템 검증
 setTimeout(() => {

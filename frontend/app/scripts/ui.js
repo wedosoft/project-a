@@ -24,12 +24,61 @@
 // UI 모듈 정의 - 모든 UI 관련 함수를 하나의 객체로 관리
 window.UI = {
   /**
+   * DOM이 완전히 준비될 때까지 기다리는 함수
+   *
+   * @param {number} timeout - 타임아웃 (밀리초, 기본값: 10000)
+   * @returns {Promise<boolean>} DOM 준비 여부
+   */
+  async waitForDOMReady(timeout = 10000) {
+    const startTime = Date.now();
+    
+    while (Date.now() - startTime < timeout) {
+      if (document.readyState === 'complete' || document.readyState === 'interactive') {
+        console.log('[UI] DOM 준비 완료');
+        return true;
+      }
+      
+      // 50ms마다 체크
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    
+    console.warn('[UI] DOM 준비 타임아웃');
+    return false;
+  },
+
+  /**
+   * 특정 요소가 존재할 때까지 기다리는 함수
+   *
+   * @param {string} selector - CSS 선택자
+   * @param {number} timeout - 타임아웃 (밀리초, 기본값: 5000)
+   * @returns {Promise<Element|null>} 찾은 요소 또는 null
+   */
+  async waitForElement(selector, timeout = 5000) {
+    const startTime = Date.now();
+    
+    while (Date.now() - startTime < timeout) {
+      const element = document.querySelector(selector);
+      if (element) {
+        console.log(`[UI] 요소 발견: ${selector}`);
+        return element;
+      }
+      
+      // 100ms마다 체크
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    console.warn(`[UI] 요소 대기 타임아웃: ${selector}`);
+    return null;
+  },
+
+  /**
    * 안전한 DOM 요소 조회
    *
    * querySelector를 안전하게 래핑하여 에러 처리와 로깅을 제공합니다.
    * 요소가 없거나 접근 오류 시 null을 반환하고 적절한 로그를 남깁니다.
    *
    * @param {string} selector - CSS 선택자
+   * @param {boolean} waitIfNotFound - 요소가 없을 경우 대기할지 여부
    * @returns {Element|null} DOM 요소 또는 null
    *
    * @example
@@ -38,11 +87,21 @@ window.UI = {
    *   button.addEventListener('click', handler);
    * }
    */
-  safeGetElement(selector) {
+  safeGetElement(selector, waitIfNotFound = false) {
     try {
       const element = document.querySelector(selector);
       if (!element) {
         console.warn(`[UI] 요소를 찾을 수 없음: ${selector}`);
+        
+        if (waitIfNotFound) {
+          // 비동기로 요소를 기다림 (백그라운드에서)
+          this.waitForElement(selector).then(foundElement => {
+            if (foundElement) {
+              console.log(`[UI] 지연 발견된 요소: ${selector}`);
+            }
+          });
+        }
+        
         return null;
       }
       return element;
@@ -117,51 +176,273 @@ window.UI = {
       }, duration);
     } catch (error) {
       console.error('[UI] 토스트 표시 오류:', error);
-      // 토스트 표시 자체가 실패하면 기본 alert 사용
-      alert(`${type.toUpperCase()}: ${message}`);
+      // 토스트 표시 자체가 실패하면 콘솔 에러로 대체
+      console.error(`[UI] 메시지 표시 실패: ${message}`);
     }
   },
 
   /**
-   * 응답 모달 창 표시
+   * 응답 모달 창 표시 (FDK 환경 최적화)
    *
    * LLM 응답이나 상세 정보를 모달 창으로 표시합니다.
    * 콘텐츠를 모달 내부에 렌더링하고 화면에 표시합니다.
+   * FDK iframe 환경에서도 올바르게 작동하도록 최적화됩니다.
    *
    * @param {string} content - 모달에 표시할 HTML 콘텐츠
-   * @param {Object} options - 모달 표시 옵션 (향후 확장용)
+   * @param {string} title - 모달 제목 (선택사항)
    *
    * @example
-   * UI.showModal('<h3>AI 응답</h3><p>처리 결과입니다.</p>');
+   * UI.showModal('<h3>AI 응답</h3><p>처리 결과입니다.</p>', 'AI 응답');
    */
-  showModal(content, options = {}) {
+  /**
+   * FDK 환경용 콘텐츠 표시 함수 (개선된 DOM 대기 로직)
+   *
+   * FDK iframe 환경에서는 별도 모달 대신 앱 컨테이너 내에서 직접 콘텐츠를 표시합니다.
+   * 기존 탭 콘텐츠를 임시로 숨기고 응답 콘텐츠를 표시한 후, 닫기 버튼으로 원래 상태로 복원합니다.
+   *
+   * @param {string} content - 표시할 HTML 콘텐츠
+   * @param {string} title - 제목 (선택사항)
+   */
+  async showModal(content, title = 'AI 응답') {
     try {
-      console.log('[UI] 모달 표시 시작');
+      console.log('[UI] FDK 환경용 콘텐츠 표시 시작');
 
-      const modal = this.safeGetElement('#response-modal');
-      if (!modal) {
-        console.error('[UI] 모달 요소를 찾을 수 없음');
-        this.showToast('모달을 표시할 수 없습니다.', 'error');
-        return;
+      // DOM이 준비될 때까지 기다림
+      await this.waitForDOMReady();
+
+      // 기존 탭 콘텐츠 숨기기 (요소가 있는 경우에만)
+      const tabContent = await this.waitForElement('.tab-content', 2000);
+      if (tabContent) {
+        tabContent.style.display = 'none';
+        console.log('[UI] 탭 콘텐츠 숨김 처리 완료');
+      } else {
+        console.warn('[UI] 탭 콘텐츠 요소를 찾을 수 없어 fallback으로 진행');
       }
 
-      const modalContent = this.safeGetElement('#modal-content');
-      if (!modalContent) {
-        console.error('[UI] 모달 콘텐츠 요소를 찾을 수 없음');
-        this.showToast('모달 콘텐츠를 로드할 수 없습니다.', 'error');
-        return;
+      // 응답 표시 컨테이너 생성 또는 가져오기
+      let responseContainer = this.safeGetElement('#fdk-response-container');
+      if (!responseContainer) {
+        console.log('[UI] 응답 컨테이너가 없어서 동적 생성');
+        responseContainer = document.createElement('div');
+        responseContainer.id = 'fdk-response-container';
+        responseContainer.style.cssText = `
+          position: relative;
+          background: white;
+          border: 1px solid #dee2e6;
+          border-radius: 8px;
+          padding: 20px;
+          margin: 10px 0;
+          box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+          max-height: 400px;
+          overflow-y: auto;
+          z-index: 1000;
+        `;
+        
+        // 탭 컨테이너 뒤에 삽입 시도, 없으면 body에 추가
+        const tabContainer = this.safeGetElement('.tab-container');
+        if (tabContainer) {
+          tabContainer.parentNode.insertBefore(responseContainer, tabContainer.nextSibling);
+          console.log('[UI] 탭 컨테이너 뒤에 응답 컨테이너 삽입');
+        } else {
+          // 컨테이너를 찾을 수 없으면 body 끝에 추가
+          document.body.appendChild(responseContainer);
+          console.log('[UI] body 끝에 응답 컨테이너 추가 (fallback)');
+        }
+      } else {
+        console.log('[UI] 기존 응답 컨테이너 재사용');
       }
 
-      modalContent.innerHTML = content;
-      modal.style.display = 'block';
+      // 헤더와 닫기 버튼 생성
+      const header = document.createElement('div');
+      header.style.cssText = `
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 15px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid #dee2e6;
+      `;
 
-      console.log('[UI] 모달 표시 완료');
+      const titleElement = document.createElement('h5');
+      titleElement.textContent = title;
+      titleElement.style.cssText = `
+        margin: 0;
+        color: #2c3e50;
+        font-size: 16px;
+        font-weight: 600;
+      `;
+
+      const closeButton = document.createElement('button');
+      closeButton.innerHTML = '&times;';
+      closeButton.style.cssText = `
+        background: none;
+        border: none;
+        font-size: 24px;
+        color: #6c757d;
+        cursor: pointer;
+        padding: 0;
+        width: 30px;
+        height: 30px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 4px;
+        transition: background-color 0.2s;
+      `;
+      closeButton.onmouseover = () => { closeButton.style.backgroundColor = '#f8f9fa'; };
+      closeButton.onmouseout = () => { closeButton.style.backgroundColor = 'transparent'; };
+      closeButton.onclick = () => this.hideModal();
+
+      header.appendChild(titleElement);
+      header.appendChild(closeButton);
+
+      // 콘텐츠 영역 생성
+      const contentArea = document.createElement('div');
+      contentArea.innerHTML = content;
+      contentArea.style.cssText = `
+        line-height: 1.6;
+        color: #333;
+      `;
+
+      // 컨테이너 내용 업데이트
+      responseContainer.innerHTML = '';
+      responseContainer.appendChild(header);
+      responseContainer.appendChild(contentArea);
+
+      // 표시
+      responseContainer.style.display = 'block';
+
+      // 스크롤하여 컨테이너가 보이도록 함
+      responseContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+      console.log('[UI] FDK 환경용 콘텐츠 표시 완료');
     } catch (error) {
-      console.error('[UI] 모달 표시 오류:', error);
-      GlobalState.ErrorHandler.handleError(error, {
-        context: 'ui_modal_display',
-        userMessage: '응답 창을 표시하는 중 오류가 발생했습니다.',
-      });
+      console.error('[UI] 콘텐츠 표시 오류:', error);
+      this.showToast('콘텐츠를 표시하는 중 오류가 발생했습니다.', 'error');
+    }
+  },
+
+  /**
+   * 에러 모달 표시 (FDK 환경 최적화)
+   *
+   * 에러 메시지를 전용 에러 모달로 표시합니다.
+   * FDK iframe 환경에서도 올바르게 작동하도록 최적화됩니다.
+   *
+   * @param {string} errorMessage - 에러 메시지
+   * @param {string} title - 모달 제목 (선택사항)
+   */
+  /**
+   * FDK 환경용 에러 표시 함수
+   *
+   * 에러 메시지를 앱 내에서 직접 표시합니다.
+   *
+   * @param {string} errorMessage - 에러 메시지
+   * @param {string} title - 제목 (선택사항)
+   */
+  showErrorModal(errorMessage, title = '오류 발생') {
+    try {
+      console.log('[UI] FDK 환경용 에러 표시 시작');
+
+      const errorContent = `
+        <div class="alert alert-danger" style="margin: 0; padding: 15px; border-radius: 6px; border: 1px solid #f5c6cb; background-color: #f8d7da; color: #721c24;">
+          <div style="display: flex; align-items: center; margin-bottom: 10px;">
+            <span style="font-size: 20px; margin-right: 10px;">⚠️</span>
+            <strong>오류가 발생했습니다</strong>
+          </div>
+          <div style="font-size: 14px;">
+            ${errorMessage}
+          </div>
+        </div>
+      `;
+
+      // showModal 함수를 재사용하여 에러 내용 표시
+      this.showModal(errorContent, title);
+
+      console.log('[UI] FDK 환경용 에러 표시 완료');
+    } catch (error) {
+      console.error('[UI] 에러 표시 오류:', error);
+      this.showToast(`오류: ${errorMessage}`, 'error');
+    }
+  },
+
+  // 캐시된 데이터로 UI를 즉시 업데이트하는 함수
+  updateUIWithCachedData(data) {
+    try {
+      console.log('[UI] 캐시된 데이터로 UI 업데이트 시작');
+      
+      if (!data) {
+        console.warn('[UI] 캐시된 데이터가 없습니다');
+        return;
+      }
+
+      // 티켓 정보 표시
+      if (data.ticket) {
+        this.displayTicketInfo(data.ticket);
+      }
+
+      // 관련 문서 표시
+      if (data.related_docs && data.related_docs.length > 0) {
+        this.displayRelatedDocs(data.related_docs);
+      }
+
+      // 요약 정보 표시
+      if (data.summary) {
+        this.displaySummary(data.summary);
+      }
+
+      console.log('[UI] 캐시된 데이터로 UI 업데이트 완료');
+    } catch (error) {
+      console.error('[UI] 캐시된 데이터 UI 업데이트 오류:', error);
+    }
+  },
+
+  /**
+   * 수동 모달 숨기기 함수
+   */
+  hideManualModal(modal, backdrop) {
+    try {
+      console.log('[UI] 수동 모달 숨기기');
+      
+      modal.style.display = 'none';
+      modal.classList.remove('show');
+      modal.setAttribute('aria-hidden', 'true');
+      
+      if (backdrop) {
+        backdrop.remove();
+      }
+      
+      document.body.classList.remove('modal-open');
+      document.body.style.overflow = '';
+      
+    } catch (error) {
+      console.error('[UI] 수동 모달 숨기기 오류:', error);
+    }
+  },
+
+  /**
+   * FDK 환경용 콘텐츠 숨기기 함수
+   *
+   * 표시된 응답 콘텐츠를 숨기고 원래 탭 콘텐츠를 복원합니다.
+   */
+  hideModal() {
+    try {
+      console.log('[UI] FDK 환경용 콘텐츠 숨기기');
+
+      // 응답 컨테이너 숨기기
+      const responseContainer = this.safeGetElement('#fdk-response-container');
+      if (responseContainer) {
+        responseContainer.style.display = 'none';
+      }
+
+      // 기존 탭 콘텐츠 다시 표시
+      const tabContent = this.safeGetElement('.tab-content');
+      if (tabContent) {
+        tabContent.style.display = 'block';
+      }
+
+      console.log('[UI] 원래 UI 상태 복원 완료');
+    } catch (error) {
+      console.error('[UI] 콘텐츠 숨기기 오류:', error);
     }
   },
 
@@ -462,11 +743,21 @@ window.UI = {
         ticketsContainer.appendChild(ticketItem);
       });
     } else {
-      // 빈 배열일 때 캐시 상태를 고려한 정보 제공
+      // 빈 배열일 때 캐시 상태와 에러 상태를 고려한 정보 제공
       const hasCachedData = globalTicketData.cached_ticket_id && !isDataStale();
-      const emptyMessage = hasCachedData
-        ? '이 티켓과 유사한 과거 사례가 없거나, 아직 데이터가 충분하지 않습니다.'
-        : '데이터를 로딩 중이거나 아직 분석이 완료되지 않았습니다.<br>페이지 새로고침 후 다시 시도해보세요.';
+      const errorState = GlobalState.getGlobalError();
+      
+      let emptyMessage;
+      if (errorState.hasError) {
+        // 에러가 발생한 경우
+        emptyMessage = `데이터를 불러오는 중 오류가 발생했습니다.<br>${errorState.errorMessage || '서버와의 연결을 확인해주세요.'}`;
+      } else if (hasCachedData) {
+        // 캐시된 데이터가 있지만 유사 티켓이 없는 경우
+        emptyMessage = '이 티켓과 유사한 과거 사례가 없거나, 아직 데이터가 충분하지 않습니다.';
+      } else {
+        // 데이터 로딩 중이거나 초기 상태
+        emptyMessage = '데이터를 로딩 중이거나 아직 분석이 완료되지 않았습니다.<br>페이지 새로고침 후 다시 시도해보세요.';
+      }
 
       resultsElement.innerHTML = `
         <div class="empty-state">
@@ -683,11 +974,21 @@ window.UI = {
         solutionsContainer.appendChild(solutionItem);
       });
     } else {
-      // 빈 배열일 때 캐시 상태를 고려한 정보 제공
+      // 빈 배열일 때 캐시 상태와 에러 상태를 고려한 정보 제공
       const hasCachedData = globalTicketData.cached_ticket_id && !isDataStale();
-      const emptyMessage = hasCachedData
-        ? '현재 지식베이스에서 이 문제와 관련된 솔루션을 찾을 수 없습니다.<br>새로운 문서가 추가되거나 더 구체적인 정보가 있으면 관련 솔루션을 제안할 수 있습니다.'
-        : '지식베이스 데이터를 로딩 중이거나 아직 분석이 완료되지 않았습니다.<br>페이지 새로고침 후 다시 시도해보세요.';
+      const errorState = GlobalState.getGlobalError();
+      
+      let emptyMessage;
+      if (errorState.hasError) {
+        // 에러가 발생한 경우
+        emptyMessage = `솔루션 데이터를 불러오는 중 오류가 발생했습니다.<br>${errorState.errorMessage || '서버와의 연결을 확인해주세요.'}`;
+      } else if (hasCachedData) {
+        // 캐시된 데이터가 있지만 추천 솔루션이 없는 경우
+        emptyMessage = '현재 지식베이스에서 이 문제와 관련된 솔루션을 찾을 수 없습니다.<br>새로운 문서가 추가되거나 더 구체적인 정보가 있으면 관련 솔루션을 제안할 수 있습니다.';
+      } else {
+        // 데이터 로딩 중이거나 초기 상태
+        emptyMessage = '지식베이스 데이터를 로딩 중이거나 아직 분석이 완료되지 않았습니다.<br>페이지 새로고침 후 다시 시도해보세요.';
+      }
 
       resultsElement.innerHTML = `
         <div class="empty-state">
@@ -1055,7 +1356,7 @@ window.UI = {
    * 여러 DOM 조작을 한 번에 처리하여 리플로우/리페인트 최소화
    */
   async batchDOMUpdates(updates) {
-    return window.PerformanceOptimizer.batchDOMUpdates(updates);
+    return await window.PerformanceOptimizer.batchDOMUpdates(updates);
   },
 
   /**
@@ -1205,7 +1506,7 @@ window.UI = {
       return this.createVirtualList(
         container,
         tickets,
-        (ticket, index) => {
+        (ticket) => {
           const element = document.createElement('div');
           element.className = 'ticket-item';
           element.innerHTML = this.generateTicketHTML(ticket);
@@ -1257,32 +1558,42 @@ window.UI = {
     await this.batchDOMUpdates(updates);
   },
 
-  // UI 모듈 export - 주요 함수들을 UI 네임스페이스로 노출
-  UI: {
-    updateUIWithCachedData: this.updateUIWithCachedData,
-    updateTicketInfo: this.updateTicketInfo,
-    displayTicketSummary: this.displayTicketSummary,
-    displaySimilarTickets: this.displaySimilarTickets,
-    displaySuggestedSolutions: this.displaySuggestedSolutions,
-    showSimilarTicketsListView: this.showSimilarTicketsListView,
-    showSimilarTicketsDetailView: this.showSimilarTicketsDetailView,
-    showSuggestedSolutionsListView: this.showSuggestedSolutionsListView,
-    showSuggestedSolutionsDetailView: this.showSuggestedSolutionsDetailView,
-    loadTicketDetails: loadTicketDetails,
-    showModal: this.showModal,
-    formatSummaryForDisplay: this.formatSummaryForDisplay,
-    formatSolutionContent: this.formatSolutionContent,
-  },
-
   // 의존성 확인 함수 - 다른 모듈에서 UI 모듈 사용 가능 여부 체크
   isAvailable: function () {
-    return typeof GlobalState !== 'undefined' && typeof Utils !== 'undefined';
+    try {
+      // UI 모듈의 핵심 의존성: GlobalState, Utils, Data
+      return (
+        typeof GlobalState !== 'undefined' &&
+        typeof Utils !== 'undefined' &&
+        typeof Data !== 'undefined'
+      );
+    } catch (error) {
+      console.error('[UI] 의존성 확인 중 오류:', error);
+      return false;
+    }
   },
+};
+
+// 전역 함수로 내보내기 (HTML onclick 등에서 사용)
+window.showModal = function(content, title) {
+  if (window.UI && window.UI.showModal) {
+    return window.UI.showModal(content, title);
+  } else {
+    console.error('[전역] UI 모듈이 준비되지 않음');
+  }
+};
+
+window.hideModal = function() {
+  if (window.UI && window.UI.hideModal) {
+    return window.UI.hideModal();
+  } else {
+    console.error('[전역] UI 모듈이 준비되지 않음');
+  }
 };
 
 console.log('🎨 UI 모듈 로드 완료 - 12개 함수 export됨');
 
-// 모듈 의존성 시스템에 등록
+// 모듈 의존성 시스템에 등록 (data 의존성 명시)
 if (typeof ModuleDependencyManager !== 'undefined') {
-  ModuleDependencyManager.registerModule('ui', Object.keys(UI).length);
+  ModuleDependencyManager.registerModule('ui', Object.keys(UI).length, ['data']);
 }
