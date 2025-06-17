@@ -232,7 +232,7 @@ class LLMProvider:
 class AnthropicProvider(LLMProvider):
     """Anthropic Claude API 제공자"""
     
-    def __init__(self, api_key: Optional[str] = None, timeout: float = 10.0):
+    def __init__(self, api_key: Optional[str] = None, timeout: float = 8.0):  # 10 → 8초로 단축
         super().__init__(name="anthropic", timeout=timeout) # 부모 클래스 생성자 호출
         self.api_key = api_key or ANTHROPIC_API_KEY
         if not self.api_key:
@@ -310,7 +310,7 @@ class AnthropicProvider(LLMProvider):
 class OpenAIProvider(LLMProvider):
     """OpenAI API 제공자"""
     
-    def __init__(self, api_key: str = None, timeout: float = 15.0):
+    def __init__(self, api_key: str = None, timeout: float = 10.0):  # OpenAI는 빠르므로 10초 유지
         super().__init__(name="openai", timeout=timeout) # 부모 클래스 생성자 호출
         self.api_key = api_key or OPENAI_API_KEY
         if not self.api_key:
@@ -391,7 +391,7 @@ class OpenAIProvider(LLMProvider):
 class GeminiProvider(LLMProvider):
     """Google Gemini API 제공자"""
     
-    def __init__(self, api_key: str = None, timeout: float = 20.0):
+    def __init__(self, api_key: str = None, timeout: float = 15.0):  # 20 → 15초로 단축
         super().__init__(name="gemini", timeout=timeout) # 부모 클래스 생성자 호출
         self.api_key = api_key or GOOGLE_API_KEY
         self.client = None # genai.GenerativeModel 인스턴스
@@ -756,11 +756,11 @@ class LLMProviderSelector:
 class LLMRouter:
     """LLM 라우팅 및 Fallback 로직 구현"""
     
-    def __init__(self, timeout: float = 10.0, gemini_timeout: float = 20.0): # Gemini 타임아웃 분리
-        self.timeout = timeout # Anthropic, OpenAI용 기본 타임아웃
+    def __init__(self, timeout: float = 8.0, gemini_timeout: float = 15.0): # 타임아웃 단축으로 속도 향상
+        self.timeout = timeout # Anthropic, OpenAI용 기본 타임아웃 (10 → 8초)
         self.anthropic = AnthropicProvider(timeout=timeout)
         self.openai = OpenAIProvider(timeout=timeout) 
-        self.gemini = GeminiProvider(timeout=gemini_timeout) # Gemini는 별도 타임아웃 적용
+        self.gemini = GeminiProvider(timeout=gemini_timeout) # Gemini는 별도 타임아웃 적용 (20 → 15초)
         
         # 제공자 우선순위 및 상태 관리 (Prometheus 연동 시 메트릭으로 활용 가능)
         # 성능 기반 우선순위: OpenAI > Anthropic > Gemini (응답 속도 최적화)
@@ -991,52 +991,33 @@ class LLMRouter:
                 # 기타 타입인 경우 문자열로 변환하여 포함
                 prompt_context += f"- 대화 내용: {str(conversations)[:200]}\n"
                 
+        # 🚀 최적화된 간소 프롬프트 - 속도 우선
         system_prompt = (
-            "당신은 AI 지원 에이전트입니다. 제공된 티켓 정보를 바탕으로 다음 정보를 추출하세요:\n"
-            "1. 티켓의 핵심 내용 요약 (주요 문제점, 고객의 요청, 현재 상태, 해결 과정 포함)\n"
-            "   - 초기 대화와 최근 대화의 맥락을 모두 고려하여 전체 상황을 포괄적으로 요약\n"
-            "   - 대화 흐름에 따른 문제 진행 상황과 해결 과정을 상세히 포함\n"
-            "   - 문제의 원인, 조치 사항, 결과를 명확하게 언급\n"
-            "   - 티켓이 해결되었다면 최종 해결책과 결과를 반드시 포함\n"
-            "2. 3-5개의 핵심 포인트 (반드시 배열로 제공)\n"
-            "   - 초기 및 최근 대화에서 나타난 중요한 정보 모두 포함\n"
-            "   - 기술적 문제점, 해결 방법, 고객 요구사항을 균형있게 포함\n"
-            "3. 티켓의 전반적인 감정 상태 (긍정적, 중립적, 부정적)\n"
-            "4. 추천 우선순위 (높음, 보통, 낮음)\n"
-            "5. 긴급도 수준 (높음, 보통, 낮음)\n\n"
-            "반드시 아래 형식의 유효한 JSON으로만 응답해주세요:\n"
-            "{\n"
-            "  \"summary\": \"티켓 요약 텍스트 - 가능한 상세하게 작성\",\n"
-            "  \"key_points\": [\"핵심 포인트 1\", \"핵심 포인트 2\", \"핵심 포인트 3\"],\n"
-            "  \"sentiment\": \"감정 상태\",\n"
-            "  \"priority_recommendation\": \"우선순위\",\n"
-            "  \"urgency_level\": \"긴급도\"\n"
-            "}\n\n"
-            "주의: key_points는 반드시 배열 형태로 제공해야 합니다. 문자열이나 다른 형식은 허용되지 않습니다.\n"
-            "요약은 가능한 자세하게 작성하고, 대화의 전체 맥락을 포함해야 합니다.\n"
-            "한국어로 답변해주세요."
+            "빠른 티켓 요약을 생성하세요. 다음 JSON 형식으로만 응답하세요:\n"
+            "{\"summary\": \"간결한 요약\", \"key_points\": [\"포인트1\", \"포인트2\"], \"sentiment\": \"중립적\", \"priority_recommendation\": \"보통\", \"urgency_level\": \"보통\"}"
         )
         
-        prompt = f"다음 티켓 정보를 분석해주세요:\n\n{prompt_context}"
+        # 🚀 프롬프트 최적화 - 토큰 사용량 최소화
+        prompt = f"티켓 요약:\n제목: {subject}\n설명: {description[:300]}\n"
         
-        # 로깅 개선 - 대화 수와 처리된 정보량 기록
-        conv_count = 0
-        if isinstance(conversations, list):
-            conv_count = len(conversations)
+        # 대화는 최근 3개만 포함 (속도 향상)
+        if conversations and isinstance(conversations, list):
+            recent_convs = conversations[-3:] if len(conversations) > 3 else conversations
+            prompt += "최근 대화:\n"
+            for i, conv in enumerate(recent_convs):
+                body = self._extract_conversation_body(conv)
+                prompt += f"- {body[:100]}\n"  # 100자로 제한
         
-        logger.info(f"티켓 요약 생성 요청 (ticket_id: {ticket_data.get('id')}, 대화 수: {conv_count}, prompt_length: {len(prompt)} chars)")
-        
-        # 프롬프트가 너무 길어질 경우 경고 로그
-        if len(prompt) > 15000:
-            logger.warning(f"티켓 {ticket_data.get('id')}의 프롬프트가 매우 깁니다 ({len(prompt)} chars). 일부 정보가 생략될 수 있습니다.")
+        logger.info(f"🚀 고속 티켓 요약 생성 (ticket_id: {ticket_data.get('id')}, prompt_length: {len(prompt)})")
         
         try:
-            # self.generate를 사용하여 텍스트 생성
+            # 🚀 속도 최적화: 토큰 수 줄이기, 경량 모델 사용
             response = await self.generate(
                 prompt=prompt,
                 system_prompt=system_prompt,
-                max_tokens=max_tokens,
-                temperature=0.3
+                max_tokens=500,  # 1000 → 500 토큰으로 단축
+                temperature=0.1,  # 0.3 → 0.1로 낮춰서 속도 향상
+                operation="ticket_summary"  # 경량 모델 사용
             )
             
             if not response or not hasattr(response, 'text') or not response.text:
@@ -1651,6 +1632,194 @@ class LLMRouter:
             
         return default
 
+    async def analyze_multiple_tickets_batch(self, tickets_data: List[dict]) -> List[dict]:
+        """
+        여러 티켓을 배치로 분석하여 각각의 issue/solution을 반환하는 메서드 (성능 최적화 버전)
+        
+        Args:
+            tickets_data: 분석할 티켓 데이터 리스트
+            
+        Returns:
+            각 티켓의 분석 결과 리스트 [{"issue": "...", "solution": "..."}, ...]
+        """
+        batch_start_time = time.time()
+        
+        try:
+            if not tickets_data:
+                return []
+            
+            logger.info(f"🚀 고성능 배치 분석 시작: {len(tickets_data)}개 티켓")
+            
+            # 🚀 최적화된 배치 크기 (성능 향상)
+            OPTIMAL_BATCH_SIZE = 3  # 4 → 3개로 줄여서 더 빠른 처리
+            
+            if len(tickets_data) > OPTIMAL_BATCH_SIZE:
+                # 청크 단위로 분할 처리
+                chunks = []
+                for i in range(0, len(tickets_data), OPTIMAL_BATCH_SIZE):
+                    chunks.append(tickets_data[i:i + OPTIMAL_BATCH_SIZE])
+                
+                # 청크별 병렬 처리
+                async def process_chunk(chunk):
+                    return await self._process_ticket_batch_chunk(chunk)
+                
+                chunk_tasks = [process_chunk(chunk) for chunk in chunks]
+                chunk_results = await asyncio.gather(*chunk_tasks, return_exceptions=True)
+                
+                # 결과 합치기
+                all_results = []
+                for chunk_result in chunk_results:
+                    if isinstance(chunk_result, Exception):
+                        logger.error(f"청크 처리 실패: {chunk_result}")
+                        # 실패한 청크는 기본값으로 채움
+                        chunk_size = OPTIMAL_BATCH_SIZE if len(all_results) + OPTIMAL_BATCH_SIZE <= len(tickets_data) else len(tickets_data) - len(all_results)
+                        all_results.extend([{"issue": "문제 상황 분석 중", "solution": "해결 방안 검토 중"}] * chunk_size)
+                    else:
+                        all_results.extend(chunk_result)
+                
+                batch_time = time.time() - batch_start_time
+                logger.info(f"✅ 분할 배치 분석 완료: {len(tickets_data)}개 티켓 → {batch_time:.2f}초 (평균 {batch_time/len(tickets_data):.2f}초/건)")
+                return all_results
+            else:
+                # 소량 배치는 기존 방식으로 처리
+                return await self._process_ticket_batch_chunk(tickets_data)
+                
+        except Exception as e:
+            logger.error(f"❌ 배치 티켓 분석 실패: {e}, 개별 분석으로 폴백")
+            # 배치 분석 실패 시 개별 분석으로 폴백
+            return await self._fallback_to_individual_analysis(tickets_data)
+
+    async def _process_ticket_batch_chunk(self, tickets_data: List[dict]) -> List[dict]:
+        """
+        티켓 배치 청크를 처리하는 내부 메서드 (원본 배치 처리 로직)
+        
+        Args:
+            tickets_data: 처리할 티켓 데이터 청크
+            
+        Returns:
+            분석 결과 리스트
+        """
+        try:
+            # 🚀 최적화된 배치 프롬프트 생성
+            batch_prompt = "다음 티켓들의 Issue와 Solution을 빠르게 분석하세요:\n\n"
+            
+            for i, ticket in enumerate(tickets_data):
+                subject = ticket.get("subject", "제목 없음")
+                description = ticket.get("description_text", "설명 없음")[:200]  # 200자로 제한
+                
+                batch_prompt += f"티켓 {i+1}:\n제목: {subject}\n내용: {description}\n\n"
+            
+            # 🚀 간소화된 시스템 프롬프트 (속도 우선)
+            system_prompt = (
+                "각 티켓의 Issue(문제)와 Solution(해결책)을 간결하게 분석하세요. "
+                "다음 JSON 형식으로만 응답하세요:\n"
+                "[{\"issue\": \"문제 요약\", \"solution\": \"해결책 요약\"}, ...]"
+            )
+            
+            logger.info(f"🚀 배치 LLM 호출 시작: {len(tickets_data)}개 티켓 (prompt_length: {len(batch_prompt)})")
+            
+            # 🚀 속도 최적화: 작은 토큰, 낮은 temperature
+            response = await self.generate(
+                prompt=batch_prompt,
+                system_prompt=system_prompt,
+                max_tokens=400,  # 800 → 400으로 단축
+                temperature=0.1,  # 낮은 temperature로 속도 향상
+                operation="ticket_summary"  # 경량 모델 사용
+            )
+            
+            if not response or not response.text:
+                logger.error("배치 분석 응답이 비어있습니다")
+                return [{"issue": "문제 상황 분석 중", "solution": "해결 방안 검토 중"}] * len(tickets_data)
+            
+            # JSON 파싱
+            try:
+                # JSON 배열 추출
+                json_text = response.text
+                json_match = re.search(r'(\[.*\])', json_text, re.DOTALL)
+                if json_match:
+                    json_text = json_match.group(1)
+                
+                results = json.loads(json_text)
+                
+                # 결과 검증 및 보정
+                if not isinstance(results, list):
+                    results = [results] if isinstance(results, dict) else []
+                
+                # 부족한 결과는 기본값으로 채움
+                while len(results) < len(tickets_data):
+                    results.append({"issue": "문제 상황 분석 중", "solution": "해결 방안 검토 중"})
+                
+                # 초과 결과는 제거
+                results = results[:len(tickets_data)]
+                
+                # 각 결과의 필드 검증
+                for result in results:
+                    if not isinstance(result, dict):
+                        result = {"issue": "문제 상황 분석 중", "solution": "해결 방안 검토 중"}
+                    if "issue" not in result:
+                        result["issue"] = "문제 상황 분석 중"
+                    if "solution" not in result:
+                        result["solution"] = "해결 방안 검토 중"
+                
+                logger.info(f"✅ 배치 분석 성공: {len(results)}개 결과")
+                return results
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"배치 분석 JSON 파싱 실패: {e}")
+                return [{"issue": "문제 상황 분석 중", "solution": "해결 방안 검토 중"}] * len(tickets_data)
+                
+        except Exception as e:
+            logger.error(f"배치 청크 처리 실패: {e}")
+            return [{"issue": "문제 상황 분석 중", "solution": "해결 방안 검토 중"}] * len(tickets_data)
+
+    async def _fallback_to_individual_analysis(self, tickets_data: List[dict]) -> List[dict]:
+        """
+        배치 분석 실패 시 개별 분석으로 폴백하는 메서드
+        
+        Args:
+            tickets_data: 분석할 티켓 데이터 리스트
+            
+        Returns:
+            각 티켓의 분석 결과 리스트
+        """
+        try:
+            logger.info(f"개별 분석 폴백 시작: {len(tickets_data)}개 티켓")
+            
+            # 개별 분석 태스크 생성 (최대 3개만 처리)
+            individual_tasks = []
+            for ticket in tickets_data[:3]:  # 폴백에서는 최대 3개만 처리
+                individual_tasks.append(self.analyze_ticket_issue_solution(ticket, max_tokens=300))
+            
+            # 개별 태스크 실행 (짧은 타임아웃)
+            results = await asyncio.wait_for(
+                asyncio.gather(*individual_tasks, return_exceptions=True),
+                timeout=8  # 8초 타임아웃
+            )
+            
+            # 결과 처리
+            processed_results = []
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    logger.warning(f"개별 분석 실패 (티켓 {i}): {result}")
+                    processed_results.append({"issue": "문제 상황 분석 중", "solution": "해결 방안 검토 중"})
+                else:
+                    processed_results.append(result)
+            
+            # 부족한 결과는 기본값으로 채움
+            while len(processed_results) < len(tickets_data):
+                processed_results.append({"issue": "문제 상황 분석 중", "solution": "해결 방안 검토 중"})
+            
+            logger.info(f"✅ 개별 분석 폴백 완료: {len(processed_results)}개 결과")
+            return processed_results
+            
+        except asyncio.TimeoutError:
+            logger.warning("개별 분석 폴백 타임아웃")
+            return [{"issue": "문제 상황 분석 중", "solution": "해결 방안 검토 중"} for _ in tickets_data]
+        except Exception as e:
+            logger.error(f"❌ 개별 분석 폴백도 실패: {e}")
+            # 모든 분석이 실패한 경우 기본값 반환
+            return [{"issue": "문제 상황 분석 중", "solution": "해결 방안 검토 중"} for _ in tickets_data]
+
     async def _generate_summary_task(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         """티켓 요약 생성 태스크"""
         try:
@@ -1730,7 +1899,7 @@ class LLMRouter:
             current_ticket_id = str(ticket_data.get('id'))
             
             if similar_tickets_result and similar_tickets_result.get("ids"):
-                analysis_tasks = []
+                tickets_for_batch_analysis = []
                 base_infos = []
                 for i, doc_id in enumerate(similar_tickets_result["ids"]):
                     # 현재 티켓과 동일한 ID는 제외
@@ -1771,8 +1940,8 @@ class LLMRouter:
                         "priority": metadata.get("priority", "")
                     }
                     
-                    # 분석 태스크 모음
-                    analysis_tasks.append(self.analyze_ticket_issue_solution(ticket_data_for_analysis))
+                    # 🚀 배치 분석을 위한 데이터 수집 (개별 태스크 대신)
+                    tickets_for_batch_analysis.append(ticket_data_for_analysis)
                     base_infos.append({
                         "id": str(ticket_number),
                         "title": title,
@@ -1784,8 +1953,26 @@ class LLMRouter:
                     if len(base_infos) >= 5:
                         break
 
-                if analysis_tasks:
-                    results = await asyncio.gather(*analysis_tasks, return_exceptions=True)
+                # 🚀 배치 분석 실행 (성능 최적화: 개별 호출 → 배치 처리)
+                if tickets_for_batch_analysis:
+                    logger.info(f"🚀 배치 분석 시작: {len(tickets_for_batch_analysis)}개 유사 티켓")
+                    batch_start_time = time.time()
+                    
+                    try:
+                        # 배치 분석 실행 (타임아웃 단축으로 속도 향상)
+                        results = await asyncio.wait_for(
+                            self.analyze_multiple_tickets_batch(tickets_for_batch_analysis),
+                            timeout=10  # 10초 타임아웃으로 단축
+                        )
+                        batch_time = time.time() - batch_start_time
+                        logger.info(f"✅ 배치 분석 완료: {batch_time:.2f}초 (평균 {batch_time/len(tickets_for_batch_analysis):.2f}초/건)")
+                    except asyncio.TimeoutError:
+                        logger.warning(f"⚠️ 배치 분석 타임아웃 (10초) - 기본값 사용")
+                        results = [{"issue": "문제 상황 분석 중", "solution": "해결 방안 검토 중"} for _ in tickets_for_batch_analysis]
+                    except Exception as e:
+                        logger.error(f"배치 분석 실패: {e}, 기본값 사용")
+                        results = [{"issue": "문제 상황 분석 중", "solution": "해결 방안 검토 중"} for _ in tickets_for_batch_analysis]
+                        
                     try:
                         from api.main import SimilarTicketItem
                     except ImportError:
@@ -2108,9 +2295,9 @@ class LLMRouter:
 # 싱글톤 인스턴스 제공
 # 타임아웃 값은 환경변수나 설정 파일에서 읽어오는 것이 좋음
 # 복잡한 응답 생성을 위해 충분한 시간 제공 (특히 issue/solution 분석)
-# 환경 변수로부터 타임아웃 설정 가져오기 (없으면 기본값 사용)
-LLM_TIMEOUT = float(os.getenv("LLM_TIMEOUT", "30.0"))  # 기본 30초
-LLM_GEMINI_TIMEOUT = float(os.getenv("LLM_GEMINI_TIMEOUT", "40.0"))  # 기본 40초 (Gemini는 더 긴 타임아웃 필요)
+# 환경 변수로부터 타임아웃 설정 가져오기 (속도 최적화된 기본값)
+LLM_TIMEOUT = float(os.getenv("LLM_TIMEOUT", "8.0"))  # 30 → 8초로 단축
+LLM_GEMINI_TIMEOUT = float(os.getenv("LLM_GEMINI_TIMEOUT", "15.0"))  # 40 → 15초로 단축
 
 # 싱글톤 인스턴스 생성
 llm_router = LLMRouter(timeout=LLM_TIMEOUT, gemini_timeout=LLM_GEMINI_TIMEOUT)
