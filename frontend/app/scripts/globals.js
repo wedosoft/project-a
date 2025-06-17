@@ -93,7 +93,7 @@ function setClient(newClient) {
  * @memberof GlobalState
  */
 function getClient() {
-  if (!client) {
+  if (!client && window.DEBUG_MODE) {
     console.warn('⚠️ FDK 클라이언트가 아직 초기화되지 않았습니다.');
   }
   return client;
@@ -1482,15 +1482,8 @@ const DebugTools = {
 if (DebugTools.isDebugMode) {
   DebugTools.registerConsoleCommands();
 
-  // 주기적 상태 모니터링 (5분마다) - 개발 모드에서만 활성화
-  if (window.location.hostname === 'localhost' || window.location.hostname.includes('dev')) {
-    setInterval(() => {
-      const report = DebugTools.checkAppHealth();
-      if (report.overall === 'critical') {
-        console.warn('🚨 앱 상태가 심각합니다! 에러 로그 및 상태를 확인하세요.');
-      }
-    }, 300000);
-  }
+  // 주기적 상태 모니터링은 너무 빈번한 로그를 방지하기 위해 비활성화
+  // 필요시 콘솔에서 debug.health() 명령으로 수동 실행 가능
 }
 
 // === 성능 최적화 및 캐싱 시스템 ===

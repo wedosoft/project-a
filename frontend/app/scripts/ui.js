@@ -132,7 +132,10 @@ window.UI = {
    */
   showToast(message, type = 'info', duration = 3000) {
     try {
-      console.log(`[UI] 토스트 표시: ${type} - ${message}`);
+      // 조용한 로깅으로 변경
+      if (window.DEBUG_MODE) {
+        console.log(`[UI] 토스트 표시: ${message} - ${type}`);
+      }
 
       // 기존 토스트 제거
       const existingToast = this.safeGetElement('.toast-message');

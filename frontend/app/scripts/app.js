@@ -256,27 +256,27 @@ if (typeof window.isFDKModal !== 'undefined' && window.isFDKModal) {
  * 이는 Freshdesk FDK의 표준 패턴입니다.
  */
 
-// 모든 모듈이 로드된 후 시스템 검증
-setTimeout(() => {
-  console.log('🔧 모듈 의존성 시스템 검증 시작');
+// 모든 모듈이 로드된 후 시스템 검증 (초기화 시 한 번만)
+if (!window.MODULE_DEPENDENCY_CHECKED) {
+  setTimeout(() => {
+    if (typeof ModuleDependencyManager !== 'undefined') {
+      // app 모듈 등록
+      ModuleDependencyManager.registerModule('app', 1); // initializeApp 함수 1개
 
-  if (typeof ModuleDependencyManager !== 'undefined') {
-    // app 모듈 등록
-    ModuleDependencyManager.registerModule('app', 1); // initializeApp 함수 1개
+      // 전체 시스템 상태 리포트 생성
+      ModuleDependencyManager.generateStatusReport();
 
-    // 전체 시스템 상태 리포트 생성
-    ModuleDependencyManager.generateStatusReport();
-
-    // 시스템 준비 상태 확인
-    if (ModuleDependencyManager.isSystemReady()) {
-      console.log('✅ 전체 모듈 시스템이 정상적으로 준비되었습니다.');
-    } else {
-      console.warn('⚠️ 일부 모듈에서 의존성 문제가 발견되었습니다.');
+      // 시스템 준비 상태 확인
+      if (ModuleDependencyManager.isSystemReady()) {
+        console.log('✅ 전체 모듈 시스템이 정상적으로 준비되었습니다.');
+      } else {
+        console.warn('⚠️ 일부 모듈에서 의존성 문제가 발견되었습니다.');
+      }
+      
+      window.MODULE_DEPENDENCY_CHECKED = true;
     }
-  } else {
-    console.warn('⚠️ ModuleDependencyManager를 찾을 수 없습니다.');
-  }
-}, 500); // 모든 모듈 로드 후 실행
+  }, 500); // 모든 모듈 로드 후 실행
+}
 
 // 레거시 init() 함수는 제거됨 (메인 초기화는 app.initialized()로 통합)
 

@@ -682,9 +682,9 @@ window.Data = {
             loadTime: new Date().toLocaleTimeString()
           });
           
-          // 사용자에게 간단한 성공 피드백 제공 (토스트)
-          if (window.UI && window.UI.showToast) {
-            window.UI.showToast('success', '초기 데이터를 성공적으로 불러왔습니다.');
+          // 사용자에게 간단한 성공 피드백 제공 (조용한 로깅으로 변경)
+          if (window.DEBUG_MODE) {
+            console.log('✅ 초기 데이터를 성공적으로 불러왔습니다.');
           }
           
           return data;
