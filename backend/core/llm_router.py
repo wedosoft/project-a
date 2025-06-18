@@ -26,6 +26,9 @@ from cachetools import TTLCache
 from langchain_core.runnables import RunnableLambda, RunnableParallel
 from prometheus_client import Counter, Gauge, Histogram
 from pydantic import BaseModel, Field
+
+# 통합 벡터 검색 최적화 모듈 import
+from .search_optimizer import VectorSearchOptimizer
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -773,6 +776,10 @@ class LLMRouter:
         
         # 가중치 기반 제공자 선택기 초기화
         self.provider_selector = LLMProviderSelector()
+        
+        # 통합 벡터 검색 최적화 모듈 초기화 (Redis URL 환경변수에서 가져오기)
+        redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+        self.search_optimizer = VectorSearchOptimizer(redis_url=redis_url)
 
     async def generate(self, prompt: str, system_prompt: str = None, max_tokens: int = 1024, temperature: float = 0.2) -> LLMResponse:
         """최적의 LLM 제공자를 선택하고, 실패 시 순차적으로 Fallback하여 텍스트 생성"""
@@ -951,33 +958,33 @@ class LLMRouter:
                             late_conversations = sorted_conversations[late_start_idx:]
                             
                             # 처음 대화 추가 (문제 상황 파악)
-                            prompt_context += "초기 대화 내용:\n"
+                            prompt_context += "초기 대화:\n"
                             for conv in early_conversations:
                                 sender = "사용자" if conv.get("user_id") else "상담원"
                                 body = self._extract_conversation_body(conv)
-                                # 초기 대화는 더 많은 내용 포함 (300자)
-                                prompt_context += f"- {sender}: {body[:300]}...\n"
+                                # 초기 대화는 150자로 제한하여 성능 최적화
+                                prompt_context += f"- {sender}: {body[:150]}...\n"
                             
                             # 중간 생략 표시
                             if late_start_idx > early_conv_count:
                                 skipped = late_start_idx - early_conv_count
-                                prompt_context += f"\n... (중간 {skipped}개 대화 생략) ...\n\n"
+                                prompt_context += f"... ({skipped}개 대화 생략) ...\n"
                             
                             # 최근 대화 추가 (더 자세한 내용 포함)
-                            prompt_context += "최근 대화 내용:\n"
+                            prompt_context += "최근 대화:\n"
                             for conv in late_conversations:
                                 sender = "사용자" if conv.get("user_id") else "상담원"
                                 body = self._extract_conversation_body(conv)
-                                # 최근 대화는 더 많은 내용 포함 (500자)
-                                prompt_context += f"- {sender}: {body[:500]}...\n"
+                                # 최근 대화는 250자로 제한
+                                prompt_context += f"- {sender}: {body[:250]}...\n"
                         else:
                             # 대화가 적은 경우 전체 내용 포함 (10개 이하)
                             prompt_context += "대화 내용:\n"
                             for conv in sorted_conversations:
                                 sender = "사용자" if conv.get("user_id") else "상담원"
                                 body = self._extract_conversation_body(conv)
-                                # 적은 대화일 경우 대화당 최대 1000자까지 포함
-                                prompt_context += f"- {sender}: {body[:1000]}...\n"
+                                # 적은 대화일 경우 대화당 최대 300자로 제한
+                                prompt_context += f"- {sender}: {body[:300]}...\n"
                     else:
                         # 유효한 대화 항목이 없는 경우
                         prompt_context += f"- 대화 내용: {str(conversations)[:200]}\n"
@@ -992,37 +999,17 @@ class LLMRouter:
                 prompt_context += f"- 대화 내용: {str(conversations)[:200]}\n"
                 
         system_prompt = (
-            "당신은 AI 지원 에이전트입니다. 제공된 티켓 정보를 바탕으로 마크다운 형식으로 체계적인 요약을 작성하세요.\n"
-            "반드시 아래 마크다운 형식으로만 응답해주세요:\n\n"
+            "티켓 정보를 분석하여 간결한 마크다운 요약을 작성하세요. 최대 500자 이내로 작성해주세요:\n\n"
             "## 📋 상황 요약\n"
-            "[티켓의 핵심 상황을 간결하게 요약. 주요 문제점, 고객 요청사항, 현재 진행 상태를 포함]\n\n"
+            "[핵심 문제와 현재 상태를 1-2줄로 요약]\n\n"
             "## 🔍 주요 내용\n"
-            "### 📌 문제 상황\n"
-            "- [구체적인 문제 상황 설명]\n"
-            "- [문제의 원인이나 배경]\n\n"
-            "### 🎯 고객 요청사항\n"
-            "- [고객이 요청한 구체적인 사항들]\n"
-            "- [기대하는 결과나 해결책]\n\n"
-            "### 🔧 조치 사항\n"
-            "- [지금까지 취한 조치나 시도한 해결책]\n"
-            "- [현재 진행 중인 작업]\n\n"
-            "## 📊 분석 결과\n"
-            "- **감정 상태**: [긍정적/중립적/부정적]\n"
-            "- **우선순위**: [높음/보통/낮음]\n"
-            "- **긴급도**: [높음/보통/낮음]\n\n"
+            "- 문제: [구체적인 문제]\n"
+            "- 요청: [고객이 원하는 것]\n"
+            "- 조치: [필요한 조치]\n\n"
             "## 💡 핵심 포인트\n"
-            "1. [가장 중요한 핵심 포인트]\n"
-            "2. [두 번째 중요한 포인트]\n"
-            "3. [세 번째 중요한 포인트]\n"
-            "4. [추가 중요 포인트 (필요시)]\n"
-            "5. [추가 중요 포인트 (필요시)]\n\n"
-            "주의사항:\n"
-            "- 초기 대화와 최근 대화의 맥락을 모두 고려하여 전체 상황을 포괄적으로 요약\n"
-            "- 대화 흐름에 따른 문제 진행 상황과 해결 과정을 상세히 포함\n"
-            "- 문제의 원인, 조치 사항, 결과를 명확하게 언급\n"
-            "- 티켓이 해결되었다면 최종 해결책과 결과를 반드시 포함\n"
-            "- 기술적 문제점, 해결 방법, 고객 요구사항을 균형있게 포함\n"
-            "- 한국어로 답변하고, 정확한 마크다운 형식을 준수하세요\n"
+            "1. [가장 중요한 포인트]\n"
+            "2. [두 번째 중요한 포인트]\n\n"
+            "참고: 간결하고 명확하게 작성하되, 핵심 정보는 누락하지 마세요."
         )
         
         prompt = f"다음 티켓 정보를 분석해주세요:\n\n{prompt_context}"
@@ -1035,16 +1022,16 @@ class LLMRouter:
         logger.info(f"티켓 요약 생성 요청 (ticket_id: {ticket_data.get('id')}, 대화 수: {conv_count}, prompt_length: {len(prompt)} chars)")
         
         # 프롬프트가 너무 길어질 경우 경고 로그
-        if len(prompt) > 15000:
-            logger.warning(f"티켓 {ticket_data.get('id')}의 프롬프트가 매우 깁니다 ({len(prompt)} chars). 일부 정보가 생략될 수 있습니다.")
+        if len(prompt) > 8000:  # 임계값을 8000으로 낮춤
+            logger.warning(f"티켓 {ticket_data.get('id')}의 프롬프트가 깁니다 ({len(prompt)} chars). 응답 속도가 느려질 수 있습니다.")
         
         try:
-            # self.generate를 사용하여 텍스트 생성
+            # self.generate를 사용하여 텍스트 생성 - 최적화된 설정으로 속도 개선
             response = await self.generate(
                 prompt=prompt,
                 system_prompt=system_prompt,
-                max_tokens=max_tokens,
-                temperature=0.3
+                max_tokens=800,   # 기존 1000에서 800으로 줄여서 속도 개선
+                temperature=0.1   # 기존 0.2에서 0.1로 낮춰서 더 빠르고 일관된 응답
             )
             
             if not response or not hasattr(response, 'text') or not response.text:
@@ -1615,17 +1602,250 @@ class LLMRouter:
             
         return default
 
-    async def _generate_summary_task(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        """티켓 요약 생성 태스크"""
+    async def _unified_search_task(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        통합 벡터 검색 태스크 - KB 문서와 유사 티켓을 한 번에 검색
+        
+        최적화 포인트:
+        1. 벡터 검색 횟수를 2회에서 1회로 줄임 (임베딩 생성 1회로 단축)
+        2. 직접 벡터 검색으로 SearchOptimizer 의존성 제거하여 단순화
+        3. LLM 분석 생략으로 응답 속도 대폭 향상 (9초+ -> 1초 목표)
+        """
         try:
-            ticket_data = inputs["ticket_data"]
-            logger.info(f"티켓 요약 생성 시작 (ticket_id: {ticket_data.get('id')})")
+            # 입력 데이터 추출 및 안전성 검증
+            ticket_data = inputs.get("ticket_data", {})
+            qdrant_client = inputs.get("qdrant_client")
+            company_id = inputs.get("company_id", "")
+            
+            if not ticket_data or not qdrant_client:
+                logger.warning("필수 입력 데이터가 누락되었습니다.")
+                return self._create_empty_search_result(0)
+            
+            logger.info(f"최적화된 통합 벡터 검색 시작 (ticket_id: {ticket_data.get('id')})")
             start_time = time.time()
             
-            summary_result = await self.generate_ticket_summary(ticket_data)
+            # 검색할 컨텐츠 검증
+            ticket_title = ticket_data.get('subject', '')
+            ticket_body = ticket_data.get('description', '')
+            
+            if not ticket_title and not ticket_body:
+                logger.warning(f"티켓 {ticket_data.get('id')}의 검색 텍스트가 비어있습니다.")
+                return self._create_empty_search_result(time.time() - start_time)
+            
+            # 검색 쿼리 생성 (한 번만 생성) - 성능 최적화
+            search_query = await self.generate_search_query(ticket_data)
+            if not search_query.strip():
+                logger.warning(f"티켓 {ticket_data.get('id')}의 검색 쿼리가 비어있습니다.")
+                return self._create_empty_search_result(time.time() - start_time)
+            
+            # 임베딩 생성 (한 번만) - 주요 최적화 포인트
+            query_embedding = await self.generate_embedding(search_query)
+            embedding_time = time.time() - start_time
+            logger.info(f"임베딩 생성 완료 ({embedding_time:.2f}초)")
+            
+            # 병렬 벡터 검색 실행 (유사 티켓 + KB 문서)
+            search_start = time.time()
+            
+            # 두 개의 독립적인 검색을 동시 실행
+            similar_search_task = asyncio.create_task(
+                self._execute_similar_tickets_search(query_embedding, company_id, ticket_data.get('id'))
+            )
+            kb_search_task = asyncio.create_task(
+                self._execute_kb_documents_search(query_embedding, company_id)
+            )
+            
+            # 병렬 실행 완료 대기
+            similar_tickets_raw, kb_documents_raw = await asyncio.gather(
+                similar_search_task, kb_search_task, return_exceptions=True
+            )
+            
+            search_time = time.time() - search_start
+            logger.info(f"병렬 벡터 검색 완료 ({search_time:.2f}초)")
+            
+            # 결과 처리 (예외 발생 시 빈 배열로 처리)
+            similar_tickets = similar_tickets_raw if not isinstance(similar_tickets_raw, Exception) else []
+            kb_documents = kb_documents_raw if not isinstance(kb_documents_raw, Exception) else []
+            
+            # 예외 로깅
+            if isinstance(similar_tickets_raw, Exception):
+                logger.warning(f"유사 티켓 검색 실패: {similar_tickets_raw}")
+            if isinstance(kb_documents_raw, Exception):
+                logger.warning(f"KB 문서 검색 실패: {kb_documents_raw}")
             
             execution_time = time.time() - start_time
-            logger.info(f"티켓 요약 생성 완료 (ticket_id: {ticket_data.get('id')}, 실행시간: {execution_time:.2f}초)")
+            logger.info(f"통합 벡터 검색 완료 (ticket_id: {ticket_data.get('id')}, "
+                       f"유사 티켓: {len(similar_tickets)}개, KB 문서: {len(kb_documents)}개, "
+                       f"총 실행시간: {execution_time:.2f}초, 임베딩: {embedding_time:.2f}초, 검색: {search_time:.2f}초)")
+            
+            return {
+                "task_type": "unified_search",
+                "similar_tickets": similar_tickets,
+                "kb_documents": kb_documents,
+                "execution_time": execution_time,
+                "success": True,
+                "cache_used": False,  # 직접 검색이므로 캐시 미사용
+                "performance_metrics": {
+                    "embedding_time": embedding_time,
+                    "search_time": search_time,
+                    "total_time": execution_time
+                }
+            }
+            
+        except Exception as e:
+            execution_time = time.time() - start_time
+            error_msg = f"통합 벡터 검색 중 오류 발생: {str(e)}"
+            logger.error(f"{error_msg} (실행시간: {execution_time:.2f}초)", exc_info=True)
+            
+            return {
+                "task_type": "unified_search",
+                "similar_tickets": [],
+                "kb_documents": [],
+                "execution_time": execution_time,
+                "success": False,
+                "error": error_msg,
+                "cache_used": False
+            }
+    
+    def _create_empty_search_result(self, execution_time: float) -> Dict[str, Any]:
+        """빈 검색 결과를 생성하는 헬퍼 메서드"""
+        return {
+            "task_type": "unified_search",
+            "similar_tickets": [],
+            "kb_documents": [],
+            "execution_time": execution_time,
+            "success": True,
+            "cache_used": False
+        }
+    
+    async def _execute_similar_tickets_search(self, query_embedding: List[float], company_id: str, current_ticket_id: str) -> List[Dict[str, Any]]:
+        """유사 티켓 검색 실행 (성능 최적화 버전)"""
+        try:
+            # 벡터 DB에서 유사 티켓 검색
+            similar_tickets_result = retrieve_top_k_docs(
+                query_embedding=query_embedding,
+                top_k=getattr(self, '_temp_top_k_tickets', 5),
+                doc_type="ticket",
+                company_id=company_id
+            )
+            
+            similar_tickets = []
+            if similar_tickets_result and similar_tickets_result.get("ids"):
+                current_ticket_str = str(current_ticket_id)
+                
+                for i, doc_id in enumerate(similar_tickets_result["ids"]):
+                    # 현재 티켓 제외
+                    if str(doc_id) == current_ticket_str:
+                        continue
+                        
+                    metadata = similar_tickets_result["metadatas"][i] if i < len(similar_tickets_result.get("metadatas", [])) else {}
+                    
+                    # 유사도 계산
+                    distance = similar_tickets_result.get("distances", [0])[i] if i < len(similar_tickets_result.get("distances", [])) else 0
+                    similarity_score = max(0, 1 - distance)
+                    
+                    # 최소 유사도 필터링
+                    if similarity_score < 0.3:
+                        continue
+                    
+                    # 기본 정보만 포함 (LLM 분석 제거로 성능 최적화)
+                    similar_tickets.append({
+                        "ticket_id": str(metadata.get("original_id", doc_id)).replace("ticket-", ""),
+                        "subject": metadata.get("title", metadata.get("subject", f"티켓 {doc_id}")),
+                        "status": metadata.get("status", "상태 정보 없음"),
+                        "priority": metadata.get("priority", "우선순위 정보 없음"),
+                        "similarity_score": round(similarity_score, 3),
+                        "issue": "유사 티켓 - 내용 확인 필요",
+                        "solution": "상담원이 티켓 세부 내용을 확인하여 적절한 해결 방안을 제공해 드립니다"
+                    })
+                    
+                    # 최대 개수 제한
+                    if len(similar_tickets) >= getattr(self, '_temp_top_k_tickets', 5):
+                        break
+            
+            return similar_tickets
+            
+        except Exception as e:
+            logger.error(f"유사 티켓 검색 실행 중 오류: {str(e)}")
+            return []
+    
+    async def _execute_kb_documents_search(self, query_embedding: List[float], company_id: str) -> List[Dict[str, Any]]:
+        """KB 문서 검색 실행 (성능 최적화 버전)"""
+        try:
+            # 벡터 DB에서 KB 문서 검색
+            kb_docs_result = retrieve_top_k_docs(
+                query_embedding=query_embedding,
+                top_k=getattr(self, '_temp_top_k_kb', 5),
+                doc_type="kb",
+                company_id=company_id
+            )
+            
+            kb_documents = []
+            if kb_docs_result and kb_docs_result.get("ids"):
+                for i, doc_id in enumerate(kb_docs_result["ids"]):
+                    metadata = kb_docs_result["metadatas"][i] if i < len(kb_docs_result.get("metadatas", [])) else {}
+                    
+                    # 유사도 계산
+                    distance = kb_docs_result.get("distances", [0])[i] if i < len(kb_docs_result.get("distances", [])) else 0
+                    similarity_score = max(0, 1 - distance)
+                    
+                    # 문서 내용 추출 및 길이 제한
+                    content = ""
+                    if i < len(kb_docs_result.get("documents", [])):
+                        content = kb_docs_result["documents"][i]
+                    if not content:
+                        content = metadata.get("description", metadata.get("description_text", "내용 없음"))
+                    
+                    # 내용 길이 제한 (성능 최적화)
+                    if len(content) > 300:
+                        content = content[:300] + "..."
+                    
+                    # KB 문서 URL 생성
+                    freshdesk_domain = os.getenv("FRESHDESK_DOMAIN", "example")
+                    doc_url = metadata.get("url", f"https://{freshdesk_domain}.freshdesk.com/solution/articles/{doc_id}")
+                    
+                    kb_documents.append({
+                        "doc_id": str(doc_id),
+                        "title": metadata.get("title", metadata.get("subject", f"KB 문서 {doc_id}")),
+                        "content": content,
+                        "similarity_score": round(similarity_score, 3),
+                        "status": metadata.get("status", ""),
+                        "url": doc_url
+                    })
+                    
+                    # 최대 개수 제한
+                    if len(kb_documents) >= getattr(self, '_temp_top_k_kb', 5):
+                        break
+            
+            return kb_documents
+            
+        except Exception as e:
+            logger.error(f"KB 문서 검색 실행 중 오류: {str(e)}")
+            return []
+
+    async def _generate_summary_task(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """티켓 요약 생성 태스크 (성능 최적화 버전)"""
+        try:
+            ticket_data = inputs.get("ticket_data", {})
+            if not ticket_data:
+                logger.warning("티켓 데이터가 없어 요약 생성을 건너뜁니다.")
+                return {
+                    "task_type": "summary",
+                    "error": "티켓 데이터 없음",
+                    "execution_time": 0,
+                    "success": False
+                }
+            
+            logger.info(f"최적화된 티켓 요약 생성 시작 (ticket_id: {ticket_data.get('id')})")
+            start_time = time.time()
+            
+            # 요약 생성 시 성능 최적화 설정
+            summary_result = await self.generate_ticket_summary(
+                ticket_data, 
+                max_tokens=800  # 기존 1000에서 800으로 줄여서 속도 향상
+            )
+            
+            execution_time = time.time() - start_time
+            logger.info(f"최적화된 티켓 요약 생성 완료 (ticket_id: {ticket_data.get('id')}, 실행시간: {execution_time:.2f}초)")
             
             return {
                 "task_type": "summary",
@@ -1634,12 +1854,13 @@ class LLMRouter:
                 "success": True
             }
         except Exception as e:
+            execution_time = time.time() - start_time if 'start_time' in locals() else 0
             error_msg = f"티켓 요약 생성 실패: {str(e)}"
             logger.error(error_msg)
             return {
                 "task_type": "summary", 
                 "error": error_msg,
-                "execution_time": 0,
+                "execution_time": execution_time,
                 "success": False
             }
     
@@ -1684,7 +1905,7 @@ class LLMRouter:
             # 벡터 DB에서 유사 티켓 검색 (현재 티켓 제외)
             similar_tickets_result = retrieve_top_k_docs(
                 query_embedding=query_embedding,
-                top_k=10,  # 더 많이 가져와서 필터링
+                top_k=getattr(self, '_temp_top_k_tickets', 5),  # 사용자 설정값 또는 기본값 5
                 doc_type="ticket",
                 company_id=company_id
             )
@@ -1694,8 +1915,10 @@ class LLMRouter:
             current_ticket_id = str(ticket_data.get('id'))
             
             if similar_tickets_result and similar_tickets_result.get("ids"):
-                analysis_tasks = []
-                base_infos = []
+                # 상위 유사 티켓에 대해서만 선택적 LLM 분석 (성능 최적화)
+                high_quality_tickets = []  # 상위 5개만 LLM 분석
+                basic_tickets = []  # 나머지는 기본 정보만
+                
                 for i, doc_id in enumerate(similar_tickets_result["ids"]):
                     # 현재 티켓과 동일한 ID는 제외
                     if str(doc_id) == current_ticket_id:
@@ -1714,6 +1937,10 @@ class LLMRouter:
                     distance = similar_tickets_result.get("distances", [0])[i] if i < len(similar_tickets_result.get("distances", [])) else 0
                     similarity_score = max(0, 1 - distance)  # 거리를 유사도로 변환
                     
+                    # 최소 유사도 필터링
+                    if similarity_score < 0.3:
+                        continue
+                    
                     # 티켓 ID 추출 (original_id 또는 doc_id 사용)
                     original_ticket_id = metadata.get("original_id", str(doc_id))
                     
@@ -1726,56 +1953,60 @@ class LLMRouter:
                     freshdesk_domain = os.getenv("FRESHDESK_DOMAIN", "example.freshdesk.com")
                     ticket_url = f"https://{freshdesk_domain}/a/tickets/{ticket_number}"
                     
-                    # Issue/Solution 분석을 위한 티켓 데이터 구성
-                    ticket_data_for_analysis = {
-                        "id": ticket_number,
-                        "subject": title,
-                        "description_text": similar_tickets_result["documents"][i] if i < len(similar_tickets_result.get("documents", [])) else "",
-                        "status": metadata.get("status", ""),
-                        "priority": metadata.get("priority", "")
-                    }
+                    # 요약 텍스트 추출
+                    summary_text = similar_tickets_result["documents"][i] if i < len(similar_tickets_result.get("documents", [])) else ""
+                    if not summary_text:
+                        summary_text = metadata.get("description_text", "요약 정보 없음")
                     
-                    # 분석 태스크 모음
-                    analysis_tasks.append(self.analyze_ticket_issue_solution(ticket_data_for_analysis))
-                    base_infos.append({
+                    # 길이 제한
+                    summary = summary_text[:200] + "..." if len(summary_text) > 200 else summary_text
+                    
+                    # 기본 티켓 정보 구성
+                    ticket_info = {
                         "id": str(ticket_number),
                         "title": title,
                         "ticket_url": ticket_url,
                         "similarity_score": round(similarity_score, 3),
-                        "summary_text": similar_tickets_result["documents"][i] if i < len(similar_tickets_result.get("documents", [])) else metadata.get("description_text", "")
-                    })
-
-                    if len(base_infos) >= 5:
+                        "summary": summary,
+                        "metadata": metadata,
+                        "full_content": summary_text
+                    }
+                    
+                    # 상위 5개는 고품질 LLM 분석, 나머지는 기본 정보만
+                    if len(high_quality_tickets) < 5 and similarity_score > 0.6:
+                        high_quality_tickets.append(ticket_info)
+                    else:
+                        basic_tickets.append(ticket_info)
+                    
+                    # 최대 10개로 제한
+                    if len(high_quality_tickets) + len(basic_tickets) >= 10:
                         break
-
-                if analysis_tasks:
-                    results = await asyncio.gather(*analysis_tasks, return_exceptions=True)
+                
+                # LLM 분석 비활성화로 성능 최적화
+                llm_analyzed_tickets = []
+                logger.info(f"성능 최적화를 위해 LLM 분석을 비활성화했습니다")
+                
+                # 모든 티켓들을 기본 정보만으로 처리
+                all_tickets = high_quality_tickets + basic_tickets
+                basic_ticket_items = []
+                for ticket in all_tickets:
                     try:
                         from api.main import SimilarTicketItem
                     except ImportError:
                         from backend.api.main import SimilarTicketItem
-
-                    for info, res in zip(base_infos, results):
-                        if isinstance(res, Exception):
-                            logger.warning(f"티켓 {info['id']} Issue/Solution 분석 실패: {res}")
-                            issue = "문제 상황 분석 실패"
-                            solution = "해결책 분석 실패"
-                        else:
-                            issue = res.get("issue", "문제 상황을 분석할 수 없습니다.")
-                            solution = res.get("solution", "해결책을 찾을 수 없습니다.")
-
-                        summary_text = info["summary_text"] or ""
-                        summary = summary_text[:200] + "..." if len(summary_text) > 200 else summary_text
-
-                        similar_tickets.append(SimilarTicketItem(
-                            id=info["id"],
-                            title=info["title"],
-                            issue=issue,
-                            solution=solution,
-                            ticket_url=info["ticket_url"],
-                            similarity_score=info["similarity_score"],
-                            ticket_summary=summary
-                        ))
+                    
+                    basic_ticket_items.append(SimilarTicketItem(
+                        id=ticket["id"],
+                        title=ticket["title"],
+                        issue=ticket["metadata"].get("status", "상태 정보 없음"),
+                        solution="기본 정보 - " + ticket["metadata"].get("priority", "우선순위 정보 없음"),
+                        ticket_url=ticket["ticket_url"],
+                        similarity_score=ticket["similarity_score"],
+                        ticket_summary=ticket["summary"]
+                    ))
+                
+                # 최종 결과 결합 (기본 정보만 사용)
+                similar_tickets = basic_ticket_items
             
             execution_time = time.time() - start_time
             logger.info(f"유사 티켓 검색 완료 (ticket_id: {ticket_data.get('id')}, 검색결과: {len(similar_tickets)}건, 실행시간: {execution_time:.2f}초)")
@@ -1837,7 +2068,7 @@ class LLMRouter:
             # 벡터 DB에서 지식베이스 문서 검색
             related_docs_result = retrieve_top_k_docs(
                 query_embedding=query_embedding,
-                top_k=10,  # 더 많이 가져와서 필터링
+                top_k=getattr(self, '_temp_top_k_kb', 5),  # 사용자 설정값 또는 기본값 5
                 doc_type="kb",  # "kb" 타입으로 검색
                 company_id=company_id
             )
@@ -1952,14 +2183,20 @@ class LLMRouter:
         include_summary: bool = True,
         include_similar_tickets: bool = True,
         include_kb_docs: bool = True,
+        top_k_tickets: int = 5,  # 사용자 설정 유사 티켓 수 (1-5)
+        top_k_kb: int = 5,       # 사용자 설정 KB 문서 수 (1-5)
     ) -> RunnableParallel:
         """
         초기화 프로세스를 위한 Langchain RunnableParallel 체인을 생성합니다.
         
-        기존의 asyncio.gather를 대체하여 다음 3가지 작업을 병렬 처리합니다:
-        1. 티켓 요약 생성
-        2. 유사 티켓 검색
-        3. 지식베이스 문서 검색
+        최적화된 버전: 벡터 검색을 통합하여 성능을 향상시킵니다.
+        1. 티켓 요약 생성 (max_tokens 축소로 속도 향상)
+        2. 통합 벡터 검색 (유사 티켓 + KB 문서를 한 번에 처리)
+        
+        성능 최적화 포인트:
+        - 임베딩 생성 1회로 단축 (기존 2회에서)
+        - LLM 분석 제거로 유사 티켓 처리 속도 대폭 향상
+        - 직접 벡터 검색으로 외부 의존성 제거
         
         Args:
             ticket_data: Freshdesk 티켓 데이터
@@ -1970,19 +2207,26 @@ class LLMRouter:
             RunnableParallel 체인 객체
         """
         
-        # RunnableParallel 체인 생성
-        # 각 태스크를 RunnableLambda로 래핑하여 병렬 실행
+        # 최적화된 RunnableParallel 체인 생성
+        # 벡터 검색을 통합하여 2개의 병렬 태스크로 구성
+        
+        # top_k 값들을 임시 인스턴스 변수로 설정 (RunnableLambda에서 사용)
+        self._temp_top_k_tickets = top_k_tickets
+        self._temp_top_k_kb = top_k_kb
+        
         tasks = {}
+        
         if include_summary:
             tasks["summary"] = RunnableLambda(self._generate_summary_task)
-        if include_similar_tickets:
-            tasks["similar_tickets"] = RunnableLambda(self._fetch_similar_tickets_task)
-        if include_kb_docs:
-            tasks["kb_documents"] = RunnableLambda(self._fetch_kb_documents_task)
+        
+        # 유사 티켓이나 KB 문서 중 하나라도 필요하면 통합 검색 실행
+        if include_similar_tickets or include_kb_docs:
+            tasks["unified_search"] = RunnableLambda(self._unified_search_task)
 
         parallel_chain = RunnableParallel(tasks)
         
-        logger.info(f"Langchain RunnableParallel 체인 생성 완료 (ticket_id: {ticket_data.get('id')})")
+        logger.info(f"최적화된 Langchain RunnableParallel 체인 생성 완료 (ticket_id: {ticket_data.get('id')}, "
+                   f"태스크 수: {len(tasks)}개)")
         return parallel_chain
 
     async def execute_init_parallel_chain(
@@ -1993,6 +2237,8 @@ class LLMRouter:
         include_summary: bool = True,
         include_similar_tickets: bool = True,
         include_kb_docs: bool = True,
+        top_k_tickets: int = 5,  # 사용자 설정 유사 티켓 수 (1-5)
+        top_k_kb: int = 5,       # 사용자 설정 KB 문서 수 (1-5)
     ) -> Dict[str, Any]:
         """
         초기화 병렬 체인을 실행하고 결과를 반환합니다.
@@ -2017,6 +2263,8 @@ class LLMRouter:
                 include_summary=include_summary,
                 include_similar_tickets=include_similar_tickets,
                 include_kb_docs=include_kb_docs,
+                top_k_tickets=top_k_tickets,  # 사용자 설정 유사 티켓 수
+                top_k_kb=top_k_kb,            # 사용자 설정 KB 문서 수
             )
             
             # 체인 실행을 위한 입력 데이터 준비

@@ -23,7 +23,7 @@ from core.embedder import embed_documents
 from core.llm_router import LLMResponse, generate_text
 from core.retriever import retrieve_top_k_docs
 from core.vectordb import vector_db
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from freshdesk import fetcher
 from pydantic import BaseModel, Field, field_validator
 
@@ -630,6 +630,8 @@ async def get_initial_context(
     include_summary: bool = True,
     include_kb_docs: bool = True,
     include_similar_tickets: bool = True,
+    top_k_tickets: int = Query(default=5, ge=1, le=5, description="유사 티켓 검색 결과 수 (1-5)"),
+    top_k_kb: int = Query(default=5, ge=1, le=5, description="지식베이스 문서 검색 결과 수 (1-5)"),
     x_freshdesk_domain: Optional[str] = Header(None, alias="X-Freshdesk-Domain"),
     x_freshdesk_api_key: Optional[str] = Header(None, alias="X-Freshdesk-API-Key")
 ):
@@ -643,6 +645,8 @@ async def get_initial_context(
         include_summary: 티켓 요약 포함 여부
         include_kb_docs: 지식베이스 문서 포함 여부
         include_similar_tickets: 유사 티켓 포함 여부
+        top_k_tickets: 유사 티켓 검색 결과 수 (1-5, 기본값: 5)
+        top_k_kb: 지식베이스 문서 검색 결과 수 (1-5, 기본값: 5)
         x_freshdesk_domain: Freshdesk 도메인 (헤더에서 전달)
         x_freshdesk_api_key: Freshdesk API 키 (헤더에서 전달)
     """
@@ -768,11 +772,13 @@ async def get_initial_context(
             # Langchain RunnableParallel 체인 실행
             chain_results = await llm_router.execute_init_parallel_chain(
                 ticket_data=ticket_info,
-                qdrant_client=getattr(vector_db, 'client', None),  # 타입 안전성을 위해 getattr 사용
+                qdrant_client=vector_db.client,  # QdrantAdapter의 client 속성 사용
                 company_id=search_company_id,
                 include_summary=include_summary_chain,
                 include_similar_tickets=include_similar_tickets,
                 include_kb_docs=include_kb_docs,
+                top_k_tickets=top_k_tickets,  # 사용자 설정 유사 티켓 수
+                top_k_kb=top_k_kb,  # 사용자 설정 KB 문서 수
             )
             
             parallel_execution_time = time.time() - parallel_start_time
@@ -782,23 +788,44 @@ async def get_initial_context(
             results = []
             task_names_ordered = []
             
-            # 요약 결과 처리
+            # chain_results 안전성 검증 강화
+            if chain_results is None:
+                logger.error("chain_results가 None입니다. 기본값으로 응답 생성합니다.")
+                chain_results = {}
+            elif not isinstance(chain_results, dict):
+                logger.error(f"chain_results가 예상 형식이 아닙니다 (타입: {type(chain_results)}). 기본값으로 응답 생성합니다.")
+                chain_results = {}
+            
+            # 요약 결과 처리 (안전성 향상)
             if cached_summary is not None:
                 ticket_summary = cached_summary
             elif include_summary and 'summary' in chain_results:
-                summary_result = chain_results['summary']
-                if summary_result.get('success', False):
+                summary_result = chain_results.get('summary', {})
+                if summary_result is not None and summary_result.get('success', False):
                     summary_data = summary_result.get('result', {})
-                    summary = TicketSummaryContent(
-                        ticket_summary=summary_data.get('summary', '요약 생성에 실패했습니다.'),
-                        key_points=summary_data.get('key_points', []),
-                        sentiment=summary_data.get('sentiment', '중립적'),
-                        priority_recommendation=summary_data.get('priority_recommendation', '보통'),
-                        urgency_level=summary_data.get('urgency_level', '보통')
-                    )
-                    ticket_summary_cache[ticket_id] = summary
-                    ticket_summary = summary
+                    if summary_data:  # summary_data가 None이 아닌지 확인
+                        summary = TicketSummaryContent(
+                            ticket_summary=summary_data.get('summary', '요약 생성에 실패했습니다.'),
+                            key_points=summary_data.get('key_points', []),
+                            sentiment=summary_data.get('sentiment', '중립적'),
+                            priority_recommendation=summary_data.get('priority_recommendation', '보통'),
+                            urgency_level=summary_data.get('urgency_level', '보통')
+                        )
+                        ticket_summary_cache[ticket_id] = summary
+                        ticket_summary = summary
+                    else:
+                        logger.warning("summary_data가 비어있습니다. 기본 요약을 생성합니다.")
+                        summary = TicketSummaryContent(
+                            ticket_summary=f"티켓 제목: {ticket_title or '제목 없음'}",
+                            key_points=["요약 데이터 없음", "수동 검토 필요"],
+                            sentiment="중립적",
+                            priority_recommendation="보통",
+                            urgency_level="보통"
+                        )
+                        ticket_summary = summary
                 else:
+                    error_msg = summary_result.get('error', '알 수 없는 오류') if summary_result is not None else 'summary_result is None'
+                    logger.warning(f"요약 생성 실패: {error_msg}")
                     summary = TicketSummaryContent(
                         ticket_summary=f"오류로 인해 요약 생성에 실패했습니다. 티켓 제목: {ticket_title or '제목 없음'}",
                         key_points=["요약 생성 오류", "수동 검토 필요"],
@@ -808,35 +835,82 @@ async def get_initial_context(
                     )
                     ticket_summary = summary
 
-                results.append((summary, summary_result.get('execution_time', 0)))
+                results.append((summary, summary_result.get('execution_time', 0) if summary_result is not None else 0))
                 task_names_ordered.append('summary')
-                task_times['summary'] = summary_result.get('execution_time', 0)
+                task_times['summary'] = summary_result.get('execution_time', 0) if summary_result is not None else 0
             
-            # 유사 티켓 결과 처리  
-            if include_similar_tickets and 'similar_tickets' in chain_results:
-                similar_result = chain_results['similar_tickets']
-                if similar_result.get('success', False):
-                    similar_tickets = similar_result.get('result', [])
-                else:
-                    similar_tickets = []
-                    logger.warning(f"유사 티켓 검색 실패: {similar_result.get('error', 'Unknown error')}")
+            # 통합 검색 결과 처리 (안전성 대폭 향상)
+            if 'unified_search' in chain_results:
+                unified_result = chain_results.get('unified_search')
                 
-                results.append((similar_tickets, similar_result.get('execution_time', 0)))
-                task_names_ordered.append('similar_tickets')
-                task_times['similar_tickets'] = similar_result.get('execution_time', 0)
+                # unified_result 안전성 검증 강화
+                if unified_result is None:
+                    logger.warning("unified_result가 None입니다. 빈 검색 결과로 처리합니다.")
+                    unified_result = {"success": False, "similar_tickets": [], "kb_documents": [], "execution_time": 0}
+                elif not isinstance(unified_result, dict):
+                    logger.warning(f"unified_result가 딕셔너리가 아닙니다 (타입: {type(unified_result)}). 빈 검색 결과로 처리합니다.")
+                    unified_result = {"success": False, "similar_tickets": [], "kb_documents": [], "execution_time": 0}
+                
+                if unified_result.get('success', False):
+                    # 유사 티켓 결과 추출 (안전성 향상)
+                    if include_similar_tickets:
+                        similar_tickets_data = unified_result.get('similar_tickets', [])
+                        similar_tickets = similar_tickets_data if isinstance(similar_tickets_data, list) else []
+                        task_times['similar_tickets'] = unified_result.get('execution_time', 0)
+                        task_names_ordered.append('similar_tickets')
+                    
+                    # KB 문서 결과 추출 (안전성 향상)
+                    if include_kb_docs:
+                        kb_documents_data = unified_result.get('kb_documents', [])
+                        kb_documents = kb_documents_data if isinstance(kb_documents_data, list) else []
+                        task_times['kb_documents'] = unified_result.get('execution_time', 0)
+                        task_names_ordered.append('kb_documents')
+                    
+                    # 통합 검색 성능 정보 로깅
+                    cache_used = unified_result.get('cache_used', False)
+                    performance_metrics = unified_result.get('search_performance', {})
+                    logger.info(f"통합 검색 완료 - 캐시 사용: {cache_used}, 성능: {performance_metrics}")
+                    
+                else:
+                    # 통합 검색 실패 시 빈 결과로 폴백
+                    error_msg = unified_result.get('error', 'Unknown error')
+                    logger.warning(f"통합 검색 실패: {error_msg}")
+                    if include_similar_tickets:
+                        similar_tickets = []
+                        task_times['similar_tickets'] = unified_result.get('execution_time', 0)
+                        task_names_ordered.append('similar_tickets')
+                    if include_kb_docs:
+                        kb_documents = []
+                        task_times['kb_documents'] = unified_result.get('execution_time', 0)
+                        task_names_ordered.append('kb_documents')
             
-            # 지식베이스 문서 결과 처리
-            if include_kb_docs and 'kb_documents' in chain_results:
-                kb_result = chain_results['kb_documents']
-                if kb_result.get('success', False):
-                    kb_documents = kb_result.get('result', [])
-                else:
-                    kb_documents = []
-                    logger.warning(f"지식베이스 문서 검색 실패: {kb_result.get('error', 'Unknown error')}")
+            else:
+                # 레거시 방식으로 개별 결과 처리 (통합 검색이 비활성화된 경우)
+                # 유사 티켓 결과 처리  
+                if include_similar_tickets and 'similar_tickets' in chain_results:
+                    similar_result = chain_results['similar_tickets']
+                    if similar_result.get('success', False):
+                        similar_tickets = similar_result.get('result', [])
+                    else:
+                        similar_tickets = []
+                        logger.warning(f"유사 티켓 검색 실패: {similar_result.get('error', 'Unknown error')}")
+                    
+                    results.append((similar_tickets, similar_result.get('execution_time', 0)))
+                    task_names_ordered.append('similar_tickets')
+                    task_times['similar_tickets'] = similar_result.get('execution_time', 0)
                 
-                results.append((kb_documents, kb_result.get('execution_time', 0)))
-                task_names_ordered.append('kb_documents')
-                task_times['kb_documents'] = kb_result.get('execution_time', 0)
+                # 지식베이스 문서 결과 처리
+                if include_kb_docs and 'kb_documents' in chain_results:
+                    kb_result = chain_results['kb_documents']
+                    if kb_result.get('success', False):
+                        kb_documents = kb_result.get('result', [])
+                    else:
+                        kb_documents = []
+                        logger.warning(f"지식베이스 문서 검색 실패: {kb_result.get('error', 'Unknown error')}")
+                    
+                    results.append((kb_documents, kb_result.get('execution_time', 0)))
+                    task_names_ordered.append('kb_documents')
+                    task_times['kb_documents'] = kb_result.get('execution_time', 0)
             
             # task_names를 정렬된 순서로 업데이트
             task_names = task_names_ordered
@@ -936,6 +1010,7 @@ async def get_initial_context(
 async def get_similar_tickets(
     ticket_id: str, 
     company_id: str = Depends(get_company_id),
+    top_k_tickets: int = Query(default=5, ge=1, le=5, description="유사 티켓 검색 결과 수 (1-5)"),
     x_freshdesk_domain: Optional[str] = Header(None, alias="X-Freshdesk-Domain"),
     x_freshdesk_api_key: Optional[str] = Header(None, alias="X-Freshdesk-API-Key")
 ):
@@ -1002,7 +1077,7 @@ async def get_similar_tickets(
         # 4. 벡터 DB에서 유사 티켓 검색
         similar_tickets_result = retriever.retrieve_top_k_docs(
             query_embedding=query_embedding, 
-            top_k=10,  # 더 많이 가져와서 필터링
+            top_k=top_k_tickets,  # 사용자 설정값 사용
             doc_type="ticket",
             company_id=company_id
         )
@@ -1103,6 +1178,7 @@ async def get_similar_tickets(
 async def get_related_documents(
     ticket_id: str, 
     company_id: str = Depends(get_company_id),
+    top_k_kb: int = Query(default=5, ge=1, le=5, description="지식베이스 문서 검색 결과 수 (1-5)"),
     x_freshdesk_domain: Optional[str] = Header(None, alias="X-Freshdesk-Domain"),
     x_freshdesk_api_key: Optional[str] = Header(None, alias="X-Freshdesk-API-Key")
 ):
@@ -1182,7 +1258,7 @@ async def get_related_documents(
             # 또는 source_type이 "kb"인 경우로 식별
             related_docs_result = retriever.retrieve_top_k_docs(
                 query_embedding=query_embedding, 
-                top_k=10,  # 더 많이 가져와서 필터링
+                top_k=top_k_kb,  # 사용자 설정값 사용
                 doc_type="kb",  # "kb" 타입으로 검색
                 company_id=company_id
             )
