@@ -54,6 +54,7 @@ let globalTicketData = {
   ticket_info: null, // 백엔드에서 받은 완전한 티켓 정보
   isLoading: false, // 로딩 상태 플래그
   lastLoadTime: null, // 마지막 로드 시간
+  last_updated: null, // 데이터 최종 업데이트 시간 (캐시 유효성 확인용)
 };
 
 /**
@@ -137,8 +138,8 @@ function updateGlobalTicketData(newData, dataType = null) {
     return;
   }
 
-  if (dataType && dataType in globalTicketData) {
-    // 특정 데이터 타입만 업데이트
+  if (dataType) {
+    // 특정 데이터 타입만 업데이트 (새로운 키도 허용)
     globalTicketData[dataType] = newData;
     console.log(`📊 전역 데이터 업데이트: ${dataType}`);
   } else if (typeof newData === 'object' && !dataType) {
@@ -399,6 +400,7 @@ window.GlobalState = {
   // 로딩 상태 관리
   setGlobalLoading,
   getGlobalLoading,
+  setLoading: setGlobalLoading, // data.js에서 사용하는 함수명과 호환성을 위한 별칭
   isLoading: getGlobalLoading, // data.js에서 사용하는 함수명과 호환성을 위한 별칭
 
   // 에러 상태 관리
@@ -663,8 +665,34 @@ window.GlobalState.ErrorHandler = {
   },
 };
 
-// 글로벌 에러 핸들러 등록
+// 글로벌 에러 핸들러 등록 (Freshdesk 내부 오류 필터링 포함)
 window.addEventListener('error', (event) => {
+  // Freshdesk 내부 오류 필터링
+  const ignoredErrors = [
+    'freshconnect-sidebar-core.js',
+    'Cannot read properties of null (reading \'parentNode\')',
+    'Requested Service is not available  EventAPI',
+    'Cannot read property \'parentNode\' of null',
+    'Script error.',
+    // 기타 Freshdesk 플랫폼 내부 오류들
+    'freshwidget',
+    'freshchat',
+    'freshdesk-widget'
+  ];
+
+  // 오류 소스나 메시지가 무시 목록에 포함되는지 확인
+  const shouldIgnore = ignoredErrors.some(ignored => 
+    (event.filename && event.filename.includes(ignored)) ||
+    (event.message && event.message.includes(ignored)) ||
+    (event.error && event.error.message && event.error.message.includes(ignored))
+  );
+
+  if (shouldIgnore) {
+    console.debug('🔇 Freshdesk 내부 오류 무시:', event.message || event.error?.message);
+    return; // 무시하고 처리하지 않음
+  }
+
+  // 우리 앱의 실제 오류만 처리
   if (window.GlobalState && window.GlobalState.ErrorHandler) {
     window.GlobalState.ErrorHandler.handleError(event.error, {
       type: 'javascript',
@@ -676,6 +704,25 @@ window.addEventListener('error', (event) => {
 });
 
 window.addEventListener('unhandledrejection', (event) => {
+  // Promise rejection도 Freshdesk 관련 오류 필터링
+  const ignoredReasons = [
+    'EventAPI',
+    'freshconnect',
+    'Cannot read properties of null',
+    'Script error'
+  ];
+
+  const reasonStr = String(event.reason);
+  const shouldIgnore = ignoredReasons.some(ignored => 
+    reasonStr.includes(ignored)
+  );
+
+  if (shouldIgnore) {
+    console.debug('🔇 Freshdesk 관련 Promise rejection 무시:', reasonStr);
+    return;
+  }
+
+  // 우리 앱의 실제 오류만 처리
   if (window.GlobalState && window.GlobalState.ErrorHandler) {
     window.GlobalState.ErrorHandler.handleError(event.reason, {
       type: 'promise',
@@ -684,7 +731,7 @@ window.addEventListener('unhandledrejection', (event) => {
   }
 });
 
-console.log('🛡️ 글로벌 에러 처리 시스템 초기화 완료');
+console.log('🛡️ 글로벌 에러 처리 시스템 초기화 완료 (Freshdesk 오류 필터링 포함)');
 
 // === 모듈 의존성 검증 시스템 ===
 

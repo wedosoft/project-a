@@ -255,7 +255,7 @@ window.Data = {
               }
 
               // 중복 호출 방지
-              if (GlobalState.isLoading()) {
+              if (GlobalState.getGlobalLoading()) {
                 console.log('⚠️ 이미 로딩 중이므로 백그라운드 로드 스킵');
                 resolve(true);
                 return;
@@ -387,7 +387,7 @@ window.Data = {
         }
 
         // 중복 호출 방지
-        if (GlobalState.isLoading()) {
+        if (GlobalState.getGlobalLoading()) {
           console.log('⚠️ 이미 로딩 중이므로 백그라운드 로드 스킵');
           return;
         }
@@ -498,7 +498,7 @@ window.Data = {
                 return;
               }
 
-              if (GlobalState.isLoading()) {
+              if (GlobalState.getGlobalLoading()) {
                 console.log(`⚠️ ${label}: 이미 로딩 중 → 스킵`);
                 return;
               }
@@ -582,7 +582,7 @@ window.Data = {
       }
 
       // 중복 호출 방지
-      if (GlobalState.isLoading()) {
+      if (GlobalState.getGlobalLoading()) {
         console.log(`⚠️ ${source}: 이미 로딩 중 → 스킵`);
         return;
       }
@@ -605,125 +605,107 @@ window.Data = {
    * @param {Object} basicTicketInfo - 기본 티켓 정보
    * @returns {Promise<Object>} 로드된 데이터 또는 null
    */
-  async loadInitialDataFromBackend(client, basicTicketInfo) {
+  async loadInitialDataFromBackend(client, ticket) {
     try {
-      console.log('🚀 백엔드 초기 데이터 로드 시작');
-      console.log('📋 요청할 티켓 정보:', basicTicketInfo);
-
-      // 중복 호출 방지
-      if (GlobalState.getGlobalLoading()) {
-        console.log('⚠️ 이미 로딩 중이므로 중복 호출 방지');
-        return null;
-      }
-
+      console.log('🚀 백엔드 초기 데이터 로드 시작:', ticket.id);
+      
       // 로딩 상태 설정
       GlobalState.setGlobalLoading(true);
-      console.log('🔄 로딩 상태 설정 완료');
-
-      try {
-        // API 모듈을 통한 백엔드 /init API 호출
-        console.log('🔍 API 모듈 상태 확인...');
-        console.log('   - window.API 존재:', !!window.API);
-        console.log('   - API 존재:', !!API);
+      
+      // API 모듈이 있는지 확인
+      if (!window.API) {
+        console.error('❌ API 모듈이 로드되지 않음');
+        return false;
+      }
+      
+      // 백엔드 /init 엔드포인트 호출
+      const response = await API.loadInitData(client, ticket.id);
+      
+      console.log('🔍 백엔드 응답 상세 분석:', {
+        response: response,
+        type: typeof response,
+        keys: response ? Object.keys(response) : null
+      });
+      
+      // 응답 성공 여부 확인 (다양한 응답 형태 지원)
+      const isSuccess = response && (
+        response.success === true ||  // { success: true, data: ... }
+        response.status === 'success' ||  // { status: 'success', data: ... }
+        (response.data && !response.error) ||  // { data: ..., error: null }
+        (!response.error && Object.keys(response).length > 0)  // 에러가 없고 데이터가 있으면
+      );
+      
+      if (isSuccess) {
+        console.log('✅ 백엔드 초기 데이터 로드 성공');
         
-        let apiInstance = API;
-        if (!apiInstance && window.API) {
-          console.log('⚠️ 전역 API 변수가 undefined이므로 window.API 사용');
-          apiInstance = window.API;
-        }
+        // 응답 데이터 구조 정규화
+        let responseData = response.data || response;  // data 필드가 없으면 전체 응답을 데이터로 사용
         
-        if (!apiInstance || !apiInstance.callBackendAPI) {
-          console.error('❌ API 모듈이 로드되지 않았습니다:', {
-            API_exists: !!API,
-            window_API_exists: !!window.API,
-            callBackendAPI_exists: apiInstance ? !!apiInstance.callBackendAPI : false
-          });
-          throw new Error('API 모듈이 로드되지 않았습니다.');
-        }
-
-        console.log('🌐 백엔드 API 호출 시작:', `init/${basicTicketInfo.id}`);
-        const response = await apiInstance.callBackendAPI(client, `init/${basicTicketInfo.id}`, null, 'GET');
-        console.log('📨 백엔드 응답 수신:', response);
-
-        if (response.ok) {
-          const data = response.data;
-          console.log('✅ 백엔드 초기 데이터 로드 완료:', data);
-
-          // 응답 데이터 구조 확인 및 로깅
-          console.log('📊 응답 데이터 분석:');
-          console.log('- similar_tickets 개수:', data.similar_tickets?.length || 0);
-          console.log('- kb_documents 개수:', data.kb_documents?.length || 0);
-
-          // 전역 캐시에 데이터 저장
-          const globalData = {
-            summary: data.ticket_summary,
-            similar_tickets: data.similar_tickets || [],
-            recommended_solutions: data.kb_documents || [], // 백엔드에서는 kb_documents로 온다
-            cached_ticket_id: basicTicketInfo.id,
-            ticket_info: data.ticket_data || basicTicketInfo,
-            isLoading: false,
-            hasError: false, // 성공 시 에러 상태 클리어 (새로 추가)
-            errorMessage: null, // 성공 시 에러 메시지 클리어 (새로 추가)
-            lastLoadTime: new Date().toISOString(),
-          };
-
-          // 전역 상태에 데이터 업데이트
-          GlobalState.updateGlobalTicketData(globalData);
+        // 전역 상태에 데이터 저장
+        if (responseData) {
+          GlobalState.updateGlobalTicketData(ticket.id, 'cached_ticket_id');
           
-          // 에러 상태 클리어 (새로 추가)
-          GlobalState.clearGlobalError();
-
-          console.log('💾 전역 캐시에 데이터 저장 완료');
-          
-          // ✅ 데이터 로드 성공 - 간단한 토스트 알림 표시
-          console.log('🎉 백엔드 데이터 로드 성공:', {
-            similarTickets: data.similar_tickets?.length || 0,
-            kbDocuments: data.kb_documents?.length || 0,
-            loadTime: new Date().toLocaleTimeString()
-          });
-          
-          // 사용자에게 간단한 성공 피드백 제공 (조용한 로깅으로 변경)
-          if (window.DEBUG_MODE) {
-            console.log('✅ 초기 데이터를 성공적으로 불러왔습니다.');
+          if (responseData.summary) {
+            GlobalState.updateGlobalTicketData(responseData.summary, 'summary');
           }
           
-          return data;
-        } else {
-          throw new Error(`백엔드 API 호출 실패: ${response.statusText}`);
+          if (responseData.similar_tickets) {
+            GlobalState.updateGlobalTicketData(responseData.similar_tickets, 'similar_tickets');
+          }
+          
+          if (responseData.recommended_solutions) {
+            GlobalState.updateGlobalTicketData(responseData.recommended_solutions, 'recommended_solutions');
+          }
+          
+          // 캐시 유효성 갱신
+          GlobalState.updateGlobalTicketData(new Date().toISOString(), 'last_updated');
+          
+          console.log('📦 저장된 데이터:', {
+            ticket_id: ticket.id,
+            has_summary: !!responseData.summary,
+            similar_tickets_count: responseData.similar_tickets?.length || 0,
+            solutions_count: responseData.recommended_solutions?.length || 0
+          });
         }
-      } finally {
-        // 로딩 상태 해제
-        GlobalState.setGlobalLoading(false);
+        
+        return true;
+      } else {
+        console.warn('⚠️ 백엔드 초기 데이터 로드 실패:', response);
+        
+        // 응답 구조 분석을 위한 상세 로깅
+        if (response) {
+          console.warn('  - response.success:', response.success);
+          console.warn('  - response.error:', response.error);
+          console.warn('  - response.data:', response.data);
+          console.warn('  - response keys:', Object.keys(response));
+        } else {
+          console.warn('  - 응답이 null 또는 undefined');
+        }
+        
+        // 에러 원인별 구체적인 메시지
+        let errorMessage = '알 수 없는 오류가 발생했습니다.';
+        if (!response) {
+          errorMessage = '서버 응답이 없습니다.';
+        } else if (response.error) {
+          errorMessage = response.error;
+        } else if (response.message) {
+          errorMessage = response.message;
+        }
+        
+        GlobalState.setGlobalError(true, errorMessage);
+        
+        return false;
       }
     } catch (error) {
-      console.error('⚠️ 백엔드 초기 데이터 로드 실패:', error);
+      console.error('❌ 백엔드 초기 데이터 로드 오류:', error);
+      
+      // 에러 상태 설정
+      GlobalState.setGlobalError(true, '백엔드 연결에 실패했습니다.');
+      
+      return false;
+    } finally {
+      // 로딩 상태 해제
       GlobalState.setGlobalLoading(false);
-      
-      // 에러 상태 설정 (새로 추가)
-      const errorMessage = error.message || '알 수 없는 오류가 발생했습니다.';
-      GlobalState.setGlobalError(true, errorMessage);
-      
-      // ❌ 실패 시 에러 모달 표시
-      if (window.UI && window.UI.showErrorModal) {
-        window.UI.showErrorModal(
-          `백엔드 데이터 로드에 실패했습니다.<br><br>
-           <strong>티켓 ID:</strong> ${basicTicketInfo.id}<br>
-           <strong>오류:</strong> ${errorMessage}<br>
-           <strong>시간:</strong> ${new Date().toLocaleTimeString()}`,
-          '데이터 로드 실패'
-        );
-      }
-      
-      if (window.GlobalState && window.GlobalState.ErrorHandler) {
-        window.GlobalState.ErrorHandler.handleError(error, {
-          module: 'data',
-          function: 'loadInitialDataFromBackend',
-          context: `티켓 ID: ${basicTicketInfo.id}`,
-          userMessage: '초기 데이터를 불러오는데 실패했습니다.',
-        });
-      }
-      
-      return null;
     }
   },
 
@@ -1117,6 +1099,34 @@ window.Data = {
       category: 'error',
       urgency_score: 0,
     };
+  },
+
+  /**
+   * 캐시된 데이터가 오래되었는지 확인
+   *
+   * 전역 상태에 저장된 데이터의 최종 업데이트 시간을 확인하여
+   * 데이터가 오래되었는지 판단합니다.
+   *
+   * @returns {boolean} 데이터가 오래되었으면 true, 아니면 false
+   */
+  isDataStale() {
+    try {
+      const globalData = GlobalState.getGlobalTicketData();
+      
+      if (!globalData.last_updated) {
+        return true; // 업데이트 시간이 없으면 오래된 데이터로 간주
+      }
+      
+      const lastUpdated = new Date(globalData.last_updated);
+      const now = new Date();
+      const diffInMinutes = (now - lastUpdated) / (1000 * 60);
+      
+      // 10분이 지나면 오래된 데이터로 간주
+      return diffInMinutes > 10;
+    } catch (error) {
+      console.warn('[Data] 데이터 유효성 확인 중 오류:', error);
+      return true; // 오류 발생 시 오래된 데이터로 간주
+    }
   },
 
   /**
