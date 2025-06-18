@@ -22,7 +22,17 @@
     "common": {
       "events": {},
       "functions": {},
-      "requests": {}
+      "requests": {
+        "backendApi": {
+          "schema": {
+            "host": "",
+            "endpoints": {
+              "init": "/init/{{ticket_id}}",
+              "query": "/query"
+            }
+          }
+        }
+      }
     }
   },
   "platform-version": "3.0",
