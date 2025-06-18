@@ -152,7 +152,8 @@ const API = {
   },
 
   /**
-   * 캐싱 지원 백엔드 API 호출
+   * 캐싱 지원 백엔드 API 호출 (자동 재시도 제거)
+   * 실패 시 사용자에게 수동 재시도를 유도하는 UX 적용
    */
   async callBackendAPIWithCache(client, endpoint, data = null, method = 'GET', options = {}) {
     const cacheKey = this.generateCacheKey(endpoint, data, method);
@@ -166,46 +167,40 @@ const API = {
       }
     }
 
-    // 재시도 로직
-    const maxRetries = options.maxRetries || 2;
-    let lastError;
+    try {
+      const result = await this.performAPICall(client, endpoint, data, method, options);
 
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-      try {
-        const result = await this.performAPICall(client, endpoint, data, method, {
-          ...options,
-          attempt: attempt + 1,
-          maxRetries: maxRetries + 1,
-        });
-
-        // 성공한 결과 캐싱 (GET 요청 또는 명시적 허용)
-        if ((method === 'GET' || options.useCache) && result && result.ok) {
-          const ttl = options.cacheTTL || 300000; // 기본 5분
-          window.PerformanceOptimizer.cacheApiResult(cacheKey, result, ttl);
-        }
-
-        return result;
-      } catch (error) {
-        lastError = error;
-
-        // 4xx 에러는 재시도하지 않음
-        if (error.status >= 400 && error.status < 500) {
-          break;
-        }
-
-        // 마지막 시도가 아니면 재시도
-        if (attempt < maxRetries) {
-          const delayTime = 1000 * Math.pow(2, attempt); // 지수적 백오프
-          console.warn(
-            `[API 재시도] ${method} /${endpoint} - ${error.message}, ${delayTime}ms 후 재시도`
-          );
-          await this.delay(delayTime);
-          continue;
-        }
+      // 성공한 결과 캐싱 (GET 요청 또는 명시적 허용)
+      if ((method === 'GET' || options.useCache) && result && result.ok) {
+        const ttl = options.cacheTTL || 300000; // 기본 5분
+        window.PerformanceOptimizer.cacheApiResult(cacheKey, result, ttl);
       }
-    }
 
-    throw lastError;
+      return result;
+    } catch (error) {
+      // 자동 재시도 제거: 실패 시 바로 에러를 던져서 사용자가 수동으로 재시도할 수 있도록 함
+      console.error(`[API 호출 실패] ${method} /${endpoint} - ${error.message}`);
+      
+      // 사용자 친화적인 에러 메시지로 변환
+      if (error.status === 0 || !error.status) {
+        // 네트워크 연결 문제
+        error.userMessage = '네트워크 연결에 문제가 있습니다. 인터넷 연결을 확인하고 다시 시도해 주세요.';
+      } else if (error.status >= 500) {
+        // 서버 에러
+        error.userMessage = '서버에 일시적인 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.';
+      } else if (error.status === 429) {
+        // Rate limit
+        error.userMessage = '요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.';
+      } else if (error.status >= 400 && error.status < 500) {
+        // 클라이언트 에러
+        error.userMessage = '요청에 문제가 있습니다. 페이지를 새로고침하고 다시 시도해 주세요.';
+      } else {
+        // 기타 에러
+        error.userMessage = '예상치 못한 문제가 발생했습니다. 페이지를 새로고침하고 다시 시도해 주세요.';
+      }
+
+      throw error;
+    }
   },
 
   /**
@@ -216,16 +211,15 @@ const API = {
 
     try {
       console.log(
-        `🚀 백엔드 API 호출: ${method} /${endpoint} ${options.attempt ? `(${options.attempt}/${options.maxRetries})` : ''}`
+        `🚀 백엔드 API 호출: ${method} /${endpoint}`
       );
 
       // 로딩 상태 표시
       if (options.showLoading !== false) {
         const loadingMessage =
           method === 'GET' ? '데이터를 불러오는 중...' : '요청을 처리하는 중...';
-        const retryText = options.attempt > 1 ? ` (재시도 ${options.attempt - 1})` : '';
         if (window.UI && window.UI.showLoading) {
-          window.UI.showLoading(`${loadingMessage}${retryText}`);
+          window.UI.showLoading(loadingMessage);
           loadingId = 'api-call';
         }
       }

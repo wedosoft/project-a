@@ -137,11 +137,13 @@ window.UI = {
         console.log(`[UI] 토스트 표시: ${message} - ${type}`);
       }
 
-      // 기존 토스트 제거
-      const existingToast = this.safeGetElement('.toast-message');
-      if (existingToast) {
-        existingToast.remove();
-      }
+      // 기존 토스트 제거 (더 안전한 방식)
+      const existingToasts = document.querySelectorAll('.toast-message');
+      existingToasts.forEach(toast => {
+        if (toast.parentNode) {
+          toast.remove();
+        }
+      });
 
       // 토스트 컨테이너 생성
       const toast = document.createElement('div');
@@ -169,7 +171,20 @@ window.UI = {
                 : '#2196f3',
       });
 
-      document.body.appendChild(toast);
+      // DOM에 토스트 추가 (더 안전한 방식)
+      let targetContainer = document.body;
+      if (!targetContainer) {
+        // body가 없으면 html 요소 사용
+        targetContainer = document.documentElement;
+      }
+      
+      if (!targetContainer) {
+        // 최후의 수단: 콘솔에만 메시지 표시
+        console.warn(`[UI] 토스트 표시 실패 (DOM 준비 안됨): ${message}`);
+        return;
+      }
+
+      targetContainer.appendChild(toast);
 
       // 자동 제거
       setTimeout(() => {
@@ -1123,9 +1138,19 @@ window.UI = {
     try {
       console.log('🚀 FDK 네이티브 메인 모달 열기 시작');
 
-      // 티켓 데이터 가져오기
-      const data = await client.data.get('ticket');
-      const ticket = data?.ticket;
+      // 티켓 데이터 가져오기 (안전한 FDK API 호출)
+      let data = null;
+      let ticket = null;
+      
+      try {
+        data = await client.data.get('ticket');
+        ticket = data?.ticket;
+        console.log('✅ 메인 모달용 티켓 데이터 가져오기 성공');
+      } catch (error) {
+        console.warn('⚠️ 메인 모달용 티켓 데이터 가져오기 실패:', error.message);
+        // EventAPI 오류가 발생해도 모달은 계속 표시
+        ticket = null;
+      }
 
       await client.interface.trigger('showModal', {
         title: 'Copilot Canvas',
@@ -1365,6 +1390,130 @@ window.UI = {
 
     container.innerHTML = '';
     await this.batchDOMUpdates(updates);
+  },
+
+  /**
+   * 사용자 친화적인 에러 메시지를 표시하고 재시도 옵션을 제공하는 함수
+   * 
+   * @param {Error} error - 발생한 에러 객체
+   * @param {Function} retryCallback - 재시도 시 실행할 콜백 함수
+   * @param {string} context - 에러가 발생한 컨텍스트 (예: "티켓 요약 로드")
+   */
+  showErrorWithRetry(error, retryCallback, context = '작업') {
+    try {
+      const errorMessage = error.userMessage || error.message || '알 수 없는 오류가 발생했습니다.';
+      
+      const errorContent = `
+        <div class="error-container">
+          <div class="error-icon">⚠️</div>
+          <div class="error-message">
+            <h3>${context} 중 문제가 발생했습니다</h3>
+            <p>${errorMessage}</p>
+          </div>
+          <div class="error-actions">
+            <button id="retry-button" class="btn btn-primary">다시 시도</button>
+            <button id="refresh-button" class="btn btn-secondary">페이지 새로고침</button>
+          </div>
+        </div>
+        <style>
+          .error-container {
+            text-align: center;
+            padding: 20px;
+            max-width: 400px;
+            margin: 0 auto;
+          }
+          .error-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+          }
+          .error-message h3 {
+            color: #d73027;
+            margin-bottom: 8px;
+          }
+          .error-message p {
+            color: #666;
+            margin-bottom: 20px;
+            line-height: 1.4;
+          }
+          .error-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+          }
+          .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+          }
+          .btn-primary {
+            background-color: #007bff;
+            color: white;
+          }
+          .btn-primary:hover {
+            background-color: #0056b3;
+          }
+          .btn-secondary {
+            background-color: #6c757d;
+            color: white;
+          }
+          .btn-secondary:hover {
+            background-color: #545b62;
+          }
+        </style>
+      `;
+
+      // 기존 컨테이너가 있으면 업데이트, 없으면 메인 컨테이너에 표시
+      const container = this.safeGetElement('init-container') || this.safeGetElement('main-container');
+      if (container) {
+        container.innerHTML = errorContent;
+        
+        // 이벤트 리스너 연결
+        const retryButton = document.getElementById('retry-button');
+        const refreshButton = document.getElementById('refresh-button');
+        
+        if (retryButton) {
+          retryButton.addEventListener('click', async () => {
+            retryButton.disabled = true;
+            retryButton.textContent = '재시도 중...';
+            
+            try {
+              await retryCallback();
+            } catch (retryError) {
+              console.error('[UI] 재시도 실패:', retryError);
+              // 재시도도 실패한 경우 다시 에러 표시
+              this.showErrorWithRetry(retryError, retryCallback, context);
+            }
+          });
+        }
+        
+        if (refreshButton) {
+          refreshButton.addEventListener('click', () => {
+            window.location.reload();
+          });
+        }
+      }
+      
+      console.error(`[UI] ${context} 에러 표시:`, error);
+    } catch (uiError) {
+      console.error('[UI] 에러 표시 중 오류:', uiError);
+      // 폴백: 콘솔에만 에러 기록 (UI 없음)
+      console.error(`🚨 UI 에러 처리 실패: ${context} - ${error.userMessage || error.message}`);
+    }
+  },
+
+  /**
+   * 토스트 아이콘을 반환하는 헬퍼 함수
+   */
+  getToastIcon(type) {
+    switch (type) {
+      case 'success': return '✅';
+      case 'error': return '❌';  
+      case 'warning': return '⚠️';
+      case 'info': return 'ℹ️';
+      default: return 'ℹ️';
+    }
   },
 
   // 의존성 확인 함수 - 다른 모듈에서 UI 모듈 사용 가능 여부 체크

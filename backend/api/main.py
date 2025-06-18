@@ -41,6 +41,17 @@ from api.ingest import ingest
 # FastAPI 앱 생성
 app = FastAPI()
 
+# CORS 미들웨어 설정 - Freshdesk FDK 환경에서의 크로스 도메인 요청 허용
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 개발용: 모든 도메인 허용 (운영시에는 특정 도메인으로 제한)
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],  # OPTIONS 메서드 허용 (preflight 요청)
+    allow_headers=["*"],  # 모든 헤더 허용
+)
+
 # 첨부파일 라우터 등록
 app.include_router(attachments_router)
 

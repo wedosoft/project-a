@@ -992,29 +992,37 @@ class LLMRouter:
                 prompt_context += f"- 대화 내용: {str(conversations)[:200]}\n"
                 
         system_prompt = (
-            "당신은 AI 지원 에이전트입니다. 제공된 티켓 정보를 바탕으로 다음 정보를 추출하세요:\n"
-            "1. 티켓의 핵심 내용 요약 (주요 문제점, 고객의 요청, 현재 상태, 해결 과정 포함)\n"
-            "   - 초기 대화와 최근 대화의 맥락을 모두 고려하여 전체 상황을 포괄적으로 요약\n"
-            "   - 대화 흐름에 따른 문제 진행 상황과 해결 과정을 상세히 포함\n"
-            "   - 문제의 원인, 조치 사항, 결과를 명확하게 언급\n"
-            "   - 티켓이 해결되었다면 최종 해결책과 결과를 반드시 포함\n"
-            "2. 3-5개의 핵심 포인트 (반드시 배열로 제공)\n"
-            "   - 초기 및 최근 대화에서 나타난 중요한 정보 모두 포함\n"
-            "   - 기술적 문제점, 해결 방법, 고객 요구사항을 균형있게 포함\n"
-            "3. 티켓의 전반적인 감정 상태 (긍정적, 중립적, 부정적)\n"
-            "4. 추천 우선순위 (높음, 보통, 낮음)\n"
-            "5. 긴급도 수준 (높음, 보통, 낮음)\n\n"
-            "반드시 아래 형식의 유효한 JSON으로만 응답해주세요:\n"
-            "{\n"
-            "  \"summary\": \"티켓 요약 텍스트 - 가능한 상세하게 작성\",\n"
-            "  \"key_points\": [\"핵심 포인트 1\", \"핵심 포인트 2\", \"핵심 포인트 3\"],\n"
-            "  \"sentiment\": \"감정 상태\",\n"
-            "  \"priority_recommendation\": \"우선순위\",\n"
-            "  \"urgency_level\": \"긴급도\"\n"
-            "}\n\n"
-            "주의: key_points는 반드시 배열 형태로 제공해야 합니다. 문자열이나 다른 형식은 허용되지 않습니다.\n"
-            "요약은 가능한 자세하게 작성하고, 대화의 전체 맥락을 포함해야 합니다.\n"
-            "한국어로 답변해주세요."
+            "당신은 AI 지원 에이전트입니다. 제공된 티켓 정보를 바탕으로 마크다운 형식으로 체계적인 요약을 작성하세요.\n"
+            "반드시 아래 마크다운 형식으로만 응답해주세요:\n\n"
+            "## 📋 상황 요약\n"
+            "[티켓의 핵심 상황을 간결하게 요약. 주요 문제점, 고객 요청사항, 현재 진행 상태를 포함]\n\n"
+            "## 🔍 주요 내용\n"
+            "### 📌 문제 상황\n"
+            "- [구체적인 문제 상황 설명]\n"
+            "- [문제의 원인이나 배경]\n\n"
+            "### 🎯 고객 요청사항\n"
+            "- [고객이 요청한 구체적인 사항들]\n"
+            "- [기대하는 결과나 해결책]\n\n"
+            "### 🔧 조치 사항\n"
+            "- [지금까지 취한 조치나 시도한 해결책]\n"
+            "- [현재 진행 중인 작업]\n\n"
+            "## 📊 분석 결과\n"
+            "- **감정 상태**: [긍정적/중립적/부정적]\n"
+            "- **우선순위**: [높음/보통/낮음]\n"
+            "- **긴급도**: [높음/보통/낮음]\n\n"
+            "## 💡 핵심 포인트\n"
+            "1. [가장 중요한 핵심 포인트]\n"
+            "2. [두 번째 중요한 포인트]\n"
+            "3. [세 번째 중요한 포인트]\n"
+            "4. [추가 중요 포인트 (필요시)]\n"
+            "5. [추가 중요 포인트 (필요시)]\n\n"
+            "주의사항:\n"
+            "- 초기 대화와 최근 대화의 맥락을 모두 고려하여 전체 상황을 포괄적으로 요약\n"
+            "- 대화 흐름에 따른 문제 진행 상황과 해결 과정을 상세히 포함\n"
+            "- 문제의 원인, 조치 사항, 결과를 명확하게 언급\n"
+            "- 티켓이 해결되었다면 최종 해결책과 결과를 반드시 포함\n"
+            "- 기술적 문제점, 해결 방법, 고객 요구사항을 균형있게 포함\n"
+            "- 한국어로 답변하고, 정확한 마크다운 형식을 준수하세요\n"
         )
         
         prompt = f"다음 티켓 정보를 분석해주세요:\n\n{prompt_context}"
@@ -1052,131 +1060,87 @@ class LLMRouter:
                 
             logger.info(f"티켓 요약 생성 완료 (ticket_id: {ticket_data.get('id')}, model: {response.model_used}, duration: {response.duration_ms}ms)")
             
-            # LLM 응답을 파싱하여 구조화된 형식으로 변환
+            # 마크다운 응답을 처리하여 구조화된 형식으로 변환
             try:
                 # 원본 응답 로깅 (디버깅용)
-                logger.info(f"LLM 원본 응답 (ticket_id: {ticket_data.get('id')}): {response.text[:500]}...")
+                logger.info(f"LLM 마크다운 응답 (ticket_id: {ticket_data.get('id')}): {response.text[:500]}...")
                 
-                # 응답에서 JSON 부분만 추출하는 시도 (여러 줄 텍스트에서 JSON만 찾기)
-                json_text = response.text
-                # JSON 객체 시작과 끝을 찾아서 추출
-                json_match = re.search(r'(\{.*\})', json_text, re.DOTALL)
-                if json_match:
-                    json_text = json_match.group(1)
-                    logger.info(f"JSON 추출 성공: {json_text[:200]}...")
+                # 마크다운 응답을 그대로 summary 필드에 포함하고, 
+                # 기존 API 호환성을 위해 추가 필드들을 마크다운에서 추출
+                markdown_text = response.text.strip()
                 
-                # JSON 형식으로 응답을 파싱
-                result = json.loads(json_text)
+                # 마크다운에서 주요 정보 추출
+                key_points = []
+                sentiment = "중립적"
+                priority_recommendation = "보통"  
+                urgency_level = "보통"
                 
-                # 필수 필드가 없는 경우 기본값 설정
-                if not isinstance(result, dict):
-                    result = {"summary": json_text}
+                # 핵심 포인트 추출 (## 💡 핵심 포인트 섹션에서)
+                key_points_match = re.search(r'## 💡 핵심 포인트\s*\n(.*?)(?=\n##|\n$)', markdown_text, re.DOTALL)
+                if key_points_match:
+                    points_text = key_points_match.group(1)
+                    # 번호가 매겨진 목록에서 포인트 추출
+                    points = re.findall(r'\d+\.\s*(.+)', points_text)
+                    key_points = [point.strip() for point in points if point.strip()]
                 
-                # 요약(summary) 필드 처리
-                if "summary" not in result:
-                    result["summary"] = "요약 정보가 제공되지 않았습니다."
-                
-                # key_points 처리 강화
-                if "key_points" not in result:
-                    logger.warning(f"티켓 요약에 key_points가 없습니다. 자동 생성을 시도합니다. (ticket_id: {ticket_data.get('id')})")
-                    result["key_points"] = []
-                
-                # key_points 타입 확인 및 처리
-                if not isinstance(result["key_points"], list):
-                    logger.warning(f"key_points가 리스트가 아닙니다. 변환을 시도합니다: {type(result['key_points'])}")
+                # 분석 결과 섹션에서 감정, 우선순위, 긴급도 추출
+                analysis_match = re.search(r'## 📊 분석 결과\s*\n(.*?)(?=\n##|\n$)', markdown_text, re.DOTALL)
+                if analysis_match:
+                    analysis_text = analysis_match.group(1)
                     
-                    # 문자열인 경우, 여러 가지 구분자로 분리 시도
-                    if isinstance(result["key_points"], str):
-                        # 1. 줄바꿈으로 구분된 경우
-                        if '\n' in result["key_points"]:
-                            points = [p.strip() for p in result["key_points"].split('\n') if p.strip()]
-                        # 2. 쉼표로 구분된 경우
-                        elif ',' in result["key_points"]:
-                            points = [p.strip() for p in result["key_points"].split(',') if p.strip()]
-                        # 3. 세미콜론으로 구분된 경우
-                        elif ';' in result["key_points"]:
-                            points = [p.strip() for p in result["key_points"].split(';') if p.strip()]
-                        # 4. 마침표로 구분된 경우
-                        else:
-                            points = [p.strip() for p in re.split(r'[.!?]\s+', result["key_points"]) if p.strip()]
-                        
-                        result["key_points"] = points if points else ["자동 변환 실패"]
-                    else:
-                        # 다른 타입인 경우 빈 배열로 설정
-                        result["key_points"] = []
+                    # 감정 상태 추출
+                    sentiment_match = re.search(r'\*\*감정\s*상태\*\*\s*:\s*\[([^\]]+)\]', analysis_text)
+                    if sentiment_match:
+                        sentiment = sentiment_match.group(1).strip()
+                    
+                    # 우선순위 추출
+                    priority_match = re.search(r'\*\*우선순위\*\*\s*:\s*\[([^\]]+)\]', analysis_text)
+                    if priority_match:
+                        priority_recommendation = priority_match.group(1).strip()
+                    
+                    # 긴급도 추출
+                    urgency_match = re.search(r'\*\*긴급도\*\*\s*:\s*\[([^\]]+)\]', analysis_text)
+                    if urgency_match:
+                        urgency_level = urgency_match.group(1).strip()
                 
-                # key_points가 비어있는 경우 요약에서 추출
-                if not result["key_points"]:
-                    if "summary" in result and result["summary"]:
-                        summary_text = result["summary"]
-                        # 요약에서 문장을 추출하여 핵심 포인트로 사용
-                        sentences = [s.strip() for s in re.split(r'[.!?]\s+', summary_text) if s.strip() and len(s.strip()) > 10]
-                        # 너무 많은 문장이 있다면 처음 3-5개만 사용
-                        result["key_points"] = sentences[:min(len(sentences), 5)]
+                # 기본값 설정 (추출 실패시)
+                if not key_points:
+                    # 마크다운에서 주요 내용이나 조치사항에서 포인트 추출 시도
+                    problem_match = re.search(r'### 📌 문제 상황\s*\n(.*?)(?=\n###|\n##|\n$)', markdown_text, re.DOTALL)
+                    request_match = re.search(r'### 🎯 고객 요청사항\s*\n(.*?)(?=\n###|\n##|\n$)', markdown_text, re.DOTALL)
+                    action_match = re.search(r'### 🔧 조치 사항\s*\n(.*?)(?=\n###|\n##|\n$)', markdown_text, re.DOTALL)
+                    
+                    for match in [problem_match, request_match, action_match]:
+                        if match:
+                            lines = [line.strip()[2:].strip() for line in match.group(1).split('\n') 
+                                   if line.strip().startswith('- ') and len(line.strip()) > 5]
+                            key_points.extend(lines)
+                    
+                    # 여전히 없으면 기본값
+                    if not key_points:
+                        key_points = ["마크다운 파싱 완료", "상세 정보 확인 가능", "구조화된 요약 제공"]
                 
-                # 여전히 key_points가 없다면 기본값 설정
-                if not result["key_points"]:
-                    result["key_points"] = ["주요 내용 파악 필요", "상세 정보 확인 요망", "추가 정보 요청 고려"]
-                
-                # 나머지 필드 처리
-                if "sentiment" not in result:
-                    result["sentiment"] = "중립적"
-                if "priority_recommendation" not in result:
-                    result["priority_recommendation"] = "보통"
-                if "urgency_level" not in result:
-                    result["urgency_level"] = "보통"
+                result = {
+                    "summary": markdown_text,  # 전체 마크다운을 summary로 저장
+                    "key_points": key_points[:5],  # 최대 5개로 제한
+                    "sentiment": sentiment,
+                    "priority_recommendation": priority_recommendation, 
+                    "urgency_level": urgency_level
+                }
                 
                 return result
-            except json.JSONDecodeError as e:
-                # JSON 파싱 실패 시 텍스트 전체를 요약으로 처리
-                logger.warning(f"JSON 파싱 실패, 텍스트 분석으로 전환 (ticket_id: {ticket_data.get('id')}): {str(e)}")
+            except Exception as e:
+                # 마크다운 파싱 실패 시 기본 처리
+                logger.warning(f"마크다운 파싱 실패, 원본 텍스트로 처리 (ticket_id: {ticket_data.get('id')}): {str(e)}")
                 
-                try:
-                    # 응답에서 JSON 형식과 유사한 부분 추출 시도
-                    summary_match = re.search(r'"summary"\s*:\s*"([^"]+)"', response.text)
-                    summary = summary_match.group(1) if summary_match else response.text
-                    
-                    # key_points 추출 시도
-                    key_points_matches = re.findall(r'"([^"]+)"', re.search(r'"key_points"\s*:\s*\[(.*?)\]', response.text).group(1) if re.search(r'"key_points"\s*:\s*\[(.*?)\]', response.text) else "")
-                    key_points = key_points_matches if key_points_matches else []
-                    
-                    # 텍스트에서 문장을 추출하여 핵심 포인트로 활용 (key_points가 비어있는 경우)
-                    if not key_points:
-                        sentences = [s.strip() for s in re.split(r'[.!?]\s+', summary) if s.strip() and len(s.strip()) > 10]
-                        key_points = sentences[:min(len(sentences), 5)] if sentences else ["자동 생성 실패"]
-                    
-                    # 감정, 우선순위, 긴급도 추출 시도
-                    sentiment_match = re.search(r'"sentiment"\s*:\s*"([^"]+)"', response.text)
-                    sentiment = sentiment_match.group(1) if sentiment_match else "중립적"
-                    
-                    priority_match = re.search(r'"priority_recommendation"\s*:\s*"([^"]+)"', response.text)
-                    priority = priority_match.group(1) if priority_match else "보통"
-                    
-                    urgency_match = re.search(r'"urgency_level"\s*:\s*"([^"]+)"', response.text)
-                    urgency = urgency_match.group(1) if urgency_match else "보통"
-                    
-                    return {
-                        "summary": summary,
-                        "key_points": key_points,
-                        "sentiment": sentiment,
-                        "priority_recommendation": priority,
-                        "urgency_level": urgency
-                    }
-                except Exception as regex_error:
-                    logger.error(f"정규식 추출 실패: {str(regex_error)}")
-                    # 가장 기본적인 형태로 처리
-                    summary = response.text
-                    # 문장 분리로 핵심 포인트 생성
-                    sentences = [s.strip() for s in re.split(r'[.!?]\s+', summary) if s.strip() and len(s.strip()) > 10]
-                    key_points = sentences[:min(len(sentences), 5)] if sentences else ["자동 생성 실패"]
-                    
-                    return {
-                        "summary": summary[:1000] if len(summary) > 1000 else summary,  # 요약이 너무 길면 잘라내기
-                        "key_points": key_points,
-                        "sentiment": "중립적",
-                        "priority_recommendation": "보통",
-                        "urgency_level": "보통"
-                    }
+                # 최소한의 구조로 반환
+                return {
+                    "summary": response.text,  # 원본 응답을 그대로 사용
+                    "key_points": ["마크다운 파싱 실패", "원본 응답 확인 필요"],
+                    "sentiment": "중립적",
+                    "priority_recommendation": "보통",
+                    "urgency_level": "보통"
+                }
         except Exception as e:
             logger.error(f"티켓 요약 생성 중 오류 발생 (ticket_id: {ticket_data.get('id')}): {e}")
             # 오류 발생 시 기본 메시지 반환

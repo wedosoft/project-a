@@ -57,9 +57,20 @@ async function showFDKModal(ticketId, hasCachedData = false) {
       return;
     }
     
-    // 티켓 데이터 가져오기 (로컬에서만, 백엔드 호출 없음)
-    const ticketData = await client.data.get('ticket');
-    const ticket = ticketData?.ticket;
+    // 티켓 데이터 가져오기 (안전한 FDK API 호출)
+    let ticketData = null;
+    let ticket = null;
+    
+    try {
+      ticketData = await client.data.get('ticket');
+      ticket = ticketData?.ticket;
+      console.log('✅ 티켓 데이터 가져오기 성공');
+    } catch (error) {
+      console.warn('⚠️ 티켓 데이터 가져오기 실패 (EventAPI 관련):', error.message);
+      // EventAPI 오류는 무시하고 계속 진행
+      ticketData = null;
+      ticket = null;
+    }
     
     // 모달 설정 구성 (백엔드 호출 없이 캐시된 데이터만 전달)
     const modalConfig = {
@@ -85,17 +96,33 @@ async function showFDKModal(ticketId, hasCachedData = false) {
   } catch (error) {
     console.error('❌ FDK 모달 오류:', error);
     
-    // 폴백: 간단한 알림으로 대체 (백엔드 호출 없음)
-    try {
-      const client = GlobalState.getClient();
-      if (client) {
-        await client.interface.trigger("showNotify", {
-          type: "warning",
-          message: "AI 지원 기능을 불러오는 중 오류가 발생했습니다."
-        });
+    // 사용자에게 친화적인 에러 메시지 표시
+    if (window.UI && window.UI.showErrorWithRetry) {
+      // 재시도 콜백 함수 정의
+      const retryCallback = async () => {
+        await showFDKModal(ticketId, hasCachedData);
+      };
+      
+      window.UI.showErrorWithRetry(
+        error, 
+        retryCallback, 
+        'AI 지원 모달 열기'
+      );
+    } else {
+      // UI 모듈이 없는 경우 폴백: 간단한 알림으로 대체
+      try {
+        const client = GlobalState.getClient();
+        if (client) {
+          await client.interface.trigger("showNotify", {
+            type: "warning",
+            message: "AI 지원 기능을 불러오는 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
+          });
+        }
+      } catch (notifyError) {
+        console.error('❌ 알림도 실패:', notifyError);
+        // 최후의 수단: 브라우저 콘솔에 에러 메시지만 기록
+        console.error('🚨 UI 초기화 실패: AI 지원 기능을 불러올 수 없습니다.');
       }
-    } catch (notifyError) {
-      console.error('❌ 알림도 실패:', notifyError);
     }
   }
 }
@@ -142,22 +169,66 @@ if (typeof window.isFDKModal !== 'undefined' && window.isFDKModal) {
         console.log('✅ 페이지 로딩 시 백엔드 호출 성공 완료');
       } else {
         console.warn('⚠️ 페이지 로딩 시 백엔드 호출 실패 또는 스킵됨');
+        
+        // 백엔드 호출 실패 시 사용자에게 알림 (토스트 메시지) - 지연 호출
+        setTimeout(() => {
+          if (window.UI && window.UI.showToast) {
+            window.UI.showToast(
+              'AI 데이터 로드에 실패했습니다. 앱 아이콘을 클릭하여 다시 시도할 수 있습니다.',
+              'warning',
+              5000 // 5초간 표시
+            );
+          } else {
+            console.warn('[APP] UI 모듈이 아직 준비되지 않아 토스트 메시지를 표시할 수 없습니다.');
+          }
+        }, 1000); // 1초 지연 후 토스트 표시
       }
     }).catch((error) => {
       console.error('❌ 페이지 로딩 시 백엔드 호출 중 예외 발생:', error);
+      
+      // 예외 발생 시 사용자에게 에러 알림 - 지연 호출
+      setTimeout(() => {
+        if (window.UI && window.UI.showToast) {
+          window.UI.showToast(
+            '서버 연결에 문제가 있습니다. 잠시 후 다시 시도해 주세요.',
+            'error',
+            7000 // 7초간 표시
+          );
+        } else {
+          console.warn('[APP] UI 모듈이 아직 준비되지 않아 에러 토스트를 표시할 수 없습니다.');
+        }
+      }, 1000); // 1초 지연 후 토스트 표시
     });
 
     // ② 상단 네비게이션 앱 아이콘 클릭 시 처리 (캐시된 데이터로 즉시 모달 표시)
     // Freshdesk 상단 네비게이션의 앱 아이콘을 클릭했을 때 실행되는 이벤트 핸들러
     client.events.on('app.activated', async () => {
       try {
-        const ctx = await client.instance.context();
+        // FDK context 가져오기 (안전한 호출)
+        let ctx = null;
+        try {
+          ctx = await client.instance.context();
+        } catch (contextError) {
+          console.warn('⚠️ FDK context 가져오기 실패:', contextError.message);
+          // context를 가져올 수 없는 경우 기본값으로 계속 진행
+          ctx = { location: 'unknown' };
+        }
 
         // 상단 네비게이션에서의 동작: 스마트 캐싱 전략 적용
         if (ctx.location === 'ticket_top_navigation') {
-          // 현재 티켓 정보 가져오기 (이 시점에서는 FDK가 안전함)
-          const ticketData = await client.data.get('ticket');
-          const currentTicketId = ticketData?.ticket?.id;
+          // 현재 티켓 정보 가져오기 (안전한 FDK API 호출)
+          let ticketData = null;
+          let currentTicketId = null;
+          
+          try {
+            ticketData = await client.data.get('ticket');
+            currentTicketId = ticketData?.ticket?.id;
+            console.log('✅ 앱 활성화 시 티켓 데이터 가져오기 성공');
+          } catch (error) {
+            console.warn('⚠️ 앱 활성화 시 티켓 데이터 가져오기 실패:', error.message);
+            // EventAPI 오류가 발생해도 계속 진행
+            currentTicketId = 'unknown';
+          }
 
           // 전역 상태에서 캐시된 데이터 확인
           const globalData = GlobalState.getGlobalTicketData();
