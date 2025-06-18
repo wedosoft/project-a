@@ -11,6 +11,11 @@ services:
       - FRESHDESK_DOMAIN=${FRESHDESK_DOMAIN}
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
     ports:
       - "8000:8000"
     volumes:
@@ -20,6 +25,7 @@ services:
       - ./.env
     depends_on:
       - qdrant
+      - redis
 
   qdrant:
     image: qdrant/qdrant:latest
@@ -32,3 +38,20 @@ services:
     environment:
       - QDRANT_ALLOW_ORIGIN=*
     restart: unless-stopped
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: project-a-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    # Redis 설정 (메모리 정책 등)
+    sysctls:
+      - net.core.somaxconn=1024
+
+volumes:
+  redis_data:
+    driver: local

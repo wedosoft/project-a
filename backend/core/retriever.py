@@ -73,28 +73,3 @@ def retrieve_top_k_docs(query_embedding: List[float], top_k: int, company_id: st
             "distances": [],
             "ids": []
         }
-
-
-def retrieve_faqs(
-    query_embedding: List[float], 
-    top_k: int, 
-    company_id: str = None, 
-    category: Optional[str] = None,
-    min_score: Optional[float] = 0.7 # FAQ 검색 시 최소 유사도 기본값 설정
-) -> List[Dict[str, Any]]:
-    """
-    FAQ 컬렉션이 제거되어 이 함수는 항상 빈 배열을 반환합니다.
-    호환성을 위해 함수 시그니처는 유지합니다.
-
-    Args:
-        query_embedding: 검색에 사용할 쿼리 임베딩 벡터.
-        top_k: 검색할 최대 FAQ 수.
-        company_id: 회사 ID (데이터 격리에 사용, None이면 "default" 사용).
-        category: 필터링할 FAQ 카테고리 (선택 사항).
-        min_score: 반환할 FAQ의 최소 유사도 점수 (선택 사항).
-
-    Returns:
-        빈 배열을 반환합니다.
-    """
-    logger.info("FAQ 기능은 더 이상 사용되지 않습니다.")
-    return []
