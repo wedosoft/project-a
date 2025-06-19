@@ -1,3 +1,7 @@
+---
+applyTo: "**"
+---
+
 # GitHub Copilot 프로젝트별 지침 - Freshdesk Custom App (project-a)
 
 ## 🚨 중요: 글로벌 지침 준수 필수
