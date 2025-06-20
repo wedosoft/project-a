@@ -15,10 +15,11 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from core.embedder import embed_documents, process_documents
 from core.vectordb import vector_db
+from core.database import SQLiteDatabase  # SQLite 데이터베이스 추가
 from freshdesk.fetcher import (
     extract_company_id_from_domain,
     fetch_kb_articles,
@@ -87,6 +88,193 @@ def save_status_mappings(mappings):
 
 # 상태 매핑 정보 로드
 STATUS_MAPPINGS = load_status_mappings()
+
+
+def create_integrated_ticket_object(ticket: Dict[str, Any], conversations: Optional[List[Dict[str, Any]]] = None, attachments: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    """
+    티켓, 대화내역, 첨부파일을 하나의 통합 객체로 생성합니다.
+    
+    Args:
+        ticket: 티켓 데이터
+        conversations: 대화내역 리스트 (옵션)
+        attachments: 첨부파일 리스트 (옵션)
+        
+    Returns:
+        Dict[str, Any]: 통합된 티켓 객체
+    """
+    # 기본 티켓 정보 복사
+    integrated_object = ticket.copy()
+    
+    # 대화내역이 티켓에 포함되어 있는 경우 사용, 아니면 파라미터 사용
+    if conversations is None:
+        conversations = ticket.get("conversations", [])
+    
+    # 첨부파일이 티켓에 포함되어 있는 경우 사용, 아니면 파라미터 사용
+    if attachments is None:
+        attachments = ticket.get("all_attachments", [])
+    
+    # 통합 객체 구성
+    integrated_object.update({
+        "conversations": conversations,
+        "all_attachments": attachments,
+        "has_conversations": len(conversations) > 0,
+        "has_attachments": len(attachments) > 0,
+        "conversation_count": len(conversations),
+        "attachment_count": len(attachments),
+        "integration_timestamp": datetime.utcnow().isoformat(),
+        "object_type": "integrated_ticket"
+    })
+    
+    # 요약 생성을 위한 텍스트 통합
+    text_parts = []
+    
+    # 티켓 제목과 설명
+    if ticket.get("subject"):
+        text_parts.append(f"제목: {ticket['subject']}")
+    if ticket.get("description_text"):
+        text_parts.append(f"설명: {ticket['description_text']}")
+    elif ticket.get("description"):
+        text_parts.append(f"설명: {ticket['description']}")
+    
+    # 대화내역 텍스트 추가
+    for conv in conversations:
+        if conv.get("body_text"):
+            text_parts.append(f"대화: {conv['body_text']}")
+        elif conv.get("body"):
+            text_parts.append(f"대화: {conv['body']}")
+    
+    # 첨부파일 정보 추가
+    if attachments:
+        attachment_names = [att.get("name", "Unknown") for att in attachments]
+        text_parts.append(f"첨부파일: {', '.join(attachment_names)}")
+    
+    integrated_object["integrated_text"] = "\n\n".join(text_parts)
+    
+    return integrated_object
+
+
+def create_integrated_article_object(article: Dict[str, Any], attachments: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    """
+    지식베이스 문서와 첨부파일을 하나의 통합 객체로 생성합니다.
+    
+    Args:
+        article: 지식베이스 문서 데이터
+        attachments: 첨부파일 리스트 (옵션)
+        
+    Returns:
+        Dict[str, Any]: 통합된 문서 객체
+    """
+    # 기본 문서 정보 복사
+    integrated_object = article.copy()
+    
+    # 첨부파일이 문서에 포함되어 있는 경우 사용, 아니면 파라미터 사용
+    if attachments is None:
+        attachments = article.get("attachments", [])
+    
+    # 통합 객체 구성
+    integrated_object.update({
+        "attachments": attachments,
+        "has_attachments": len(attachments) > 0,
+        "attachment_count": len(attachments),
+        "integration_timestamp": datetime.utcnow().isoformat(),
+        "object_type": "integrated_article"
+    })
+    
+    # 요약 생성을 위한 텍스트 통합
+    text_parts = []
+    
+    # 문서 제목과 내용
+    if article.get("title"):
+        text_parts.append(f"제목: {article['title']}")
+    if article.get("description"):
+        text_parts.append(f"설명: {article['description']}")
+    
+    # 첨부파일 정보 추가
+    if attachments:
+        attachment_names = [att.get("name", "Unknown") for att in attachments]
+        text_parts.append(f"첨부파일: {', '.join(attachment_names)}")
+    
+    integrated_object["integrated_text"] = "\n\n".join(text_parts)
+    
+    return integrated_object
+
+
+def store_integrated_object_to_sqlite(db: SQLiteDatabase, integrated_object: Dict[str, Any], company_id: str, platform: str = "freshdesk") -> bool:
+    """
+    통합 객체를 SQLite 데이터베이스에 저장합니다.
+    
+    Args:
+        db: SQLite 데이터베이스 인스턴스
+        integrated_object: 통합 객체
+        company_id: 회사 ID
+        platform: 플랫폼명 (기본: freshdesk)
+        
+    Returns:
+        bool: 저장 성공 여부
+    """
+    try:
+        object_type = integrated_object.get("object_type", "unknown")
+        
+        if object_type == "integrated_ticket":
+            # 티켓으로 저장 - database.py의 insert_ticket 함수 형식에 맞춤
+            ticket_id = integrated_object.get("id")
+            if not ticket_id:
+                logger.error("티켓 ID가 없습니다.")
+                return False
+                
+            # 통합 객체를 ticket_data 형식으로 변환
+            ticket_data = integrated_object.copy()
+            ticket_data.update({
+                'company_id': company_id,
+                'platform': platform
+            })
+                
+            # insert_ticket은 딕셔너리를 받아서 raw_data에 저장
+            result = db.insert_ticket(ticket_data)
+            
+            # 대화내역도 개별적으로 저장 (옵션)
+            conversations = integrated_object.get("conversations", [])
+            for conv in conversations:
+                conversation_data = conv.copy()
+                conversation_data.update({
+                    'ticket_id': ticket_id,
+                    'company_id': company_id,
+                    'platform': platform
+                })
+                
+                # insert_conversation은 딕셔너리를 받아서 raw_data에 저장
+                db.insert_conversation(conversation_data)
+            
+            logger.info(f"통합 티켓 객체 저장 완료: ID={ticket_id}, 대화={len(conversations)}개")
+            return True
+            
+        elif object_type == "integrated_article":
+            # 지식베이스 문서로 저장 - database.py의 insert_article 함수 형식에 맞춤
+            article_id = integrated_object.get("id")
+            if not article_id:
+                logger.error("문서 ID가 없습니다.")
+                return False
+                
+            # 통합 객체를 article_data 형식으로 변환
+            article_data = integrated_object.copy()
+            article_data.update({
+                'company_id': company_id,
+                'platform': platform
+            })
+                
+            # insert_article은 딕셔너리를 받아서 raw_data에 저장
+            db.insert_article(article_data)
+            
+            logger.info(f"통합 문서 객체 저장 완료: ID={article_id}")
+            return True
+            
+        else:
+            logger.error(f"알 수 없는 객체 타입: {object_type}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"통합 객체 저장 실패: {e}")
+        return False
 
 
 def sanitize_metadata(
@@ -446,6 +634,121 @@ async def ingest(
             logger.warning("Freshdesk에서 가져온 데이터가 없습니다.")
             return
 
+        # SQLite에 원본 데이터 저장
+        logger.info("SQLite 데이터베이스에 원본 데이터 저장 중...")
+        job_id = f"ingest_{int(time.time())}"
+        try:
+            # 테스트용 데이터베이스 사용 (100건 제한)
+            db = SQLiteDatabase("freshdesk_test_data.db")
+            db.connect()
+            db.create_tables()
+            
+            # 수집 작업 시작 로그
+            job_start_data = {
+                'job_id': job_id,
+                'company_id': DEFAULT_COMPANY_ID,
+                'job_type': 'ingest',
+                'status': 'started',
+                'start_time': datetime.now().isoformat(),
+                'config': {
+                    'incremental': incremental,
+                    'purge': purge,
+                    'include_kb': include_kb,
+                    'tickets_count': len(tickets),
+                    'articles_count': len(articles)
+                }
+            }
+            db.log_collection_job(job_start_data)
+            
+            # 티켓 데이터를 통합 객체로 변환하여 저장
+            tickets_saved = 0
+            for ticket in tickets:
+                try:
+                    # 통합 객체 생성 (티켓 + 대화 + 첨부파일)
+                    integrated_ticket = create_integrated_ticket_object(
+                        ticket=ticket,
+                        conversations=ticket.get("conversations", []),
+                        attachments=ticket.get("all_attachments", [])
+                    )
+                    
+                    # 통합 객체를 SQLite에 저장
+                    success = store_integrated_object_to_sqlite(
+                        db=db, 
+                        integrated_object=integrated_ticket, 
+                        company_id=DEFAULT_COMPANY_ID, 
+                        platform='freshdesk'
+                    )
+                    
+                    if success:
+                        tickets_saved += 1
+                        if tickets_saved % 10 == 0:
+                            logger.info(f"📊 통합 티켓 객체 저장 진행상황: {tickets_saved}/{len(tickets)}")
+                except Exception as e:
+                    logger.error(f"통합 티켓 객체 저장 실패 (ID: {ticket.get('id')}): {e}")
+            
+            # 지식베이스 문서를 통합 객체로 변환하여 저장
+            articles_saved = 0
+            for article in articles:
+                try:
+                    # 통합 객체 생성 (문서 + 첨부파일)
+                    integrated_article = create_integrated_article_object(
+                        article=article,
+                        attachments=article.get("attachments", [])
+                    )
+                    
+                    # 통합 객체를 SQLite에 저장
+                    success = store_integrated_object_to_sqlite(
+                        db=db, 
+                        integrated_object=integrated_article, 
+                        company_id=DEFAULT_COMPANY_ID, 
+                        platform='freshdesk'
+                    )
+                    
+                    if success:
+                        articles_saved += 1
+                        if articles_saved % 10 == 0:
+                            logger.info(f"📊 통합 문서 객체 저장 진행상황: {articles_saved}/{len(articles)}")
+                except Exception as e:
+                    logger.error(f"통합 문서 객체 저장 실패 (ID: {article.get('id')}): {e}")
+            
+            # 수집 작업 완료 로그
+            job_end_data = {
+                'job_id': job_id,
+                'company_id': DEFAULT_COMPANY_ID,
+                'job_type': 'ingest',
+                'status': 'completed',
+                'start_time': job_start_data['start_time'],
+                'end_time': datetime.now().isoformat(),
+                'tickets_collected': tickets_saved,
+                'articles_collected': articles_saved,
+                'errors_count': 0
+            }
+            db.log_collection_job(job_end_data)
+            
+            logger.info(f"✅ SQLite 저장 완료: 티켓 {tickets_saved}개, 지식베이스 문서 {articles_saved}개")
+            logger.info(f"📈 수집 통계: {db.get_collection_stats(DEFAULT_COMPANY_ID)}")
+            db.disconnect()
+            
+        except Exception as e:
+            logger.error(f"SQLite 저장 중 오류 발생: {e}")
+            # 실패 로그 기록
+            try:
+                job_error_data = {
+                    'job_id': job_id,
+                    'company_id': DEFAULT_COMPANY_ID,
+                    'job_type': 'ingest',
+                    'status': 'failed',
+                    'start_time': job_start_data.get('start_time', datetime.now().isoformat()),
+                    'end_time': datetime.now().isoformat(),
+                    'errors_count': 1,
+                    'error_message': str(e)
+                }
+                db.log_collection_job(job_error_data)
+                db.disconnect()
+            except:
+                pass  # 오류 로그 기록 실패는 무시
+            # SQLite 저장 실패해도 벡터 DB 저장은 계속 진행
+
         # 2. 삭제된 문서 감지 및 처리 (증분 업데이트 모드에서만)
         if incremental:
             # 회사 문서 수 확인 (상세 ID 목록은 Qdrant에서는 직접 조회가 어려움)
@@ -525,7 +828,7 @@ async def ingest(
             existing_count = vector_db.count(company_id=DEFAULT_COMPANY_ID)
             logger.info(f"현재 문서 {existing_count}개 확인됨 (삭제 처리 후, 최대 1000개 ID 샘플링)")
 
-        logger.info("티켓 데이터 처리 중...")
+        logger.info("티켓 데이터를 통합 객체로 처리 중...")
         for t in tickets:
             # ID 체계 개선: ID 생성 방식 수정
             original_id = str(t.get('id'))  # 원본 ID를 문자열로 변환
@@ -545,9 +848,16 @@ async def ingest(
                     detail = await fetch_ticket_details(ticket_id, domain=domain, api_key=api_key)
                     if detail:
                         t.update({k: v for k, v in detail.items() if k not in t or not t[k]})
+            
+            # 통합 객체 생성 (티켓 + 대화 + 첨부파일)
+            integrated_ticket = create_integrated_ticket_object(
+                ticket=t,
+                conversations=t.get("conversations", []),
+                attachments=t.get("all_attachments", [])
+            )
                     
             # 첨부파일(이미지 등) 메타데이터만 저장
-            attachments = t.get("attachments") or t.get("all_attachments")
+            attachments = integrated_ticket.get("all_attachments", [])
             attachment_meta = []
             if attachments:
                 for att in attachments:
@@ -565,12 +875,12 @@ async def ingest(
                     }
                     attachment_meta.append(meta)  # 실제로 리스트에 추가
                     
-            # Qdrant에 저장할 문서 구조 생성
+            # Qdrant에 저장할 문서 구조 생성 - 통합 텍스트 사용
             doc = {
                 "id": doc_id,  # 내부 처리용 ID (접두어 포함)
-                "text": t.get("description_text") or t.get("description") or "",
+                "text": integrated_ticket.get("integrated_text", ""),  # 통합 텍스트 사용
                 "metadata": {
-                    **t,
+                    **integrated_ticket,
                     "original_id": original_id,  # 원본 ID를 문자열로 저장 (접두어 없음)
                     "doc_type": "ticket",  # 문서 타입 명시적 저장
                     "attachments": attachment_meta
@@ -578,16 +888,23 @@ async def ingest(
             }
             all_documents.append(doc)
 
-        logger.info("지식베이스 문서 처리 중...")
+        logger.info("지식베이스 문서를 통합 객체로 처리 중...")
         for a in articles:
             # ID 체계 개선: ID 생성 방식 수정
             original_id = str(a.get('id'))  # 원본 ID를 문자열로 변환
             doc_id = f"kb-{original_id}"  # Qdrant 포인트 ID 생성용 (접두어 포함)
+            
+            # 통합 객체 생성 (문서 + 첨부파일)
+            integrated_article = create_integrated_article_object(
+                article=a,
+                attachments=a.get("attachments", [])
+            )
+            
             doc = {
                 "id": doc_id,  # 내부 처리용 ID (접두어 포함)
-                "text": a.get("description_text") or a.get("description") or "",
+                "text": integrated_article.get("integrated_text", ""),  # 통합 텍스트 사용
                 "metadata": {
-                    **a,
+                    **integrated_article,
                     "original_id": original_id,  # 원본 ID를 문자열로 저장 (접두어 없음)
                     "doc_type": "kb"  # 문서 타입 명시적 저장
                 }
@@ -1093,3 +1410,198 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"예상치 못한 오류 발생: {e}", exc_info=True)
         exit(1)
+
+def extract_integrated_text_for_summary(integrated_object: Dict[str, Any], max_length: int = 5000) -> str:
+    """
+    통합 객체에서 요약에 적합한 텍스트를 추출합니다.
+    
+    Args:
+        integrated_object: 통합 객체 (티켓 또는 문서)
+        max_length: 최대 텍스트 길이
+        
+    Returns:
+        str: 요약용 텍스트
+    """
+    text_parts = []
+    
+    object_type = integrated_object.get("object_type", "unknown")
+    
+    if object_type == "integrated_ticket":
+        # 티켓 제목과 설명
+        if integrated_object.get("subject"):
+            text_parts.append(f"티켓 제목: {integrated_object['subject']}")
+        
+        if integrated_object.get("description_text"):
+            text_parts.append(f"티켓 설명: {integrated_object['description_text']}")
+        elif integrated_object.get("description"):
+            text_parts.append(f"티켓 설명: {integrated_object['description']}")
+        
+        # 중요한 대화만 선별 (길이 제한)
+        conversations = integrated_object.get("conversations", [])
+        important_conversations = []
+        
+        for conv in conversations[:5]:  # 최대 5개의 대화만 포함
+            if conv.get("body_text"):
+                if len(conv["body_text"]) > 50:  # 의미있는 길이의 대화만
+                    important_conversations.append(conv["body_text"][:200])  # 200자로 제한
+            elif conv.get("body"):
+                if len(conv["body"]) > 50:
+                    important_conversations.append(conv["body"][:200])
+        
+        if important_conversations:
+            text_parts.append(f"주요 대화: {' | '.join(important_conversations)}")
+            
+        # 첨부파일 정보
+        attachments = integrated_object.get("all_attachments", [])
+        if attachments:
+            attachment_names = [att.get("name", "Unknown") for att in attachments[:3]]  # 최대 3개만
+            text_parts.append(f"첨부파일: {', '.join(attachment_names)}")
+    
+    elif object_type == "integrated_article":
+        # 문서 제목과 설명
+        if integrated_object.get("title"):
+            text_parts.append(f"문서 제목: {integrated_object['title']}")
+        
+        if integrated_object.get("description"):
+            text_parts.append(f"문서 내용: {integrated_object['description']}")
+        
+        # 첨부파일 정보
+        attachments = integrated_object.get("attachments", [])
+        if attachments:
+            attachment_names = [att.get("name", "Unknown") for att in attachments[:3]]
+            text_parts.append(f"첨부파일: {', '.join(attachment_names)}")
+    
+    # 텍스트 결합 및 길이 제한
+    full_text = "\n\n".join(text_parts)
+    
+    if len(full_text) > max_length:
+        full_text = full_text[:max_length] + "..."
+    
+    return full_text
+
+
+def extract_integrated_text_for_embedding(integrated_object: Dict[str, Any]) -> str:
+    """
+    통합 객체에서 임베딩에 적합한 텍스트를 추출합니다.
+    
+    Args:
+        integrated_object: 통합 객체
+        
+    Returns:
+        str: 임베딩용 텍스트
+    """
+    # integrated_text가 이미 생성되어 있으면 그것을 사용
+    if integrated_object.get("integrated_text"):
+        return integrated_object["integrated_text"]
+    
+    # 아니면 직접 생성
+    text_parts = []
+    object_type = integrated_object.get("object_type", "unknown")
+    
+    if object_type == "integrated_ticket":
+        if integrated_object.get("subject"):
+            text_parts.append(integrated_object["subject"])
+        if integrated_object.get("description_text") or integrated_object.get("description"):
+            text_parts.append(integrated_object.get("description_text") or integrated_object.get("description"))
+        
+        # 모든 대화 포함
+        conversations = integrated_object.get("conversations", [])
+        for conv in conversations:
+            if conv.get("body_text"):
+                text_parts.append(conv["body_text"])
+            elif conv.get("body"):
+                text_parts.append(conv["body"])
+    
+    elif object_type == "integrated_article":
+        if integrated_object.get("title"):
+            text_parts.append(integrated_object["title"])
+        if integrated_object.get("description"):
+            text_parts.append(integrated_object["description"])
+    
+    return " ".join(text_parts)
+
+
+def get_integrated_object_from_sqlite(db: SQLiteDatabase, doc_type: str, object_id: str, company_id: str) -> Optional[Dict[str, Any]]:
+    """
+    SQLite에서 통합 객체를 조회합니다.
+    
+    Args:
+        db: SQLite 데이터베이스 인스턴스
+        doc_type: 문서 타입 ('ticket' 또는 'kb')
+        object_id: 객체 ID
+        company_id: 회사 ID
+        
+    Returns:
+        Optional[Dict[str, Any]]: 통합 객체 또는 None
+    """
+    try:
+        if doc_type == "ticket":
+            # 티켓 조회
+            result = db.get_ticket(ticket_id=object_id, company_id=company_id)
+            if result and result.get("raw_data"):
+                integrated_object = json.loads(result["raw_data"])
+                return integrated_object
+        elif doc_type == "kb":
+            # 지식베이스 문서 조회
+            result = db.get_article(article_id=object_id, company_id=company_id)
+            if result and result.get("raw_data"):
+                integrated_object = json.loads(result["raw_data"])
+                return integrated_object
+        
+        return None
+    except Exception as e:
+        logger.error(f"통합 객체 조회 실패: {e}")
+        return None
+
+
+def search_integrated_objects_from_sqlite(db: SQLiteDatabase, query: str, company_id: str, doc_type: Optional[str] = None, limit: int = 10) -> List[Dict[str, Any]]:
+    """
+    SQLite에서 통합 객체를 검색합니다.
+    
+    Args:
+        db: SQLite 데이터베이스 인스턴스
+        query: 검색 쿼리
+        company_id: 회사 ID
+        doc_type: 문서 타입 필터 ('ticket', 'kb', 또는 None)
+        limit: 결과 개수 제한
+        
+    Returns:
+        List[Dict[str, Any]]: 검색된 통합 객체 목록
+    """
+    try:
+        results = []
+        
+        if doc_type is None or doc_type == "ticket":
+            # 티켓 검색
+            ticket_results = db.search_tickets(query=query, company_id=company_id, limit=limit)
+            for result in ticket_results:
+                if result.get("raw_data"):
+                    try:
+                        integrated_object = json.loads(result["raw_data"])
+                        integrated_object["search_score"] = result.get("score", 0)
+                        results.append(integrated_object)
+                    except json.JSONDecodeError:
+                        continue
+        
+        if doc_type is None or doc_type == "kb":
+            # 지식베이스 검색
+            article_results = db.search_articles(query=query, company_id=company_id, limit=limit)
+            for result in article_results:
+                if result.get("raw_data"):
+                    try:
+                        integrated_object = json.loads(result["raw_data"])
+                        integrated_object["search_score"] = result.get("score", 0)
+                        results.append(integrated_object)
+                    except json.JSONDecodeError:
+                        continue
+        
+        # 점수 기준 정렬
+        results.sort(key=lambda x: x.get("search_score", 0), reverse=True)
+        return results[:limit]
+        
+    except Exception as e:
+        logger.error(f"통합 객체 검색 실패: {e}")
+        return []
+
+
+# 기존의 sanitize_metadata 함수 유지...

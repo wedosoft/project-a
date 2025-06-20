@@ -5,7 +5,13 @@ FastAPI 의존성 함수 정의
 """
 
 from typing import Optional
-from fastapi import Header
+from fastapi import Header, HTTPException
+import logging
+
+from core.utils import extract_company_id
+
+# 로거 설정
+logger = logging.getLogger(__name__)
 
 # 전역 변수들 (main.py에서 설정됨)
 _vector_db = None
@@ -79,17 +85,67 @@ def get_ticket_summary_cache():
 
 
 async def get_company_id(
-    x_company_id: Optional[str] = Header(None, alias="X-Company-ID")
+    x_company_id: Optional[str] = Header(None, alias="X-Company-ID"),
+    x_freshdesk_domain: Optional[str] = Header(None, alias="X-Freshdesk-Domain"),
+    x_zendesk_domain: Optional[str] = Header(None, alias="X-Zendesk-Domain")
 ) -> str:
     """
-    현재 사용자의 회사 ID를 반환합니다.
-    X-Company-ID 헤더가 제공되지 않으면 "default" 값을 사용합니다.
-    실제 환경에서는 인증 토큰에서 추출하는 방식으로 변경해야 합니다.
+    멀티테넌트 보안을 위한 company_id 자동 추출
+    
+    지침서에 따른 우선순위:
+    1. X-Company-ID 헤더 (명시적 지정)
+    2. X-Freshdesk-Domain 헤더에서 자동 추출
+    3. X-Zendesk-Domain 헤더에서 자동 추출
+    4. 환경변수 FRESHDESK_DOMAIN에서 자동 추출 (fallback)
+    
+    Args:
+        x_company_id: 명시적으로 지정된 company_id 헤더
+        x_freshdesk_domain: Freshdesk 도메인 헤더
+        x_zendesk_domain: Zendesk 도메인 헤더
+        
+    Returns:
+        str: 추출된 company_id
+        
+    Raises:
+        HTTPException: company_id를 추출할 수 없는 경우
     """
-    if not x_company_id:
-        # X-Company-ID 헤더가 없으면 기본값 "default" 사용
-        return "default"
-    return x_company_id
+    # 1. 명시적 헤더 우선
+    if x_company_id:
+        logger.info(f"명시적 X-Company-ID 헤더 사용: {x_company_id}")
+        return x_company_id
+    
+    # 2. 도메인 헤더에서 자동 추출
+    domain_headers = [
+        ("X-Freshdesk-Domain", x_freshdesk_domain),
+        ("X-Zendesk-Domain", x_zendesk_domain),
+    ]
+    
+    for header_name, domain in domain_headers:
+        if domain:
+            try:
+                company_id = extract_company_id(domain)
+                logger.info(f"{header_name} 헤더에서 company_id 자동 추출: {domain} → {company_id}")
+                return company_id
+            except ValueError as e:
+                logger.warning(f"{header_name} 헤더 도메인 추출 실패 ({domain}): {e}")
+                continue
+    
+    # 3. 환경변수 fallback (개발환경용)
+    import os
+    default_domain = os.getenv("FRESHDESK_DOMAIN")
+    if default_domain:
+        try:
+            company_id = extract_company_id(default_domain)
+            logger.info(f"환경변수 FRESHDESK_DOMAIN에서 company_id 추출: {default_domain} → {company_id}")
+            return company_id
+        except ValueError as e:
+            logger.warning(f"환경변수 FRESHDESK_DOMAIN 추출 실패 ({default_domain}): {e}")
+    
+    # 4. 모든 방법 실패 시 에러
+    raise HTTPException(
+        status_code=400,
+        detail="company_id를 추출할 수 없습니다. X-Company-ID 헤더 또는 유효한 플랫폼 도메인 헤더를 제공해주세요."
+    )
 
 
 async def get_platform(
