@@ -90,7 +90,7 @@ backend/
 │   │   ├── __init__.py
 │   │   ├── init.py                 # /init 엔드포인트
 │   │   ├── query.py                # /query, /query/stream
-│   │   ├── generate_reply.py       # /generate_reply, /generate_reply/stream
+│   │   ├── reply.py                # /reply, /reply/stream
 │   │   ├── ingest.py               # /ingest
 │   │   ├── health.py               # /health
 │   │   ├── metrics.py              # /metrics
@@ -112,7 +112,7 @@ backend/
 │   │   ├── chains/                 # langchain 체인 구현
 │   │   │   ├── __init__.py
 │   │   │   ├── summarization.py    # 요약 체인
-│   │   │   ├── qa_chain.py         # 질답 체인
+│   │   │   ├── init_chain.py       # 초기화 병렬 체인 (/init 엔드포인트용)
 │   │   │   └── search_chain.py     # 검색 체인
 │   │   ├── prompts/                # langchain 프롬프트 템플릿
 │   │   │   ├── __init__.py

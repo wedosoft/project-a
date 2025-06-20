@@ -63,19 +63,20 @@ class VectorDBInterface(ABC):
         self, 
         query_embedding: List[float], 
         top_k: int, 
-        company_id: str
+        company_id: str,
+        platform: Optional[str] = None
     ) -> Dict[str, Any]:
-        """벡터 검색"""
+        """벡터 검색 (멀티플랫폼/멀티테넌트 지원)"""
         pass
 
     @abstractmethod
-    def count(self, company_id: Optional[str] = None) -> int:
-        """문서 수 반환"""
+    def count(self, company_id: Optional[str] = None, platform: Optional[str] = None) -> int:
+        """문서 수 반환 (멀티플랫폼/멀티테넌트 지원)"""
         pass
     
     @abstractmethod
-    def get_by_id(self, original_id_value: str, doc_type: Optional[str] = None, company_id: Optional[str] = None) -> Dict[str, Any]:
-        """원본 ID로 단일 문서 조회"""
+    def get_by_id(self, original_id_value: str, doc_type: Optional[str] = None, company_id: Optional[str] = None, platform: Optional[str] = None) -> Dict[str, Any]:
+        """원본 ID로 단일 문서 조회 (멀티플랫폼/멀티테넌트 지원)"""
         pass
 
     @abstractmethod
@@ -124,8 +125,10 @@ class QdrantAdapter(VectorDBInterface):
             # 필수 인덱스 생성 (성능 및 필터링 향상)
             try:
                 logger.info(f"필수 필드에 대한 인덱스 생성 중...")
-                # 회사 ID 인덱스 생성
+                # 회사 ID 인덱스 생성 (멀티테넌트 지원)
                 self.client.create_payload_index(collection_name=self.collection_name, field_name="company_id", field_schema="keyword")
+                # 플랫폼 인덱스 생성 (멀티플랫폼 지원)
+                self.client.create_payload_index(collection_name=self.collection_name, field_name="platform", field_schema="keyword")
                 # 원본 ID 인덱스 생성
                 try:
                     self.client.create_payload_index(collection_name=self.collection_name, field_name="original_id", field_schema="keyword")
@@ -149,7 +152,7 @@ class QdrantAdapter(VectorDBInterface):
                 except Exception as status_err:
                     logger.warning(f"status 인덱스 생성 실패: {status_err}")
                 
-                logger.info(f"인덱스 생성 완료")
+                logger.info(f"멀티플랫폼/멀티테넌트 인덱스 생성 완료")
             except Exception as e:
                 logger.warning(f"인덱스 생성 중 오류 발생 (비정상적인 동작이 예상될 수 있음): {e}")
                 
@@ -181,10 +184,13 @@ class QdrantAdapter(VectorDBInterface):
         """
         if len(texts) != len(embeddings) or len(texts) != len(metadatas) or len(texts) != len(ids):
             raise ValueError("텍스트, 임베딩, 메타데이터, ID 목록의 길이가 일치해야 합니다")
-        # 모든 메타데이터에 company_id, doc_type, id, original_id가 포함되어 있는지 확인 및 보정
+        # 모든 메타데이터에 company_id, platform, doc_type, id, original_id가 포함되어 있는지 확인 및 보정
         for i, (metadata, id) in enumerate(zip(metadatas, ids)):
             if "company_id" not in metadata:
                 raise ValueError(f"메타데이터 #{i}에 company_id가 없습니다")
+            # platform 필드 확인 (멀티플랫폼 지원)
+            if "platform" not in metadata:
+                raise ValueError(f"메타데이터 #{i}에 platform이 없습니다")
             # doc_type 필수 보정: 없으면 예외
             if "doc_type" not in metadata or not metadata["doc_type"]:
                 raise ValueError(f"메타데이터 #{i}에 doc_type이 없습니다. id={id}, metadata={metadata}")
@@ -332,15 +338,17 @@ class QdrantAdapter(VectorDBInterface):
         query_embedding: List[float], 
         top_k: int, 
         company_id: str,
+        platform: Optional[str] = None,  # 플랫폼 필터링 (freshdesk, zendesk 등)
         doc_type: str = None  # 문서 타입 필터링 (ticket, kb)
     ) -> Dict[str, Any]:
         """
-        벡터 검색
+        벡터 검색 (멀티플랫폼/멀티테넌트 지원)
         
         Args:
             query_embedding: 쿼리 임베딩
             top_k: 반환할 최대 문서 수
             company_id: 회사 ID (필수)
+            platform: 플랫폼 필터 (선택사항, "freshdesk", "zendesk" 등)
             doc_type: 문서 타입 필터 (선택사항, "ticket" 또는 "kb")
             
         Returns:
@@ -349,23 +357,29 @@ class QdrantAdapter(VectorDBInterface):
         if not company_id:
             raise ValueError("company_id는 필수 매개변수입니다.")
             
-        # 필터 조건 구성 - 인덱스 문제로 초기에는 company_id만 사용
+        # 필터 조건 구성 - company_id는 필수
         filter_conditions = [
             FieldCondition(key="company_id", match=MatchValue(value=company_id))
         ]
         
+        # 플랫폼 필터 추가 (멀티플랫폼 지원)
+        if platform:
+            filter_conditions.append(
+                FieldCondition(key="platform", match=MatchValue(value=platform))
+            )
+        
         # doc_type 필드의 인덱스 문제를 해결하기 위해 메모리에서 필터링 수행
         use_doc_type_filter = doc_type is not None
-        logger.info(f"검색 요청: company_id={company_id}, doc_type={doc_type}, top_k={top_k}")
+        logger.info(f"검색 요청: company_id={company_id}, platform={platform}, doc_type={doc_type}, top_k={top_k}")
         
-        # 기본 검색은 company_id만 사용하여 수행
+        # 기본 검색은 company_id와 platform 필터로 수행
         search_filter = Filter(must=filter_conditions)
         
         try:
             # doc_type 필터링이 필요한 경우 더 많은 결과를 요청하여 메모리 내 필터링 수행
             # 더 많은 결과를 가져와 필터링하기 위해 배수를 10으로 설정
             fetch_limit = top_k * 10 if use_doc_type_filter else top_k
-            logger.info(f"Qdrant 검색 시도 (company_id={company_id}, 검색 크기={fetch_limit})")
+            logger.info(f"Qdrant 검색 시도 (company_id={company_id}, platform={platform}, 검색 크기={fetch_limit})")
             
             search_results = self.client.search(
                 collection_name=self.collection_name,
@@ -541,35 +555,38 @@ class QdrantAdapter(VectorDBInterface):
             "skipped_count": skipped_count if use_doc_type_filter else 0
         }
 
-    def count(self, company_id: Optional[str] = None) -> int:
+    def count(self, company_id: Optional[str] = None, platform: Optional[str] = None) -> int:
         """
-        문서 수 반환
+        문서 수 반환 (멀티플랫폼/멀티테넌트 지원)
         
         Args:
             company_id: 특정 회사의 문서만 카운트할 경우 회사 ID
+            platform: 특정 플랫폼의 문서만 카운트할 경우 플랫폼 이름
             
         Returns:
             문서 수
         """
         try:
+            # 필터 조건 구성
+            filter_conditions = []
             if company_id:
-                # 특정 회사의 문서 수 카운트
-                # Qdrant 2.x 버전에서는 filter를 지원하지 않을 수 있음
-                # 대체 방법으로 검색을 사용하여 카운트
+                filter_conditions.append(
+                    FieldCondition(key="company_id", match=MatchValue(value=company_id))
+                )
+            if platform:
+                filter_conditions.append(
+                    FieldCondition(key="platform", match=MatchValue(value=platform))
+                )
+            
+            if filter_conditions:
+                # 특정 조건의 문서 수 카운트
                 try:
-                    company_filter = Filter(
-                        must=[
-                            FieldCondition(
-                                key="company_id",
-                                match=MatchValue(value=company_id)
-                            )
-                        ]
-                    )
+                    filter_obj = Filter(must=filter_conditions)
                     
                     # 검색 결과로 카운트
                     count = self.client.count(
                         collection_name=self.collection_name,
-                        filter=company_filter  # Qdrant 버전에 따라 filter 또는 count_filter 사용
+                        filter=filter_obj  # Qdrant 버전에 따라 filter 또는 count_filter 사용
                     )
                     return count.count
                 except Exception as inner_e:
@@ -594,9 +611,22 @@ class QdrantAdapter(VectorDBInterface):
                         if not batch:
                             break
                             
-                        # company_id로 필터링하여 카운트
-                        company_matches = sum(1 for point in batch if point.payload.get("company_id") == company_id)
-                        count += company_matches
+                        # 조건에 맞는 문서 필터링하여 카운트
+                        for point in batch:
+                            payload = point.payload
+                            matches = True
+                            
+                            # company_id 필터링
+                            if company_id and payload.get("company_id") != company_id:
+                                matches = False
+                            
+                            # platform 필터링
+                            if platform and payload.get("platform") != platform:
+                                matches = False
+                            
+                            if matches:
+                                count += 1
+                        
                         total_scanned += len(batch)
                         
                         # 다음 오프셋 설정
@@ -604,7 +634,13 @@ class QdrantAdapter(VectorDBInterface):
                         if offset is None:
                             break
                     
-                    logger.info(f"{total_scanned}개 문서 중 {count}개가 company_id '{company_id}'와 일치합니다.")
+                    filter_desc = []
+                    if company_id:
+                        filter_desc.append(f"company_id='{company_id}'")
+                    if platform:
+                        filter_desc.append(f"platform='{platform}'")
+                    
+                    logger.info(f"{total_scanned}개 문서 중 {count}개가 필터 조건({', '.join(filter_desc)})과 일치합니다.")
                     return count
             else:
                 # 전체 문서 수 카운트
@@ -614,14 +650,15 @@ class QdrantAdapter(VectorDBInterface):
             logger.error(f"문서 수 카운트 실패: {e}")
             return 0
 
-    def get_by_id(self, original_id_value: str, doc_type: Optional[str] = None, company_id: Optional[str] = None) -> Dict[str, Any]:
+    def get_by_id(self, original_id_value: str, doc_type: Optional[str] = None, company_id: Optional[str] = None, platform: Optional[str] = None) -> Dict[str, Any]:
         """
-        원본 ID로 단일 문서 조회
+        원본 ID로 단일 문서 조회 (멀티플랫폼/멀티테넌트 지원)
 
         Args:
             original_id_value: 조회할 문서의 원본 ID (Freshdesk 원본 숫자 ID의 문자열 형태, 예: "12345")
             doc_type: 문서 타입 필터 ("ticket" 또는 "kb", None이거나 빈 문자열이면 예외 발생)
             company_id: 회사 ID 필터 (선택 사항, None이면 "default" 사용)
+            platform: 플랫폼 필터 (선택 사항, "freshdesk", "zendesk" 등)
 
         Returns:
             조회된 문서 정보 (메타데이터와 임베딩 포함)
@@ -636,9 +673,9 @@ class QdrantAdapter(VectorDBInterface):
         try:
             # company_id가 None이면 "default"로 설정
             search_company_id = company_id if company_id else "default"
-            logger.info(f"문서 조회 시작 (original_id: {original_id_value}, doc_type: {doc_type}, company_id: {search_company_id})")
+            logger.info(f"문서 조회 시작 (original_id: {original_id_value}, doc_type: {doc_type}, company_id: {search_company_id}, platform: {platform})")
             
-            # 필터 조건: company_id, original_id, doc_type 모두 필수
+            # 필터 조건: company_id, original_id, doc_type 필수, platform 선택사항
             filter_conditions = [
                 FieldCondition(
                     key="company_id",
@@ -653,6 +690,16 @@ class QdrantAdapter(VectorDBInterface):
                     match=MatchValue(value=doc_type)
                 )
             ]
+            
+            # platform 필터 추가 (멀티플랫폼 지원)
+            if platform:
+                filter_conditions.append(
+                    FieldCondition(
+                        key="platform",
+                        match=MatchValue(value=platform)
+                    )
+                )
+            
             filter_log_str = ", ".join([f"{c.key}='{c.match.value}'" for c in filter_conditions])
             logger.info(f"원본 ID '{original_id_value}'로 문서 검색 시도 (필터 조건: {filter_log_str})")
             
