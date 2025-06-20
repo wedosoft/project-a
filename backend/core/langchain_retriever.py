@@ -79,21 +79,26 @@ class OptimizedVectorRetriever:
         
         logger.info(f"OptimizedVectorRetriever 초기화 완료 (collection: {collection_name})")
     
-    def _create_filter(self, company_id: str, doc_type: Optional[str] = None, status: Optional[int] = None) -> Filter:
+    def _create_filter(self, company_id: str, doc_type: Optional[str] = None, status: Optional[int] = None, platform: Optional[str] = None) -> Filter:
         """
-        Qdrant 필터 생성
+        Qdrant 필터 생성 (기존 데이터 호환)
         
         Args:
             company_id: 회사 ID
             doc_type: 문서 타입 ("ticket" 또는 "kb")
             status: KB 문서 상태 (2: published)
+            platform: 플랫폼 ("freshdesk" 등, 선택적)
             
         Returns:
             Qdrant 필터 객체
         """
-        conditions = [
-            FieldCondition(key="company_id", match=MatchValue(value=company_id))
-        ]
+        conditions = []
+        
+        # company_id 필터 (기존 데이터 호환을 위해 조건부 추가)
+        if company_id != "default":
+            conditions.append(
+                FieldCondition(key="company_id", match=MatchValue(value=company_id))
+            )
         
         if doc_type:
             conditions.append(
@@ -105,6 +110,16 @@ class OptimizedVectorRetriever:
             conditions.append(
                 FieldCondition(key="status", match=MatchValue(value=status))
             )
+        
+        # platform 필터 (있는 경우에만 추가)
+        if platform:
+            conditions.append(
+                FieldCondition(key="platform", match=MatchValue(value=platform))
+            )
+        
+        # 조건이 없으면 빈 필터 반환 (모든 문서 검색)
+        if not conditions:
+            return None
         
         return Filter(must=conditions)
     
@@ -379,18 +394,27 @@ class OptimizedVectorRetriever:
             }
     
     def _format_kb_results(self, documents: List[Document]) -> List[Dict[str, Any]]:
-        """KB 검색 결과 포맷팅"""
+        """KB 검색 결과 포맷팅 - DocumentInfo 모델과 호환"""
         results = []
         for doc in documents:
             metadata = doc.metadata
+            content_preview = doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content
             results.append({
-                "id": metadata.get("kb_id", ""),
+                # DocumentInfo 모델 필수 필드들
                 "title": metadata.get("title", "제목 없음"),
+                "content": content_preview,
+                "source_id": metadata.get("kb_id", ""),
+                "source_url": metadata.get("url", ""),
+                "relevance_score": metadata.get("score", 0.0),
+                "doc_type": "kb",
+                
+                # 기존 호환성을 위한 추가 필드들
+                "id": metadata.get("kb_id", ""),
                 "description": metadata.get("description", ""),
                 "category": metadata.get("category", "일반"),
                 "tags": metadata.get("tags", []),
                 "score": metadata.get("score", 0.0),
-                "content_preview": doc.page_content[:200] + "..." if len(doc.page_content) > 200 else doc.page_content,
+                "content_preview": content_preview,
                 "url": metadata.get("url", ""),
                 "updated_at": metadata.get("updated_at", ""),
                 "status": metadata.get("status", 1)

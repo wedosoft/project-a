@@ -45,12 +45,12 @@ applyTo: "**"
 
 ### 프로덕션 단계
 ```
-PostgreSQL + Qdrant → AWS RDS → 멀티테넌트 → 확장성 확보
+PostgreSQL + Qdrant → AWS RDS → 멀티플랫폼/멀티테넌트 → 확장성 확보
 ```
 
-- **Vector DB**: Qdrant Cloud (멀티테넌트 네임스페이스)
-- **App DB**: PostgreSQL (AWS RDS, Row-level Security)
-- **Secrets**: AWS Secrets Manager (API 키 관리)
+- **Vector DB**: Qdrant Cloud (단일 `documents` 컬렉션, platform/company_id 필터링)
+- **App DB**: PostgreSQL (AWS RDS, Row-level Security, 멀티플랫폼 지원)
+- **Secrets**: AWS Secrets Manager (통합 API 키 관리)
 - **Cache**: Redis Cluster (고가용성)
 
 ---
@@ -78,11 +78,11 @@ project-a/
 
 ### 프로덕션 DB 스키마
 ```sql
--- 티켓 원본 및 메타데이터
+-- 티켓 원본 및 메타데이터 (멀티플랫폼 지원)
 CREATE TABLE tickets (
     id SERIAL PRIMARY KEY,
     company_id VARCHAR(100) NOT NULL,
-    platform VARCHAR(50) NOT NULL,
+    platform VARCHAR(50) NOT NULL, -- 'freshdesk', 'zendesk', 'servicenow' 등
     ticket_id VARCHAR(100) NOT NULL,
     raw_data JSONB NOT NULL,
     processed_data JSONB,
@@ -93,11 +93,27 @@ CREATE TABLE tickets (
     UNIQUE(company_id, platform, ticket_id)
 );
 
+-- 지식베이스 문서 (멀티플랫폼 지원)
+CREATE TABLE knowledge_base (
+    id SERIAL PRIMARY KEY,
+    company_id VARCHAR(100) NOT NULL,
+    platform VARCHAR(50) NOT NULL,
+    kb_id VARCHAR(100) NOT NULL,
+    raw_data JSONB NOT NULL,
+    processed_data JSONB,
+    summary JSONB,
+    status VARCHAR(50) DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(company_id, platform, kb_id)
+);
+
 -- LLM 처리 큐
 CREATE TABLE processing_queue (
     id SERIAL PRIMARY KEY,
     company_id VARCHAR(100) NOT NULL,
-    item_type VARCHAR(50) NOT NULL,
+    platform VARCHAR(50) NOT NULL,
+    item_type VARCHAR(50) NOT NULL, -- 'ticket', 'kb'
     item_id VARCHAR(100) NOT NULL,
     priority INTEGER DEFAULT 0,
     status VARCHAR(50) DEFAULT 'pending',
@@ -110,6 +126,7 @@ CREATE TABLE processing_queue (
 CREATE TABLE feedback (
     id SERIAL PRIMARY KEY,
     company_id VARCHAR(100) NOT NULL,
+    platform VARCHAR(50) NOT NULL,
     recommendation_id VARCHAR(100) NOT NULL,
     user_id VARCHAR(100),
     feedback_type VARCHAR(50), -- 'thumbs_up', 'thumbs_down'
@@ -118,10 +135,46 @@ CREATE TABLE feedback (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
--- Row-level Security 설정
+-- 플랫폼별 API 설정 관리
+CREATE TABLE platform_configs (
+    id SERIAL PRIMARY KEY,
+    company_id VARCHAR(100) NOT NULL,
+    platform VARCHAR(50) NOT NULL,
+    config_data JSONB NOT NULL, -- API 키는 secrets manager 참조 ID만 저장
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(company_id, platform)
+);
+
+-- Row-level Security 설정 (멀티테넌트 격리)
 ALTER TABLE tickets ENABLE ROW LEVEL SECURITY;
 CREATE POLICY tickets_company_isolation ON tickets
     FOR ALL TO app_user USING (company_id = current_setting('app.current_company_id'));
+
+ALTER TABLE knowledge_base ENABLE ROW LEVEL SECURITY;
+CREATE POLICY kb_company_isolation ON knowledge_base
+    FOR ALL TO app_user USING (company_id = current_setting('app.current_company_id'));
+
+ALTER TABLE processing_queue ENABLE ROW LEVEL SECURITY;
+CREATE POLICY queue_company_isolation ON processing_queue
+    FOR ALL TO app_user USING (company_id = current_setting('app.current_company_id'));
+
+ALTER TABLE feedback ENABLE ROW LEVEL SECURITY;
+CREATE POLICY feedback_company_isolation ON feedback
+    FOR ALL TO app_user USING (company_id = current_setting('app.current_company_id'));
+
+ALTER TABLE platform_configs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY configs_company_isolation ON platform_configs
+    FOR ALL TO app_user USING (company_id = current_setting('app.current_company_id'));
+
+-- 인덱스 최적화 (멀티플랫폼 쿼리 성능)
+CREATE INDEX idx_tickets_company_platform ON tickets(company_id, platform);
+CREATE INDEX idx_tickets_status ON tickets(company_id, platform, status);
+CREATE INDEX idx_kb_company_platform ON knowledge_base(company_id, platform);
+CREATE INDEX idx_queue_company_platform_status ON processing_queue(company_id, platform, status);
+CREATE INDEX idx_feedback_company_platform ON feedback(company_id, platform);
+```
 ```
 
 ---
@@ -138,17 +191,19 @@ CREATE POLICY tickets_company_isolation ON tickets
 **수집 전략**:
 ```python
 # 대용량 데이터 수집 최적화
-async def collect_freshdesk_data(
+async def collect_platform_data(
     company_id: str,
+    platform: str,  # 'freshdesk', 'zendesk', 'servicenow'
     start_date: str,
     end_date: str,
     chunk_size: int = 100
 ):
     """
-    Freshdesk 대용량 데이터 수집 (500만건+ 최적화)
+    멀티플랫폼 대용량 데이터 수집 (500만건+ 최적화)
     
     Args:
         company_id: 고객사 ID (멀티테넌트 격리)
+        platform: 플랫폼 타입 (freshdesk/zendesk/servicenow)
         start_date: 수집 시작일
         end_date: 수집 종료일
         chunk_size: 청크 크기 (Rate Limit 대응)
@@ -157,6 +212,7 @@ async def collect_freshdesk_data(
     # 2. Rate Limit 대응 (요청 간격 조절)
     # 3. 에러 복구 및 재시도 로직
     # 4. 메모리 사용량 최적화
+    # 5. 플랫폼별 Adapter 패턴 적용
 ```
 
 ### 2. LLM 요약 처리
@@ -209,45 +265,54 @@ async def process_tickets_batch(
 
 **벡터 처리**:
 ```python
-# Qdrant 멀티테넌트 설정
+# Qdrant 통합 컬렉션 설정 (멀티플랫폼/멀티테넌트)
 async def store_embeddings(
     company_id: str,
+    platform: str,  # 'freshdesk', 'zendesk', 'servicenow'
     embeddings: List[List[float]],
     metadata: List[Dict],
-    data_type: str = "ticket"
+    data_type: str = "ticket"  # 'ticket' or 'kb'
 ):
     """
-    멀티테넌트 벡터 저장
+    멀티플랫폼/멀티테넌트 벡터 저장 (단일 컬렉션 사용)
     
     Args:
         company_id: 고객사 ID
+        platform: 플랫폼 타입
         embeddings: 임베딩 벡터 리스트
         metadata: 메타데이터 (원본 데이터 포함)
         data_type: 데이터 타입 (ticket/kb)
     """
-    collection_name = f"{company_id}_{data_type}"
+    collection_name = "documents"  # 단일 컬렉션 사용
     
-    # Qdrant 컬렉션 생성 (테넌트별)
-    await qdrant_client.create_collection(
-        collection_name=collection_name,
-        vectors_config=VectorParams(
-            size=1536,  # OpenAI text-embedding-3-small
-            distance=Distance.COSINE
+    # Qdrant 컬렉션 생성 (최초 1회만)
+    try:
+        await qdrant_client.create_collection(
+            collection_name=collection_name,
+            vectors_config=VectorParams(
+                size=1536,  # OpenAI text-embedding-3-small
+                distance=Distance.COSINE
+            )
         )
-    )
+    except Exception:
+        # 이미 컬렉션이 존재하는 경우 무시
+        pass
     
-    # 벡터 저장 (메타데이터 포함)
+    # 벡터 저장 (플랫폼 및 테넌트 정보 포함)
     points = [
         PointStruct(
             id=str(uuid.uuid4()),
             vector=embedding,
             payload={
                 "company_id": company_id,
+                "platform": platform,
                 "data_type": data_type,
-                "ticket_id": metadata[i].get("ticket_id"),
+                "item_id": metadata[i].get("ticket_id") or metadata[i].get("kb_id"),
                 "summary": metadata[i].get("summary"),
                 "original_data": metadata[i].get("original_data"),
-                "created_at": datetime.now().isoformat()
+                "created_at": datetime.now().isoformat(),
+                # 필터링을 위한 복합 키
+                "tenant_key": f"{company_id}_{platform}_{data_type}"
             }
         )
         for i, embedding in enumerate(embeddings)
@@ -356,19 +421,60 @@ class BasePlatformAdapter(ABC):
     async def fetch_knowledge_base(self) -> List[Dict]:
         """지식베이스 수집"""
         pass
+    
+    @abstractmethod
+    def get_platform_name(self) -> str:
+        """플랫폼 이름 반환"""
+        pass
 
 class FreshdeskAdapter(BasePlatformAdapter):
     """Freshdesk 완전 구현"""
+    
+    def get_platform_name(self) -> str:
+        return "freshdesk"
     
     async def fetch_tickets(self, start_date: str, end_date: str) -> List[Dict]:
         # Freshdesk API 호출 및 데이터 정규화
         pass
 
 class ZendeskAdapter(BasePlatformAdapter):
-    """Zendesk 추상화 (향후 구현)"""
+    """Zendesk 구현"""
+    
+    def get_platform_name(self) -> str:
+        return "zendesk"
     
     async def fetch_tickets(self, start_date: str, end_date: str) -> List[Dict]:
-        raise NotImplementedError("Zendesk 어댑터는 향후 구현 예정")
+        # Zendesk API 호출 및 데이터 정규화
+        pass
+
+class ServiceNowAdapter(BasePlatformAdapter):
+    """ServiceNow 구현 (향후 확장)"""
+    
+    def get_platform_name(self) -> str:
+        return "servicenow"
+    
+    async def fetch_tickets(self, start_date: str, end_date: str) -> List[Dict]:
+        raise NotImplementedError("ServiceNow 어댑터는 향후 구현 예정")
+
+# 플랫폼 어댑터 팩토리
+class PlatformAdapterFactory:
+    """플랫폼별 어댑터 생성 팩토리"""
+    
+    _adapters = {
+        "freshdesk": FreshdeskAdapter,
+        "zendesk": ZendeskAdapter,
+        "servicenow": ServiceNowAdapter
+    }
+    
+    @classmethod
+    def create_adapter(cls, platform: str, company_id: str) -> BasePlatformAdapter:
+        """플랫폼별 어댑터 생성"""
+        if platform not in cls._adapters:
+            raise ValueError(f"Unsupported platform: {platform}")
+        
+        adapter_class = cls._adapters[platform]
+        return adapter_class(company_id=company_id)
+```
 ```
 
 ---
@@ -390,19 +496,20 @@ class ZendeskAdapter(BasePlatformAdapter):
 # 1. 피드백 수집
 async def collect_feedback(
     company_id: str,
+    platform: str,  # 플랫폼 정보 추가
     recommendation_id: str,
     feedback_type: str,  # 'thumbs_up', 'thumbs_down'
     user_id: str = None
 ):
-    """사용자 피드백 수집 및 저장"""
+    """사용자 피드백 수집 및 저장 (멀티플랫폼 지원)"""
     
 # 2. 점수 재조정
-async def recalculate_similarity_scores(company_id: str):
-    """피드백 기반 유사도 점수 재조정"""
+async def recalculate_similarity_scores(company_id: str, platform: str = None):
+    """피드백 기반 유사도 점수 재조정 (플랫폼별 또는 전체)"""
     
 # 3. 모델 개선
-async def retrain_recommendation_model(company_id: str):
-    """추천 모델 재학습 (주기적 실행)"""
+async def retrain_recommendation_model(company_id: str, platform: str = None):
+    """추천 모델 재학습 (주기적 실행, 플랫폼별 또는 통합)"""
 ```
 
 ---
@@ -410,25 +517,26 @@ async def retrain_recommendation_model(company_id: str):
 ## 🔐 멀티테넌트 보안 워크플로우
 
 ### 고객별 설정 관리
-- **DB에 저장** (암호화된 API 키)
+- **DB에 저장** (암호화된 API 키는 secrets manager 참조)
 - **동적 로드** (런타임 설정 변경)
 - **캐싱 적용** (성능 최적화)
+- **플랫폼별 설정** (각 플랫폼마다 별도 API 키 및 설정)
 
 ### 데이터 격리 전략
 ```
-company_id 필터링 → Row-level 보안 → API 키 검증 → 네임스페이스 분리
+company_id + platform 필터링 → Row-level 보안 → API 키 검증 → 단일 컬렉션 내 논리적 분리
 ```
 
 **보안 구현**:
 ```python
-# 테넌트 컨텍스트 관리
+# 테넌트 + 플랫폼 컨텍스트 관리
 @contextmanager
-async def tenant_context(company_id: str):
-    """멀티테넌트 컨텍스트 관리"""
+async def tenant_platform_context(company_id: str, platform: str):
+    """멀티플랫폼/멀티테넌트 컨텍스트 관리"""
     
-    # 1. company_id 검증
-    if not validate_company_id(company_id):
-        raise UnauthorizedError("Invalid company_id")
+    # 1. company_id + platform 검증
+    if not validate_company_platform(company_id, platform):
+        raise UnauthorizedError(f"Invalid company_id or platform: {company_id}/{platform}")
     
     # 2. 데이터베이스 세션에 컨텍스트 설정
     async with get_db_session() as session:
@@ -437,24 +545,56 @@ async def tenant_context(company_id: str):
             {"company_id": company_id}
         )
         
-        # 3. Qdrant 네임스페이스 설정
-        qdrant_collection = f"{company_id}_tickets"
+        # 3. Qdrant 단일 컬렉션에서 필터링 조건 설정
+        qdrant_collection = "documents"
+        qdrant_filter = Filter(
+            must=[
+                FieldCondition(key="company_id", match=MatchValue(value=company_id)),
+                FieldCondition(key="platform", match=MatchValue(value=platform))
+            ]
+        )
         
         yield {
             "session": session,
             "qdrant_collection": qdrant_collection,
-            "company_id": company_id
+            "qdrant_filter": qdrant_filter,
+            "company_id": company_id,
+            "platform": platform
         }
 
 # 사용 예시
-async def search_similar_tickets(company_id: str, query: str):
-    async with tenant_context(company_id) as context:
+async def search_similar_tickets(company_id: str, platform: str, query: str):
+    async with tenant_platform_context(company_id, platform) as context:
         # 완전히 격리된 환경에서 검색 수행
         results = await vector_search(
             collection=context["qdrant_collection"],
-            query=query
+            query=query,
+            filter=context["qdrant_filter"]  # 플랫폼별 필터링
         )
         return results
+
+# 멀티플랫폼 통합 검색 (선택적)
+async def search_across_platforms(company_id: str, query: str, platforms: List[str] = None):
+    """여러 플랫폼에서 통합 검색 (회사 내에서만)"""
+    
+    # company_id는 동일하지만 여러 플랫폼에서 검색
+    platform_filter = platforms or ["freshdesk", "zendesk", "servicenow"]
+    
+    qdrant_filter = Filter(
+        must=[
+            FieldCondition(key="company_id", match=MatchValue(value=company_id)),
+            FieldCondition(key="platform", match=MatchAny(any=platform_filter))
+        ]
+    )
+    
+    results = await vector_search(
+        collection="documents",
+        query=query,
+        filter=qdrant_filter
+    )
+    
+    return results
+```
 ```
 
 ---
@@ -462,35 +602,36 @@ async def search_similar_tickets(company_id: str, query: str):
 ## 📋 단계별 구현 로드맵
 
 ### Phase 1: MVP (2-4주)
-**목표**: 파일 기반 기본 기능 완성
+**목표**: 파일 기반 기본 기능 완성 (Freshdesk 우선)
 - ✅ Freshdesk 데이터 수집
 - ✅ LLM 요약 생성
-- ✅ 벡터 검색 구현
+- ✅ 벡터 검색 구현 (단일 컬렉션)
 - ✅ 단일 고객 테스트
+- 🔄 Zendesk 어댑터 추가
 
 ### Phase 2: 스테이징 (1-2주)
-**목표**: 클라우드 DB 도입 및 멀티테넌트 검증
-- 🔄 PostgreSQL 마이그레이션
+**목표**: 클라우드 DB 도입 및 멀티플랫폼/멀티테넌트 검증
+- 🔄 PostgreSQL 마이그레이션 (멀티플랫폼 스키마)
 - 🔄 Redis 캐싱 도입
-- 🔄 멀티테넌트 보안 검증
-- 🔄 성능 최적화
+- 🔄 멀티플랫폼/멀티테넌트 보안 검증
+- 🔄 통합 컬렉션 성능 최적화
 
 ### Phase 3: 프로덕션 (2-3주)
 **목표**: 전체 시스템 운영 준비
 - 🔄 전체 마이그레이션
-- 🔄 모니터링 구축
+- 🔄 모니터링 구축 (플랫폼별 메트릭)
 - 🔄 자동화 완성
-- 🔄 Zendesk 확장 준비
+- 🔄 ServiceNow 확장 준비
 
 ---
 
 ## ✅ 핵심 설계 원칙
 
-1. **MVP 우선** - 복잡도 최소화, 빠른 검증
-2. **점진적 개선** - 단계별 확장, 안정성 우선
-3. **추상화 적용** - 변경 용이성, 테스트 가능성
-4. **보안 중시** - 데이터 격리, 규정 준수
-5. **비용 효율** - 리소스 최적화, LLM 비용 관리
+1. **MVP 우선** - 복잡도 최소화, 빠른 검증 (Freshdesk 우선)
+2. **점진적 개선** - 단계별 확장, 안정성 우선 (플랫폼별 순차 확장)
+3. **추상화 적용** - 변경 용이성, 테스트 가능성 (멀티플랫폼 지원)
+4. **보안 중시** - 데이터 격리, 규정 준수 (테넌트/플랫폼별 격리)
+5. **비용 효율** - 리소스 최적화, LLM 비용 관리 (단일 인프라 활용)
 
 ---
 

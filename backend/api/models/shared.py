@@ -1,0 +1,78 @@
+"""
+공유 모델 정의
+
+Request와 Response 모델에서 공통으로 사용되는 모델들을 정의합니다.
+"""
+
+from typing import Any, Dict, List, Optional
+from pydantic import BaseModel, Field, field_validator
+
+
+class DocumentInfo(BaseModel):
+    """검색된 문서 정보를 담는 모델"""
+
+    title: str
+    content: Optional[str] = ""  # Optional로 변경하고 기본값 설정
+    source_id: str = ""
+    source_url: str = ""  # 빈 문자열을 기본값으로 설정
+    relevance_score: float = 0.0
+    # 문서 타입을 명시 (예: "ticket", "kb", "faq")
+    doc_type: Optional[str] = None
+
+    @field_validator('source_url')
+    def ensure_source_url_is_str(cls, v):
+        """URL이 None이면 빈 문자열로 변환"""
+        return v or ""
+
+
+class Source(BaseModel):
+    """출처 정보"""
+
+    title: str = ""
+    url: str = ""
+
+
+class TicketSummaryContent(BaseModel):
+    """티켓 요약을 위한 통합 모델"""
+    
+    # summary → ticket_summary로 필드명 변경 (일관성)
+    ticket_summary: str = Field(description="티켓의 전체 요약")
+    key_points: List[str] = Field(
+        default_factory=list, description="주요 포인트 목록"
+    )
+    sentiment: str = Field(
+        default="중립적", description="감정 분석 결과 (긍정적, 중립적, 부정적)"
+    )
+    priority_recommendation: Optional[str] = Field(
+        default=None, description="권장 우선순위"
+    )
+    category_suggestion: Optional[List[str]] = Field(
+        default=None, description="추천 카테고리"
+    )
+    customer_summary: Optional[str] = Field(
+        default=None, description="고객 관련 주요 내용 요약"
+    )
+    request_summary: Optional[str] = Field(
+        default=None, description="고객의 주요 요청 사항 요약"
+    )
+    urgency_level: Optional[str] = Field(
+        default=None, description="티켓의 긴급도 (예: 높음, 보통, 낮음)"
+    )
+
+
+class SimilarTicketItem(BaseModel):
+    """유사 티켓 정보 모델"""
+    
+    id: str = Field(description="유사 티켓의 ID")
+    title: Optional[str] = Field(default=None, description="유사 티켓의 제목")
+    issue: Optional[str] = Field(default=None, description="문제 상황 요약")
+    solution: Optional[str] = Field(default=None, description="해결책 요약")
+    ticket_url: Optional[str] = Field(default=None, description="원본 티켓 링크")
+    similarity_score: Optional[float] = Field(
+        default=None, description="유사도 점수 (0.0 ~ 1.0)"
+    )
+
+    # 기존 호환성을 위한 필드 (deprecated)
+    ticket_summary: Optional[str] = Field(
+        default=None, description="유사 티켓의 내용 요약 (deprecated)"
+    )
