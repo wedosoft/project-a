@@ -43,6 +43,236 @@ async function getFreshdeskConfigFromIparams(client) {
 }
 
 /**
+ * 📊 데이터 수집 작업 관리 API
+ * Data ingestion job management APIs
+ */
+const IngestJobAPI = {
+  /**
+   * 새로운 데이터 수집 작업 생성 및 시작
+   * @param {Object} options 수집 옵션
+   * @param {boolean} options.incremental 증분 업데이트 여부
+   * @param {boolean} options.purge 기존 데이터 삭제 여부
+   * @param {boolean} options.process_attachments 첨부파일 처리 여부
+   * @param {boolean} options.force_rebuild 강제 재구축 여부
+   * @param {boolean} options.include_kb 지식베이스 포함 여부
+   * @param {string} domain Freshdesk 도메인
+   * @param {string} apiKey Freshdesk API 키
+   * @returns {Promise<Object>} 작업 정보
+   */
+  async createJob(options = {}, domain = null, apiKey = null) {
+    try {
+      console.log('🚀 새 데이터 수집 작업 생성 중...', options);
+
+      const headers = {
+        'Content-Type': 'application/json',
+        'X-Company-ID': await API.getCompanyId(),
+      };
+
+      // 동적 Freshdesk 설정 추가
+      if (domain) headers['X-Freshdesk-Domain'] = domain;
+      if (apiKey) headers['X-Freshdesk-API-Key'] = apiKey;
+
+      const response = await fetch(`${API.baseURL}/ingest/jobs`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          incremental: options.incremental !== false,
+          purge: options.purge || false,
+          process_attachments: options.process_attachments !== false,
+          force_rebuild: options.force_rebuild || false,
+          include_kb: options.include_kb !== false,
+          batch_size: options.batch_size || 50,
+          max_retries: options.max_retries || 3,
+          parallel_workers: options.parallel_workers || 4,
+          auto_start: options.auto_start !== false,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.detail || '작업 생성 실패');
+      }
+
+      console.log('✅ 데이터 수집 작업 생성 성공:', result.job.job_id);
+      return result;
+    } catch (error) {
+      console.error('❌ 데이터 수집 작업 생성 실패:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * 작업 목록 조회
+   * @param {Object} params 조회 파라미터
+   * @param {string} params.status 상태 필터
+   * @param {number} params.page 페이지 번호
+   * @param {number} params.per_page 페이지당 항목 수
+   * @returns {Promise<Object>} 작업 목록
+   */
+  async listJobs(params = {}) {
+    try {
+      const queryParams = new URLSearchParams();
+      
+      if (params.status) queryParams.append('status', params.status);
+      if (params.page) queryParams.append('page', params.page.toString());
+      if (params.per_page) queryParams.append('per_page', params.per_page.toString());
+
+      const response = await fetch(`${API.baseURL}/ingest/jobs?${queryParams}`, {
+        headers: {
+          'X-Company-ID': await API.getCompanyId(),
+        },
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.detail || '작업 목록 조회 실패');
+      }
+
+      return result;
+    } catch (error) {
+      console.error('❌ 작업 목록 조회 실패:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * 특정 작업 상태 조회
+   * @param {string} jobId 작업 ID
+   * @returns {Promise<Object>} 작업 상태
+   */
+  async getJobStatus(jobId) {
+    try {
+      const response = await fetch(`${API.baseURL}/ingest/jobs/${jobId}`, {
+        headers: {
+          'X-Company-ID': await API.getCompanyId(),
+        },
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.detail || '작업 상태 조회 실패');
+      }
+
+      return result;
+    } catch (error) {
+      console.error('❌ 작업 상태 조회 실패:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * 작업 제어 (일시정지/재개/취소)
+   * @param {string} jobId 작업 ID
+   * @param {string} action 액션 (pause, resume, cancel)
+   * @param {string} reason 사유 (선택사항)
+   * @returns {Promise<Object>} 제어 결과
+   */
+  async controlJob(jobId, action, reason = null) {
+    try {
+      console.log(`🎮 작업 제어: ${jobId}, 액션: ${action}`);
+
+      const response = await fetch(`${API.baseURL}/ingest/jobs/${jobId}/control`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Company-ID': await API.getCompanyId(),
+        },
+        body: JSON.stringify({
+          action,
+          reason,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.detail || '작업 제어 실패');
+      }
+
+      console.log(`✅ 작업 제어 성공: ${action}`);
+      return result;
+    } catch (error) {
+      console.error('❌ 작업 제어 실패:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * 데이터 수집 메트릭스 조회
+   * @returns {Promise<Object>} 메트릭스 정보
+   */
+  async getMetrics() {
+    try {
+      const response = await fetch(`${API.baseURL}/ingest/metrics`, {
+        headers: {
+          'X-Company-ID': await API.getCompanyId(),
+        },
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.detail || '메트릭스 조회 실패');
+      }
+
+      return result;
+    } catch (error) {
+      console.error('❌ 메트릭스 조회 실패:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * 기존 즉시 실행 방식 (하위 호환성)
+   * @param {Object} options 수집 옵션
+   * @param {string} domain Freshdesk 도메인
+   * @param {string} apiKey Freshdesk API 키
+   * @returns {Promise<Object>} 수집 결과
+   */
+  async triggerImmediate(options = {}, domain = null, apiKey = null) {
+    try {
+      console.log('⚡ 즉시 데이터 수집 실행...', options);
+
+      const headers = {
+        'Content-Type': 'application/json',
+        'X-Company-ID': await API.getCompanyId(),
+      };
+
+      // 동적 Freshdesk 설정 추가
+      if (domain) headers['X-Freshdesk-Domain'] = domain;
+      if (apiKey) headers['X-Freshdesk-API-Key'] = apiKey;
+
+      const response = await fetch(`${API.baseURL}/ingest`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          incremental: options.incremental !== false,
+          purge: options.purge || false,
+          process_attachments: options.process_attachments !== false,
+          force_rebuild: options.force_rebuild || false,
+          include_kb: options.include_kb !== false,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.detail || '데이터 수집 실패');
+      }
+
+      console.log('✅ 즉시 데이터 수집 완료');
+      return result;
+    } catch (error) {
+      console.error('❌ 즉시 데이터 수집 실패:', error);
+      throw error;
+    }
+  },
+};
+
+/**
  * 최적화된 API 모듈
  */
 const API = {

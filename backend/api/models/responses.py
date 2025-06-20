@@ -6,6 +6,7 @@ API Response 모델 정의
 
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
+from datetime import datetime
 
 from .shared import DocumentInfo, TicketSummaryContent, SimilarTicketItem
 
@@ -53,6 +54,28 @@ class IngestResponse(BaseModel):
     duration_seconds: Optional[float] = None
     documents_processed: Optional[int] = None
     error: Optional[str] = None
+
+
+class IngestJobResponse(BaseModel):
+    """데이터 수집 작업 응답 모델 (비동기)"""
+    
+    job_id: str = Field(description="작업 ID")
+    status: str = Field(description="작업 상태")
+    created_at: str = Field(description="생성 시각")
+    started_at: Optional[str] = Field(default=None, description="시작 시각")
+    message: str = Field(description="응답 메시지")
+    progress: Dict[str, Any] = Field(default_factory=dict, description="진행상황")
+    can_control: bool = Field(default=True, description="제어 가능 여부")
+
+
+class JobControlResponse(BaseModel):
+    """작업 제어 응답 모델"""
+    
+    success: bool = Field(description="제어 성공 여부")
+    message: str = Field(description="응답 메시지")
+    job_id: str = Field(description="작업 ID")
+    action: str = Field(description="수행된 액션")
+    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat(), description="실행 시각")
 
 
 class InitResponse(BaseModel):

@@ -14,6 +14,7 @@ import traceback
 from datetime import datetime, timezone
 from functools import wraps
 from typing import Any, Callable, Dict, Generic, List, Optional, TypeVar, Union
+from urllib.parse import urlparse
 
 from pydantic import BaseModel
 
@@ -273,3 +274,108 @@ def dict_to_model(data: Dict[str, Any], model_class: type) -> BaseModel:
         BaseModel: 변환된 Pydantic 모델 인스턴스
     """
     return model_class(**data)
+
+
+def extract_company_id(domain: str) -> str:
+    """
+    도메인에서 company_id를 자동으로 추출합니다.
+    
+    지침서에 따른 멀티테넌트 보안 요구사항:
+    - wedosoft.freshdesk.com → "wedosoft"
+    - company.zendesk.com → "company"
+    
+    Args:
+        domain: 플랫폼 도메인 (예: wedosoft.freshdesk.com)
+        
+    Returns:
+        str: 추출된 company_id
+        
+    Raises:
+        ValueError: 유효하지 않은 도메인 형식인 경우
+    """
+    if not domain or not isinstance(domain, str):
+        raise ValueError("도메인은 필수이며 문자열이어야 합니다")
+    
+    # URL이 포함된 경우 도메인만 추출
+    if domain.startswith(('http://', 'https://')):
+        parsed = urlparse(domain)
+        domain = parsed.hostname or domain
+    
+    # 도메인 정규화 (소문자 변환, 공백 제거)
+    domain = domain.lower().strip()
+    
+    # 지원되는 플랫폼 패턴
+    platform_patterns = {
+        'freshdesk': r'^([a-zA-Z0-9\-_]+)\.freshdesk\.com$',
+        'zendesk': r'^([a-zA-Z0-9\-_]+)\.zendesk\.com$',
+        # 향후 확장 가능
+    }
+    
+    for platform, pattern in platform_patterns.items():
+        match = re.match(pattern, domain)
+        if match:
+            company_id = match.group(1)
+            # company_id 유효성 검증
+            if not company_id or len(company_id) < 2:
+                raise ValueError(f"추출된 company_id가 너무 짧습니다: {company_id}")
+            logger.info(f"도메인 {domain}에서 company_id '{company_id}' 추출 완료 (플랫폼: {platform})")
+            return company_id
+    
+    # 패턴이 맞지 않는 경우
+    raise ValueError(f"지원되지 않는 도메인 형식입니다: {domain}")
+
+
+def validate_company_platform(company_id: str, platform: str) -> bool:
+    """
+    company_id와 platform 조합의 유효성을 검증합니다.
+    
+    Args:
+        company_id: 회사 식별자
+        platform: 플랫폼 이름 (freshdesk, zendesk 등)
+        
+    Returns:
+        bool: 유효한 조합인지 여부
+    """
+    if not company_id or not platform:
+        return False
+    
+    # company_id 형식 검증 (영숫자, 하이픈, 언더스코어만 허용)
+    if not re.match(r'^[a-zA-Z0-9\-_]{2,50}$', company_id):
+        logger.error(f"유효하지 않은 company_id 형식: {company_id}")
+        return False
+    
+    # 지원되는 플랫폼 목록
+    supported_platforms = ['freshdesk', 'zendesk']
+    if platform not in supported_platforms:
+        logger.error(f"지원되지 않는 플랫폼: {platform}")
+        return False
+    
+    return True
+
+
+def build_domain_from_company_id(company_id: str, platform: str) -> str:
+    """
+    company_id와 platform으로 도메인을 재구성합니다.
+    
+    Args:
+        company_id: 회사 식별자
+        platform: 플랫폼 이름
+        
+    Returns:
+        str: 재구성된 도메인
+        
+    Raises:
+        ValueError: 유효하지 않은 입력인 경우
+    """
+    if not validate_company_platform(company_id, platform):
+        raise ValueError(f"유효하지 않은 company_id 또는 platform: {company_id}, {platform}")
+    
+    domain_templates = {
+        'freshdesk': f"{company_id}.freshdesk.com",
+        'zendesk': f"{company_id}.zendesk.com",
+    }
+    
+    if platform not in domain_templates:
+        raise ValueError(f"지원되지 않는 플랫폼: {platform}")
+    
+    return domain_templates[platform]

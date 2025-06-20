@@ -4,7 +4,7 @@ applyTo: "**"
 
 # 🛠️ 구현 가이드 & 코딩 패턴 지침서
 
-*모델 참조 최적화 버전 - 구체적 구현/코딩/디버깅 가이드 전용*
+_AI 참조 최적화 버전 - 세션 간 일관성 보장을 위한 구현 가이드_
 
 ## 🎯 구현 목표
 
@@ -17,28 +17,68 @@ applyTo: "**"
 
 ---
 
-## ⚠️ **코딩 철칙 (절대 준수 필수)**
+## 🚀 **TL;DR - 핵심 패턴 요약**
 
-### 기존 코드 재활용 의무
+### 💡 **즉시 참조용 핵심 포인트**
+
+**FDK 환경**:
+
+- Node.js v14-v18만 지원, `fdk validate --verbose`로 디버깅
+- iparams.html에서 company_id 자동 추출: `domain.split('.')[0]`
+- 플랫폼은 항상 "freshdesk" (FDK 자체가 Freshdesk 전용)
+
+**멀티테넌트 보안**:
+
+- 모든 데이터에 company_id 자동 태깅 필수
+- Row-level Security + Qdrant 필터링 조합
+- API 키는 secrets manager 참조만 저장
+
+**비동기 패턴**:
+
+- 동시성 제한: `asyncio.Semaphore(max_concurrent)`
+- 재시도 로직: 지수 백오프 + 최대 3회
+- 컨텍스트 매니저로 리소스 관리
+
+**주의사항**:
+
+- ⚠️ FDK 중괄호 매칭 오류 빈발 → 구문 검증 필수
+- ⚠️ company_id 없는 데이터 절대 금지 → 자동 추출 실패 시 에러
+- ⚠️ LLM 캐싱 필수 → Redis 없으면 비용 폭증
+
+---
+
+## ⚠️ **코딩 철칙 & 설계 원칙**
+
+### 🔄 **기존 코드 재활용 의무 (AI 세션 간 일관성 핵심)**
+
+**목적**: 세션이 바뀌어도 동일한 아키텍처 패턴 유지
+
 - **90% 이상 기존 코드 재활용**: 새로운 코딩은 최소한으로 제한
 - **레거시 로직 보존**: 안정적으로 작동하던 기존 코드의 핵심 로직 유지
 - **점진적 개선**: 전면 재작성 대신 기존 코드를 다듬어 사용
 - **검증된 패턴 유지**: 기존 비즈니스 로직, 데이터 처리 방식 최대한 보존
 
-### 리팩토링 접근 방식
-```python
-# ❌ 잘못된 접근 - 전면 재작성
-def new_ticket_processor():
-    # 완전히 새로운 로직으로 재작성
-    pass
+### 📋 **AI 작업 시 필수 체크포인트**
 
-# ✅ 올바른 접근 - 기존 코드 개선
+1. **기존 파일 구조 확인** → `file_search` 또는 `read_file`로 현재 상태 파악
+2. **company_id 자동 추출 패턴** → 모든 멀티테넌트 로직에 필수 적용
+3. **플랫폼별 추상화** → Freshdesk 중심이지만 확장 가능하게 설계
+4. **에러 처리 패턴** → 재시도 + 로깅 + 사용자 친화적 메시지
+
+**리팩토링 접근법**:
+
+```python
+# ✅ AI가 따라야 할 패턴 - 기존 코드 개선
 def improved_ticket_processor():
     # 기존 process_ticket() 함수 로직을 기반으로
-    # 성능 최적화 요소만 추가
     existing_logic = process_ticket()  # 기존 함수 재사용
-    # 최소한의 개선사항만 추가
+    # 성능 최적화나 company_id 태깅만 추가
     return enhanced_result
+
+# ❌ 피해야 할 패턴 - 전면 재작성
+def new_ticket_processor():
+    # 완전히 새로운 로직으로 재작성 (금지)
+    pass
 ```
 
 ---
@@ -48,6 +88,7 @@ def improved_ticket_processor():
 ### FDK 개발 환경 구성
 
 **환경 요구사항**:
+
 - **Node.js**: v14.x ~ v18.x (최신 버전 호환성 주의)
 - **FDK CLI**: `npm install -g @freshworks/fdk`
 - **개발 명령어**: `fdk run` (로컬 서버), `fdk validate` (검증)
@@ -128,7 +169,8 @@ class AIAssistantApp {
     return {
       id: ticketData.ticket.id,
       subject: ticketData.ticket.subject,
-      description: ticketData.ticket.description_text || ticketData.ticket.description,
+      description:
+        ticketData.ticket.description_text || ticketData.ticket.description,
       status: ticketData.ticket.status,
       priority: ticketData.ticket.priority,
     };
@@ -157,13 +199,15 @@ class BackendAPIClient {
   async apiCall(endpoint, options = {}) {
     const response = await fetch(`${this.baseURL}${endpoint}`, {
       headers: { ...this.defaultHeaders, ...options.headers },
-      ...options
+      ...options,
     });
-    
+
     if (!response.ok) {
-      throw new Error(`API 호출 실패: ${response.status} ${response.statusText}`);
+      throw new Error(
+        `API 호출 실패: ${response.status} ${response.statusText}`
+      );
     }
-    
+
     return response.json();
   }
 
@@ -174,34 +218,118 @@ class BackendAPIClient {
 
   // AI 채팅 쿼리
   async query(ticketId, queryData) {
-    return this.apiCall('/query', {
-      method: 'POST',
-      body: JSON.stringify({ ticket_id: ticketId, ...queryData })
+    return this.apiCall("/query", {
+      method: "POST",
+      body: JSON.stringify({ ticket_id: ticketId, ...queryData }),
     });
   }
 }
 ```
 
-#### 4. iparams.html 보안 패턴
+#### 4. iparams.html 최적화 패턴 (Freshdesk)
 
 ```html
-<!-- ❌ 보안 위험 - 하드코딩된 값 -->
-<input
-  type="text"
-  id="freshdesk_domain"
-  value="wedosoft.freshdesk.com"
-  placeholder="your-domain.freshdesk.com"
-/>
+<!-- ✅ Freshdesk 전용 최적화 패턴 - company_id 자동 추출 -->
+<script>
+  class FreshdeskInstallSetup {
+    constructor() {
+      // Freshdesk 환경이므로 플랫폼은 자동으로 "freshdesk"
+      this.platform = "freshdesk";
+      this.setupEventListeners();
+    }
 
-<!-- ✅ 안전한 패턴 - 빈 기본값과 검증 -->
-<input
-  type="text"
-  id="freshdesk_domain"
-  value=""
-  placeholder="your-domain.freshdesk.com"
-  required
-  pattern="[a-zA-Z0-9-]+\.freshdesk\.com"
-/>
+    validateFreshdeskDomain() {
+      const domain = document.getElementById("freshdesk_domain").value;
+      const statusEl = document.getElementById("domain_status");
+
+      if (!domain) return;
+
+      // Freshdesk 도메인 패턴 검증
+      const freshdeskPattern = /^[a-zA-Z0-9-]+\.freshdesk\.com$/;
+
+      if (freshdeskPattern.test(domain)) {
+        // company_id 자동 추출 및 표시
+        const companyId = domain.split(".")[0];
+
+        statusEl.innerHTML = `✅ Freshdesk 도메인이 확인되었습니다.`;
+        statusEl.className = "status-success";
+
+        // company_id 표시
+        this.displayCompanyId(companyId, domain);
+
+        // 도메인 유효성 검사 추가
+        this.validateCompanyId(companyId);
+      } else {
+        statusEl.innerHTML =
+          "❌ 올바른 Freshdesk 도메인 형식이 아닙니다. (예: company.freshdesk.com)";
+        statusEl.className = "status-error";
+        this.clearCompanyId();
+      }
+    }
+
+    displayCompanyId(companyId, domain) {
+      const companyIdEl = document.getElementById("company_id_display");
+      if (companyIdEl) {
+        companyIdEl.innerHTML = `
+        <div class="company-info">
+          <h4>🏢 추출된 고객사 정보</h4>
+          <p><strong>Company ID:</strong> <code>${companyId}</code></p>
+          <p><strong>Full Domain:</strong> <code>${domain}</code></p>
+          <p class="note">이 Company ID로 데이터가 격리되어 저장됩니다.</p>
+        </div>
+      `;
+      }
+    }
+
+    async testFreshdeskConnection() {
+      const domain = document.getElementById("freshdesk_domain").value;
+      const apiKey = document.getElementById("api_key").value;
+      const statusEl = document.getElementById("connection_status");
+
+      if (!domain || !apiKey) return;
+
+      // 도메인에서 company_id 추출
+      const companyId = domain.split(".")[0];
+
+      statusEl.innerHTML = `🔄 ${companyId} Freshdesk 연결을 테스트하는 중...`;
+      statusEl.className = "status-loading";
+
+      try {
+        const response = await fetch("/api/setup/test-freshdesk-connection", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            domain,
+            api_key: apiKey,
+            platform: "freshdesk",
+          }),
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+          statusEl.innerHTML = `
+          ✅ ${companyId} Freshdesk 연결 성공<br>
+          📊 확인된 티켓: ${result.ticket_count}개<br>
+          🏢 Company ID: <strong>${result.company_id}</strong>
+        `;
+          statusEl.className = "status-success";
+        } else {
+          statusEl.innerHTML = "❌ 연결 실패: API 키를 확인해주세요.";
+          statusEl.className = "status-error";
+        }
+      } catch (error) {
+        statusEl.innerHTML = "❌ 연결 테스트 중 오류가 발생했습니다.";
+        statusEl.className = "status-error";
+      }
+    }
+  }
+
+  // Freshdesk 환경에서 자동 초기화
+  document.addEventListener("DOMContentLoaded", () => {
+    new FreshdeskInstallSetup();
+  });
+</script>
 ```
 
 #### 5. FDK 디버깅 명령어
@@ -223,6 +351,7 @@ fdk run --log-level debug
 ### 1. 비동기 프로그래밍 패턴
 
 **기본 원칙**:
+
 - **모든 I/O 작업은 비동기**로 처리
 - **동시성 제한**으로 리소스 보호
 - **에러 처리 중심** 설계
@@ -238,39 +367,39 @@ class AsyncHTTPClient:
     """
     비동기 HTTP 클라이언트 - 동시성 제한 및 에러 처리 포함
     """
-    
+
     def __init__(self, max_concurrent: int = 10, timeout: int = 30):
         self.semaphore = asyncio.Semaphore(max_concurrent)
         self.timeout = aiohttp.ClientTimeout(total=timeout)
         self.session: Optional[aiohttp.ClientSession] = None
-        
+
     async def __aenter__(self):
         """컨텍스트 매니저 진입 - 세션 생성"""
         self.session = aiohttp.ClientSession(timeout=self.timeout)
         return self
-        
+
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """컨텍스트 매니저 종료 - 세션 정리"""
         if self.session:
             await self.session.close()
-            
+
     async def fetch_with_retry(
-        self, 
-        url: str, 
+        self,
+        url: str,
         headers: Dict[str, str] = None,
         max_retries: int = 3
     ) -> Dict[str, Any]:
         """
         재시도 로직이 포함된 HTTP 요청
-        
+
         Args:
             url: 요청 URL
             headers: HTTP 헤더
             max_retries: 최대 재시도 횟수
-            
+
         Returns:
             JSON 응답 데이터
-            
+
         Raises:
             aiohttp.ClientError: HTTP 요청 실패 시
         """
@@ -278,54 +407,56 @@ class AsyncHTTPClient:
             for attempt in range(max_retries + 1):
                 try:
                     async with self.session.get(url, headers=headers) as response:
-                        response.raise_for_status()
-                        return await response.json()
-                        
+                        response.raise_for_status();
+                        return await response.json();
+
                 except aiohttp.ClientError as e:
                     if attempt == max_retries:
-                        logging.error(f"HTTP 요청 최종 실패: {url}, 오류: {e}")
-                        raise
-                    
+                        logging.error(f"HTTP 요청 최종 실패: {url}, 오류: {e}");
+                        raise;
+
                     # 지수적 백오프
-                    wait_time = 2 ** attempt
-                    logging.warning(f"HTTP 요청 재시도 {attempt + 1}/{max_retries}: {url}, {wait_time}초 대기")
-                    await asyncio.sleep(wait_time)
+                    wait_time = 2 ** attempt;
+                    logging.warning(f"HTTP 요청 재시도 {attempt + 1}/{max_retries}: {url}, {wait_time}초 대기");
+                    await asyncio.sleep(wait_time);
 
 # 사용 예시
 async def collect_freshdesk_tickets(api_key: str, domain: str) -> List[Dict[str, Any]]:
     """Freshdesk 티켓 수집 실제 구현"""
-    headers = {"Authorization": f"Basic {api_key}"}
-    
+    headers = {"Authorization": f"Basic {api_key}"};
+
     async with AsyncHTTPClient(max_concurrent=5) as client:
         # 페이징 처리
-        tickets = []
-        page = 1
-        
-        while True:
-            url = f"https://{domain}.freshdesk.com/api/v2/tickets?page={page}"
-            
-            try:
-                response = await client.fetch_with_retry(url, headers)
-                
+        tickets = [];
+        page = 1;
+
+        while True {
+            url = f"https://{domain}.freshdesk.com/api/v2/tickets?page={page}";
+
+            try {
+                response = await client.fetch_with_retry(url, headers);
+
                 if not response:  # 빈 페이지이면 종료
-                    break
-                    
-                tickets.extend(response)
-                page += 1
-                
+                    break;
+
+                tickets.extend(response);
+                page += 1;
+
                 # Rate limit 대응 (Freshdesk API 제한)
-                await asyncio.sleep(0.1)
-                
-            except aiohttp.ClientError:
-                logging.error(f"티켓 수집 실패: 페이지 {page}")
-                break
-                
-        return tickets
+                await asyncio.sleep(0.1);
+
+            } catch (aiohttp.ClientError) {
+                logging.error(f"티켓 수집 실패: 페이지 {page}");
+                break;
+            }
+
+        return tickets;
 ```
 
 ### 2. LLM 호출 최적화 패턴
 
 **특징**:
+
 - **배치 처리**로 비용 절약
 - **캐싱**으로 중복 호출 방지
 - **스트리밍** 지원
@@ -344,67 +475,72 @@ class LLMManager:
     """
     LLM 호출 최적화 매니저 - 캐싱, 배치 처리, 스트리밍 지원
     """
-    
+
     def __init__(self, redis_url: str = "redis://localhost:6379"):
-        self.client = openai.AsyncOpenAI()
+        self.client = openai.AsyncOpenAI();
         self.redis_client: Optional[aioredis.Redis] = None
         self.redis_url = redis_url
-        
+
     async def __aenter__(self):
         """Redis 연결 설정"""
-        self.redis_client = await aioredis.from_url(self.redis_url)
+        self.redis_client = await aioredis.from_url(self.redis_url);
         return self
-        
+
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Redis 연결 정리"""
         if self.redis_client:
             await self.redis_client.close()
-            
+
     def _generate_cache_key(self, prompt: str, model: str) -> str:
         """캐시 키 생성 - 프롬프트와 모델 기반 해시"""
-        content = f"{model}:{prompt}"
-        return f"llm_cache:{hashlib.md5(content.encode()).hexdigest()}"
-        
+        content = f"{model}:{prompt}";
+        return f"llm_cache:{hashlib.md5(content.encode()).hexdigest()}";
+
     async def _get_cached_response(self, cache_key: str) -> Optional[str]:
         """캐시된 응답 조회"""
         if not self.redis_client:
             return None
-            
-        try:
-            cached = await self.redis_client.get(cache_key)
-            if cached:
-                return json.loads(cached)
-        except Exception as e:
-            logging.warning(f"캐시 조회 실패: {e}")
-            
-        return None
-        
+
+        try {
+            cached = await self.redis_client.get(cache_key);
+            if cached {
+                return json.loads(cached);
+            }
+        } catch (Exception as e) {
+            logging.warning(f"캐시 조회 실패: {e}");
+        }
+
+        return None;
+    }
+
     async def _set_cached_response(self, cache_key: str, response: str, ttl: int = 3600):
         """응답 캐싱 - 1시간 TTL"""
         if not self.redis_client:
             return
-            
-        try:
+
+        try {
             await self.redis_client.setex(
-                cache_key, 
-                ttl, 
+                cache_key,
+                ttl,
                 json.dumps(response)
-            )
-        except Exception as e:
-            logging.warning(f"캐시 저장 실패: {e}")
-            
+            );
+        } catch (Exception as e) {
+            logging.warning(f"캐시 저장 실패: {e}");
+        }
+    }
+
     async def summarize_ticket(
-        self, 
-        ticket_content: str, 
+        self,
+        ticket_content: str,
         model: str = "gpt-3.5-turbo"
     ) -> Dict[str, Any]:
         """
         티켓 요약 생성 - 캐싱 적용
-        
+
         Args:
             ticket_content: 티켓 내용 (병합된 데이터)
             model: 사용할 LLM 모델
-            
+
         Returns:
             구조화된 요약 데이터
         """
@@ -431,17 +567,18 @@ JSON 형식으로 응답해주세요:
     "keywords": ["키워드1", "키워드2", "키워드3"]
 }}
 """
-        
+
         # 캐시 확인
-        cache_key = self._generate_cache_key(prompt, model)
-        cached_response = await self._get_cached_response(cache_key)
-        
-        if cached_response:
-            logging.info("캐시된 LLM 응답 사용")
-            return cached_response
-            
+        cache_key = self._generate_cache_key(prompt, model);
+        cached_response = await self._get_cached_response(cache_key);
+
+        if cached_response {
+            logging.info("캐시된 LLM 응답 사용");
+            return cached_response;
+        }
+
         # LLM 호출
-        try:
+        try {
             response = await self.client.chat.completions.create(
                 model=model,
                 messages=[
@@ -450,14 +587,14 @@ JSON 형식으로 응답해주세요:
                 ],
                 temperature=0.1,  # 일관성을 위해 낮은 temperature
                 max_tokens=1000
-            )
-            
-            content = response.choices[0].message.content
-            
+            );
+
+            content = response.choices[0].message.content;
+
             # JSON 파싱 시도
-            try:
-                summary = json.loads(content)
-            except json.JSONDecodeError:
+            try {
+                summary = json.loads(content);
+            } catch (json.JSONDecodeError) {
                 # JSON 파싱 실패 시 기본 구조
                 summary = {
                     "problem": "파싱 오류",
@@ -465,101 +602,110 @@ JSON 형식으로 응답해주세요:
                     "solution": content,
                     "result": "처리 필요",
                     "keywords": []
-                }
-                
+                };
+            }
+
             # 캐시 저장
-            await self._set_cached_response(cache_key, summary)
-            
-            return summary
-            
-        except Exception as e:
-            logging.error(f"LLM 요약 생성 실패: {e}")
+            await self._set_cached_response(cache_key, summary);
+
+            return summary;
+
+        } catch (Exception as e) {
+            logging.error(f"LLM 요약 생성 실패: {e}");
             return {
                 "problem": "요약 생성 실패",
                 "cause": "LLM 호출 오류",
                 "solution": str(e),
                 "result": "오류",
                 "keywords": []
-            }
-            
+            };
+        }
+
     async def summarize_batch(
-        self, 
-        ticket_contents: List[str], 
+        self,
+        ticket_contents: List[str],
         batch_size: int = 5
     ) -> List[Dict[str, Any]]:
         """
         배치 요약 처리 - 동시성 제한
-        
+
         Args:
             ticket_contents: 티켓 내용 리스트
             batch_size: 동시 처리 배치 크기
-            
+
         Returns:
             요약 결과 리스트
         """
-        semaphore = asyncio.Semaphore(batch_size)
-        
+        semaphore = asyncio.Semaphore(batch_size);
+
         async def process_single(content: str) -> Dict[str, Any]:
             async with semaphore:
-                return await self.summarize_ticket(content)
-                
+                return await self.summarize_ticket(content);
+
         # 모든 티켓을 동시에 처리 (세마포어로 제한)
-        tasks = [process_single(content) for content in ticket_contents]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
+        tasks = [process_single(content) for content in ticket_contents];
+        results = await asyncio.gather(*tasks, return_exceptions=True);
+
         # 예외 처리
-        summaries = []
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                logging.error(f"배치 처리 오류 (인덱스 {i}): {result}")
+        summaries = [];
+        for i, result in enumerate(results) {
+            if isinstance(result, Exception) {
+                logging.error(f"배치 처리 오류 (인덱스 {i}): {result}");
                 summaries.append({
                     "problem": "배치 처리 오류",
                     "cause": str(result),
                     "solution": "재처리 필요",
                     "result": "오류",
                     "keywords": []
-                })
-            else:
-                summaries.append(result)
-                
-        return summaries
+                });
+            } else {
+                summaries.append(result);
+            }
+        }
+
+        return summaries;
+    }
 
 # 스트리밍 LLM 호출 패턴
 async def stream_llm_response(
-    prompt: str, 
+    prompt: str,
     model: str = "gpt-3.5-turbo"
 ) -> AsyncGenerator[str, None]:
     """
     LLM 스트리밍 응답 - 실시간 UI 업데이트용
-    
+
     Args:
         prompt: 입력 프롬프트
         model: LLM 모델
-        
+
     Yields:
         스트리밍 응답 청크
     """
-    client = openai.AsyncOpenAI()
-    
-    try:
+    client = openai.AsyncOpenAI();
+
+    try {
         stream = await client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
             stream=True
-        )
-        
-        async for chunk in stream:
-            if chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
-                
-    except Exception as e:
-        logging.error(f"스트리밍 LLM 호출 실패: {e}")
-        yield f"오류 발생: {e}"
+        );
+
+        async for chunk in stream {
+            if chunk.choices[0].delta.content {
+                yield chunk.choices[0].delta.content;
+            }
+        }
+
+    } catch (Exception as e) {
+        logging.error(f"스트리밍 LLM 호출 실패: {e}");
+        yield f"오류 발생: {e}";
+    }
 ```
 
 ### 3. 벡터 검색 최적화 패턴
 
 **특징**:
+
 - **멀티테넌트** 격리
 - **하이브리드 검색** (벡터 + 키워드)
 - **결과 재순위** (reranking)
@@ -577,20 +723,20 @@ class VectorSearchManager:
     """
     벡터 검색 최적화 매니저 - 멀티테넌트 지원
     """
-    
+
     def __init__(
-        self, 
-        qdrant_url: str, 
+        self,
+        qdrant_url: str,
         qdrant_api_key: str,
         collection_name: str = "tickets"
     ):
         self.client = AsyncQdrantClient(
             url=qdrant_url,
             api_key=qdrant_api_key
-        )
-        self.collection_name = collection_name
-        self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
-        
+        );
+        self.collection_name = collection_name;
+        self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2');
+
     async def search_similar_tickets(
         self,
         query_text: str,
@@ -600,20 +746,20 @@ class VectorSearchManager:
     ) -> List[Dict[str, Any]]:
         """
         유사 티켓 검색 - company_id 기반 격리
-        
+
         Args:
             query_text: 검색 쿼리
             company_id: 회사 ID (멀티테넌트 격리)
             limit: 반환할 결과 수
             score_threshold: 최소 유사도 임계값
-            
+
         Returns:
             유사 티켓 리스트
         """
-        try:
+        try {
             # 쿼리 임베딩 생성
-            query_embedding = self.embedding_model.encode(query_text).tolist()
-            
+            query_embedding = self.embedding_model.encode(query_text).tolist();
+
             # company_id 필터 설정
             search_filter = Filter(
                 must=[
@@ -622,8 +768,8 @@ class VectorSearchManager:
                         match=MatchValue(value=company_id)
                     )
                 ]
-            )
-            
+            );
+
             # 벡터 검색 실행
             search_result = await self.client.search(
                 collection_name=self.collection_name,
@@ -631,11 +777,11 @@ class VectorSearchManager:
                 query_filter=search_filter,
                 limit=limit,
                 score_threshold=score_threshold
-            )
-            
+            );
+
             # 결과 변환
-            tickets = []
-            for hit in search_result:
+            tickets = [];
+            for hit in search_result {
                 ticket_data = {
                     "ticket_id": hit.payload.get("ticket_id"),
                     "title": hit.payload.get("title"),
@@ -643,16 +789,19 @@ class VectorSearchManager:
                     "status": hit.payload.get("status"),
                     "similarity_score": hit.score,
                     "created_at": hit.payload.get("created_at")
-                }
-                tickets.append(ticket_data)
-                
-            logging.info(f"벡터 검색 완료: {len(tickets)}개 티켓 발견")
-            return tickets
-            
-        except Exception as e:
-            logging.error(f"벡터 검색 실패: {e}")
-            return []
-            
+                };
+                tickets.append(ticket_data);
+            }
+
+            logging.info(f"벡터 검색 완료: {len(tickets)}개 티켓 발견");
+            return tickets;
+
+        } catch (Exception as e) {
+            logging.error(f"벡터 검색 실패: {e}");
+            return [];
+        }
+    }
+
     async def hybrid_search(
         self,
         query_text: str,
@@ -662,80 +811,88 @@ class VectorSearchManager:
     ) -> List[Dict[str, Any]]:
         """
         하이브리드 검색 - 벡터 검색 + 키워드 필터링
-        
+
         Args:
             query_text: 검색 쿼리
             company_id: 회사 ID
             keywords: 추가 키워드 필터
             limit: 반환할 결과 수
-            
+
         Returns:
             검색 결과 (재순위 적용)
         """
         # 기본 벡터 검색
         vector_results = await self.search_similar_tickets(
-            query_text, 
-            company_id, 
+            query_text,
+            company_id,
             limit * 2  # 재순위를 위해 더 많은 결과 가져오기
-        )
-        
+        );
+
         # 키워드 필터링 (옵션)
-        if keywords:
-            filtered_results = []
-            for ticket in vector_results:
+        if keywords {
+            filtered_results = [];
+            for ticket in vector_results {
                 summary_text = ticket.get("summary", {}).get("problem", "") + " " + \
-                              ticket.get("summary", {}).get("solution", "")
-                
+                              ticket.get("summary", {}).get("solution", "");
+
                 # 키워드 매칭 점수 계산
-                keyword_score = 0
-                for keyword in keywords:
-                    if keyword.lower() in summary_text.lower():
-                        keyword_score += 1
-                        
-                if keyword_score > 0:
-                    ticket["keyword_score"] = keyword_score / len(keywords)
-                    filtered_results.append(ticket)
-                    
-            vector_results = filtered_results
-            
+                keyword_score = 0;
+                for keyword in keywords {
+                    if keyword.lower() in summary_text.lower() {
+                        keyword_score += 1;
+                    }
+                }
+
+                if keyword_score > 0 {
+                    ticket["keyword_score"] = keyword_score / len(keywords);
+                    filtered_results.append(ticket);
+                }
+            }
+
+            vector_results = filtered_results;
+        }
+
         # 재순위 적용 (벡터 유사도 + 키워드 점수)
-        for ticket in vector_results:
-            vector_score = ticket.get("similarity_score", 0)
-            keyword_score = ticket.get("keyword_score", 0)
-            
+        for ticket in vector_results {
+            vector_score = ticket.get("similarity_score", 0);
+            keyword_score = ticket.get("keyword_score", 0);
+
             # 가중 평균 (벡터 70%, 키워드 30%)
-            combined_score = (vector_score * 0.7) + (keyword_score * 0.3)
-            ticket["final_score"] = combined_score
-            
+            combined_score = (vector_score * 0.7) + (keyword_score * 0.3);
+            ticket["final_score"] = combined_score;
+        }
+
         # 최종 점수로 정렬
-        vector_results.sort(key=lambda x: x.get("final_score", 0), reverse=True)
-        
-        return vector_results[:limit]
+        vector_results.sort(key=lambda x: x.get("final_score", 0), reverse=True);
+
+        return vector_results[:limit];
+    }
+}
 
 # 사용 예시
 async def search_and_recommend(
-    user_query: str, 
+    user_query: str,
     company_id: str,
     qdrant_config: Dict[str, str]
 ) -> Dict[str, Any]:
     """검색 및 추천 통합 함수"""
-    
+
     search_manager = VectorSearchManager(
         qdrant_url=qdrant_config["url"],
         qdrant_api_key=qdrant_config["api_key"]
-    )
-    
+    );
+
     # 쿼리에서 키워드 추출 (간단한 예시)
-    keywords = [word for word in user_query.split() if len(word) > 3]
-    
+    keywords = [word for word in user_query.split() if len(word) > 3];
+
     # 하이브리드 검색 실행
     recommendations = await search_manager.hybrid_search(
         query_text=user_query,
         company_id=company_id,
         keywords=keywords,
         limit=5
-    )
-    
+    );
+
     return {
         "query": user_query,
         "recommendations": recommendations,
@@ -745,695 +902,537 @@ async def search_and_recommend(
             "keywords": keywords,
             "timestamp": datetime.utcnow().isoformat()
         }
-    }
+    };
 ```
 
 ---
 
-## 🔧 실용적 유틸리티 함수
+## 🌐 플랫폼 감지 및 관리 패턴
 
-### 1. 설정 관리 패턴
+### 플랫폼별 설치 화면 추상화
 
-```python
-# 설정 관리 최적화
-from pydantic import BaseSettings, Field
-from typing import Optional
-import os
-from functools import lru_cache
+**플랫폼별 특성**:
 
-class Settings(BaseSettings):
-    """
-    애플리케이션 설정 - 환경변수 기반
-    """
-    
-    # Freshdesk 설정
-    freshdesk_domain: str = Field(..., env="FRESHDESK_DOMAIN")
-    freshdesk_api_key: str = Field(..., env="FRESHDESK_API_KEY")
-    
-    # Qdrant 설정
-    qdrant_url: str = Field(..., env="QDRANT_URL")
-    qdrant_api_key: str = Field(..., env="QDRANT_API_KEY")
-    qdrant_collection: str = Field("tickets", env="QDRANT_COLLECTION")
-    
-    # LLM 설정
-    openai_api_key: str = Field(..., env="OPENAI_API_KEY")
-    openai_model: str = Field("gpt-3.5-turbo", env="OPENAI_MODEL")
-    
-    # Redis 설정
-    redis_url: str = Field("redis://localhost:6379", env="REDIS_URL")
-    
-    # 애플리케이션 설정
-    company_id: str = Field(..., env="COMPANY_ID")
-    debug: bool = Field(False, env="DEBUG")
-    log_level: str = Field("INFO", env="LOG_LEVEL")
-    
-    # 성능 설정
-    max_concurrent_requests: int = Field(10, env="MAX_CONCURRENT_REQUESTS")
-    cache_ttl: int = Field(3600, env="CACHE_TTL")
-    
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-
-@lru_cache()
-def get_settings() -> Settings:
-    """설정 싱글톤 - 캐싱 적용"""
-    return Settings()
-
-# 사용 예시
-def get_database_url() -> str:
-    """데이터베이스 URL 생성"""
-    settings = get_settings()
-    return f"postgresql://{settings.db_user}:{settings.db_password}@{settings.db_host}:{settings.db_port}/{settings.db_name}"
-```
-
-### 2. 로깅 최적화 패턴
+- **Freshdesk**: `iparams.html` 사용, 도메인에서 company_id 자동 추출
+- **Zendesk**: `manifest.json` 사용 (추정), 유사한 도메인 구조
+- **ServiceNow**: 별도 설정 방식 (향후 확장)
 
 ```python
-# 구조화된 로깅 시스템
-import logging
-import json
-import sys
-from datetime import datetime
+# backend/core/platform_manager.py
+from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional
-import traceback
-
-class StructuredLogger:
-    """
-    구조화된 JSON 로깅 - 모니터링 최적화
-    """
-    
-    def __init__(self, name: str, level: str = "INFO"):
-        self.logger = logging.getLogger(name)
-        self.logger.setLevel(getattr(logging, level.upper()))
-        
-        # JSON 포맷터 설정
-        handler = logging.StreamHandler(sys.stdout)
-        handler.setFormatter(self._get_json_formatter())
-        self.logger.addHandler(handler)
-        
-    def _get_json_formatter(self):
-        """JSON 로그 포맷터"""
-        class JSONFormatter(logging.Formatter):
-            def format(self, record):
-                log_entry = {
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "level": record.levelname,
-                    "logger": record.name,
-                    "message": record.getMessage(),
-                    "module": record.module,
-                    "function": record.funcName,
-                    "line": record.lineno
-                }
-                
-                # 예외 정보 추가
-                if record.exc_info:
-                    log_entry["exception"] = {
-                        "type": record.exc_info[0].__name__,
-                        "message": str(record.exc_info[1]),
-                        "traceback": traceback.format_exception(*record.exc_info)
-                    }
-                
-                # 추가 컨텍스트 정보
-                if hasattr(record, 'extra_data'):
-                    log_entry["context"] = record.extra_data
-                    
-                return json.dumps(log_entry, ensure_ascii=False)
-                
-        return JSONFormatter()
-        
-    def info(self, message: str, **kwargs):
-        """정보 로그"""
-        extra = {"extra_data": kwargs} if kwargs else {}
-        self.logger.info(message, extra=extra)
-        
-    def error(self, message: str, error: Optional[Exception] = None, **kwargs):
-        """에러 로그"""
-        extra = {"extra_data": kwargs} if kwargs else {}
-        self.logger.error(message, exc_info=error, extra=extra)
-        
-    def warning(self, message: str, **kwargs):
-        """경고 로그"""
-        extra = {"extra_data": kwargs} if kwargs else {}
-        self.logger.warning(message, extra=extra)
-
-# 글로벌 로거 인스턴스
-logger = StructuredLogger("freshdesk_app")
-
-# 사용 예시
-def process_ticket_with_logging(ticket_id: str, company_id: str):
-    """로깅이 포함된 티켓 처리"""
-    logger.info(
-        "티켓 처리 시작",
-        ticket_id=ticket_id,
-        company_id=company_id,
-        timestamp=datetime.utcnow().isoformat()
-    )
-    
-    try:
-        # 티켓 처리 로직
-        result = process_ticket(ticket_id)
-        
-        logger.info(
-            "티켓 처리 완료",
-            ticket_id=ticket_id,
-            result_summary=result.get("summary"),
-            processing_time=result.get("processing_time")
-        )
-        
-        return result
-        
-    except Exception as e:
-        logger.error(
-            "티켓 처리 실패",
-            error=e,
-            ticket_id=ticket_id,
-            company_id=company_id
-        )
-        raise
-```
-
-### 3. 에러 처리 및 재시도 패턴
-
-```python
-# 견고한 에러 처리 시스템
-import asyncio
-import functools
-from typing import TypeVar, Callable, Type, Tuple, Any
 from enum import Enum
-import random
 
-T = TypeVar('T')
+class PlatformType(Enum):
+    FRESHDESK = "freshdesk"
+    ZENDESK = "zendesk"
+    SERVICENOW = "servicenow"
 
-class ErrorType(Enum):
-    """에러 유형 분류"""
-    NETWORK = "network"
-    RATE_LIMIT = "rate_limit"
-    AUTHENTICATION = "authentication"
-    VALIDATION = "validation"
-    UNKNOWN = "unknown"
+class PlatformInstallConfig(ABC):
+    """플랫폼별 설치 설정 추상화"""
 
-class RetryStrategy:
-    """재시도 전략 설정"""
-    
-    def __init__(
-        self,
-        max_attempts: int = 3,
-        base_delay: float = 1.0,
-        max_delay: float = 60.0,
-        exponential_factor: float = 2.0,
-        jitter: bool = True
-    ):
-        self.max_attempts = max_attempts
-        self.base_delay = base_delay
-        self.max_delay = max_delay
-        self.exponential_factor = exponential_factor
-        self.jitter = jitter
-        
-    def get_delay(self, attempt: int) -> float:
-        """재시도 지연 시간 계산"""
-        delay = self.base_delay * (self.exponential_factor ** attempt)
-        delay = min(delay, self.max_delay)
-        
-        if self.jitter:
-            # 지터 추가 (동시 재시도 방지)
-            delay *= (0.5 + random.random() * 0.5)
-            
-        return delay
+    @abstractmethod
+    async def validate_credentials(self, domain: str, api_key: str) -> Dict[str, Any]:
+        """플랫폼별 인증 정보 검증"""
+        pass
 
-def with_retry(
-    strategy: RetryStrategy = None,
-    retriable_exceptions: Tuple[Type[Exception], ...] = (Exception,)
-):
-    """
-    재시도 데코레이터
-    
-    Args:
-        strategy: 재시도 전략
-        retriable_exceptions: 재시도 가능한 예외 타입들
-    """
-    if strategy is None:
-        strategy = RetryStrategy()
-        
-    def decorator(func: Callable[..., T]) -> Callable[..., T]:
-        @functools.wraps(func)
-        async def async_wrapper(*args, **kwargs) -> T:
-            last_exception = None
-            
-            for attempt in range(strategy.max_attempts):
-                try:
-                    if asyncio.iscoroutinefunction(func):
-                        return await func(*args, **kwargs)
-                    else:
-                        return func(*args, **kwargs)
-                        
-                except retriable_exceptions as e:
-                    last_exception = e
-                    
-                    if attempt == strategy.max_attempts - 1:
-                        # 최종 시도 실패
-                        logger.error(
-                            f"함수 {func.__name__} 최종 실패",
-                            error=e,
-                            attempt=attempt + 1,
-                            max_attempts=strategy.max_attempts
-                        )
-                        raise
-                    
-                    # 재시도 대기
-                    delay = strategy.get_delay(attempt)
-                    logger.warning(
-                        f"함수 {func.__name__} 재시도",
-                        error=str(e),
-                        attempt=attempt + 1,
-                        delay=delay
-                    )
-                    
-                    await asyncio.sleep(delay)
-                    
-            # 여기에 도달하면 안되지만 안전장치
-            raise last_exception
-            
-        @functools.wraps(func)
-        def sync_wrapper(*args, **kwargs) -> T:
-            # 동기 함수용 래퍼
-            return asyncio.run(async_wrapper(*args, **kwargs))
-            
-        if asyncio.iscoroutinefunction(func):
-            return async_wrapper
-        else:
-            return sync_wrapper
-            
-    return decorator
+    @abstractmethod
+    def get_company_id(self, domain: str) -> str:
+        """도메인에서 company_id 추출"""
+        pass
 
-# 사용 예시
-@with_retry(
-    strategy=RetryStrategy(max_attempts=5, base_delay=2.0),
-    retriable_exceptions=(aiohttp.ClientError, asyncio.TimeoutError)
-)
-async def fetch_freshdesk_data(url: str, headers: Dict[str, str]) -> Dict[str, Any]:
-    """재시도 로직이 적용된 Freshdesk API 호출"""
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers) as response:
-            response.raise_for_status()
-            return await response.json()
-```
+    @abstractmethod
+    def get_recommended_settings(self) -> Dict[str, Any]:
+        """플랫폼별 권장 설정값"""
+        pass
 
----
+class FreshdeskInstallConfig(PlatformInstallConfig):
+    """Freshdesk 설치 설정"""
 
-## 🐛 디버깅 & 모니터링 가이드
+    def get_company_id(self, domain: str) -> str:
+        """Freshdesk 도메인에서 company_id 추출
 
-### 1. 성능 프로파일링 패턴
+        Args:
+            domain: "wedosoft.freshdesk.com" 형태
 
-```python
-# 성능 모니터링 시스템
-import time
-import asyncio
-from typing import Dict, Any, Optional
-from functools import wraps
-from collections import defaultdict
-import psutil
-import threading
+        Returns:
+            company_id: "wedosoft"
+        """
+        if not domain.endswith('.freshdesk.com'):
+            raise ValueError(f"올바르지 않은 Freshdesk 도메인: {domain}")
 
-class PerformanceMonitor:
-    """
-    성능 모니터링 - 메모리, CPU, 응답 시간 추적
-    """
-    
-    def __init__(self):
-        self.metrics = defaultdict(list)
-        self.active_operations = {}
-        
-    def start_operation(self, operation_name: str) -> str:
-        """작업 시작 추적"""
-        operation_id = f"{operation_name}_{int(time.time() * 1000)}"
-        self.active_operations[operation_id] = {
-            "name": operation_name,
-            "start_time": time.time(),
-            "start_memory": psutil.Process().memory_info().rss / 1024 / 1024  # MB
-        }
-        return operation_id
-        
-    def end_operation(self, operation_id: str) -> Dict[str, Any]:
-        """작업 종료 및 메트릭 수집"""
-        if operation_id not in self.active_operations:
-            return {}
-            
-        operation = self.active_operations.pop(operation_id)
-        end_time = time.time()
-        end_memory = psutil.Process().memory_info().rss / 1024 / 1024
-        
-        metrics = {
-            "operation": operation["name"],
-            "duration": end_time - operation["start_time"],
-            "memory_used": end_memory - operation["start_memory"],
-            "cpu_percent": psutil.cpu_percent(),
-            "timestamp": end_time
-        }
-        
-        self.metrics[operation["name"]].append(metrics)
-        return metrics
-        
-    def get_operation_stats(self, operation_name: str) -> Dict[str, Any]:
-        """작업별 통계 조회"""
-        if operation_name not in self.metrics:
-            return {}
-            
-        operations = self.metrics[operation_name]
-        durations = [op["duration"] for op in operations]
-        memory_usage = [op["memory_used"] for op in operations]
-        
-        return {
-            "operation": operation_name,
-            "total_executions": len(operations),
-            "avg_duration": sum(durations) / len(durations),
-            "max_duration": max(durations),
-            "min_duration": min(durations),
-            "avg_memory": sum(memory_usage) / len(memory_usage),
-            "max_memory": max(memory_usage)
-        }
+        company_id = domain.split('.')[0]
+        if not company_id or len(company_id) < 2:
+            raise ValueError(f"유효하지 않은 company_id: {company_id}")
 
-# 글로벌 모니터 인스턴스
-performance_monitor = PerformanceMonitor()
+        return company_id
 
-def monitor_performance(operation_name: str = None):
-    """성능 모니터링 데코레이터"""
-    def decorator(func):
-        @wraps(func)
-        async def async_wrapper(*args, **kwargs):
-            op_name = operation_name or func.__name__
-            operation_id = performance_monitor.start_operation(op_name)
-            
-            try:
-                result = await func(*args, **kwargs)
-                metrics = performance_monitor.end_operation(operation_id)
-                
-                # 성능 경고 (5초 이상 소요)
-                if metrics.get("duration", 0) > 5.0:
-                    logger.warning(
-                        f"성능 경고: {op_name} 실행 시간 초과",
-                        duration=metrics["duration"],
-                        memory_used=metrics["memory_used"]
-                    )
-                    
-                return result
-                
-            except Exception as e:
-                performance_monitor.end_operation(operation_id)
-                raise
-                
-        @wraps(func)
-        def sync_wrapper(*args, **kwargs):
-            # 동기 함수용
-            op_name = operation_name or func.__name__
-            operation_id = performance_monitor.start_operation(op_name)
-            
-            try:
-                result = func(*args, **kwargs)
-                performance_monitor.end_operation(operation_id)
-                return result
-            except Exception as e:
-                performance_monitor.end_operation(operation_id)
-                raise
-                
-        if asyncio.iscoroutinefunction(func):
-            return async_wrapper
-        else:
-            return sync_wrapper
-            
-    return decorator
+    async def validate_credentials(self, domain: str, api_key: str) -> Dict[str, Any]:
+        """Freshdesk API 연결 테스트 및 company_id 확인"""
+        import aiohttp
+        import base64
 
-# 사용 예시
-@monitor_performance("llm_summarization")
-async def summarize_ticket_with_monitoring(ticket_data: Dict[str, Any]) -> Dict[str, Any]:
-    """성능 모니터링이 적용된 티켓 요약"""
-    # LLM 요약 로직
-    async with LLMManager() as llm:
-        summary = await llm.summarize_ticket(ticket_data["content"])
-        
-    return summary
-```
+        try {
+            company_id = self.get_company_id(domain);
+            auth_string = base64.b64encode(f"{api_key}:X".encode()).decode();
 
-### 2. API 엔드포인트 디버깅 패턴
+            async with aiohttp.ClientSession() as session {
+                url = `https://${domain}/api/v2/tickets?per_page=1`;
+                headers = {"Authorization": `Basic ${auth_string}`};
 
-```python
-# FastAPI 디버깅 최적화
-from fastapi import FastAPI, Request, HTTPException, Depends
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-import uuid
-from typing import Dict, Any, Optional
-import json
-
-class DebugMiddleware:
-    """
-    디버깅 미들웨어 - 요청/응답 로깅
-    """
-    
-    def __init__(self, app: FastAPI):
-        self.app = app
-        
-    async def __call__(self, request: Request, call_next):
-        # 요청 ID 생성
-        request_id = str(uuid.uuid4())
-        request.state.request_id = request_id
-        
-        # 요청 로깅
-        logger.info(
-            "API 요청 시작",
-            request_id=request_id,
-            method=request.method,
-            url=str(request.url),
-            headers=dict(request.headers),
-            client_ip=request.client.host
-        )
-        
-        start_time = time.time()
-        
-        try:
-            # 요청 본문 로깅 (POST/PUT)
-            if request.method in ["POST", "PUT", "PATCH"]:
-                body = await request.body()
-                if body:
-                    try:
-                        body_json = json.loads(body)
-                        logger.info(
-                            "요청 본문",
-                            request_id=request_id,
-                            body=body_json
-                        )
-                    except json.JSONDecodeError:
-                        logger.info(
-                            "요청 본문 (텍스트)",
-                            request_id=request_id,
-                            body=body.decode('utf-8')[:1000]  # 최대 1000자
-                        )
-            
-            # 실제 요청 처리
-            response = await call_next(request)
-            
-            # 응답 로깅
-            duration = time.time() - start_time
-            logger.info(
-                "API 요청 완료",
-                request_id=request_id,
-                status_code=response.status_code,
-                duration=duration
-            )
-            
-            return response
-            
-        except Exception as e:
-            duration = time.time() - start_time
-            logger.error(
-                "API 요청 실패",
-                error=e,
-                request_id=request_id,
-                duration=duration
-            )
-            
-            # 에러 응답
-            return JSONResponse(
-                status_code=500,
-                content={
-                    "error": "내부 서버 오류",
-                    "request_id": request_id,
-                    "message": str(e) if app.debug else "서버 오류가 발생했습니다."
+                async with session.get(url, headers=headers) as response {
+                    if response.status == 200 {
+                        data = await response.json();
+                        return {
+                            "success": True,
+                            "platform": "freshdesk",
+                            "company_id": company_id,
+                            "domain": domain,
+                            "ticket_count": len(data)
+                        };
+                    } else {
+                        return {"success": False, "error": "인증 실패"};
+                    }
                 }
-            )
+            }
 
-# FastAPI 앱 설정
-def create_app() -> FastAPI:
-    """디버깅 최적화된 FastAPI 앱 생성"""
-    app = FastAPI(
-        title="Freshdesk Custom App API",
-        description="RAG 기반 고객지원 시스템",
-        version="1.0.0",
-        debug=get_settings().debug
-    )
-    
-    # CORS 설정
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],  # 프로덕션에서는 제한 필요
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-    
-    # 디버깅 미들웨어 추가
-    app.middleware("http")(DebugMiddleware(app))
-    
-    return app
-
-# 의존성 주입 패턴
-async def get_request_context(request: Request) -> Dict[str, Any]:
-    """요청 컨텍스트 추출"""
-    return {
-        "request_id": getattr(request.state, "request_id", "unknown"),
-        "company_id": request.headers.get("X-Company-ID"),
-        "freshdesk_domain": request.headers.get("X-Freshdesk-Domain"),
-        "api_key": request.headers.get("X-Freshdesk-API-Key"),
-        "user_agent": request.headers.get("User-Agent")
-    }
-
-# 에러 핸들러
-@app.exception_handler(HTTPException)
-async def http_exception_handler(request: Request, exc: HTTPException):
-    """HTTP 예외 처리"""
-    request_id = getattr(request.state, "request_id", "unknown")
-    
-    logger.warning(
-        "HTTP 예외 발생",
-        request_id=request_id,
-        status_code=exc.status_code,
-        detail=exc.detail
-    )
-    
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "error": exc.detail,
-            "request_id": request_id,
-            "status_code": exc.status_code
+        } catch (Exception as e) {
+            return {"success": False, "error": str(e)};
         }
-    )
+    }
 
-# API 엔드포인트 예시
-@app.get("/debug/health")
-async def debug_health_check(
-    context: Dict[str, Any] = Depends(get_request_context)
-) -> Dict[str, Any]:
-    """디버깅 정보를 포함한 헬스 체크"""
-    
-    # 시스템 상태 확인
-    system_info = {
-        "cpu_percent": psutil.cpu_percent(),
-        "memory_percent": psutil.virtual_memory().percent,
-        "disk_usage": psutil.disk_usage('/').percent
+    def get_recommended_settings(self) -> Dict[str, Any]:
+        """Freshdesk 권장 설정값"""
+        return {
+            "collection_period": 6,  # 6개월
+            "similar_tickets_count": 3,
+            "kb_documents_count": 3,
+            "auto_summary": True,
+            "processing_batch_size": 50
+        };
     }
-    
-    # 성능 통계
-    performance_stats = {}
-    for operation in ["llm_summarization", "vector_search", "data_collection"]:
-        stats = performance_monitor.get_operation_stats(operation)
-        if stats:
-            performance_stats[operation] = stats
-    
-    return {
-        "status": "healthy",
-        "request_id": context["request_id"],
-        "timestamp": datetime.utcnow().isoformat(),
-        "system": system_info,
-        "performance": performance_stats,
-        "active_operations": len(performance_monitor.active_operations)
+
+# 플랫폼 설정 팩토리
+class PlatformConfigFactory:
+    """플랫폼별 설정 팩토리"""
+
+    _configs = {
+        PlatformType.FRESHDESK: FreshdeskInstallConfig,
+        # PlatformType.ZENDESK: ZendeskInstallConfig,  # 향후 추가
     }
+
+    @classmethod
+    def get_config(cls, platform: PlatformType) -> PlatformInstallConfig:
+        config_class = cls._configs.get(platform);
+        if not config_class:
+            raise ValueError(f"지원하지 않는 플랫폼: {platform}");
+        return config_class();
+
+    @classmethod
+    def detect_platform_from_domain(cls, domain: str) -> PlatformType:
+        """도메인으로 플랫폼 자동 감지"""
+        if '.freshdesk.com' in domain:
+            return PlatformType.FRESHDESK;
+        elif '.zendesk.com' in domain:
+            return PlatformType.ZENDESK;
+        elif '.service-now.com' in domain:
+            return PlatformType.SERVICENOW;
+        else:
+            raise ValueError(f"지원하지 않는 도메인: {domain}");
+    }
+}
+```
+
+### 백엔드 설치 API 패턴
+
+```python
+# backend/api/routes/setup.py
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+from core.platform_manager import PlatformConfigFactory, PlatformType
+
+router = APIRouter(prefix="/setup", tags=["setup"])
+
+class InstallRequest(BaseModel):
+    domain: str
+    api_key: str
+    platform: str = None  # iparams에서는 자동 설정
+    collection_period: int = 6
+    similar_tickets_count: int = 3
+    kb_documents_count: int = 3
+    auto_summary: bool = True
+
+@router.post("/test-freshdesk-connection")
+async def test_freshdesk_connection(request: InstallRequest) -> Dict[str, Any]:
+    """Freshdesk 연결 테스트 (iparams 전용) - company_id 자동 추출"""
+
+    try {
+        freshdesk_config = PlatformConfigFactory.get_config(PlatformType.FRESHDESK);
+        company_id = freshdesk_config.get_company_id(request.domain);
+
+        validation_result = await freshdesk_config.validate_credentials(
+            request.domain,
+            request.api_key
+        );
+
+        if validation_result["success"] {
+            recommended = freshdesk_config.get_recommended_settings();
+
+            return {
+                "success": True,
+                "platform": "freshdesk",
+                "company_id": company_id,  # 자동 추출된 값
+                "domain": request.domain,
+                "ticket_count": validation_result.get("ticket_count", 0),
+                "recommended_settings": recommended,
+                "message": `Company '${company_id}' Freshdesk 연결이 성공했습니다.`
+            };
+        } else {
+            raise HTTPException(
+                status_code=400,
+                detail=`Company '${company_id}' 연결 실패: ${validation_result['error']}`
+            );
+        }
+
+    } catch (Exception as e) {
+        raise HTTPException(status_code=500, detail=str(e));
+    }
+}
+
+@router.post("/install")
+async def install_platform(request: InstallRequest) -> Dict[str, Any]:
+    """플랫폼 설치 - company_id 자동 관리"""
+
+    try {
+        # 도메인으로 플랫폼 및 company_id 자동 감지
+        platform_type = PlatformConfigFactory.detect_platform_from_domain(request.domain);
+        platform_config = PlatformConfigFactory.get_config(platform_type);
+
+        # company_id 자동 추출
+        company_id = platform_config.get_company_id(request.domain);
+
+        # 인증 검증
+        validation_result = await platform_config.validate_credentials(
+            request.domain,
+            request.api_key
+        );
+
+        if not validation_result["success"] {
+            raise HTTPException(status_code=400, detail=validation_result["error"]);
+        }
+
+        # 설치 설정 저장 (company_id 자동 설정)
+        install_config = {
+            "company_id": company_id,  # 도메인에서 자동 추출
+            "platform": platform_type.value,
+            "domain": request.domain,
+            "api_key_hash": hash_api_key(request.api_key),
+            "settings": {
+                "collection_period": request.collection_period,
+                "similar_tickets_count": request.similar_tickets_count,
+                "kb_documents_count": request.kb_documents_count,
+                "auto_summary": request.auto_summary
+            },
+            "installed_at": datetime.now().isoformat()
+        };
+
+        return {
+            "status": "success",
+            "message": `Company '${company_id}' ${platform_type.value.title()} 플랫폼이 성공적으로 설치되었습니다.`,
+            "company_id": company_id,
+            "platform": platform_type.value,
+            "domain": request.domain,
+            "data_isolation": `모든 데이터는 '${company_id}' 고유 영역에 저장됩니다.`,
+            "next_steps": [
+                `${company_id} 데이터 수집을 시작합니다.`,
+                `약 10-30분 소요될 예정입니다.`,
+                `완료 후 알림을 받으실 수 있습니다.`
+            ]
+        };
+
+    } catch (Exception as e) {
+        raise HTTPException(status_code=500, detail=str(e));
+    }
+}
+```
+
+### 환경 변수 관리 패턴
+
+```bash
+# .env 파일 구조 (company_id 자동 관리)
+# 기본 설정
+FRESHDESK_DOMAIN=wedosoft.freshdesk.com  # company_id는 자동 추출: "wedosoft"
+FRESHDESK_API_KEY=your-api-key
+PLATFORM=freshdesk  # iparams 자체가 Freshdesk이므로 자동 설정
+
+# 벡터 DB 설정
+QDRANT_URL=https://your-cluster.qdrant.io
+QDRANT_API_KEY=your-qdrant-key
+QDRANT_COLLECTION=documents
+
+# LLM 설정
+OPENAI_API_KEY=your-openai-key
+OPENAI_MODEL=gpt-3.5-turbo
+
+# 자동 추출 검증
+# COMPANY_ID는 환경변수로 설정하지 않고 도메인에서 자동 추출
+```
+
+### 데이터 파이프라인 company_id 통합
+
+```python
+# scripts/collect_and_process.py (company_id 자동 적용)
+async def main():
+    # 환경변수에서 도메인 읽기
+    freshdesk_domain = os.getenv("FRESHDESK_DOMAIN")  # "wedosoft.freshdesk.com"
+
+    # 도메인에서 company_id 자동 추출
+    company_id = freshdesk_domain.split('.')[0]  # "wedosoft"
+
+    print(f"🏢 Company ID: {company_id}");
+    print(f"🌐 Freshdesk Domain: {freshdesk_domain}");
+
+    # 1. Freshdesk API에서 데이터 수집
+    collector = FreshdeskDataCollector(
+        domain=freshdesk_domain,
+        api_key=os.getenv("FRESHDESK_API_KEY"),
+        company_id=company_id  # 자동 추출된 값 사용
+    );
+
+    # 2. 티켓 데이터 수집 (company_id 포함)
+    tickets = await collector.collect_tickets_with_conversations(
+        start_date="2024-01-01",
+        platform="freshdesk",
+        company_id=company_id
+    );
+
+    # 3. KB 문서 수집 (company_id 포함)
+    kb_docs = await collector.collect_knowledge_base(
+        platform="freshdesk",
+        company_id=company_id,
+        status="published"
+    );
+
+    # 4. 모든 데이터에 company_id 태깅
+    for item in tickets + kb_docs {
+        item["company_id"] = company_id;
+        item["platform"] = "freshdesk";
+    }
+
+    print(f"✅ {company_id} 데이터 수집 완료: 티켓 {len(tickets)}개, KB {len(kb_docs)}개");
+
+    # 5. 나머지 처리 과정...
+}
 ```
 
 ---
 
-## 🚀 배포 및 운영 패턴
+## 🎯 **AI 세션 간 일관성 보장 체크리스트**
 
-### 1. Docker 최적화
+### ✅ **필수 확인사항 (모든 구현 시)**
 
-```dockerfile
-# 최적화된 Python Docker 이미지
-FROM python:3.10-slim
+1. **company_id 자동 추출**
 
-# 시스템 패키지 업데이트 및 필수 도구 설치
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+   - Freshdesk: `domain.split('.')[0]`
+   - 모든 데이터에 company_id 태깅 필수
+   - 누락 시 멀티테넌트 격리 실패
 
-# 작업 디렉토리 설정
-WORKDIR /app
+2. **플랫폼 식별**
 
-# Python 의존성 먼저 복사 (캐시 최적화)
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+   - FDK = Freshdesk 전용 (platform: "freshdesk")
+   - 헤더에 X-Platform, X-Company-ID 포함
+   - 향후 Zendesk 확장 대비 추상화
 
-# 애플리케이션 코드 복사
-COPY . .
+3. **에러 처리**
 
-# 비특권 사용자 생성
-RUN adduser --disabled-password --gecos '' appuser
-RUN chown -R appuser:appuser /app
-USER appuser
+   - 재시도 로직: 지수 백오프 + 최대 3회
+   - 로깅: 구조화된 로그 + 사용자 친화적 메시지
+   - 리소스 정리: 컨텍스트 매니저 사용
 
-# 헬스체크 설정
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+4. **성능 최적화**
+   - 비동기: asyncio.Semaphore로 동시성 제한
+   - 캐싱: Redis 기반 LLM 응답 캐싱
+   - 배치 처리: 대용량 데이터 청크 단위
 
-# 애플리케이션 실행
-CMD ["python", "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+### 🚨 **자주 발생하는 함정들**
+
+- **FDK 구문 오류**: 중괄호 매칭, 세미콜론 누락
+- **company_id 누락**: 멀티테넌트 데이터 격리 실패
+- **API Rate Limit**: Freshdesk API 제한 초과
+- **메모리 누수**: aiohttp 세션 정리 누락
+- **캐싱 미적용**: LLM 비용 폭증
+
+### 📋 **AI 작업 시 표준 프로세스**
+
+1. **기존 코드 확인**: `file_search` → `read_file`로 현재 상태 파악
+2. **패턴 적용**: 위 체크리스트 기반 구현
+3. **테스트**: `fdk validate` + 브라우저 개발자 도구
+4. **company_id 검증**: 모든 API 호출에 포함 확인
+5. **문서 업데이트**: 주요 변경사항 기록
+
+### 🎨 **프론트엔드 개발 우선순위 원칙**
+
+**스타일 파일 관리**:
+
+- **단일 스타일 파일**: `app/styles/styles.css`만 사용
+- **UI 분할 금지**: 별도 UI 컴포넌트 파일 생성 지양
+- **기존 스타일 활용**: 이미 잘 구성된 스타일 최대한 재사용
+
+**개발 우선순위**:
+
+1. **백엔드 우선**: 데이터 파이프라인, API 엔드포인트 완성도 우선
+2. **프론트 지연**: UI/UX 개선은 백엔드 안정화 후 진행
+3. **지침서 명시**: 프론트엔드 예정 작업은 지침서에 상세히 기록
+
+---
+
+## 🎯 **AI 참조용 핵심 코드 패턴 라이브러리**
+
+### **1. company_id 자동 추출 (멀티테넌트 핵심)**
+
+```python
+# Python 버전
+def extract_company_id(domain: str) -> str:
+    if domain.endswith(".freshdesk.com"):
+        return domain.split(".")[0]
+    raise ValueError(f"Unsupported domain: {domain}")
+
+# JavaScript 버전 (FDK)
+function extractCompanyId(domain) {
+    if (domain.includes(".freshdesk.com")) {
+        return domain.split(".")[0];
+    }
+    throw new Error(`Unsupported domain: ${domain}`);
+}
 ```
 
-### 2. 환경별 설정 관리
+### **2. 멀티테넌트 API 호출 패턴**
 
-```yaml
-# docker-compose.yml - 개발환경
-version: '3.8'
+```python
+# 백엔드 API 호출 시 필수 헤더
+headers = {
+    "X-Company-ID": company_id,  # 멀티테넌트 격리 핵심
+    "X-Platform": "freshdesk",   # 플랫폼 식별
+    "Content-Type": "application/json"
+}
 
-services:
-  backend:
-    build: .
-    ports:
-      - "8000:8000"
-    environment:
-      - DEBUG=true
-      - LOG_LEVEL=DEBUG
-      - REDIS_URL=redis://redis:6379
-    volumes:
-      - ./data:/app/data
-      - ./.env:/app/.env
-    depends_on:
-      - redis
-      
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-      
-  qdrant:
-    image: qdrant/qdrant:latest
-    ports:
-      - "6333:6333"
-    volumes:
-      - qdrant_data:/qdrant/storage
-
-volumes:
-  redis_data:
-  qdrant_data:
+# Qdrant 필터링
+search_filter = Filter(
+    must=[
+        FieldCondition(key="company_id", match=MatchValue(value=company_id)),
+        FieldCondition(key="platform", match=MatchValue(value="freshdesk"))
+    ]
+)
 ```
 
-이로써 **implementation-guide.instructions.md** 파일이 완성되었습니다. 
+### **3. 에러 처리 표준 패턴**
 
-**다음 단계는 구버전 지침서들을 정리하는 것입니다:**
+```python
+# 재시도 로직 with 지수 백오프
+async def retry_with_backoff(func, max_retries=3):
+    for attempt in range(max_retries + 1):
+        try:
+            return await func()
+        except Exception as e:
+            if attempt == max_retries:
+                raise
+            await asyncio.sleep(2 ** attempt)  # 1, 2, 4초
 
-1. `backend.instructions.md` - 제거 또는 간소화
-2. `frontend.instructions.md` - 필요한 FDK 내용만 보존하여 간소화
+# 사용자 친화적 에러 메시지
+def format_user_error(error: Exception) -> str:
+    if "401" in str(error):
+        return "❌ API 키를 확인해주세요."
+    elif "rate limit" in str(error).lower():
+        return "⏳ 요청이 많습니다. 잠시 후 다시 시도해주세요."
+    else:
+        return "❌ 연결 중 오류가 발생했습니다."
+```
 
-이 작업을 진행해도 될까요?
+### **4. 리소스 관리 패턴**
+
+```python
+# 컨텍스트 매니저 사용 (리소스 정리 보장)
+async with AsyncHTTPClient(max_concurrent=5) as client:
+    results = await client.fetch_multiple(urls)
+    # 자동으로 client.close() 호출됨
+
+# Redis 연결 관리
+async with aioredis.from_url("redis://localhost") as redis:
+    await redis.setex("key", 3600, "value")
+    # 자동으로 연결 해제
+```
+
+### **5. FDK 특수 패턴**
+
+```javascript
+// Freshdesk 앱 컨텍스트 접근
+const context = await window.parent.app.instance.context();
+const companyId = context.account.subdomain; // 자동 추출
+
+// 티켓 데이터 접근
+const ticketData = await window.parent.app.data.get("ticket");
+const ticketInfo = {
+  id: ticketData.ticket.id,
+  subject: ticketData.ticket.subject,
+  description:
+    ticketData.ticket.description_text || ticketData.ticket.description,
+};
+
+// 백엔드 API 호출 헤더
+const headers = {
+  "Content-Type": "application/json",
+  "X-Company-ID": companyId,
+  "X-Platform": "freshdesk",
+};
+```
+
+---
+
+## 🎨 **프론트엔드 개발 원칙 (UI 분할 금지)**
+
+### **스타일 관리 원칙**
+
+- **단일 스타일 파일 사용**: `app/styles/styles.css` 파일만 사용
+- **UI 분할 금지**: 별도 UI 컴포넌트 파일 생성 금지 (복잡도 증가 방지)
+- **백엔드 우선**: 현재는 백엔드 구현에 집중, 프론트엔드는 최소한의 기능만 유지
+
+### **프론트엔드 예정 작업 (지침서 명시용)**
+
+다음 작업들은 백엔드 안정화 후 진행 예정:
+
+1. **데이터 수집 상태 관리 UI**
+
+   - 수집 진행률 표시
+   - 일시정지/재시작 버튼
+   - 실시간 상태 업데이트
+
+2. **향상된 검색 인터페이스**
+
+   - 필터링 옵션 추가
+   - 검색 결과 정렬 기능
+   - 키워드 하이라이팅
+
+3. **설정 관리 화면**
+
+   - LLM 모델 선택
+   - 임계값 조정
+   - 캐시 관리
+
+4. **분석 대시보드**
+
+   - 티켓 처리 통계
+   - 응답 품질 메트릭
+   - 사용량 분석
+
+5. **프론트엔드 파일 간소화 및 최적화**
+   - 불필요한 UI 모듈 파일 제거 완료 (`ingest-job-ui.js` 등)
+   - 기존 `app.js`, `api.js`, `ui.js` 등 핵심 파일만 유지
+   - `styles.css` 단일 파일로 스타일 통합 관리
+   - JavaScript 모듈 통합 및 중복 코드 정리
+   - FDK 호환성 최적화 및 성능 개선
+
+**현재 단계에서는 위 기능들을 구현하지 않고, 백엔드 API 완성에 집중합니다.**
+
+---
+
+**이 지침서는 AI 세션 간 일관성을 보장하기 위한 참조 자료입니다. 모든 구현 작업 전에 TL;DR 섹션과 체크리스트를 필수 확인하세요.**

@@ -48,6 +48,24 @@ class IngestRequest(BaseModel):
     include_kb: bool = True  # 지식베이스 데이터 포함 여부
 
 
+class IngestJobCreateRequest(BaseModel):
+    """데이터 수집 작업 생성 요청 모델 (비동기)"""
+    
+    incremental: bool = True  # 증분 업데이트 모드 여부
+    purge: bool = False  # 기존 데이터 삭제 여부
+    process_attachments: bool = True  # 첨부파일 처리 여부
+    force_rebuild: bool = False  # 데이터베이스 강제 재구축 여부
+    include_kb: bool = True  # 지식베이스 데이터 포함 여부
+    
+    # 고급 옵션
+    batch_size: int = Field(default=50, ge=1, le=200, description="배치 크기")
+    max_retries: int = Field(default=3, ge=0, le=10, description="최대 재시도 횟수")
+    parallel_workers: int = Field(default=4, ge=1, le=8, description="병렬 작업자 수")
+    
+    # 자동 시작 여부
+    auto_start: bool = Field(default=True, description="생성 후 자동 시작 여부")
+
+
 class TicketInitRequest(BaseModel):
     """티켓 초기화 요청 모델"""
     
