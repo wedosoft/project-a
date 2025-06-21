@@ -1,7 +1,8 @@
 """
-공유 모델 정의
+Platform-Neutral 공유 모델 정의
 
-Request와 Response 모델에서 공통으로 사용되는 모델들을 정의합니다.
+Request와 Response 모델에서 공통으로 사용되는 Platform-Neutral 모델들을 정의합니다.
+모든 모델이 3-Tuple (company_id, platform, original_id) 구조를 지원합니다.
 """
 
 from typing import Any, Dict, List, Optional
@@ -9,15 +10,31 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class DocumentInfo(BaseModel):
-    """검색된 문서 정보를 담는 모델"""
+    """Platform-Neutral 검색 문서 정보 모델"""
 
     title: str
     content: Optional[str] = ""  # Optional로 변경하고 기본값 설정
-    source_id: str = ""
+    
+    # Platform-Neutral 3-Tuple 기반 식별자
+    source_id: str = Field(description="플랫폼 원본 문서 ID (original_id)")
+    company_id: Optional[str] = Field(default=None, description="회사 ID (테넌트 격리)")
+    platform: Optional[str] = Field(default=None, description="플랫폼 ID (멀티플랫폼 지원)")
+    platform_neutral_key: Optional[str] = Field(
+        default=None, 
+        description="Platform-Neutral 3-Tuple 키 (company_id:platform:original_id)"
+    )
+    
     source_url: str = ""  # 빈 문자열을 기본값으로 설정
     relevance_score: float = 0.0
-    # 문서 타입을 명시 (예: "ticket", "kb", "faq")
-    doc_type: Optional[str] = None
+    
+    # Platform-Neutral 문서 타입 (예: "ticket", "kb", "faq")
+    doc_type: Optional[str] = Field(default=None, description="Platform-neutral 문서 타입")
+    
+    # Platform-Neutral 메타데이터
+    platform_metadata: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="플랫폼별 추가 메타데이터 (상태, 우선순위 등)"
+    )
 
     @field_validator('source_url')
     def ensure_source_url_is_str(cls, v):
@@ -61,15 +78,31 @@ class TicketSummaryContent(BaseModel):
 
 
 class SimilarTicketItem(BaseModel):
-    """유사 티켓 정보 모델"""
+    """Platform-Neutral 유사 티켓 정보 모델"""
     
-    id: str = Field(description="유사 티켓의 ID")
+    # Platform-Neutral 원본 티켓 ID
+    id: str = Field(description="플랫폼 원본 티켓 ID (original_id)")
+    
+    # Platform-Neutral 3-Tuple 정보
+    company_id: Optional[str] = Field(default=None, description="회사 ID")
+    platform: Optional[str] = Field(default=None, description="플랫폼 ID") 
+    platform_neutral_key: Optional[str] = Field(
+        default=None,
+        description="Platform-Neutral 3-Tuple 키 (company_id:platform:original_id)"
+    )
+    
     title: Optional[str] = Field(default=None, description="유사 티켓의 제목")
     issue: Optional[str] = Field(default=None, description="문제 상황 요약")
     solution: Optional[str] = Field(default=None, description="해결책 요약")
     ticket_url: Optional[str] = Field(default=None, description="원본 티켓 링크")
     similarity_score: Optional[float] = Field(
         default=None, description="유사도 점수 (0.0 ~ 1.0)"
+    )
+
+    # Platform-Neutral 메타데이터
+    platform_metadata: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="플랫폼별 추가 메타데이터 (상태, 우선순위 등)"
     )
 
     # 기존 호환성을 위한 필드 (deprecated)

@@ -23,25 +23,33 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
-from core import llm_router, retriever
-from core.context_builder import build_optimized_context
-from core.embedder import embed_documents
-from core.llm_router import LLMResponse, generate_text
-from core.retriever import retrieve_top_k_docs
-from core.vectordb import vector_db
+from core.search import retriever
+from core.processing.context_builder import build_optimized_context
+from core.search.embeddings.embedder import embed_documents
+from core.llm import LLMResponse, LLMManager
+from core.search.retriever import retrieve_top_k_docs
+from core.database.vectordb import vector_db
 from core.platforms.factory import PlatformFactory
-from freshdesk import fetcher  # 하위 호환성을 위해 유지
+from core.platforms.freshdesk import fetcher  # 하위 호환성을 위해 유지
+
+# LLM 라우터 인스턴스 생성 (새로운 구조)
+llm_manager = LLMManager()
+
+# 하위 호환성을 위한 generate_text 함수
+async def generate_text(prompt: str, system_prompt: str = None) -> LLMResponse:
+    """하위 호환성을 위한 generate_text 함수"""
+    return await llm_manager.generate(prompt, system_prompt)
 
 # 멀티플랫폼 첨부파일 API 라우터 import
 from api.multi_platform_attachments import router as attachments_router
 
 # 데이터 수집 함수 import
-from api.ingest import ingest
+from core.ingest.processor import ingest
 
 # Prometheus 메트릭 정의
-# LLM 관련 메트릭은 llm_router.py에서 정의되어 있으므로 중복 방지를 위해 여기서는 HTTP 요청 관련 메트릭만 정의
+# LLM 관련 메트릭은 llm_manager.py에서 정의되어 있으므로 중복 방지를 위해 여기서는 HTTP 요청 관련 메트릭만 정의
 # HTTP 요청 관련 메트릭은 필요시 추후 추가 가능
-# 현재는 /metrics 엔드포인트만 제공하여 llm_router에서 수집된 메트릭을 노출
+# 현재는 /metrics 엔드포인트만 제공하여 llm_manager에서 수집된 메트릭을 노출
 
 # FastAPI 앱 생성
 app = FastAPI()
@@ -960,7 +968,7 @@ async def get_initial_context(
             }
             
             # Langchain RunnableParallel 체인 실행 (플랫폼 정보 추가)
-            chain_results = await llm_router.execute_init_parallel_chain(
+            chain_results = await llm_manager.execute_init_parallel_chain(
                 ticket_data=ticket_info,
                 qdrant_client=vector_db.client,  # QdrantAdapter의 client 속성 사용
                 company_id=search_company_id,
@@ -1495,7 +1503,7 @@ async def query_stream(
             
             # 임베딩 생성
             yield f"data: {json.dumps({'type': 'status', 'message': '쿼리 분석 중...', 'progress': 30})}\n\n"
-            query_embedding = await llm_router.generate_embedding(req.query)
+            query_embedding = await llm_manager.generate_embedding(req.query)
             
             # 검색 실행
             yield f"data: {json.dumps({'type': 'status', 'message': '관련 문서 검색 중...', 'progress': 50})}\n\n"
@@ -1572,7 +1580,7 @@ async def reply_stream(request: GenerateReplyRequest):
             yield f"data: {json.dumps({'type': 'status', 'message': '관련 문서를 분석하고 있습니다...', 'progress': 20})}\n\n"
             
             # 검색 실행 (기존 로직과 동일)
-            query_embedding = await llm_router.generate_embedding(request.query)
+            query_embedding = await llm_manager.generate_embedding(request.query)
             
             # KB 문서 검색
             kb_results = retriever.retrieve_top_k_docs(
@@ -1613,7 +1621,7 @@ async def reply_stream(request: GenerateReplyRequest):
             
             # 실제 LLM 스트리밍 응답 (간단한 예시)
             # 실제 구현에서는 LLM의 스트리밍 API를 사용해야 합니다
-            full_response = await llm_router.generate_text(prompt)
+            full_response = await llm_manager.generate_text(prompt)
             
             # 응답을 청크로 나누어 스트리밍
             chunk_size = 20

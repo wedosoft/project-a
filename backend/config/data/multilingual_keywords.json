@@ -1,0 +1,57 @@
+{
+  "max_token_budget": 8000,
+  "preserve_context_flow": true,
+  "multilingual_support": true,
+  "adaptive_filtering": true,
+  "quality_threshold": 0.7,
+  "strategies": {
+    "tiny": {"max_conv": 10, "mode": "minimal_filter"},
+    "small": {"max_conv": 25, "mode": "smart_filter"},
+    "medium": {"max_conv": 50, "mode": "aggressive_filter"},
+    "large": {"max_conv": 100, "mode": "chunk_filter"}
+  },
+  "noise_patterns": {
+    "ko": {
+      "auto_responses": ["감사합니다", "티켓이 접수되었습니다", "자동 응답", "시스템", "할당되었습니다"],
+      "simple_greetings": ["안녕하세요", "수고하세요", "실례합니다", "좋은 하루"],
+      "system_messages": ["첨부파일", "상태 변경", "우선순위 변경", "해결됨"],
+      "confirmations": ["확인했습니다", "알겠습니다", "네", "예", "확인완료"]
+    },
+    "en": {
+      "auto_responses": ["thank you", "ticket has been", "auto", "acknowledged", "assigned"],
+      "simple_greetings": ["hello", "hi", "thanks", "regards", "good morning"],
+      "system_messages": ["attachment", "status changed", "priority", "closed"],
+      "confirmations": ["understood", "got it", "received", "noted", "ok"]
+    }
+  },
+  "importance_keywords": {
+    "ko": {
+      "high": {
+        "problem": ["문제", "오류", "에러", "안됩니다", "작동하지", "실패", "버그"],
+        "solution": ["해결", "방법", "시도해보세요", "설정", "확인해주세요", "수정"],
+        "escalation": ["긴급", "심각", "즉시", "빨리", "우선순위", "중요"]
+      },
+      "medium": {
+        "feedback": ["해결됐습니다", "여전히", "다시", "추가로", "다른"],
+        "info": ["스크린샷", "로그", "버전", "환경", "재현", "단계"]
+      }
+    },
+    "en": {
+      "high": {
+        "problem": ["issue", "error", "problem", "not working", "failed", "bug"],
+        "solution": ["solution", "try", "please check", "configure", "resolve"],
+        "escalation": ["urgent", "critical", "immediately", "asap", "priority"]
+      },
+      "medium": {
+        "feedback": ["resolved", "still", "again", "additional", "another"],
+        "info": ["screenshot", "log", "version", "environment", "reproduce"]
+      }
+    }
+  },
+  "token_estimation": {
+    "korean_multiplier": 1.5,
+    "english_multiplier": 1.3,
+    "min_conversation_length_ko": 10,
+    "min_conversation_length_en": 20
+  }
+}

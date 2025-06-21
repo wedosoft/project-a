@@ -11,16 +11,14 @@ from typing import Optional, Dict, Any, List
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from functools import partial
 
 from ..dependencies import (
-    get_company_id, 
+    get_company_id,
     get_platform,
     get_vector_db,
     get_fetcher,
     get_llm_router,
-    get_ticket_context_cache,
-    get_ticket_summary_cache
+    get_hybrid_search_manager
 )
 from ..models.requests import QueryRequest
 from ..models.responses import QueryResponse
@@ -30,16 +28,7 @@ from ..models.shared import DocumentInfo
 import logging
 logger = logging.getLogger(__name__)
 
-# 캐시 import (main.py에서 가져와야 함)
-# from cachetools import TTLCache
-# from cachetools.keys import hashkey
-
 router = APIRouter()
-
-# 캐시 키 생성 함수 (임시 - main.py에서 가져와야 함)
-def _query_cache_key(prefix: str, req: QueryRequest, company_id: str, platform: str):
-    """쿼리 캐시 키 생성"""
-    return f"{prefix}:{company_id}:{platform}:{req.query[:50]}:{req.top_k}"
 
 
 @router.post("/query", response_model=QueryResponse)
@@ -50,7 +39,8 @@ async def query_endpoint(
     platform: str = Depends(get_platform),
     vector_db = Depends(get_vector_db),
     fetcher = Depends(get_fetcher),
-    llm_router = Depends(get_llm_router)
+    llm_router = Depends(get_llm_router),
+    hybrid_search_manager = Depends(get_hybrid_search_manager)  # 하이브리드 검색 매니저 추가
 ):
     """
     사용자 쿼리에 대한 AI 응답을 생성하는 엔드포인트 (멀티플랫폼 지원)
@@ -168,74 +158,127 @@ async def query_endpoint(
         if req.ticket_id else req.query
     )
     
-    # 임베딩 생성 (TODO: embed_documents 함수를 llm_router에서 가져와야 함)
-    # query_embedding = embed_documents([query_for_embedding_str])[0]
-    query_embedding = await llm_router.generate_embedding(query_for_embedding_str)
-
-    # 콘텐츠 타입에 따라 검색할 문서 타입 결정
-    top_k_per_type = max(
-        1, req.top_k // len([t for t in content_types if t in ["tickets", "solutions"]])
-    )
-
-    # 티켓 검색 (콘텐츠 타입에 "tickets"가 포함된 경우만)
-    ticket_results = {
-        "documents": [], "metadatas": [], "ids": [], "distances": []
-    }
-    if "tickets" in content_types:
-        # TODO: retrieve_top_k_docs 함수를 vector_db에서 가져와야 함
-        ticket_results = vector_db.retrieve_top_k_docs(
-            query_embedding,
-            top_k_per_type,
-            company_id,
-            doc_type="ticket",
-            platform=effective_platform
+    # 하이브리드 검색 활성화 여부 확인
+    if req.use_hybrid_search:
+        logger.info(f"하이브리드 검색 활성화: {effective_platform}")
+        
+        # 하이브리드 검색 실행
+        hybrid_results = await hybrid_search_manager.hybrid_search(
+            query=req.query,
+            company_id=company_id,
+            platform=effective_platform,
+            top_k=req.top_k,
+            doc_types=req.search_types or ["ticket", "kb"],
+            custom_fields=req.custom_fields,
+            search_filters=req.search_filters,
+            enable_intent_analysis=req.enable_intent_analysis,
+            enable_llm_enrichment=req.enable_llm_enrichment,
+            rerank_results=req.rerank_results,
+            ticket_context=ticket_context_for_query if req.ticket_id else None
         )
-        logger.info(
-            f"플랫폼 {effective_platform} 티켓 검색 결과: "
-            f"{len(ticket_results.get('documents', []))} 건"
-        )
-    
-    # 지식베이스 문서 검색 (콘텐츠 타입에 "solutions"가 포함된 경우만)
-    kb_results = {"documents": [], "metadatas": [], "ids": [], "distances": []}
-    if "solutions" in content_types:
-        kb_results = vector_db.retrieve_top_k_docs(
-            query_embedding,
-            top_k_per_type,
-            company_id,
-            doc_type="kb",
-            platform=effective_platform
-        )
-        logger.info(
-            f"플랫폼 {effective_platform} 솔루션 검색 결과: "
-            f"{len(kb_results.get('documents', []))} 건"
+        
+        # 하이브리드 검색 결과에서 기존 형식으로 변환
+        docs = hybrid_results["documents"]
+        metadatas = hybrid_results["metadatas"] 
+        distances = hybrid_results["distances"]
+        
+        # 추가 정보 저장
+        search_analysis = hybrid_results.get("search_analysis", {})
+        custom_field_matches = hybrid_results.get("custom_field_matches", [])
+        llm_insights = hybrid_results.get("llm_insights", {})
+        search_quality_score = hybrid_results.get("search_quality_score", 0.0)
+        
+        logger.info(f"하이브리드 검색 완료: {len(docs)} 문서, 품질점수: {search_quality_score:.3f}")
+        
+    else:
+        # 기존 벡터 검색 로직 유지
+        # 임베딩 생성 (TODO: embed_documents 함수를 llm_router에서 가져와야 함)
+        # query_embedding = embed_documents([query_for_embedding_str])[0]
+        query_embedding = await llm_router.generate_embedding(
+            query_for_embedding_str
         )
 
-    # 검색 결과를 병합합니다.
-    all_docs_content = ticket_results["documents"] + kb_results["documents"]
-    all_metadatas = ticket_results["metadatas"] + kb_results["metadatas"]
-    all_distances = ticket_results["distances"] + kb_results["distances"]
-    
-    # 통합된 결과를 유사도 기준으로 재정렬합니다 (거리가 작을수록 유사도가 높음).
-    # 각 메타데이터에 doc_type을 명시적으로 추가합니다.
-    for meta in ticket_results["metadatas"]:
-        meta["source_type"] = "ticket"
-    for meta in kb_results["metadatas"]:
-        meta["source_type"] = "kb"
-    # 문서 타입별 메타데이터 설정 완료
+        # 콘텐츠 타입에 따라 검색할 문서 타입 결정
+        top_k_per_type = max(
+            1, req.top_k // len([
+                t for t in content_types 
+                if t in ["tickets", "solutions"]
+            ])
+        )
 
-    combined = list(zip(all_docs_content, all_metadatas, all_distances))
-    # 거리(distance) 기준으로 오름차순 정렬
-    combined.sort(key=lambda x: x[2])
-    
-    # 최대 top_k 개수만큼 잘라냅니다.
-    final_top_k = req.top_k
-    combined = combined[:final_top_k]
-    
-    # 다시 분리합니다.
-    docs = [item[0] for item in combined]
-    metadatas = [item[1] for item in combined]
-    # 이 distances는 실제 거리 또는 1-score 값임
-    distances = [item[2] for item in combined]
+        # 티켓 검색 (콘텐츠 타입에 "tickets"가 포함된 경우만)
+        ticket_results = {
+            "documents": [], "metadatas": [], "ids": [], "distances": []
+        }
+        if "tickets" in content_types:
+            # TODO: retrieve_top_k_docs 함수를 vector_db에서 가져와야 함
+            ticket_results = vector_db.retrieve_top_k_docs(
+                query_embedding,
+                top_k_per_type,
+                company_id,
+                doc_type="ticket",
+                platform=effective_platform
+            )
+            logger.info(
+                f"플랫폼 {effective_platform} 티켓 검색 결과: "
+                f"{len(ticket_results.get('documents', []))} 건"
+            )
+        
+        # 지식베이스 문서 검색 (콘텐츠 타입에 "solutions"가 포함된 경우만)
+        kb_results = {
+            "documents": [], "metadatas": [], "ids": [], "distances": []
+        }
+        if "solutions" in content_types:
+            kb_results = vector_db.retrieve_top_k_docs(
+                query_embedding,
+                top_k_per_type,
+                company_id,
+                doc_type="kb",
+                platform=effective_platform
+            )
+            logger.info(
+                f"플랫폼 {effective_platform} 솔루션 검색 결과: "
+                f"{len(kb_results.get('documents', []))} 건"
+            )
+
+        # 검색 결과를 병합합니다.
+        all_docs_content = (
+            ticket_results["documents"] + kb_results["documents"]
+        )
+        all_metadatas = (
+            ticket_results["metadatas"] + kb_results["metadatas"]
+        )
+        all_distances = (
+            ticket_results["distances"] + kb_results["distances"]
+        )
+        
+        # 통합된 결과를 유사도 기준으로 재정렬합니다 (거리가 작을수록 유사도가 높음).
+        # 각 메타데이터에 doc_type을 명시적으로 추가합니다.
+        for meta in ticket_results["metadatas"]:
+            meta["source_type"] = "ticket"
+        for meta in kb_results["metadatas"]:
+            meta["source_type"] = "kb"
+        # 문서 타입별 메타데이터 설정 완료
+
+        combined = list(zip(all_docs_content, all_metadatas, all_distances))
+        # 거리(distance) 기준으로 오름차순 정렬
+        combined.sort(key=lambda x: x[2])
+        
+        # 최대 top_k 개수만큼 잘라냅니다.
+        final_top_k = req.top_k
+        combined = combined[:final_top_k]
+        
+        # 다시 분리합니다.
+        docs = [item[0] for item in combined]
+        metadatas = [item[1] for item in combined]
+        # 이 distances는 실제 거리 또는 1-score 값임
+        distances = [item[2] for item in combined]
+        
+        # 기존 검색에서는 추가 정보 없음
+        search_analysis = {}
+        custom_field_matches = []
+        llm_insights = {}
+        search_quality_score = None
     
     search_time = time.time() - search_start
     
@@ -337,8 +380,12 @@ async def query_endpoint(
         if req.answer_instructions:
             system_prompt = f"{base_system_prompt} 다음 지침에 따라 응답해 주세요: {req.answer_instructions}"
             
-        # TODO: call_llm 함수를 llm_router에서 가져와야 함
-        response = await llm_router.call_llm(prompt, system_prompt=system_prompt)
+        # 실시간 상담원 쿼리용으로 용도 지정하여 호출
+        response = await llm_router.generate(
+            prompt=prompt, 
+            system_prompt=system_prompt,
+            use_case="realtime"  # 실시간 상담원 쿼리용 모델 사용
+        )
         answer = response.text
         
         # 콘텐츠 타입이 "attachments"나 "images"만 포함되어 있으면 이미지에 대한 설명 추가
@@ -389,7 +436,12 @@ async def query_endpoint(
         answer=answer, 
         context_docs=structured_docs, 
         context_images=context_images,
-        metadata=metadata
+        metadata=metadata,
+        # 하이브리드 검색 결과 추가
+        search_analysis=search_analysis if req.use_hybrid_search else None,
+        custom_field_matches=custom_field_matches if req.use_hybrid_search else None,
+        llm_insights=llm_insights if req.use_hybrid_search else None,
+        search_quality_score=search_quality_score if req.use_hybrid_search else None
     )
 
 
@@ -477,3 +529,122 @@ async def query_stream(
             "Access-Control-Allow-Headers": "*"
         }
     )
+
+
+@router.post("/query/hybrid", response_model=QueryResponse)
+async def hybrid_query_endpoint(
+    req: QueryRequest,
+    company_id: str = Depends(get_company_id),
+    platform: str = Depends(get_platform),
+    hybrid_search_manager = Depends(get_hybrid_search_manager)
+):
+    """
+    하이브리드 검색 전용 엔드포인트
+    
+    벡터 검색 + SQL 검색 + LLM 기반 인사이트를 결합한 고급 검색 기능을 제공합니다.
+    커스텀 필드 검색, 의도 분석, LLM 컨텍스트 강화 등을 지원합니다.
+    
+    Args:
+        req: 쿼리 요청 객체 (QueryRequest)
+        company_id: 회사 ID
+        platform: 플랫폼
+        
+    Returns:
+        하이브리드 검색 결과를 포함한 QueryResponse 객체
+    """
+    start_time = time.time()
+    effective_platform = req.platform or platform
+    
+    logger.info(
+        f"하이브리드 검색 요청: platform={effective_platform}, "
+        f"query='{req.query[:100]}...', custom_fields={req.custom_fields}, "
+        f"search_filters={req.search_filters}"
+    )
+    
+    try:
+        # 하이브리드 검색 실행
+        hybrid_results = await hybrid_search_manager.hybrid_search(
+            query=req.query,
+            company_id=company_id,
+            platform=effective_platform,
+            top_k=req.top_k,
+            doc_types=req.search_types or ["ticket", "kb"],
+            custom_fields=req.custom_fields,
+            search_filters=req.search_filters,
+            enable_intent_analysis=req.enable_intent_analysis,
+            enable_llm_enrichment=req.enable_llm_enrichment,
+            rerank_results=req.rerank_results,
+            min_similarity=req.min_similarity
+        )
+        
+        # 문서 정보 구조화
+        structured_docs = []
+        for i, (doc_content, metadata, distance) in enumerate(zip(
+            hybrid_results["documents"], 
+            hybrid_results["metadatas"], 
+            hybrid_results["distances"]
+        )):
+            title = metadata.get("title", metadata.get("subject", ""))
+            content = doc_content
+            doc_type = metadata.get("source_type", metadata.get("doc_type", "unknown"))
+            
+            # 제목과 내용 파싱
+            lines = doc_content.split("\\n", 2)
+            if len(lines) > 0 and lines[0].startswith("제목:"):
+                title = lines[0].replace("제목:", "").strip()
+                if len(lines) > 1:
+                    content = "\\n".join(lines[1:]).strip()
+                    if content.startswith("설명:"):
+                        content = content.replace("설명:", "", 1).strip()
+            
+            # 유사도 점수 계산 (거리를 백분율로 변환)
+            relevance_score = round(((2 - distance) / 2) * 100, 1) if distance <= 2 else 0.0
+            
+            doc_info = DocumentInfo(
+                title=title,
+                content=content,
+                source_id=metadata.get("source_id", metadata.get("id", "")),
+                source_url=metadata.get("source_url", ""),
+                relevance_score=relevance_score,
+                doc_type=doc_type
+            )
+            structured_docs.append(doc_info)
+        
+        # 총 처리 시간
+        total_time = time.time() - start_time
+        
+        # 메타데이터 구성
+        metadata = {
+            "duration_ms": int(total_time * 1000),
+            "search_method": "hybrid",
+            "documents_found": len(structured_docs),
+            "search_quality_score": hybrid_results.get("search_quality_score", 0.0),
+            "intent_detected": hybrid_results.get("search_analysis", {}).get("intent", "unknown"),
+            "custom_field_matches": len(hybrid_results.get("custom_field_matches", [])),
+            "llm_enrichment_enabled": req.enable_llm_enrichment,
+            "rerank_enabled": req.rerank_results
+        }
+        
+        logger.info(
+            f"하이브리드 검색 완료: {len(structured_docs)} 문서, "
+            f"품질점수: {hybrid_results.get('search_quality_score', 0.0):.3f}, "
+            f"소요시간: {total_time:.2f}s"
+        )
+        
+        return QueryResponse(
+            answer=hybrid_results.get("enhanced_response", "하이브리드 검색이 완료되었습니다."),
+            context_docs=structured_docs,
+            context_images=[],
+            metadata=metadata,
+            search_analysis=hybrid_results.get("search_analysis"),
+            custom_field_matches=hybrid_results.get("custom_field_matches"),
+            llm_insights=hybrid_results.get("llm_insights"),
+            search_quality_score=hybrid_results.get("search_quality_score")
+        )
+        
+    except Exception as e:
+        logger.error(f"하이브리드 검색 중 오류 발생: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"하이브리드 검색 중 오류가 발생했습니다: {str(e)}"
+        )

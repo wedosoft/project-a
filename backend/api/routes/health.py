@@ -13,7 +13,7 @@ import os
 
 from ..models.responses import HealthCheckResponse
 from ..dependencies import get_platform, get_vector_db
-from core.vectordb import vector_db
+from core.database.vectordb import vector_db
 
 # 라우터 생성
 router = APIRouter(prefix="/health", tags=["헬스 체크"])
@@ -58,8 +58,8 @@ async def health_check(
     try:
         # 1. 벡터 데이터베이스 상태 확인
         try:
-            # Qdrant 연결 상태 확인
-            collections = await vector_db.list_collections()
+            # Qdrant 연결 상태 확인 (동기 함수이므로 await 제거)
+            collections = vector_db.list_collections()
             health_status["checks"]["vector_db"] = {
                 "status": "healthy",
                 "message": f"Qdrant 연결 성공, {len(collections)} 컬렉션 활성화",

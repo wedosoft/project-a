@@ -22,7 +22,7 @@ from ..models.ingest_job import (
     JobProgress,
     JobMetrics
 )
-from ..ingest import ingest as legacy_ingest
+from core.ingest.processor import ingest as legacy_ingest
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +114,25 @@ class JobManager:
         if len(self.running_jobs) >= 2:
             logger.warning(f"최대 동시 실행 작업 수 초과: {len(self.running_jobs)}")
             return False
+        
+        # 🚨 자동 재수집 방지: 같은 회사의 최근 완료된 작업이 있는지 확인
+        # 단, force_rebuild가 True인 경우에는 무시
+        if not job.config.force_rebuild:
+            recent_completed_jobs = [
+                j for j in self.jobs.values() 
+                if j.company_id == job.company_id 
+                and j.status == JobStatus.COMPLETED 
+                and j.completed_at
+                and (datetime.now() - j.completed_at).total_seconds() < 300  # 5분 이내
+            ]
+            
+            if recent_completed_jobs:
+                logger.warning(f"⚠️  자동 재수집 방지: 회사 {job.company_id}의 최근 완료된 작업이 있습니다.")
+                logger.warning(f"최근 완료된 작업: {[j.job_id for j in recent_completed_jobs]}")
+                logger.warning("5분 후에 다시 시도하거나 force_rebuild=True를 사용하세요.")
+                return False
+        else:
+            logger.info(f"🔧 강제 재구축 모드: 최근 작업 완료 여부를 무시하고 시작합니다.")
         
         # 작업 상태 업데이트
         job.status = JobStatus.RUNNING

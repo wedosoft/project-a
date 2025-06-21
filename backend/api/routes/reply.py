@@ -209,10 +209,13 @@ async def reply(
     # LLM 호출
     llm_start_time = time.time()
     try:
-        from ..core.llm_router import call_llm  # 로컬 임포트
-        
         system_prompt = f"당신은 {company_id} 회사의 전문적인 고객 지원 담당자입니다. 정확하고 도움이 되는 응답을 제공하세요."
-        response = await call_llm(prompt, system_prompt=system_prompt)
+        # 실시간 상담원 쿼리용으로 용도 지정하여 호출
+        response = await llm_router.generate(
+            prompt=prompt, 
+            system_prompt=system_prompt,
+            use_case="realtime"  # 실시간 상담원 쿼리용 모델 사용
+        )
         llm_time = time.time() - llm_start_time
         
         # 응답 텍스트 정리
@@ -425,14 +428,12 @@ async def reply_stream(
 """
             
             # 스트리밍 LLM 호출
-            from ..core.llm_router import call_llm_stream  # 로컬 임포트
-            
             system_prompt = f"당신은 {company_id} 회사의 전문적인 고객 지원 담당자입니다. 정확하고 도움이 되는 응답을 제공하세요."
             
             # 응답 텍스트 누적용
             full_response = ""
             
-            async for chunk in call_llm_stream(prompt, system_prompt=system_prompt):
+            async for chunk in llm_router.generate_stream(prompt, system_prompt=system_prompt):
                 if chunk.strip():
                     full_response += chunk
                     # 실시간으로 청크 전송

@@ -5,36 +5,37 @@
             "path": "."
         },
         {
+            "name": "⚙️ Instructions (AI 지침서)",
+            "path": ".github/instructions"
+        },
+        {
             "name": "🧠 Backend (Python)",
-            "path": "./backend"
+            "path": "backend"
         },
         {
             "name": "🎨 Frontend (FDK)",
-            "path": "./frontend"
+            "path": "frontend"
         },
         {
             "name": "📋 Tasks",
-            "path": "./tasks"
+            "path": "tasks"
         },
         {
             "name": "📚 Documentation",
-            "path": "./docs"
+            "path": "docs"
         },
         {
             "name": "🔧 Scripts",
-            "path": "./scripts"
+            "path": "scripts"
         }
     ],
     "settings": {
-        "github.copilot.chat.defaultMode": "freshdesk-dev",
-        "github.copilot.chat.enableContextualChat": true,
         "github.copilot.advanced": {
             "inlineCompletionTrigger": "automatic",
             "listCount": 5,
             "length": "short"
         },
-        "task.allowAutomaticTasks": "on",
-        "task.showDecorations": true
+        "task.allowAutomaticTasks": "on"
     },
     "tasks": {
         "version": "2.0.0",

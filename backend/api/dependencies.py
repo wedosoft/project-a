@@ -16,27 +16,30 @@ logger = logging.getLogger(__name__)
 # 전역 변수들 (main.py에서 설정됨)
 _vector_db = None
 _fetcher = None
-_llm_router = None
+_llm_manager = None
 _ticket_context_cache = None
 _ticket_summary_cache = None
+_hybrid_search_manager = None
 
 
 def set_global_dependencies(
     vector_db,
     fetcher,
-    llm_router,
+    llm_manager,
     ticket_context_cache,
     ticket_summary_cache,
+    hybrid_search_manager=None,
 ):
     """
     main.py에서 전역 의존성들을 설정하는 함수
     """
-    global _vector_db, _fetcher, _llm_router, _ticket_context_cache, _ticket_summary_cache
+    global _vector_db, _fetcher, _llm_manager, _ticket_context_cache, _ticket_summary_cache, _hybrid_search_manager
     _vector_db = vector_db
     _fetcher = fetcher
-    _llm_router = llm_router
+    _llm_manager = llm_manager
     _ticket_context_cache = ticket_context_cache
     _ticket_summary_cache = ticket_summary_cache
+    _hybrid_search_manager = hybrid_search_manager
 
 
 def get_vector_db():
@@ -57,13 +60,13 @@ def get_fetcher():
     return _fetcher
 
 
-def get_llm_router():
-    """LLM 라우터 의존성"""
-    if _llm_router is None:
+def get_llm_manager():
+    """LLM 매니저 의존성"""
+    if _llm_manager is None:
         raise RuntimeError(
-            "LLM Router가 초기화되지 않았습니다. main.py에서 set_global_dependencies를 호출해주세요."
+            "LLM Manager가 초기화되지 않았습니다. main.py에서 set_global_dependencies를 호출해주세요."
         )
-    return _llm_router
+    return _llm_manager
 
 
 def get_ticket_context_cache():
@@ -82,6 +85,15 @@ def get_ticket_summary_cache():
             "Ticket summary cache가 초기화되지 않았습니다. main.py에서 set_global_dependencies를 호출해주세요."
         )
     return _ticket_summary_cache
+
+
+def get_hybrid_search_manager():
+    """하이브리드 검색 매니저 의존성"""
+    if _hybrid_search_manager is None:
+        raise RuntimeError(
+            "Hybrid search manager가 초기화되지 않았습니다. main.py에서 set_global_dependencies를 호출해주세요."
+        )
+    return _hybrid_search_manager
 
 
 async def get_company_id(
@@ -170,3 +182,7 @@ async def get_platform(
     else:
         # 기본값으로 freshdesk 사용 (하위 호환성)
         return "freshdesk"
+
+
+# 하위 호환성을 위한 별칭
+get_llm_router = get_llm_manager

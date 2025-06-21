@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # 벡터 DB 모듈 임포트
 from core import vectordb
-from core.vectordb import QdrantAdapter
+from core.database.vectordb import QdrantAdapter
 
 # 벡터 DB 초기화
 vector_db = vectordb.vector_db

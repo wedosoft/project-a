@@ -25,7 +25,7 @@ load_dotenv()
 
 # 벡터 DB 모듈 임포트
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from core.vectordb import migrate_type_to_doc_type, vector_db
+from core.database.vectordb import migrate_type_to_doc_type, vector_db
 
 
 async def run_migration():
