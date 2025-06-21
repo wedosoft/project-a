@@ -5,7 +5,7 @@ Qdrant Cloud 데이터 초기화 스크립트
 
 import logging
 
-from core.vectordb import vector_db
+from core.database.vectordb import vector_db
 
 logging.basicConfig(level=logging.INFO)
 

@@ -36,12 +36,27 @@ class MetricsResponse(BaseModel):
 
 
 class QueryResponse(BaseModel):
-    """쿼리 응답 모델"""
+    """Platform-Neutral 쿼리 응답 모델"""
     
     answer: str
     context_docs: List[DocumentInfo]
     context_images: List[dict] = []
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    
+    # Platform-Neutral 하이브리드 검색 결과 필드들
+    search_analysis: Optional[Dict[str, Any]] = None  # 검색 분석 결과 (의도, 엔티티 등)
+    platform_neutral_matches: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Platform-Neutral 3-Tuple 기반 매칭 결과"
+    )
+    llm_insights: Optional[Dict[str, Any]] = None  # LLM 기반 인사이트 및 추천
+    search_quality_score: Optional[float] = None  # 검색 품질 점수 (0-1)
+    
+    # Platform-Neutral 요약 정보
+    platform_neutral_summary: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Platform-Neutral 검색 요약 (플랫폼별 결과 통계 등)"
+    )
 
 
 class IngestResponse(BaseModel):
@@ -79,9 +94,14 @@ class JobControlResponse(BaseModel):
 
 
 class InitResponse(BaseModel):
-    """통합된 티켓 초기화 응답 모델"""
+    """Platform-Neutral 통합 티켓 초기화 응답 모델"""
 
-    ticket_id: str = Field(description="처리 대상 티켓의 ID")
+    # Platform-Neutral 티켓 식별자
+    ticket_id: str = Field(description="플랫폼 원본 티켓 ID")
+    company_id: str = Field(description="회사 ID (테넌트 격리)")
+    platform: str = Field(description="플랫폼 ID (멀티플랫폼 지원)")
+    platform_neutral_key: str = Field(description="Platform-Neutral 3-Tuple 키 (company_id:platform:original_id)")
+    
     # 티켓 원본 데이터
     ticket_data: Dict[str, Any] = Field(
         default_factory=dict, description="티켓 원본 데이터"
@@ -102,6 +122,12 @@ class InitResponse(BaseModel):
     context_id: str = Field(description="컨텍스트 ID")
     metadata: Dict[str, Any] = Field(
         default_factory=dict, description="메타데이터"
+    )
+    
+    # Platform-Neutral 검색 통계
+    platform_neutral_stats: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Platform-Neutral 검색 통계 (문서 수, 매칭 점수 등)"
     )
 
 

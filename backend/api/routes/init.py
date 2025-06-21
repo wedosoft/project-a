@@ -28,7 +28,7 @@ from ..models.responses import InitResponse
 from ..models.shared import TicketSummaryContent, SimilarTicketItem, DocumentInfo
 
 # Langchain 기반 init_chain import
-from core.langchain.chains import execute_init_parallel_chain
+from core.llm.integrations.langchain.chains import execute_init_parallel_chain
 
 # 로거
 import logging

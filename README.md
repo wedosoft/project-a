@@ -27,12 +27,13 @@ Code Interpreter 환경에서는 가상환경 없이 바로 사용할 수 있습
 
 # 자동 검증 항목:
 # ✅ 환경변수 설정 상태 (7개)
-# ✅ 라이브러리 설치 상태 (13개) 
+# ✅ 라이브러리 설치 상태 (13개)
 # ✅ 백엔드 모듈 임포트 (7개)
 # ✅ 클라이언트 연결 테스트
 ```
 
 **환경변수 설정:**
+
 ```bash
 # Code Interpreter에서 환경변수 설정
 export FRESHDESK_DOMAIN="yourcompany.freshdesk.com"
@@ -45,6 +46,7 @@ export COMPANY_ID="your_company_id"
 ```
 
 **Python에서 직접 설정 (선택사항):**
+
 ```python
 import os
 os.environ['FRESHDESK_DOMAIN'] = 'yourcompany.freshdesk.com'
@@ -133,3 +135,38 @@ Task Master가 API 키를 인식하지 못하는 경우:
 1. `./taskmaster.sh check` 명령으로 현재 상태를 진단하세요.
 2. `./taskmaster.sh fix` 명령으로 자동 문제 해결을 시도하세요.
 3. 환경 변수가 제대로 로드되었는지 확인하려면 `./taskmaster.sh load-env` 명령을 실행하세요.
+
+---
+
+## 🎉 최신 업데이트 (2025년 6월 21일)
+
+### ✅ Backend Core 대규모 리팩토링 완료!
+
+**프로젝트 구조가 대폭 개선되었습니다:**
+
+#### 🏗️ 새로운 Backend 구조
+
+```
+backend/core/
+├── database/     # Qdrant 벡터DB, SQLite 관리
+├── data/         # Pydantic 모델, 데이터 스키마
+├── search/       # 하이브리드 검색, GPU 임베딩 최적화
+├── processing/   # 데이터 처리 파이프라인
+├── llm/         # 통합 LLM 관리 (OpenAI, Anthropic, Gemini)
+├── platforms/   # Freshdesk 등 플랫폼 어댑터
+├── ingest/      # 데이터 수집 시스템
+└── legacy/      # 레거시 코드 보관
+```
+
+#### 🚀 주요 개선사항
+
+- **모듈화 완료**: 33개 분산 파일 → 8개 체계적 모듈
+- **성능 향상**: GPU 임베딩 (`torch`, `sentence-transformers`) 지원
+- **LLM 통합**: 모든 LLM 프로바이더 단일 인터페이스로 통합
+- **확장성**: 새로운 플랫폼 추가 용이성 대폭 개선
+- **안정성**: Pydantic v2 완전 호환, 타입 안정성 강화
+
+#### 📋 자세한 내용
+
+- **[리팩토링 완료 보고서](./backend/docs/BACKEND_REFACTORING_COMPLETION_REPORT.md)**
+- **[업데이트된 아키텍처 가이드](./.github/instructions/core/system-architecture.instructions.md)**

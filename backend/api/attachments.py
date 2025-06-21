@@ -13,7 +13,7 @@ import os
 from typing import Any, Dict, Optional
 
 import httpx
-from core.vectordb import vector_db
+from core.database.vectordb import vector_db
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel

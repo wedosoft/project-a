@@ -29,7 +29,7 @@ from ..models.ingest_job import (
 )
 from ..dependencies import get_company_id
 from ..services.job_manager import job_manager
-from ..ingest import ingest
+from core.ingest.processor import ingest
 
 # 라우터 생성
 router = APIRouter(prefix="/ingest", tags=["데이터 수집"])
@@ -75,7 +75,9 @@ async def trigger_data_ingestion(
             local_data_dir=None,  # API 호출이므로 로컬 데이터 사용 안함
             include_kb=request.include_kb,
             domain=x_freshdesk_domain,
-            api_key=x_freshdesk_api_key
+            api_key=x_freshdesk_api_key,
+            max_tickets=request.max_tickets,
+            max_articles=request.max_articles
         )
         
         end_time = datetime.now()

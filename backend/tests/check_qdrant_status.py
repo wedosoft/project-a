@@ -22,7 +22,7 @@ dotenv_path = os.path.join(project_root, ".env")
 load_dotenv(dotenv_path=dotenv_path)
 
 # .env가 로드된 후 QdrantAdapter 임포트
-from core.vectordb import QdrantAdapter
+from core.database.vectordb import QdrantAdapter
 
 # 로깅 설정
 logging.basicConfig(

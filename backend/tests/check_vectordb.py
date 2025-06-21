@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """벡터DB 상태 확인 스크립트"""
 
-from core.vectordb import QdrantAdapter
+from core.database.vectordb import QdrantAdapter
 from core.config import get_settings
 
 def main():

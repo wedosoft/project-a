@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 
 from .adapter import FreshdeskAdapter
 # 통합 객체 생성을 위한 모듈 추가
-from ...data_merger import PlatformDataMerger, DataStorage
+from ...data.merger import PlatformDataMerger, DataStorage
 
 # .env 파일 로드
 load_dotenv()

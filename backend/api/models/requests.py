@@ -9,26 +9,46 @@ from pydantic import BaseModel, Field
 
 
 class QueryRequest(BaseModel):
-    """쿼리 요청 모델"""
+    """Platform-Neutral 쿼리 요청 모델"""
     
     query: str
     top_k: int = 3
     answer_instructions: Optional[str] = None  # 사용자가 제공하는 답변 지침
-    # 현재 처리 중인 티켓 ID (선택 사항)
-    ticket_id: Optional[str] = None
+    
+    # Platform-Neutral 3-Tuple 필수 필드
+    company_id: str = Field(description="회사 ID (테넌트 격리 필수)")
+    platform: str = Field(default="freshdesk", description="플랫폼 ID (멀티플랫폼 지원)")
+    
+    # 현재 처리 중인 티켓 ID (platform-neutral original_id)
+    ticket_id: Optional[str] = Field(default=None, description="플랫폼 원본 티켓 ID")
+    
     # 검색할 콘텐츠 타입
     type: List[str] = Field(
         default_factory=lambda: ["tickets", "solutions", "images", "attachments"]
     )
     # 검색 의도 (예: "search", "recommend", "answer")
     intent: Optional[str] = "search"
-    company_id: Optional[str] = None  # 회사 ID (헤더에서 가져오는 경우 선택 사항)
-    platform: Optional[str] = None  # 플랫폼 필터링 (헤더에서 가져오는 경우 선택 사항)
-    # 검색할 데이터 타입
+    
+    # Platform-Neutral 검색 타입
     search_types: Optional[List[str]] = Field(
-        default_factory=lambda: ["ticket", "kb"]
+        default_factory=lambda: ["ticket", "kb"],
+        description="Platform-neutral 문서 타입 (ticket, kb, attachment 등)"
     )
     min_similarity: float = 0.5  # 최소 유사도 임계값
+    
+    # Platform-Neutral 하이브리드 검색 필드들
+    use_hybrid_search: bool = False  # 하이브리드 검색 활성화 여부
+    custom_fields: Optional[Dict[str, Any]] = Field(
+        default=None, 
+        description="Platform-neutral 커스텀 필드 검색 조건"
+    )
+    search_filters: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Platform-neutral 검색 필터 (우선순위, 상태, 날짜 등)"
+    )
+    enable_intent_analysis: bool = True  # 의도 분석 활성화 여부
+    enable_llm_enrichment: bool = True  # LLM 컨텍스트 강화 활성화 여부
+    rerank_results: bool = True  # 결과 재순위 활성화 여부
     
     # /init 엔드포인트에서 사용되는 추가 필드들
     include_summary: bool = True  # 티켓 요약 생성 여부
@@ -39,13 +59,25 @@ class QueryRequest(BaseModel):
 
 
 class IngestRequest(BaseModel):
-    """데이터 수집 요청 모델"""
+    """Platform-Neutral 데이터 수집 요청 모델"""
+    
+    # Platform-Neutral 3-Tuple 필수 필드 (헤더에서 추출되지만 명시적 검증)
+    company_id: Optional[str] = Field(
+        default=None, 
+        description="회사 ID (헤더에서 자동 추출, 테넌트 격리)"
+    )
+    platform: Optional[str] = Field(
+        default=None,
+        description="플랫폼 ID (헤더에서 자동 추출, 멀티플랫폼 지원)"
+    )
     
     incremental: bool = True  # 증분 업데이트 모드 여부
     purge: bool = False  # 기존 데이터 삭제 여부
     process_attachments: bool = True  # 첨부파일 처리 여부
     force_rebuild: bool = False  # 데이터베이스 강제 재구축 여부
     include_kb: bool = True  # 지식베이스 데이터 포함 여부
+    max_tickets: Optional[int] = None  # 최대 수집 티켓 수 (None=무제한, 테스트용으로 100 지정 가능)
+    max_articles: Optional[int] = None  # 최대 수집 KB 문서 수 (None=무제한, 테스트용으로 100 지정 가능)
 
 
 class IngestJobCreateRequest(BaseModel):
@@ -67,10 +99,15 @@ class IngestJobCreateRequest(BaseModel):
 
 
 class TicketInitRequest(BaseModel):
-    """티켓 초기화 요청 모델"""
+    """Platform-Neutral 티켓 초기화 요청 모델"""
     
-    ticket_id: str
-    company_id: str
+    # Platform-Neutral 원본 티켓 ID (접두어 없는 플랫폼 원본 ID)
+    ticket_id: str = Field(description="플랫폼 원본 티켓 ID (예: '12345', 'ticket-' 접두어 제외)")
+    
+    # Platform-Neutral 3-Tuple 필수 필드
+    company_id: str = Field(description="회사 ID (테넌트 격리 필수)")
+    platform: str = Field(default="freshdesk", description="플랫폼 ID (멀티플랫폼 지원)")
+    
     include_summary: bool = True  # 티켓 요약 생성 여부
     include_kb_docs: bool = True  # 관련 지식베이스 문서 포함 여부
     include_similar_tickets: bool = True  # 유사 티켓 포함 여부
@@ -84,13 +121,17 @@ class AttachmentProcessRequest(BaseModel):
 
 
 class GenerateReplyRequest(BaseModel):
-    """응답 생성 요청 모델"""
+    """Platform-Neutral 응답 생성 요청 모델"""
     
     context_id: str  # 초기화에서 생성된 컨텍스트 ID
     query: str  # 고객 질문/요청 내용
+    
+    # Platform-Neutral 3-Tuple 필수 필드
+    company_id: str = Field(description="회사 ID (테넌트 격리 필수)")
+    platform: str = Field(default="freshdesk", description="플랫폼 ID (멀티플랫폼 지원)")
+    
     style: Optional[str] = "professional"  # 응답 스타일 (professional, friendly, technical)
     tone: Optional[str] = "helpful"  # 응답 톤 (helpful, empathetic, direct)
     instructions: Optional[str] = None  # 추가 응답 생성 지침
     include_greeting: bool = True  # 인사말 포함 여부
     include_signature: bool = True  # 서명 포함 여부
-    company_id: Optional[str] = None  # 회사 ID (선택사항)

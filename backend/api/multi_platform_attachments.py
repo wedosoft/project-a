@@ -11,7 +11,7 @@ import os
 from typing import Any, Dict, Optional, List
 
 import httpx
-from core.vectordb import vector_db
+from core.database.vectordb import vector_db
 from core.platforms.factory import PlatformFactory
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException, Query, Header

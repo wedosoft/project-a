@@ -11,10 +11,11 @@ from cachetools import TTLCache
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-# 새로운 Langchain 기반 구조 사용
-from core.langchain import LLMManager
-from core.vectordb import vector_db
-from freshdesk import fetcher  # 하위 호환성을 위해 유지
+# 새로운 모듈화된 LLM 매니저 사용
+from core.llm import LLMManager
+from core.database.vectordb import vector_db
+from core.search.hybrid import HybridSearchManager  # 하이브리드 검색 매니저 추가
+from core.platforms.freshdesk import fetcher  # 하위 호환성을 위해 유지
 
 # 분리된 라우터들 import
 from .routes import (
@@ -73,16 +74,24 @@ logger = logging.getLogger(__name__)
 ticket_context_cache = TTLCache(maxsize=1000, ttl=3600)  # 1시간 유효
 ticket_summary_cache = TTLCache(maxsize=500, ttl=1800)  # 30분 유효
 
-# LLMManager 인스턴스 생성 (Langchain 기반)
+# LLMManager 인스턴스 생성 (새로운 모듈화된 구조)
 llm_manager = LLMManager()
+
+# 하이브리드 검색 매니저 초기화
+hybrid_search_manager = HybridSearchManager(
+    vector_db=vector_db,
+    llm_router=llm_manager,  # llm_router -> llm_manager로 변경
+    fetcher=fetcher
+)
 
 # 전역 의존성 설정 (라우터에서 사용하기 위해)
 set_global_dependencies(
     vector_db=vector_db,
     fetcher=fetcher,
-    llm_router=llm_manager,  # 새로운 LLMManager 사용
+    llm_manager=llm_manager,  # 새로운 LLMManager 사용
     ticket_context_cache=ticket_context_cache,
-    ticket_summary_cache=ticket_summary_cache
+    ticket_summary_cache=ticket_summary_cache,
+    hybrid_search_manager=hybrid_search_manager  # 하이브리드 검색 매니저 추가
 )
 
 # 애플리케이션 시작 로그
