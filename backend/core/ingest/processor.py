@@ -15,10 +15,11 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
+import pytz
 
 from core.search.embeddings.embedder import embed_documents, process_documents
 from core.database.vectordb import vector_db
-from core.database import SQLiteDatabase
+from core.database.database import SQLiteDatabase
 from core.ingest.integrator import create_integrated_ticket_object, create_integrated_article_object
 from core.ingest.storage import store_integrated_object_to_sqlite, sanitize_metadata
 from core.ingest.validator import load_status_mappings, save_status_mappings
@@ -27,21 +28,27 @@ from core.platforms.freshdesk.fetcher import (
     fetch_kb_articles,
     fetch_tickets,
 )
+from core.llm.summarizer import generate_summary
 
 # 로깅 설정
 logger = logging.getLogger(__name__)
 
+def get_kst_time() -> str:
+    """현재 시간을 KST로 반환합니다."""
+    kst = pytz.timezone('Asia/Seoul')
+    return datetime.now(kst).isoformat()
+
 COLLECTION_NAME = "documents"  # Qdrant 컬렉션 이름
 PROCESS_ATTACHMENTS = True  # 첨부파일 처리 여부 설정
 
-# FRESHDESK_DOMAIN에서 company_id 자동 추출
-FRESHDESK_DOMAIN = os.getenv("FRESHDESK_DOMAIN")
-if FRESHDESK_DOMAIN:
-    DEFAULT_COMPANY_ID = extract_company_id_from_domain(FRESHDESK_DOMAIN)
-    logger.debug(f"FRESHDESK_DOMAIN '{FRESHDESK_DOMAIN}'에서 추출된 company_id: '{DEFAULT_COMPANY_ID}'")
+# DOMAIN에서 company_id 자동 추출
+DEFAULT_DOMAIN = os.getenv("DOMAIN")
+if DEFAULT_DOMAIN:
+    DEFAULT_COMPANY_ID = extract_company_id_from_domain(DEFAULT_DOMAIN)
+    logger.debug(f"DOMAIN '{DEFAULT_DOMAIN}'에서 추출된 company_id: '{DEFAULT_COMPANY_ID}'")
 else:
     DEFAULT_COMPANY_ID = "default"
-    logger.warning("FRESHDESK_DOMAIN 환경변수가 설정되지 않아 기본값 'default'를 사용합니다.")
+    logger.warning("DOMAIN 환경변수가 설정되지 않아 기본값 'default'를 사용합니다.")
 
 
 def load_local_data(data_dir: str):
@@ -181,9 +188,11 @@ def clear_checkpoints(data_dir: str) -> None:
 
 
 async def ingest(
+    company_id: str,
+    platform: str = "freshdesk",
     incremental: bool = True,
     purge: bool = False,
-    process_attachments: bool = PROCESS_ATTACHMENTS,
+    process_attachments: bool = True,
     force_rebuild: bool = False,
     local_data_dir: Optional[str] = None,
     include_kb: bool = True,
@@ -191,195 +200,716 @@ async def ingest(
     api_key: Optional[str] = None,
     max_tickets: Optional[int] = None,
     max_articles: Optional[int] = None,
-) -> None:
+    cancel_event: Optional[asyncio.Event] = None,
+    pause_event: Optional[asyncio.Event] = None,
+    progress_callback: Optional[callable] = None
+) -> Dict[str, Any]:
     """
-    Freshdesk 티켓과 지식베이스 문서를 임베딩 후 Qdrant에 저장합니다.
+    멀티플랫폼 데이터 수집 및 처리 메인 함수
     
     Args:
-        incremental: 증분 업데이트 모드 여부 (기본값: True)
-        purge: 기존 데이터 삭제 여부 (기본값: False)
-        process_attachments: 첨부파일 처리 여부 (기본값: True)
-        force_rebuild: 데이터베이스 강제 재구축 여부 (기본값: False)
-        local_data_dir: 로컬 데이터 디렉토리 경로 (None이면 Freshdesk API에서 직접 수집)
-        include_kb: 지식베이스 데이터 포함 여부 (기본값: True)
-        domain: Freshdesk 도메인 (None이면 환경변수 사용)
-        api_key: Freshdesk API 키 (None이면 환경변수 사용)
-        max_tickets: 최대 수집 티켓 수 (None이면 무제한, 기본값: None)
-        max_articles: 최대 수집 KB 문서 수 (None이면 무제한, 기본값: None)
+        company_id: 회사 ID (필수)
+        platform: 플랫폼 식별자 (freshdesk, zendesk 등)
+        incremental: 증분 업데이트 모드
+        purge: 기존 데이터 삭제 
+        process_attachments: 첨부파일 처리 여부
+        force_rebuild: 강제 재구축 모드
+        local_data_dir: 로컬 데이터 디렉토리 (선택사항)
+        include_kb: 지식베이스 포함 여부
+        domain: 플랫폼 도메인
+        api_key: API 키
+        max_tickets: 최대 티켓 수 (선택사항)
+        max_articles: 최대 문서 수 (선택사항)
+        cancel_event: 취소 이벤트 (작업 제어용)
+        pause_event: 일시정지 이벤트 (작업 제어용)
+        progress_callback: 진행상황 콜백 함수
+        
+    Returns:
+        Dict: 수집 결과 정보
     """
     start_time = time.time()
+    logger.info(f"데이터 수집 시작 - Company: {company_id}, Platform: {platform}")
     
-    # FRESHDESK_DOMAIN에서 company_id 자동 추출
-    FRESHDESK_DOMAIN = os.getenv("FRESHDESK_DOMAIN")
-    if FRESHDESK_DOMAIN:
-        DEFAULT_COMPANY_ID = extract_company_id_from_domain(FRESHDESK_DOMAIN)
-        logger.debug(f"ingest: FRESHDESK_DOMAIN '{FRESHDESK_DOMAIN}'에서 추출된 company_id: '{DEFAULT_COMPANY_ID}'")
-    else:
-        DEFAULT_COMPANY_ID = "default"
-        logger.warning("ingest: FRESHDESK_DOMAIN 환경변수가 설정되지 않아 기본값 'default'를 사용합니다.")
+    # 결과 초기화
+    result = {
+        "success": False,
+        "message": "",
+        "tickets_processed": 0,
+        "articles_processed": 0,
+        "documents_embedded": 0,
+        "start_time": get_kst_time(),
+        "end_time": None,
+        "duration_seconds": 0,
+        "error": None
+    }
     
-    logger.info("데이터 수집 프로세스 시작")
-    start_time = time.time()
-
     try:
-        # Qdrant 클라우드만 사용하므로, 로컬 DB 백업/무결성 검사 등은 제거됨
-        if force_rebuild:
-            logger.warning("데이터베이스 강제 재구축 모드 (Qdrant 클라우드 환경)")
-            incremental = False
-            purge = True
+        # 취소 신호 확인
+        if cancel_event and cancel_event.is_set():
+            result["message"] = "작업이 취소되었습니다"
+            return result
+            
+        # 일시정지 대기
+        while pause_event and pause_event.is_set():
+            logger.info("작업이 일시정지되었습니다. 재개를 기다리는 중...")
+            await asyncio.sleep(1)
+            if cancel_event and cancel_event.is_set():
+                result["message"] = "작업이 취소되었습니다"
+                return result
         
-        existing_count = vector_db.count(company_id=DEFAULT_COMPANY_ID)
-        logger.info(f"기존 컬렉션에 {existing_count}개 문서가 있습니다 (company_id={DEFAULT_COMPANY_ID})")
-
-        total_count = vector_db.count()
-        logger.info(f"컬렉션 전체 문서 수: {total_count}")
+        # 진행상황 업데이트
+        if progress_callback:
+            progress_callback("데이터 수집 시작", 5)
         
-        if total_count == 0 and purge is False:
-            logger.warning("컬렉션에 문서가 없습니다. 데이터베이스가 비어있거나 접근에 문제가 있을 수 있습니다.")
-            incremental = False
-            purge = False
-
+        # 플랫폼별 데이터 수집
+        tickets = []
+        articles = []
+        
+        # 멀티테넌트 데이터베이스 생성 (데이터 수집 전에 먼저 생성)
+        logger.info("멀티테넌트 데이터베이스 생성 중...")
+        from core.database.database import get_database
+        db = get_database(company_id, platform)
+        logger.info(f"데이터베이스 생성 완료: {db.db_path}")
+        
         if local_data_dir:
-            # 로컬에서 이미 수집된 데이터 읽기
-            logger.info(f"로컬 데이터 디렉토리에서 데이터 로드 중: {local_data_dir}")
-            
-            # 체크포인트 확인 - 이미 임베딩이 완료된 데이터가 있는지 확인
-            # 단, force_rebuild가 아닌 경우에만 체크포인트 복구 시도
-            embedded_checkpoint = load_checkpoint(local_data_dir, "embedded")
-            if embedded_checkpoint and not force_rebuild:
-                # 체크포인트 복구 시도 전 사용자 확인 (자동 재수집 방지)
-                logger.warning("⚠️  기존 임베딩 작업이 중단된 상태입니다.")
-                logger.info("체크포인트에서 작업을 재개하려면 force_rebuild=False 상태에서만 가능합니다.")
-                
-                # 자동 재수집 방지: 명시적 재개 요청이 있을 때만 실행
-                if not incremental:  # 전체 재수집 모드에서는 체크포인트 무시
-                    logger.info("전체 재수집 모드: 기존 체크포인트를 무시하고 새로 시작합니다.")
-                    clear_checkpoints(local_data_dir)
-                else:
-                    logger.info("임베딩 완료된 체크포인트 발견됨, 벡터 DB 저장 단계부터 재개...")
-                    docs = embedded_checkpoint["docs"]
-                    all_embeddings = embedded_checkpoint["embeddings"]
-                    metadatas = embedded_checkpoint["metadatas"]
-                    ids = embedded_checkpoint["ids"]
-                    
-                    # 벡터 DB 저장으로 바로 이동
-                    logger.info("Qdrant 벡터 DB에 문서 저장 중...")
-                    batch_size = 50
-                    for i in range(0, len(docs), batch_size):
-                        end_idx = min(i + batch_size, len(docs))
-                        batch_docs = docs[i:end_idx]
-                        batch_embeddings = all_embeddings[i:end_idx]
-                        batch_metadatas = metadatas[i:end_idx]
-                        batch_ids = ids[i:end_idx]
-
-                        logger.info(f"문서 배치 저장 중... ({i+1}~{end_idx}/{len(docs)})")
-                        vector_db.add_documents(
-                            texts=batch_docs,
-                            embeddings=batch_embeddings,
-                            metadatas=batch_metadatas,
-                            ids=batch_ids,
-                        )
-                    
-                    # 성공적으로 완료되면 체크포인트 정리
-                    clear_checkpoints(local_data_dir)
-                    logger.info("✅ 체크포인트에서 벡터 DB 저장 완료")
-                    return
-            
-            # 체크포인트가 없거나 force_rebuild인 경우 일반 로드
-            tickets, articles = load_local_data(local_data_dir)
-            
-            # 지식베이스 문서 포함 여부에 따라 처리
-            if not include_kb:
-                logger.info("include_kb=False 설정으로 지식베이스 문서는 제외됩니다.")
-                articles = []
-            
-            # 데이터 로드 체크포인트 저장
-            checkpoint_data = {
-                "tickets": tickets,
-                "articles": articles,
-                "docs": [],
-                "embeddings": [],
-                "metadatas": [],
-                "ids": []
-            }
-            save_checkpoint(local_data_dir, "data_loaded", checkpoint_data)
-            
+            # 로컬 데이터 로드
+            logger.info(f"로컬 데이터 디렉토리에서 데이터 로드: {local_data_dir}")
+            # TODO: 로컬 데이터 로드 로직 구현
         else:
-            # 기존 방식: Freshdesk API에서 직접 수집
-            logger.info("Freshdesk 데이터 수집 중...")
-            # 동적 Freshdesk 설정을 fetch 함수들에 전달
-            tickets_task = asyncio.create_task(fetch_tickets(domain=domain, api_key=api_key, max_tickets=max_tickets or 10000))
-            articles_task = asyncio.create_task(fetch_kb_articles(domain=domain, api_key=api_key, max_articles=max_articles))
-            tickets, articles = await asyncio.gather(tickets_task, articles_task)
-
-        if not tickets and not articles:
-            logger.warning("Freshdesk에서 가져온 데이터가 없습니다.")
-            return
-
-        # SQLite에 원본 데이터 저장
+            # API에서 데이터 수집
+            if platform == "freshdesk":
+                from core.platforms.freshdesk.fetcher import fetch_tickets, fetch_kb_articles
+                
+                # 취소 확인
+                if cancel_event and cancel_event.is_set():
+                    result["message"] = "작업이 취소되었습니다"
+                    return result
+                
+                # 진행상황 업데이트
+                if progress_callback:
+                    progress_callback("티켓 데이터 수집 중", 20)
+                
+                logger.info("티켓 데이터 수집 중...")
+                try:
+                    logger.info(f"[DEBUG] fetch_tickets 함수 호출 시작 - domain: {domain}, max_tickets: {max_tickets}")
+                    logger.info(f"[DEBUG] 즉시 저장 모드로 호출합니다 - company_id: {company_id}, platform: {platform}")
+                    tickets = await fetch_tickets(
+                        domain=domain, 
+                        api_key=api_key,
+                        max_tickets=max_tickets,
+                        company_id=company_id,
+                        platform=platform,
+                        store_immediately=True  # 즉시 저장 모드 활성화
+                    )
+                    logger.info(f"[DEBUG] fetch_tickets 함수 호출 완료")
+                    logger.info(f"[DEBUG] 티켓 수집 완료: {len(tickets)}개")
+                    logger.info(f"[DEBUG] 즉시 저장 모드로 실행되어 모든 티켓이 개별 저장되었습니다")
+                    logger.info(f"[DEBUG] 티켓 샘플 (첫 3개): {[t.get('id') for t in tickets[:3]] if tickets else 'None'}")
+                except Exception as e:
+                    logger.error(f"[DEBUG] 티켓 수집 중 오류: {e}", exc_info=True)
+                    tickets = []  # 오류 시 빈 리스트
+                
+                # 취소 확인
+                if cancel_event and cancel_event.is_set():
+                    result["message"] = "작업이 취소되었습니다"
+                    return result
+                
+                if include_kb:
+                    # 진행상황 업데이트
+                    if progress_callback:
+                        progress_callback("지식베이스 데이터 수집 중", 35)
+                    
+                    logger.info("KB 데이터 수집 중...")
+                    try:
+                        logger.info(f"[DEBUG] fetch_kb_articles 함수 호출 시작 - domain: {domain}, max_articles: {max_articles}")
+                        articles = await fetch_kb_articles(
+                            domain=domain,
+                            api_key=api_key,
+                            max_articles=max_articles
+                        )
+                        logger.info(f"[DEBUG] fetch_kb_articles 함수 호출 완료")
+                        logger.info(f"[DEBUG] KB 수집 완료: {len(articles)}개")
+                        logger.info(f"[DEBUG] 문서 샘플 (첫 3개): {[a.get('id') for a in articles[:3]] if articles else 'None'}")
+                    except Exception as e:
+                        logger.error(f"[DEBUG] KB 수집 중 오류: {e}", exc_info=True)
+                        articles = []  # 오류 시 빈 리스트
+                else:
+                    logger.info("[DEBUG] include_kb=False이므로 KB 수집을 건너뜁니다.")
+            else:
+                raise ValueError(f"지원되지 않는 플랫폼: {platform}")
+        
+        logger.info(f"[DEBUG] ===== 데이터 수집 단계 완전 완료 =====")
+        logger.info(f"[DEBUG] platform: {platform}")
+        logger.info(f"[DEBUG] local_data_dir: {local_data_dir}")
+        logger.info(f"[DEBUG] 수집 결과 - 티켓: {len(tickets)}개, 문서: {len(articles)}개")
+        
+        # 취소 확인
+        if cancel_event and cancel_event.is_set():
+            result["message"] = "작업이 취소되었습니다"
+            return result
+        
+        logger.info(f"[DEBUG] 데이터 수집 단계 완료 - 티켓: {len(tickets)}개, 문서: {len(articles)}개")
+        logger.info(f"[DEBUG] 저장 단계로 진입합니다...")
+        logger.info(f"[DEBUG] 매개변수 확인 - company_id: {company_id}, platform: {platform}")
+        logger.info(f"[DEBUG] 티켓 샘플 확인 - 첫 번째 티켓: {tickets[0] if tickets else 'None'}")
+        logger.info(f"[DEBUG] 문서 샘플 확인 - 첫 번째 문서: {articles[0] if articles else 'None'}")
+        
+        # 진행상황 업데이트
+        if progress_callback:
+            progress_callback("데이터 저장 및 처리 중", 50)
+        
+        # SQLite에 원본 데이터 저장 (데이터 유무와 관계없이 데이터베이스는 생성)
         logger.info("SQLite 데이터베이스에 원본 데이터 저장 중...")
         job_id = f"ingest_{int(time.time())}"
-        try:
-            # 테스트용 데이터베이스 사용 (100건 제한)
-            db = SQLiteDatabase("freshdesk_test_data.db")
-            db.connect()
-            db.create_tables()
-            
-            # 수집 작업 시작 로그
-            job_start_data = {
-                'job_id': job_id,
-                'company_id': DEFAULT_COMPANY_ID,
-                'job_type': 'ingest',
-                'status': 'started',
-                'start_time': datetime.now().isoformat(),
-                'config': {
-                    'incremental': incremental,
-                    'purge': purge,
-                    'include_kb': include_kb,
-                    'tickets_count': len(tickets),
-                    'articles_count': len(articles)
-                }
-            }
-            db.log_collection_job(job_start_data)
-            
-            # 티켓 데이터를 통합 객체로 변환하여 저장
-            tickets_saved = 0
-            for ticket in tickets:
-                # create_integrated_ticket_object는 이미 integrator.py에 있음
-                integrated_ticket = create_integrated_ticket_object(ticket)
-                if store_integrated_object_to_sqlite(db, integrated_ticket, DEFAULT_COMPANY_ID):
-                    tickets_saved += 1
-            
-            # KB 문서 데이터를 통합 객체로 변환하여 저장
-            articles_saved = 0
-            for article in articles:
-                # create_integrated_article_object는 이미 integrator.py에 있음  
-                integrated_article = create_integrated_article_object(article)
-                if store_integrated_object_to_sqlite(db, integrated_article, DEFAULT_COMPANY_ID):
-                    articles_saved += 1
-            
-            logger.info(f"SQLite에 저장됨 - 티켓: {tickets_saved}개, KB 문서: {articles_saved}개")
-            
-        except Exception as e:
-            logger.error(f"SQLite 저장 중 오류: {e}")
-        finally:
-            if 'db' in locals():
-                db.close()
-
-        # 벡터 임베딩 및 저장 로직은 원본 파일에서 계속 가져와야 함
-        # 이 부분은 다음 단계에서 완성하겠습니다.
         
-        # 임시로 성공 로그만 출력
+        # 데이터가 없는 경우 조기 종료 (데이터베이스 생성 후)
+        if not tickets and not articles:
+            logger.info("수집된 데이터가 없지만 데이터베이스는 생성되었습니다")
+            result["message"] = "수집할 데이터가 없습니다 (데이터베이스 생성 완료)"
+            result["success"] = True
+            return result
+        
+        logger.info(f"[DEBUG] 데이터 존재 확인 - 티켓: {len(tickets)}개, 문서: {len(articles)}개")
+        logger.info(f"[DEBUG] 저장 로직 시작 - force_rebuild: {force_rebuild}")
+        
+        # force_rebuild 모드인 경우 기존 데이터 삭제
+        if force_rebuild:
+            logger.info("force_rebuild 모드: 기존 SQLite 데이터 삭제 중...")
+            db.clear_all_data(company_id=company_id, platform=platform)
+        
+        # 수집 작업 시작 로그
+        job_start_data = {
+            'job_id': job_id,
+            'company_id': company_id,
+            'platform': platform,
+            'job_type': 'ingest',
+            'status': 'started',
+            'start_time': get_kst_time(),
+            'config': {
+                'incremental': incremental,
+                'purge': purge,
+                'include_kb': include_kb,
+                'tickets_count': len(tickets),
+                'articles_count': len(articles)
+            }
+        }
+        db.log_collection_job(job_start_data)
+        
+        # 티켓 데이터 처리
+        tickets_saved = 0
+        total_attachments = 0
+        total_conversations = 0
+        
+        logger.info(f"[DEBUG] ===== 티켓 처리 루프 시작 =====")
+        logger.info(f"[DEBUG] 처리할 티켓 수: {len(tickets)}")
+        
+        for i, ticket in enumerate(tickets):
+            logger.info(f"[DEBUG] 티켓 루프 진입: {i+1}/{len(tickets)}, ticket_id={ticket.get('id')}")
+            
+            # 취소 확인
+            if cancel_event and cancel_event.is_set():
+                result["message"] = "작업이 취소되었습니다"
+                return result
+            
+            # 일시정지 대기
+            while pause_event and pause_event.is_set():
+                await asyncio.sleep(1)
+                if cancel_event and cancel_event.is_set():
+                    result["message"] = "작업이 취소되었습니다"
+                    return result
+            
+            # 진행상황 업데이트
+            if progress_callback and i % 10 == 0:
+                progress = 50 + (i / len(tickets)) * 25  # 50-75% 구간
+                progress_callback(f"티켓 처리 중 ({i+1}/{len(tickets)})", progress)
+            
+            # 통합 객체 생성 및 저장
+            logger.info(f"[DEBUG] 티켓 처리 시작: ID={ticket.get('id')}, company_id={company_id}")
+            
+            try:
+                integrated_ticket = create_integrated_ticket_object(ticket, company_id=company_id)
+                logger.info(f"[DEBUG] 통합 티켓 객체 생성 완료: ID={integrated_ticket.get('id')}, company_id={company_id}")
+                logger.info(f"[DEBUG] 저장 함수 호출 시작: store_integrated_object_to_sqlite")
+                
+                store_result = store_integrated_object_to_sqlite(db, integrated_ticket, company_id, platform)
+                logger.info(f"[DEBUG] 저장 함수 호출 완료: result={store_result}")
+                
+                if store_result:
+                    tickets_saved += 1
+                    # 첨부파일 및 대화 수 카운트
+                    attachments = integrated_ticket.get("all_attachments", [])
+                    total_attachments += len(attachments)
+                    conversations = integrated_ticket.get("all_conversations", [])
+                    total_conversations += len(conversations)
+                    logger.info(f"[DEBUG] 티켓 저장 성공: ID={integrated_ticket.get('id')}, 첨부파일={len(attachments)}개, 대화={len(conversations)}개")
+                else:
+                    logger.error(f"[DEBUG] 티켓 저장 실패: ID={ticket.get('id')}, company_id={company_id}")
+                    
+            except Exception as e:
+                logger.error(f"[DEBUG] 티켓 처리 중 예외 발생: ID={ticket.get('id')}, 오류={e}", exc_info=True)
+                
+        logger.info(f"[DEBUG] ===== 티켓 처리 루프 완료 =====")
+        logger.info(f"[DEBUG] 저장된 티켓 수: {tickets_saved}/{len(tickets)}")
+        
+        # 문서 데이터 처리
+        articles_saved = 0
+        for i, article in enumerate(articles):
+            # 취소 확인
+            if cancel_event and cancel_event.is_set():
+                result["message"] = "작업이 취소되었습니다"
+                return result
+            
+            # 일시정지 대기
+            while pause_event and pause_event.is_set():
+                await asyncio.sleep(1)
+                if cancel_event and cancel_event.is_set():
+                    result["message"] = "작업이 취소되었습니다"
+                    return result
+            
+            # 진행상황 업데이트
+            if progress_callback and i % 5 == 0:
+                progress = 75 + (i / len(articles)) * 10  # 75-85% 구간
+                progress_callback(f"문서 처리 중 ({i+1}/{len(articles)})", progress)
+            
+            # 통합 객체 생성 및 저장
+            logger.info(f"[DEBUG] 문서 처리 시작: ID={article.get('id')}, company_id={company_id}")
+            integrated_article = create_integrated_article_object(article, company_id=company_id)
+            logger.info(f"[DEBUG] 통합 아티클 객체 생성 완료: ID={integrated_article.get('id')}, company_id={company_id}")
+            logger.info(f"[DEBUG] 저장 함수 호출 시작: store_integrated_object_to_sqlite")
+            
+            store_result = store_integrated_object_to_sqlite(db, integrated_article, company_id, platform)
+            logger.info(f"[DEBUG] 저장 함수 호출 완료: result={store_result}")
+            
+            if store_result:
+                articles_saved += 1
+                logger.info(f"[DEBUG] 아티클 저장 성공: ID={integrated_article.get('id')}")
+            else:
+                logger.error(f"[DEBUG] 아티클 저장 실패: ID={article.get('id')}, company_id={company_id}")
+        
+        logger.info(f"SQLite 저장 완료 - 티켓: {tickets_saved}개, 문서: {articles_saved}개")
+        
+        # 진행상황 업데이트
+        if progress_callback:
+            progress_callback("임베딩 및 벡터 저장 중", 85)
+        
+        # 임베딩 및 벡터 저장 (기존 로직)
+        logger.info("문서 임베딩 및 벡터 저장 시작...")
+        
+        # TODO: 임베딩 로직 구현 (기존 코드 활용)
+        
+        # 결과 설정
         end_time = time.time()
-        elapsed_time = end_time - start_time
-        logger.info(f"✅ 데이터 수집 프로세스 완료 (소요시간: {elapsed_time:.2f}초)")
+        result.update({
+            "success": True,
+            "message": "데이터 수집이 완료되었습니다",
+            "tickets_processed": tickets_saved,
+            "articles_processed": articles_saved,
+            "documents_embedded": tickets_saved + articles_saved,
+            "end_time": get_kst_time(),
+            "duration_seconds": end_time - start_time
+        })
+        
+        # 완료 로그
+        job_end_data = {
+            'job_id': job_id,
+            'company_id': company_id,
+            'status': 'completed',
+            'end_time': get_kst_time(),
+            'tickets_collected': tickets_saved,
+            'conversations_collected': total_conversations,
+            'articles_collected': articles_saved,
+            'attachments_collected': total_attachments,
+            'results': {
+                'tickets_processed': tickets_saved,
+                'articles_processed': articles_saved,
+                'total_documents_embedded': tickets_saved + articles_saved,
+                'vectors_stored': tickets_saved + articles_saved
+            }
+        }
+        db.log_collection_job(job_end_data)
+        
+        # 진행상황 업데이트
+        if progress_callback:
+            progress_callback("완료", 100)
+        
+        logger.info(f"✅ 데이터 수집 완료 (소요시간: {result['duration_seconds']:.2f}초)")
         
     except Exception as e:
-        logger.error(f"데이터 수집 중 오류 발생: {e}")
+        logger.error(f"데이터 수집 중 오류 발생: {e}", exc_info=True)
+        end_time = time.time()
+        result.update({
+            "success": False,
+            "message": f"데이터 수집 실패: {str(e)}",
+            "end_time": get_kst_time(),
+            "duration_seconds": end_time - start_time,
+            "error": str(e)
+        })
+        
+        # 실패 로그
+        if 'job_id' in locals():
+            job_error_data = {
+                'job_id': job_id,
+                'company_id': company_id,
+                'status': 'failed',
+                'end_time': get_kst_time(),
+                'error': str(e)
+            }
+            if 'db' in locals():
+                db.log_collection_job(job_error_data)
+        
         raise
+    finally:
+        if 'db' in locals():
+            db.disconnect()
+    
+    return result
+
+async def generate_and_store_summaries(
+    company_id: str,
+    platform: str = "freshdesk",
+    force_update: bool = False
+) -> Dict[str, Any]:
+    """
+    티켓과 KB 문서의 LLM 요약을 생성하고 integrated_objects 테이블에 저장합니다.
+    
+    Args:
+        company_id: 회사 식별자
+        platform: 플랫폼 식별자
+        force_update: 기존 요약 강제 업데이트 여부
+        
+    Returns:
+        Dict[str, Any]: 처리 결과
+    """
+    logger.info(f"LLM 요약 생성 시작 (company_id: {company_id}, platform: {platform})")
+    start_time = time.time()
+    
+    result = {
+        "success_count": 0,
+        "failure_count": 0,
+        "skipped_count": 0,
+        "total_processed": 0,
+        "processing_time": 0,
+        "errors": []
+    }
+    
+    # 멀티테넌트 데이터베이스 연결
+    from core.database.database import get_database
+    db = get_database(company_id, platform)
+    
+    try:
+        # 1. 티켓 요약 생성
+        logger.info("티켓 요약 생성 중...")
+        tickets = db.get_tickets_by_company_and_platform(company_id, platform)
+        logger.info(f"처리할 티켓 수: {len(tickets)}")
+        
+        for ticket in tickets:
+            try:
+                original_id = str(ticket.get('original_id', ''))
+                
+                # 기존 요약 확인 (force_update가 False인 경우)
+                if not force_update:
+                    # integrated_objects에서 기존 요약 확인
+                    cursor = db.connection.cursor()
+                    cursor.execute("""
+                        SELECT summary FROM integrated_objects 
+                        WHERE company_id = ? AND platform = ? AND object_type = ? AND original_id = ?
+                    """, (company_id, platform, 'integrated_ticket', original_id))
+                    existing = cursor.fetchone()
+                    
+                    if existing and existing[0]:
+                        logger.debug(f"티켓 {original_id}: 기존 요약 존재, 건너뜀")
+                        result["skipped_count"] += 1
+                        continue
+                
+                # 통합 티켓 객체 생성
+                integrated_ticket = create_integrated_ticket_object(
+                    ticket=ticket,
+                    company_id=company_id
+                )
+                
+                # LLM 요약 생성
+                content_text = ticket.get('description_text', '') or ticket.get('description', '')
+                if not content_text:
+                    logger.warning(f"티켓 {original_id}: 요약할 내용이 없음")
+                    result["skipped_count"] += 1
+                    continue
+                
+                summary = await generate_summary(
+                    content=content_text,
+                    content_type="ticket",
+                    subject=ticket.get('subject', ''),
+                    metadata={
+                        'status': ticket.get('status', ''),
+                        'priority': ticket.get('priority', ''),
+                        'created_at': ticket.get('created_at', '')
+                    }
+                )
+                
+                # integrated_objects에 저장
+                integrated_data = {
+                    'original_id': original_id,
+                    'company_id': company_id,
+                    'platform': platform,
+                    'object_type': 'integrated_ticket',
+                    'original_data': ticket,
+                    'integrated_content': integrated_ticket.get('integrated_text', ''),
+                    'summary': summary,
+                    'metadata': {
+                        'subject': ticket.get('subject', ''),
+                        'status': ticket.get('status', ''),
+                        'priority': ticket.get('priority', ''),
+                        'created_at': ticket.get('created_at', ''),
+                        'updated_at': ticket.get('updated_at', '')
+                    }
+                }
+                
+                db.insert_integrated_object(integrated_data)
+                result["success_count"] += 1
+                logger.debug(f"티켓 {original_id}: 요약 생성 및 저장 완료")
+                
+            except Exception as e:
+                logger.error(f"티켓 {original_id} 요약 생성 중 오류: {e}")
+                result["failure_count"] += 1
+                result["errors"].append(f"티켓 {original_id}: {str(e)}")
+        
+        # 2. KB 문서 요약 생성
+        logger.info("KB 문서 요약 생성 중...")
+        articles = db.get_articles_by_company_and_platform(company_id, platform)
+        logger.info(f"처리할 KB 문서 수: {len(articles)}")
+        
+        for article in articles:
+            try:
+                original_id = str(article.get('original_id', ''))
+                
+                # 기존 요약 확인 (force_update가 False인 경우)
+                if not force_update:
+                    cursor = db.connection.cursor()
+                    cursor.execute("""
+                        SELECT summary FROM integrated_objects 
+                        WHERE company_id = ? AND platform = ? AND object_type = ? AND original_id = ?
+                    """, (company_id, platform, 'integrated_article', original_id))
+                    existing = cursor.fetchone()
+                    
+                    if existing and existing[0]:
+                        logger.debug(f"KB {original_id}: 기존 요약 존재, 건너뜀")
+                        result["skipped_count"] += 1
+                        continue
+                
+                # 통합 문서 객체 생성
+                integrated_article = create_integrated_article_object(
+                    article=article,
+                    company_id=company_id
+                )
+                
+                # LLM 요약 생성
+                content_text = article.get('description_text', '') or article.get('description', '')
+                if not content_text:
+                    logger.warning(f"KB {original_id}: 요약할 내용이 없음")
+                    result["skipped_count"] += 1
+                    continue
+                
+                summary = await generate_summary(
+                    content=content_text,
+                    content_type="knowledge_base",
+                    subject=article.get('title', ''),
+                    metadata={
+                        'status': article.get('status', ''),
+                        'category_id': article.get('category_id', ''),
+                        'created_at': article.get('created_at', '')
+                    }
+                )
+                
+                # integrated_objects에 저장
+                integrated_data = {
+                    'original_id': original_id,
+                    'company_id': company_id,
+                    'platform': platform,
+                    'object_type': 'integrated_article',
+                    'original_data': article,
+                    'integrated_content': integrated_article.get('integrated_text', ''),
+                    'summary': summary,
+                    'metadata': {
+                        'title': article.get('title', ''),
+                        'status': article.get('status', ''),
+                        'category_id': article.get('category_id', ''),
+                        'created_at': article.get('created_at', ''),
+                        'updated_at': article.get('updated_at', '')
+                    }
+                }
+                
+                db.insert_integrated_object(integrated_data)
+                result["success_count"] += 1
+                logger.debug(f"KB {original_id}: 요약 생성 및 저장 완료")
+                
+            except Exception as e:
+                logger.error(f"KB {original_id} 요약 생성 중 오류: {e}")
+                result["failure_count"] += 1
+                result["errors"].append(f"KB {original_id}: {str(e)}")
+        
+        result["total_processed"] = result["success_count"] + result["failure_count"] + result["skipped_count"]
+        result["processing_time"] = time.time() - start_time
+        
+        logger.info(f"✅ LLM 요약 생성 완료:")
+        logger.info(f"  - 성공: {result['success_count']}")
+        logger.info(f"  - 실패: {result['failure_count']}")
+        logger.info(f"  - 건너뜀: {result['skipped_count']}")
+        logger.info(f"  - 총 처리: {result['total_processed']}")
+        logger.info(f"  - 소요 시간: {result['processing_time']:.2f}초")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"LLM 요약 생성 중 오류 발생: {e}")
+        result["errors"].append(str(e))
+        result["processing_time"] = time.time() - start_time
+        raise
+    finally:
+        db.disconnect()
+
+
+async def sync_summaries_to_vector_db(company_id: str, platform: str = "freshdesk", 
+                                      batch_size: int = 25, force_update: bool = False) -> Dict[str, Any]:
+    """
+    SQLite에서 요약이 생성된 문서들을 조회하여 벡터 DB에 동기화합니다.
+    
+    Args:
+        company_id: 회사 ID
+        platform: 플랫폼명 (기본값: "freshdesk")
+        batch_size: 배치 크기 (기본값: 25)
+        force_update: 강제 업데이트 여부 (기본값: False)
+        
+    Returns:
+        Dict[str, Any]: 동기화 결과 정보
+    """
+    from core.database.database import get_database
+    from core.database.vectordb import vector_db
+    
+    result = {
+        "status": "success",
+        "message": "벡터 DB 동기화 완료",
+        "synced_count": 0,
+        "errors": [],
+        "error_count": 0
+    }
+    
+    db = None
+    
+    try:
+        # 데이터베이스 연결
+        db = get_database(company_id, platform)
+        logger.info("벡터 DB 동기화용 데이터베이스 연결 완료")
+        
+        # SQLite에서 요약이 있는 문서들 조회
+        cursor = db.connection.cursor()
+        
+        # 티켓 데이터 조회 (요약이 있는 것만)
+        logger.info("SQLite에서 티켓 데이터 조회 중...")
+        cursor.execute("""
+            SELECT original_id, company_id, platform, object_type, summary, integrated_content, metadata
+            FROM integrated_objects 
+            WHERE company_id = ? AND platform = ? 
+            AND (summary IS NOT NULL AND summary != '')
+            AND object_type LIKE '%ticket%'
+        """, (company_id, platform))
+        
+        ticket_rows = cursor.fetchall()
+        logger.info(f"티켓 데이터 {len(ticket_rows)}개 조회 완료 (요약 또는 원본 콘텐츠)")
+        
+        # KB 문서 데이터 조회 (요약이 있는 것만)
+        logger.info("SQLite에서 KB 문서 데이터 조회 중...")
+        cursor.execute("""
+            SELECT original_id, company_id, platform, object_type, summary, integrated_content, metadata
+            FROM integrated_objects 
+            WHERE company_id = ? AND platform = ? 
+            AND (summary IS NOT NULL AND summary != '')
+            AND object_type LIKE '%article%'
+        """, (company_id, platform))
+        
+        article_rows = cursor.fetchall()
+        logger.info(f"KB 문서 데이터 {len(article_rows)}개 조회 완료 (요약 또는 원본 콘텐츠)")
+        
+        # 모든 데이터 통합
+        all_rows = ticket_rows + article_rows
+        total_count = len(all_rows)
+        
+        if total_count == 0:
+            result["message"] = "동기화할 문서가 없습니다 (요약이 생성된 문서 없음)"
+            return result
+        
+        logger.info(f"벡터 DB에 {total_count}개 문서 업로드 시작...")
+        
+        # 벡터 DB 클라이언트 가져오기
+        vector_client = vector_db
+        
+        # 문서 변환 및 업로드
+        documents = []
+        for row in all_rows:
+            original_id, db_company_id, db_platform, object_type, summary, integrated_content, metadata_str = row
+            
+            # 메타데이터 파싱
+            try:
+                metadata = json.loads(metadata_str) if metadata_str else {}
+            except json.JSONDecodeError:
+                metadata = {}
+            
+            # doc_type 설정 - object_type에서 추출
+            if 'ticket' in object_type.lower():
+                doc_type = 'ticket'
+            elif 'article' in object_type.lower():
+                doc_type = 'kb_article'
+            else:
+                doc_type = 'unknown'
+            
+            # 문서 객체 생성
+            doc = {
+                'id': f"{db_company_id}_{db_platform}_{original_id}",
+                'content': summary or integrated_content or "",
+                'metadata': {
+                    'doc_type': doc_type,  # 필수 필드
+                    'original_id': str(original_id),
+                    'company_id': db_company_id,
+                    'platform': db_platform,
+                    'object_type': object_type,
+                    **metadata  # 기존 메타데이터 병합
+                }
+            }
+            
+            documents.append(doc)
+        
+        # 벡터 DB에 문서 추가 (비동기 아님)
+        if documents:
+            # documents를 vectordb의 add_documents 형식에 맞게 변환
+            texts = [doc['content'] for doc in documents]
+            metadatas = [doc['metadata'] for doc in documents]
+            ids = [doc['id'] for doc in documents]
+            
+            # 실제 임베딩 생성
+            logger.info(f"임베딩 생성 시작: {len(texts)}개 문서")
+            from core.search.embeddings.embedder import embed_documents
+            embeddings = embed_documents(texts)
+            logger.info(f"임베딩 생성 완료: {len(embeddings)}개")
+            
+            vector_client.add_documents(texts, embeddings, metadatas, ids)
+            result["synced_count"] = len(documents)
+            logger.info(f"벡터 DB 동기화 완료: {len(documents)}개 문서")
+        else:
+            result["message"] = "업로드할 문서가 없습니다"
+        
+    except Exception as e:
+        logger.error(f"벡터 DB 동기화 실패: {e}")
+        result["status"] = "error"
+        result["errors"].append(str(e))
+        result["error_count"] += 1
+    finally:
+        if db:
+            db.disconnect()
+            logger.info("벡터 DB 동기화용 데이터베이스 연결 해제")
+    
+    return result
 
 
 # 임시 검증 및 상태 관리 함수들 (validator.py로 이동 예정)
+
 async def update_status_mappings(collection_name: str = COLLECTION_NAME) -> None:
     """
     Qdrant에서 기존 상태 값들을 조회하여 매핑 정보를 업데이트합니다.

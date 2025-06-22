@@ -1,3 +1,4 @@
+````instructions
 # 🔐 멀티테넌트 보안 핵심 패턴
 
 _AI 참조 최적화 버전 - 핵심 보안 패턴만 집중 정리_
@@ -13,13 +14,98 @@ _AI 참조 최적화 버전 - 핵심 보안 패턴만 집중 정리_
 
 ---
 
+## 🚨 **중요 업데이트 (2025-06-22)**
+
+### 📋 **표준 4개 헤더 기반 API 일관성 확보**
+
+**모든 FastAPI 라우터에서 표준 헤더만 사용**:
+```python
+# ✅ 표준 헤더 (의존성으로 주입)
+async def endpoint(
+    headers: StandardHeaders = Depends(get_standard_headers)
+):
+    # headers.company_id, headers.platform, headers.domain, headers.api_key
+    pass
+
+# ❌ 레거시 환경변수/쿼리 파라미터 사용 금지
+# FRESHDESK_DOMAIN, FRESHDESK_API_KEY 등 완전 제거
+```
+
+**헤더 우선순위**:
+1. **X-Company-ID** (필수)
+2. **X-Platform** (필수: freshdesk, zendesk 등)
+3. **X-Domain** (필수: API 엔드포인트)
+4. **X-API-Key** (필수: 인증 키)
+
+### 🗄️ **멀티테넌트 데이터베이스 정책 확정**
+
+**개발환경 (SQLite) - 회사별 데이터베이스 파일 분리**:
+```
+data/
+├── company1_freshdesk_data.db     # 물리적 격리
+├── acme_freshdesk_data.db         # 완전 독립
+└── demo_zendesk_data.db           # 플랫폼별 분리
+```
+
+**운영환경 (PostgreSQL) - 테넌트별 스키마**:
+```sql
+-- 스키마 기반 격리
+CREATE SCHEMA tenant_company1_freshdesk;
+CREATE SCHEMA tenant_acme_freshdesk;
+
+-- Row-level Security 적용
+ALTER TABLE tenant_company1_freshdesk.tickets ENABLE ROW LEVEL SECURITY;
+```
+
+**데이터베이스 생성 함수 업데이트**:
+```python
+def get_database(company_id: str, platform: str = "freshdesk"):
+    """멀티테넌트 데이터베이스 인스턴스 반환"""
+    if os.getenv("DATABASE_URL"):
+        # PostgreSQL: 스키마 기반 격리
+        return PostgreSQLDatabase(
+            schema_name=f"tenant_{company_id}_{platform}"
+        )
+    else:
+        # SQLite: 파일 기반 격리
+        db_path = f"data/{company_id}_{platform}_data.db"
+        return SQLiteDatabase(db_path)
+```
+
+### 🔧 **Fetcher 함수 리팩토링 완료**
+
+**fetch_tickets/fetch_kb_articles 파라미터 표준화**:
+```python
+# ✅ 수정 후: company_id 파라미터 제거
+async def fetch_tickets(
+    domain: Optional[str] = None,
+    api_key: Optional[str] = None,
+    max_tickets: int = 10000
+) -> List[Dict[str, Any]]:
+
+# ✅ 내부에서 company_id 추출
+company_id = extract_company_id_from_domain(domain)
+```
+
+**ingest 프로세서 호출부 수정**:
+```python
+# ✅ 수정 후: company_id 파라미터 제거
+tickets = await fetch_tickets(
+    domain=domain, 
+    api_key=api_key,
+    max_tickets=max_tickets
+)
+```
+
+---
+
 ## 🚀 **TL;DR - 핵심 멀티테넌트 보안 요약**
 
 ### 💡 **즉시 참조용 핵심 포인트**
 
 **테넌트 식별 전략**:
 ```
-도메인 추출: wedosoft.freshdesk.com → "wedosoft"
+도메인 추출: your_company.freshdesk.com → "your_company"
 X-Company-ID 헤더 → API 전체에 필수 적용
 모든 DB 쿼리 → company_id WHERE 조건 필수
 ```
@@ -86,7 +172,7 @@ def validate_company_id(company_id: str) -> bool:
     return re.match(r'^[a-zA-Z0-9-]+$', company_id) is not None
 
 # 사용 예시
-company_id = extract_company_id("wedosoft.freshdesk.com")  # "wedosoft"
+company_id = extract_company_id("your_company.freshdesk.com")  # "your_company"
 if not validate_company_id(company_id):
     raise ValueError(f"Invalid company_id: {company_id}")
 ```
@@ -562,3 +648,98 @@ def log_tenant_access(operation: str, table_name: str = None):
 *📝 이 지침서는 멀티테넌트 보안의 핵심 패턴만 정리했습니다. 더 상세한 구현은 legacy/multitenant-security-complete.instructions.md를 참조하세요.*
 
 **🔗 Next Steps**: 단계별로 보안 패턴을 적용하여 테넌트 격리를 강화하세요.
+
+---
+
+## 🧪 **데이터 파이프라인 테스트 가이드라인 (2025-06-22 추가)**
+
+### 📊 **ingest 엔드포인트 테스트 프로세스**
+
+**1. 서버 실행 및 확인**:
+```bash
+cd backend && source venv/bin/activate
+python -m uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
+
+# 서버 상태 확인
+curl http://localhost:8000/health
+```
+
+**2. 표준 헤더로 ingest 테스트**:
+```bash
+# ✅ 올바른 테스트 방법
+curl -X POST "http://localhost:8000/ingest" \
+  -H "Content-Type: application/json" \
+  -H "X-Company-ID: your_company" \
+  -H "X-Platform: freshdesk" \
+  -H "X-Domain: your_company.freshdesk.com" \
+  -H "X-API-Key: your_api_key" \
+  -d '{
+    "max_tickets": 100,
+    "max_articles": 50,
+    "include_kb": true
+  }'
+```
+
+**3. 데이터베이스 파일 확인**:
+```bash
+# SQLite 파일 생성 확인
+ls -la backend/core/data/
+# → your_company_freshdesk_data.db 파일 존재 확인
+
+# 데이터 확인
+sqlite3 backend/core/data/your_company_freshdesk_data.db
+.tables
+SELECT COUNT(*) FROM integrated_objects;
+```
+
+### 🔍 **일반적인 문제 해결**
+
+**문제**: `fetch_tickets() got an unexpected keyword argument 'company_id'`
+**해결**: processor.py에서 company_id 파라미터 제거 완료
+
+**문제**: SQL 데이터베이스가 생성되지 않음
+**해결**: get_database() 함수에 company_id, platform 파라미터 추가 완료
+
+**문제**: 환경변수 우선순위 충돌
+**해결**: 
+- 헤더 우선, 환경변수는 fallback으로만 사용
+- FRESHDESK_* 레거시 환경변수 완전 제거
+
+### 📈 **성공 기준**
+
+**✅ 데이터 수집 성공 지표**:
+- SQLite 파일 자동 생성: `{company_id}_{platform}_data.db`
+- 100건 티켓 데이터 정상 수집
+- 50건 KB 문서 정상 수집
+- 첨부파일 메타데이터 포함
+- 대화 내역 포함
+
+**✅ 멀티테넌트 격리 확인**:
+- 회사별 데이터베이스 파일 분리
+- company_id 태깅 100% 적용
+- 헤더 검증 정상 동작
+
+---
+
+## 📝 **구현 체크리스트 (최종)**
+
+### ✅ **완료된 작업**
+- [x] 표준 4개 헤더 API 일관성 확보
+- [x] 레거시 환경변수/파라미터 완전 제거
+- [x] fetch_tickets/fetch_kb_articles 파라미터 표준화
+- [x] 멀티테넌트 데이터베이스 정책 구현
+- [x] get_database() 함수 company_id 지원
+- [x] processor.py ingest 파이프라인 수정
+- [x] 서버 실행 오류 수정
+
+### 🔄 **진행 중인 작업**
+- [ ] ingest 엔드포인트 100건 테스트 데이터 수집 검증
+- [ ] 전체 파이프라인 통합 테스트
+- [ ] 벡터 검색 성능 검증
+
+### 📋 **다음 단계**
+- [ ] 프론트엔드 연동 테스트
+- [ ] 운영환경 PostgreSQL 전환 준비
+- [ ] AWS Secrets Manager 통합
+- [ ] 백업 및 복구 정책 수립
+````

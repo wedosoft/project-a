@@ -32,7 +32,7 @@ from .routes import (
 from .dependencies import set_global_dependencies
 
 # 하위 호환성을 위한 기존 라우터 유지 (추후 제거 예정)
-from api.multi_platform_attachments import router as legacy_attachments_router
+from .multi_platform_attachments import router as legacy_attachments_router
 
 # FastAPI 앱 생성
 app = FastAPI(

@@ -12,7 +12,7 @@ import psutil
 import time
 
 from ..models.responses import MetricsResponse
-from ..dependencies import get_platform, get_vector_db
+from ..dependencies import get_platform, get_vector_db, get_domain
 
 # 라우터 생성
 router = APIRouter(prefix="/metrics", tags=["메트릭스"])
@@ -24,17 +24,16 @@ logger = logging.getLogger(__name__)
 async def get_metrics(
     platform: str = Depends(get_platform),
     vector_db = Depends(get_vector_db),
-    x_freshdesk_domain: Optional[str] = Header(None, alias="X-Freshdesk-Domain")
+    domain: Optional[str] = Depends(get_domain)
 ):
     """
-    애플리케이션 메트릭스 조회 엔드포인트
+    애플리케이션 메트릭스 조회 엔드포인트 (멀티플랫폼 지원)
     
     시스템 리소스 사용량, 벡터 DB 통계, 애플리케이션 성능 지표 등을 제공합니다.
     
-    Args:
-        platform: 플랫폼 정보 (헤더에서 자동 추출)
-        vector_db: 벡터 데이터베이스 클라이언트
-        x_freshdesk_domain: Freshdesk 도메인 (헤더에서 전달, 선택사항)
+    Headers:
+        X-Platform: 플랫폼 식별자 (freshdesk, zendesk 등)
+        X-Domain: 플랫폼 도메인 (선택사항)
         
     Returns:
         MetricsResponse: 메트릭스 정보
@@ -123,12 +122,12 @@ async def get_metrics(
                 "open_files": len(process.open_files()) if hasattr(process, 'open_files') else 0
             }
             
-            # Freshdesk 연결 정보 (헤더에서 제공된 경우)
-            if x_freshdesk_domain:
-                app_metrics["freshdesk_domain"] = x_freshdesk_domain
-                app_metrics["freshdesk_configured"] = True
+            # 플랫폼 연결 정보 (헤더에서 제공된 경우)
+            if domain:
+                app_metrics["platform_domain"] = domain
+                app_metrics["platform_configured"] = True
             else:
-                app_metrics["freshdesk_configured"] = False
+                app_metrics["platform_configured"] = False
             
             metrics_data["application"] = app_metrics
             

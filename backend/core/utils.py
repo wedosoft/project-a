@@ -379,3 +379,234 @@ def build_domain_from_company_id(company_id: str, platform: str) -> str:
         raise ValueError(f"지원되지 않는 플랫폼: {platform}")
     
     return domain_templates[platform]
+
+
+# ==================== HTML 파싱 및 인라인 이미지 처리 ====================
+
+try:
+    from bs4 import BeautifulSoup
+    HAS_BEAUTIFULSOUP = True
+except ImportError:
+    HAS_BEAUTIFULSOUP = False
+    logger.warning("BeautifulSoup4가 설치되지 않았습니다. HTML 파싱 기능이 제한됩니다.")
+
+
+def extract_attachment_id_from_url(url: str) -> Optional[int]:
+    """
+    Freshdesk 첨부파일 URL에서 attachment_id를 추출합니다.
+    
+    Args:
+        url: Freshdesk 첨부파일 URL
+        
+    Returns:
+        추출된 attachment_id 또는 None
+        
+    Example:
+        URL: "https://company.freshdesk.com/helpdesk/attachments/12345678901"
+        Returns: 12345678901
+    """
+    try:
+        # Freshdesk 첨부파일 URL 패턴들
+        patterns = [
+            r'/attachments/(\d+)',           # 일반적인 패턴
+            r'attachment_id=(\d+)',          # 쿼리 파라미터
+            r'/helpdesk/attachments/(\d+)',  # 헬프데스크 패턴
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, url)
+            if match:
+                return int(match.group(1))
+        
+        # URL 파싱으로 쿼리 파라미터 확인
+        from urllib.parse import urlparse, parse_qs
+        parsed = urlparse(url)
+        query_params = parse_qs(parsed.query)
+        
+        if 'attachment_id' in query_params:
+            return int(query_params['attachment_id'][0])
+            
+    except (ValueError, IndexError) as e:
+        logger.warning(f"첨부파일 ID 추출 실패: {url} - {e}")
+    
+    return None
+
+
+def extract_inline_images_from_html(html_content: str) -> List[Dict[str, Any]]:
+    """
+    HTML 콘텐츠에서 인라인 이미지 정보를 추출합니다.
+    
+    Args:
+        html_content: HTML 형태의 티켓 본문 또는 대화 내용
+        
+    Returns:
+        인라인 이미지 정보 리스트
+        
+    Example:
+        [
+            {
+                "attachment_id": 12345,
+                "alt_text": "스크린샷",
+                "type": "inline",
+                "src_url": "https://...",
+                "position": 0
+            }
+        ]
+    """
+    if not html_content or not isinstance(html_content, str):
+        return []
+    
+    inline_images = []
+    
+    if HAS_BEAUTIFULSOUP:
+        # BeautifulSoup을 사용한 정확한 파싱
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            for position, img in enumerate(soup.find_all('img')):
+                src = img.get('src', '').strip()
+                alt = img.get('alt', '').strip()
+                
+                # Freshdesk 첨부파일인지 확인
+                if src and ('freshdesk.com' in src or 'attachments' in src):
+                    attachment_id = extract_attachment_id_from_url(src)
+                    
+                    if attachment_id:
+                        inline_images.append({
+                            "attachment_id": attachment_id,
+                            "alt_text": alt,
+                            "type": "inline",
+                            "src_url": src,  # 임시 저장 (나중에 제거됨)
+                            "position": position,
+                            "tag_attributes": dict(img.attrs)  # 추가 속성들
+                        })
+                        
+        except Exception as e:
+            logger.warning(f"BeautifulSoup 파싱 실패, 정규식 사용: {e}")
+            # 실패 시 정규식으로 fallback
+            inline_images = _extract_images_with_regex(html_content)
+    else:
+        # BeautifulSoup이 없는 경우 정규식 사용
+        inline_images = _extract_images_with_regex(html_content)
+    
+    logger.debug(f"HTML에서 {len(inline_images)}개의 인라인 이미지 추출됨")
+    return inline_images
+
+
+def _extract_images_with_regex(html_content: str) -> List[Dict[str, Any]]:
+    """
+    정규식을 사용하여 HTML에서 이미지 태그를 추출합니다.
+    
+    Args:
+        html_content: HTML 콘텐츠
+        
+    Returns:
+        인라인 이미지 정보 리스트
+    """
+    inline_images = []
+    
+    # img 태그 패턴 (src와 alt 속성 추출)
+    img_pattern = r'<img[^>]*src=["\']([^"\']*)["\'][^>]*(?:alt=["\']([^"\']*)["\'][^>]*)?>'
+    
+    for position, match in enumerate(re.finditer(img_pattern, html_content, re.IGNORECASE)):
+        src = match.group(1).strip()
+        alt = match.group(2).strip() if match.group(2) else ""
+        
+        # Freshdesk 첨부파일인지 확인
+        if src and ('freshdesk.com' in src or 'attachments' in src):
+            attachment_id = extract_attachment_id_from_url(src)
+            
+            if attachment_id:
+                inline_images.append({
+                    "attachment_id": attachment_id,
+                    "alt_text": alt,
+                    "type": "inline",
+                    "src_url": src,  # 임시 저장 (나중에 제거됨)
+                    "position": position
+                })
+    
+    return inline_images
+
+
+def sanitize_inline_image_metadata(inline_images: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    인라인 이미지 메타데이터에서 URL을 제거하고 안전한 정보만 보존합니다.
+    
+    Args:
+        inline_images: 원본 인라인 이미지 정보 리스트
+        
+    Returns:
+        URL이 제거된 안전한 메타데이터 리스트
+    """
+    sanitized = []
+    
+    for img in inline_images:
+        # URL 제거하고 안전한 메타데이터만 보존
+        safe_metadata = {
+            "attachment_id": img.get("attachment_id"),
+            "alt_text": img.get("alt_text", ""),
+            "type": "inline",
+            "position": img.get("position", 0),
+            # src_url은 저장하지 않음 (보안상 위험)
+        }
+        
+        # 추가 속성이 있으면 필요한 것만 선별적으로 추가
+        if "tag_attributes" in img:
+            attrs = img["tag_attributes"]
+            # 안전한 속성들만 추가
+            safe_attrs = {}
+            for key in ["width", "height", "title", "class"]:
+                if key in attrs:
+                    safe_attrs[key] = attrs[key]
+            
+            if safe_attrs:
+                safe_metadata["attributes"] = safe_attrs
+        
+        sanitized.append(safe_metadata)
+    
+    return sanitized
+
+
+def extract_text_content_from_html(html_content: str) -> str:
+    """
+    HTML에서 순수 텍스트 내용만 추출합니다.
+    
+    Args:
+        html_content: HTML 콘텐츠
+        
+    Returns:
+        HTML 태그가 제거된 순수 텍스트
+    """
+    if not html_content:
+        return ""
+    
+    if HAS_BEAUTIFULSOUP:
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            return soup.get_text(separator=' ', strip=True)
+        except Exception as e:
+            logger.warning(f"BeautifulSoup 텍스트 추출 실패, 정규식 사용: {e}")
+    
+    # 정규식으로 HTML 태그 제거 (기존 sanitize_html 함수와 유사하지만 개선됨)
+    text = re.sub(r'<[^>]+>', ' ', html_content)
+    # 여러 공백을 하나로 통합
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
+
+
+def count_inline_images_in_html(html_content: str) -> int:
+    """
+    HTML 콘텐츠 내 인라인 이미지 개수를 빠르게 계산합니다.
+    
+    Args:
+        html_content: HTML 콘텐츠
+        
+    Returns:
+        인라인 이미지 개수
+    """
+    if not html_content:
+        return 0
+    
+    # Freshdesk 첨부파일 이미지만 카운트
+    pattern = r'<img[^>]*src=["\'][^"\']*(?:freshdesk\.com|attachments)[^"\']*["\'][^>]*>'
+    return len(re.findall(pattern, html_content, re.IGNORECASE))

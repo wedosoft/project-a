@@ -3,6 +3,7 @@
 기존 attachments.py를 멀티플랫폼/멀티테넌트 구조로 리팩토링
 
 S3 pre-signed URL 만료 문제를 해결하기 위한 실시간 URL 발급 및 상담사 검색 지원
+표준 4개 헤더(X-Company-ID, X-Platform, X-Domain, X-API-Key) 사용
 """
 
 import asyncio
@@ -14,9 +15,12 @@ import httpx
 from core.database.vectordb import vector_db
 from core.platforms.factory import PlatformFactory
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, HTTPException, Query, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, Query
 from pydantic import BaseModel
 from qdrant_client.http.models import FieldCondition, Filter, MatchValue
+
+# 표준 헤더 의존성 import (절대경로)
+from api.dependencies import get_company_id, get_platform, get_api_key, get_domain
 
 # .env 파일 로드
 load_dotenv()
@@ -53,49 +57,25 @@ class AttachmentMetadata(BaseModel):
     company_id: str
 
 
-def get_platform_adapter(platform: str, company_id: str):
+def get_platform_adapter(platform: str, company_id: str, domain: str, api_key: str):
     """
-    플랫폼별 어댑터 생성 - 팩토리 패턴 사용
+    플랫폼별 어댑터 생성 - 표준 헤더 기반
     """
-    # 플랫폼별 환경변수 로드
-    if platform == "freshdesk":
-        domain = os.getenv("FRESHDESK_DOMAIN")
-        api_key = os.getenv("FRESHDESK_API_KEY")
-        
-        if not domain or not api_key:
-            raise HTTPException(
-                status_code=500,
-                detail="Freshdesk 환경변수(FRESHDESK_DOMAIN, FRESHDESK_API_KEY)가 설정되지 않았습니다"
-            )
-        
-        config = {
-            "platform": platform,
-            "company_id": company_id,
-            "domain": domain,
-            "api_key": api_key
-        }
-        return PlatformFactory.create_adapter(platform, config)
-    
-    # 향후 다른 플랫폼 지원 시 자동으로 팩토리에서 처리
-    else:
-        try:
-            # 플랫폼별 환경변수는 각 플랫폼 구현 시 추가
-            config = {
-                "platform": platform,
-                "company_id": company_id
-            }
-            return PlatformFactory.create_adapter(platform, config)
-        except ValueError as e:
-            raise HTTPException(
-                status_code=400,
-                detail=f"지원하지 않는 플랫폼: {platform}"
-            )
+    config = {
+        "platform": platform,
+        "company_id": company_id,
+        "domain": domain,
+        "api_key": api_key
+    }
+    return PlatformFactory.create_adapter(platform, config)
 
 
 async def get_attachment_download_url_multi_platform(
     attachment_id: str,
     platform: str,
     company_id: str,
+    domain: str,
+    api_key: str,
     ticket_id: Optional[str] = None,
     conversation_id: Optional[str] = None
 ) -> Dict[str, Any]:
@@ -106,6 +86,8 @@ async def get_attachment_download_url_multi_platform(
         attachment_id: 첨부파일 ID
         platform: 플랫폼 이름 (freshdesk, zendesk 등)
         company_id: 테넌트 식별자
+        domain: 플랫폼 도메인
+        api_key: 플랫폼 API 키
         ticket_id: 티켓 ID (선택사항)
         conversation_id: 대화 ID (선택사항)
         
@@ -117,7 +99,7 @@ async def get_attachment_download_url_multi_platform(
     """
     try:
         # 플랫폼별 어댑터 생성
-        adapter = get_platform_adapter(platform, company_id)
+        adapter = get_platform_adapter(platform, company_id, domain, api_key)
         
         async with adapter:
             # 어댑터를 통해 첨부파일 URL 발급
@@ -138,10 +120,12 @@ async def get_attachment_download_url_multi_platform(
 @router.get("/{attachment_id}/download-url", response_model=AttachmentResponse)
 async def get_attachment_download_url(
     attachment_id: str,
-    platform: str = Query(..., description="플랫폼 이름 (freshdesk, zendesk 등)"),
-    company_id: str = Query(..., description="테넌트 식별자"),
-    ticket_id: Optional[str] = Query(None, description="첨부파일이 속한 티켓 ID"),
-    conversation_id: Optional[str] = Query(None, description="첨부파일이 속한 대화 ID")
+    company_id: str = Depends(get_company_id),
+    platform: str = Depends(get_platform),
+    domain: str = Depends(get_domain),
+    api_key: str = Depends(get_api_key),
+    ticket_id: Optional[str] = None,
+    conversation_id: Optional[str] = None
 ):
     """
     멀티플랫폼 첨부파일의 최신 다운로드 URL을 발급받습니다.
@@ -149,18 +133,20 @@ async def get_attachment_download_url(
     이 엔드포인트는 플랫폼별 pre-signed URL 만료 문제를 해결하기 위해
     매번 새로운 URL을 동적으로 발급받습니다.
     
+    표준 4개 헤더(X-Company-ID, X-Platform, X-Domain, X-API-Key)를 통해
+    플랫폼 정보를 받습니다.
+    
     Args:
         attachment_id: 첨부파일 고유 ID
-        platform: 플랫폼 이름 (freshdesk, zendesk 등)
-        company_id: 테넌트 식별자
-        ticket_id: 첨부파일이 속한 티켓 ID (권장)
-        conversation_id: 첨부파일이 속한 대화 ID (권장)
+        company_id: 회사 ID (헤더)
+        platform: 플랫폼 이름 (헤더)
+        domain: 플랫폼 도메인 (헤더)
+        api_key: API 키 (헤더)
+        ticket_id: 첨부파일이 속한 티켓 ID (선택사항)
+        conversation_id: 첨부파일이 속한 대화 ID (선택사항)
         
     Returns:
         AttachmentResponse: 첨부파일 정보와 유효한 다운로드 URL
-        
-    Example:
-        GET /attachments/12345/download-url?platform=freshdesk&company_id=mycompany&ticket_id=67890
     """
     logger.info(f"첨부파일 {attachment_id} 다운로드 URL 요청 (platform={platform}, company_id={company_id}, ticket_id={ticket_id}, conversation_id={conversation_id})")
     
@@ -170,6 +156,8 @@ async def get_attachment_download_url(
             attachment_id=attachment_id,
             platform=platform,
             company_id=company_id,
+            domain=domain,
+            api_key=api_key,
             ticket_id=ticket_id,
             conversation_id=conversation_id
         )
@@ -201,8 +189,8 @@ async def get_attachment_download_url(
 @router.get("/{attachment_id}/metadata", response_model=AttachmentMetadata)
 async def get_attachment_metadata(
     attachment_id: str,
-    platform: Optional[str] = Query(None, description="플랫폼 이름 (지정하면 더 빠른 검색)"),
-    company_id: Optional[str] = Query(None, description="테넌트 식별자 (지정하면 더 빠른 검색)")
+    company_id: str = Depends(get_company_id),
+    platform: str = Depends(get_platform)
 ):
     """
     벡터 DB에서 첨부파일 메타데이터를 조회합니다.
@@ -210,13 +198,12 @@ async def get_attachment_metadata(
     실제 파일 다운로드 없이 첨부파일의 기본 정보만 조회할 때 사용합니다.
     이 정보는 벡터 DB에 캐시되어 있어 빠르게 응답됩니다.
     
-    멀티플랫폼/멀티테넌트 환경에서는 platform과 company_id를 지정하면
-    더 빠른 검색이 가능합니다.
+    표준 4개 헤더를 통해 멀티플랫폼/멀티테넌트 보안이 적용됩니다.
     
     Args:
         attachment_id: 첨부파일 고유 ID
-        platform: 플랫폼 이름 (선택사항, 지정하면 더 빠른 검색)
-        company_id: 테넌트 식별자 (선택사항, 지정하면 더 빠른 검색)
+        company_id: 회사 ID (헤더, 필수)
+        platform: 플랫폼 이름 (헤더, 필수)
         
     Returns:
         AttachmentMetadata: 첨부파일의 메타데이터
@@ -227,19 +214,12 @@ async def get_attachment_metadata(
         # 벡터 DB에서 첨부파일 메타데이터 검색
         attachment_data = None
         
-        # 벡터 DB 검색 필터 구성
+        # 벡터 DB 검색 필터 구성 - 멀티테넌트 보안 적용
         search_filters = []
         
-        # platform과 company_id가 지정된 경우 필터에 추가 (더 빠른 검색)
-        if platform:
-            search_filters.append(FieldCondition(key="platform", match=MatchValue(value=platform)))
-        if company_id:
-            search_filters.append(FieldCondition(key="company_id", match=MatchValue(value=company_id)))
-        
-        # 기본 필터가 없는 경우, 환경변수에서 기본값 사용 (하위 호환성)
-        if not search_filters:
-            default_company_id = os.getenv("COMPANY_ID", "default")
-            search_filters.append(FieldCondition(key="company_id", match=MatchValue(value=default_company_id)))
+        # 필수 헤더로 전달된 platform과 company_id 필터 추가
+        search_filters.append(FieldCondition(key="platform", match=MatchValue(value=platform)))
+        search_filters.append(FieldCondition(key="company_id", match=MatchValue(value=company_id)))
         
         # scroll API를 사용하여 문서에서 첨부파일 메타데이터 검색
         offset = 0
@@ -310,10 +290,12 @@ async def get_attachment_metadata(
 
 @router.get("/bulk-urls")
 async def get_bulk_attachment_urls(
-    attachment_ids: str = Query(..., description="쉼표로 구분된 첨부파일 ID 목록"),
-    platform: str = Query(..., description="플랫폼 이름 (freshdesk, zendesk 등)"),
-    company_id: str = Query(..., description="테넌트 식별자"),
-    ticket_id: Optional[str] = Query(None, description="공통 티켓 ID")
+    attachment_ids: str,
+    company_id: str = Depends(get_company_id),
+    platform: str = Depends(get_platform),
+    domain: str = Depends(get_domain),
+    api_key: str = Depends(get_api_key),
+    ticket_id: Optional[str] = None
 ):
     """
     여러 첨부파일의 다운로드 URL을 한 번에 발급받습니다.
@@ -321,17 +303,19 @@ async def get_bulk_attachment_urls(
     대화창에서 여러 이미지를 동시에 표시해야 할 때 유용합니다.
     성능 최적화를 위해 동시 요청으로 처리됩니다.
     
+    표준 4개 헤더(X-Company-ID, X-Platform, X-Domain, X-API-Key)를 통해
+    플랫폼 정보를 받습니다.
+    
     Args:
         attachment_ids: 쉼표로 구분된 첨부파일 ID 목록 (예: "123,456,789")
-        platform: 플랫폼 이름 (freshdesk, zendesk 등)
-        company_id: 테넌트 식별자
+        company_id: 회사 ID (헤더)
+        platform: 플랫폼 이름 (헤더)
+        domain: 플랫폼 도메인 (헤더)
+        api_key: API 키 (헤더)
         ticket_id: 모든 첨부파일이 속한 공통 티켓 ID (있는 경우)
         
     Returns:
         Dict: 각 첨부파일 ID별 URL 정보
-        
-    Example:
-        GET /attachments/bulk-urls?attachment_ids=123,456,789&platform=freshdesk&company_id=mycompany&ticket_id=999
     """
     try:
         # 첨부파일 ID 목록 파싱
@@ -345,6 +329,8 @@ async def get_bulk_attachment_urls(
                 attachment_id=attachment_id,
                 platform=platform,
                 company_id=company_id,
+                domain=domain,
+                api_key=api_key,
                 ticket_id=ticket_id
             )
             tasks.append(task)

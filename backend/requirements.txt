@@ -8,6 +8,8 @@ pydantic>=2.7.0  # Pydantic 버전을 pydantic-settings와 호환되도록 조�
 pydantic-settings==2.9.1  # Pydantic v2 설정 관리 패키지
 openai>=1.10.0,<2.0.0  # Langchain 호환을 위한 OpenAI 버전 업그레이드
 python-dotenv==1.0.0
+boto3>=1.34.0  # AWS SDK for Python (Secrets Manager 등)
+pytz>=2023.3  # 타임존 처리를 위한 패키지
 Pillow==10.1.0
 pytesseract==0.3.10
 PyPDF2==3.0.1
@@ -20,6 +22,7 @@ prometheus-client>=0.14.1 # Prometheus metrics client
 pandas>=1.5.0
 psutil>=5.8.0  # 시스템 리소스 모니터링을 위한 패키지
 redis>=4.5.0  # Redis 캐싱을 위한 패키지
+beautifulsoup4>=4.12.0  # HTML 파싱을 위한 패키지 (인라인 이미지 처리용)
 # Langchain 의존성 추가 (Phase 1: RunnableParallel 적용) - 호환 버전으로 업데이트
 langchain>=0.1.16,<0.2.0
 langchain-community>=0.0.34,<0.1.0

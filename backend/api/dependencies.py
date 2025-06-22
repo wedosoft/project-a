@@ -5,8 +5,9 @@ FastAPI 의존성 함수 정의
 """
 
 from typing import Optional
-from fastapi import Header, HTTPException
+from fastapi import Header, HTTPException, Depends
 import logging
+from core.config import get_tenant_manager, TenantConfig
 
 from core.utils import extract_company_id
 
@@ -97,91 +98,102 @@ def get_hybrid_search_manager():
 
 
 async def get_company_id(
-    x_company_id: Optional[str] = Header(None, alias="X-Company-ID"),
-    x_freshdesk_domain: Optional[str] = Header(None, alias="X-Freshdesk-Domain"),
-    x_zendesk_domain: Optional[str] = Header(None, alias="X-Zendesk-Domain")
+    x_company_id: str = Header(..., alias="X-Company-ID", description="회사 ID (필수)")
 ) -> str:
     """
-    멀티테넌트 보안을 위한 company_id 자동 추출
-    
-    지침서에 따른 우선순위:
-    1. X-Company-ID 헤더 (명시적 지정)
-    2. X-Freshdesk-Domain 헤더에서 자동 추출
-    3. X-Zendesk-Domain 헤더에서 자동 추출
-    4. 환경변수 FRESHDESK_DOMAIN에서 자동 추출 (fallback)
+    멀티테넌트 보안을 위한 company_id
     
     Args:
-        x_company_id: 명시적으로 지정된 company_id 헤더
-        x_freshdesk_domain: Freshdesk 도메인 헤더
-        x_zendesk_domain: Zendesk 도메인 헤더
+        x_company_id: 회사 ID 헤더 (필수)
         
     Returns:
-        str: 추출된 company_id
-        
-    Raises:
-        HTTPException: company_id를 추출할 수 없는 경우
+        str: 회사 ID
     """
-    # 1. 명시적 헤더 우선
-    if x_company_id:
-        logger.info(f"명시적 X-Company-ID 헤더 사용: {x_company_id}")
-        return x_company_id
-    
-    # 2. 도메인 헤더에서 자동 추출
-    domain_headers = [
-        ("X-Freshdesk-Domain", x_freshdesk_domain),
-        ("X-Zendesk-Domain", x_zendesk_domain),
-    ]
-    
-    for header_name, domain in domain_headers:
-        if domain:
-            try:
-                company_id = extract_company_id(domain)
-                logger.info(f"{header_name} 헤더에서 company_id 자동 추출: {domain} → {company_id}")
-                return company_id
-            except ValueError as e:
-                logger.warning(f"{header_name} 헤더 도메인 추출 실패 ({domain}): {e}")
-                continue
-    
-    # 3. 환경변수 fallback (개발환경용)
-    import os
-    default_domain = os.getenv("FRESHDESK_DOMAIN")
-    if default_domain:
-        try:
-            company_id = extract_company_id(default_domain)
-            logger.info(f"환경변수 FRESHDESK_DOMAIN에서 company_id 추출: {default_domain} → {company_id}")
-            return company_id
-        except ValueError as e:
-            logger.warning(f"환경변수 FRESHDESK_DOMAIN 추출 실패 ({default_domain}): {e}")
-    
-    # 4. 모든 방법 실패 시 에러
-    raise HTTPException(
-        status_code=400,
-        detail="company_id를 추출할 수 없습니다. X-Company-ID 헤더 또는 유효한 플랫폼 도메인 헤더를 제공해주세요."
-    )
+    logger.info(f"X-Company-ID 헤더 사용: {x_company_id}")
+    return x_company_id
 
 
 async def get_platform(
-    x_platform: Optional[str] = Header(None, alias="X-Platform"),
-    x_freshdesk_domain: Optional[str] = Header(
-        None, alias="X-Freshdesk-Domain"
-    ),
-    x_zendesk_domain: Optional[str] = Header(None, alias="X-Zendesk-Domain")
+    x_platform: str = Header(..., alias="X-Platform", description="플랫폼 식별자 (필수, 예: freshdesk, zendesk)")
 ) -> str:
     """
-    현재 요청의 플랫폼을 반환합니다.
-    우선순위: X-Platform > X-Freshdesk-Domain > X-Zendesk-Domain
-    > "freshdesk" (기본값)
-    하위 호환성을 위해 기존 Freshdesk 헤더도 지원합니다.
+    현재 요청의 플랫폼을 반환합니다 (멀티플랫폼 지원)
+    
+    Args:
+        x_platform: 플랫폼 식별자 헤더 (필수)
+        
+    Returns:
+        str: 플랫폼 식별자 (소문자)
     """
-    if x_platform:
-        return x_platform.lower()
-    elif x_freshdesk_domain:
-        return "freshdesk"
-    elif x_zendesk_domain:
-        return "zendesk"
-    else:
-        # 기본값으로 freshdesk 사용 (하위 호환성)
-        return "freshdesk"
+    platform = x_platform.lower()
+    logger.info(f"X-Platform 헤더 사용: {platform}")
+    return platform
+
+
+async def get_api_key(
+    x_api_key: str = Header(..., alias="X-API-Key", description="API 키 (필수)")
+) -> str:
+    """
+    API 키를 반환합니다
+    
+    Args:
+        x_api_key: API 키 헤더 (필수)
+        
+    Returns:
+        str: API 키
+    """
+    logger.info("X-API-Key 헤더 사용")
+    return x_api_key
+
+
+async def get_domain(
+    x_domain: str = Header(..., alias="X-Domain", description="플랫폼 도메인 (필수, 예: wedosoft.freshdesk.com)")
+) -> str:
+    """
+    도메인을 반환합니다
+    
+    Args:
+        x_domain: 도메인 헤더 (필수)
+        
+    Returns:
+        str: 도메인
+    """
+    logger.info(f"X-Domain 헤더 사용: {x_domain}")
+    return x_domain
+
+
+async def get_tenant_config(
+    company_id: str = Depends(get_company_id),
+    platform: str = Depends(get_platform), 
+    domain: str = Depends(get_domain),
+    api_key: str = Depends(get_api_key)
+) -> TenantConfig:
+    """
+    헤더에서 테넌트 정보를 받아 TenantConfig 객체를 생성합니다.
+    
+    멀티테넌트 환경에서 각 요청별로 테넌트 설정을 제공하는 핵심 함수입니다.
+    
+    Args:
+        company_id: X-Company-ID 헤더
+        platform: X-Platform 헤더
+        domain: X-Domain 헤더
+        api_key: X-API-Key 헤더
+        
+    Returns:
+        TenantConfig: 테넌트별 설정 객체
+    """
+    tenant_manager = get_tenant_manager()
+    
+    # 헤더 기반 설정 생성 (멀티테넌트의 핵심)
+    tenant_config = tenant_manager.get_config_from_headers(
+        company_id=company_id,
+        platform=platform,
+        domain=domain,
+        api_key=api_key
+    )
+    
+    logger.info(f"테넌트 설정 로드 완료: {company_id} ({platform})")
+    return tenant_config
 
 
 # 하위 호환성을 위한 별칭

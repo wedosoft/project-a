@@ -22,7 +22,7 @@ from ..models.ingest_job import (
     JobProgress,
     JobMetrics
 )
-from core.ingest.processor import ingest as legacy_ingest
+from core.ingest.processor import ingest
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +51,8 @@ class JobManager:
         self.jobs: Dict[str, IngestJob] = {}
         self.running_jobs: Set[str] = set()
         self.paused_jobs: Set[str] = set()
-        self.cancel_signals: Dict[str, threading.Event] = {}
-        self.pause_signals: Dict[str, threading.Event] = {}
+        self.cancel_signals: Dict[str, asyncio.Event] = {}
+        self.pause_signals: Dict[str, asyncio.Event] = {}
         self.job_threads: Dict[str, threading.Thread] = {}
         self.executor = ThreadPoolExecutor(max_workers=2)  # 최대 2개 동시 실행
         
@@ -140,8 +140,8 @@ class JobManager:
         self.running_jobs.add(job_id)
         
         # 제어 신호 초기화
-        self.cancel_signals[job_id] = threading.Event()
-        self.pause_signals[job_id] = threading.Event()
+        self.cancel_signals[job_id] = asyncio.Event()
+        self.pause_signals[job_id] = asyncio.Event()
         
         # 백그라운드에서 작업 실행
         thread = threading.Thread(target=self._run_job, args=(job_id,), daemon=True)
@@ -167,10 +167,26 @@ class JobManager:
         
         # 일시정지 신호 발송
         if job_id in self.pause_signals:
-            self.pause_signals[job_id].set()
+            # asyncio.Event를 스레드에서 설정할 때는 call_soon_threadsafe 사용
+            try:
+                loop = asyncio.get_event_loop()
+                loop.call_soon_threadsafe(self.pause_signals[job_id].set)
+            except RuntimeError:
+                # 이벤트 루프가 없는 경우 직접 설정
+                asyncio.create_task(self._set_pause_signal(job_id))
         
         logger.info(f"작업 일시정지: {job_id}")
         return True
+    
+    async def _set_pause_signal(self, job_id: str):
+        """일시정지 신호 설정 (async 헬퍼)"""
+        if job_id in self.pause_signals:
+            self.pause_signals[job_id].set()
+    
+    async def _clear_pause_signal(self, job_id: str):
+        """일시정지 신호 해제 (async 헬퍼)"""
+        if job_id in self.pause_signals:
+            self.pause_signals[job_id].clear()
     
     def resume_job(self, job_id: str) -> bool:
         """작업 재개"""
@@ -188,7 +204,11 @@ class JobManager:
         
         # 일시정지 신호 해제
         if job_id in self.pause_signals:
-            self.pause_signals[job_id].clear()
+            try:
+                loop = asyncio.get_event_loop()
+                loop.call_soon_threadsafe(self.pause_signals[job_id].clear)
+            except RuntimeError:
+                asyncio.create_task(self._clear_pause_signal(job_id))
         
         logger.info(f"작업 재개: {job_id}")
         return True
@@ -208,12 +228,21 @@ class JobManager:
         
         # 취소 신호 발송
         if job_id in self.cancel_signals:
-            self.cancel_signals[job_id].set()
+            try:
+                loop = asyncio.get_event_loop()
+                loop.call_soon_threadsafe(self.cancel_signals[job_id].set)
+            except RuntimeError:
+                asyncio.create_task(self._set_cancel_signal(job_id))
         
         self._cleanup_job_resources(job_id)
         
         logger.info(f"작업 취소: {job_id}")
         return True
+    
+    async def _set_cancel_signal(self, job_id: str):
+        """취소 신호 설정 (async 헬퍼)"""
+        if job_id in self.cancel_signals:
+            self.cancel_signals[job_id].set()
     
     def get_job(self, job_id: str) -> Optional[IngestJob]:
         """작업 정보 조회"""
@@ -330,19 +359,23 @@ class JobManager:
         job = self.jobs[job_id]
         config = job.config
         
-        # 주기적으로 취소/일시정지 신호 확인
-        def check_signals_periodically():
-            while job.status == JobStatus.RUNNING:
-                self._check_signals(job_id)
-                time.sleep(1)  # 1초마다 확인
+        # 취소/일시정지 이벤트 생성
+        cancel_event = self.cancel_signals.get(job_id, asyncio.Event())
+        pause_event = self.pause_signals.get(job_id, asyncio.Event())
         
-        # 신호 확인 스레드 시작
-        signal_thread = threading.Thread(target=check_signals_periodically, daemon=True)
-        signal_thread.start()
+        # 진행상황 콜백 함수
+        def progress_callback(message: str, percentage: float):
+            job.progress.current_step_name = message
+            # percentage를 current_step으로 변환 (0-100% → 0-total_steps)
+            if job.progress.total_steps > 0:
+                job.progress.current_step = int((percentage / 100.0) * job.progress.total_steps)
+            logger.info(f"작업 {job_id} 진행상황: {message} ({percentage:.1f}%)")
         
         try:
-            # 기존 ingest 함수 호출
-            await legacy_ingest(
+            # 기존 ingest 함수 호출 (신호 전달)
+            result = await ingest(
+                company_id=job.company_id,
+                platform="freshdesk",  # TODO: config에서 가져오기
                 incremental=config.incremental,
                 purge=config.purge,
                 process_attachments=config.process_attachments,
@@ -350,10 +383,32 @@ class JobManager:
                 local_data_dir=None,
                 include_kb=config.include_kb,
                 domain=config.domain,
-                api_key=config.api_key
+                api_key=config.api_key,
+                cancel_event=cancel_event,
+                pause_event=pause_event,
+                progress_callback=progress_callback
             )
+            
+            # 결과 업데이트
+            job.result_summary = result
+            
+            if result.get("success"):
+                job.status = JobStatus.COMPLETED
+                job.progress.current_step_name = "완료"
+                job.progress.percentage = 100.0
+            else:
+                job.status = JobStatus.FAILED
+                job.error_message = result.get("error", "알 수 없는 오류")
+                
+        except Exception as e:
+            logger.error(f"작업 {job_id} 실행 중 오류: {e}")
+            job.status = JobStatus.FAILED
+            job.error_message = str(e)
+            job.result_summary = {"success": False, "error": str(e)}
+        
         finally:
-            signal_thread.join(timeout=0.1)  # 신호 확인 스레드 정리
+            job.completed_at = datetime.now()
+            self._cleanup_job_resources(job_id)
     
     def _check_signals(self, job_id: str):
         """취소/일시정지 신호 확인"""

@@ -229,7 +229,7 @@ class QdrantAdapter(VectorDBInterface):
                 # 메타데이터는 이미 위에서 정규화됨
                 payload = {
                     **metadata,
-                    "text": text
+                    "summary": text  # 텍스트 필드명을 summary로 변경
                 }
                 
                 # Platform-Neutral 3-Tuple 기반 유니크 Qdrant 포인트 ID 생성
@@ -617,14 +617,30 @@ class QdrantAdapter(VectorDBInterface):
                 try:
                     filter_obj = Filter(must=filter_conditions)
                     
-                    # 검색 결과로 카운트
-                    count = self.client.count(
-                        collection_name=self.collection_name,
-                        filter=filter_obj  # Qdrant 버전에 따라 filter 또는 count_filter 사용
-                    )
-                    return count.count
+                    # Qdrant 버전 호환성을 위해 여러 방법 시도
+                    try:
+                        # 방법 1: count_filter 파라미터 사용 (최신 버전)
+                        count = self.client.count(
+                            collection_name=self.collection_name,
+                            count_filter=filter_obj
+                        )
+                        return count.count
+                    except (TypeError, AttributeError) as e1:
+                        logger.debug(f"count_filter 파라미터 사용 실패: {e1}")
+                        try:
+                            # 방법 2: filter 파라미터 사용 (이전 버전)
+                            count = self.client.count(
+                                collection_name=self.collection_name,
+                                filter=filter_obj
+                            )
+                            return count.count
+                        except (TypeError, AttributeError) as e2:
+                            logger.debug(f"filter 파라미터 사용 실패: {e2}")
+                            # 방법 3: 파라미터 없이 사용 후 별도 필터링
+                            raise Exception("count 메서드에서 필터 파라미터를 지원하지 않습니다.")
+                            
                 except Exception as inner_e:
-                    logger.warning(f"필터를 사용한 카운트 실패: {inner_e}, 대체 방법 시도 중...")
+                    logger.warning(f"필터를 사용한 카운트 실패: {inner_e}, scroll API를 사용한 대체 방법 시도 중...")
                     
                     # 대체 방법: scroll API를 사용하여 모든 문서를 가져온 후 메모리에서 필터링
                     count = 0

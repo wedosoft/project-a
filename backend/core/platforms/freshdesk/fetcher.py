@@ -1,7 +1,7 @@
 """
-Freshdesk 데이터 가져오기 모듈
+플랫폼 데이터 가져오기 모듈
 
-이 모듈은 Freshdesk API를 통해 티켓과 지식베이스 문서를 가져오는 기능을 제공합니다.
+이 모듈은 외부 API를 통해 티켓과 지식베이스 문서를 가져오는 기능을 제공합니다.
 비동기 HTTP 요청을 사용하여 데이터를 효율적으로 조회합니다.
 
 프로젝트 규칙 및 가이드라인: /PROJECT_RULES.md 참조
@@ -22,15 +22,15 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 # 환경변수에서 기본값을 가져오되, 파라미터로 오버라이드 가능하도록 수정
-DEFAULT_FRESHDESK_DOMAIN = os.getenv("FRESHDESK_DOMAIN")
-DEFAULT_FRESHDESK_API_KEY = os.getenv("FRESHDESK_API_KEY")
+DEFAULT_DOMAIN = os.getenv("FRESHDESK_DOMAIN")
+DEFAULT_API_KEY = os.getenv("FRESHDESK_API_KEY")
 
 def extract_company_id_from_domain(domain: str) -> str:
     """
-    FRESHDESK_DOMAIN에서 company_id를 추출합니다.
+    도메인에서 company_id를 추출합니다.
     
     Args:
-        domain: Freshdesk 도메인 (예: "your-company.freshdesk.com" 또는 "your-company")
+        domain: 플랫폼 도메인 (예: "your-company.freshdesk.com" 또는 "your-company")
         
     Returns:
         str: 추출된 company_id
@@ -52,23 +52,23 @@ def extract_company_id_from_domain(domain: str) -> str:
     
     return company_id
 
-def get_freshdesk_config(domain: Optional[str] = None, api_key: Optional[str] = None) -> Tuple[str, str, str, Dict[str, str], Tuple[str, str]]:
+def get_platform_config(domain: Optional[str] = None, api_key: Optional[str] = None) -> Tuple[str, str, str, Dict[str, str], Tuple[str, str]]:
     """
-    Freshdesk 설정을 가져오거나 파라미터로 오버라이드합니다.
+    플랫폼 설정을 가져오거나 파라미터로 오버라이드합니다.
     
     Args:
-        domain: Freshdesk 도메인 (파라미터로 전달된 경우 우선 사용)
-        api_key: Freshdesk API 키 (파라미터로 전달된 경우 우선 사용)
+        domain: 플랫폼 도메인 (파라미터로 전달된 경우 우선 사용)
+        api_key: 플랫폼 API 키 (파라미터로 전달된 경우 우선 사용)
         
     Returns:
         tuple: (company_id, base_url, api_key, headers, auth)
     """
     # 파라미터가 제공되지 않은 경우 환경변수에서 가져오기
-    final_domain = domain or DEFAULT_FRESHDESK_DOMAIN
-    final_api_key = api_key or DEFAULT_FRESHDESK_API_KEY
+    final_domain = domain or DEFAULT_DOMAIN
+    final_api_key = api_key or DEFAULT_API_KEY
     
     if not final_domain or not final_api_key:
-        raise ValueError("Freshdesk 도메인과 API 키가 필요합니다.")
+        raise ValueError("도메인과 API 키가 필요합니다.")
     
     # company_id 추출
     company_id = extract_company_id_from_domain(final_domain)
@@ -84,16 +84,19 @@ def get_freshdesk_config(domain: Optional[str] = None, api_key: Optional[str] = 
     }
     auth = (final_api_key, "X")
     
-    logger.debug(f"Freshdesk 설정 - 도메인: {final_domain}, company_id: {company_id}")
+    logger.debug(f"플랫폼 설정 - 도메인: {final_domain}, company_id: {company_id}")
     
     return company_id, base_url, final_api_key, headers, auth
+
+# 이전 함수명과의 호환성을 위한 별칭
+get_freshdesk_config = get_platform_config
 
 # API 호출 시 사용할 재시도 횟수 및 대기 시간
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # seconds - 지연 시간 증가
 
 # 요청 간격 및 페이지 크기 설정 (토큰 한도 초과 방지)
-REQUEST_DELAY = 1.5  # seconds
+REQUEST_DELAY = 0.2  # seconds - 성능 최적화 (1.5초 → 0.2초)
 PER_PAGE = 50  # 페이지당 항목 수 감소
 
 async def fetch_with_retry(client: httpx.AsyncClient, url: str, headers: Dict[str, str], auth: Tuple[str, str], params: Optional[Dict[str, Any]] = None) -> Any:
@@ -146,7 +149,7 @@ async def fetch_ticket_conversations(client: httpx.AsyncClient, ticket_id: int, 
     Args:
         client: httpx 클라이언트 객체
         ticket_id: 티켓 ID
-        base_url: Freshdesk API 베이스 URL
+        base_url: API 베이스 URL
         headers: 요청 헤더
         auth: 인증 정보
         
@@ -174,7 +177,7 @@ async def fetch_ticket_attachments(client: httpx.AsyncClient, ticket_id: int, ba
     Args:
         client: httpx 클라이언트 객체
         ticket_id: 티켓 ID
-        base_url: Freshdesk API 베이스 URL
+        base_url: API 베이스 URL
         headers: 요청 헤더
         auth: 인증 정보
         ticket_detail: 이미 가져온 티켓 상세 정보 (옵션)
@@ -233,12 +236,11 @@ async def fetch_ticket_attachments(client: httpx.AsyncClient, ticket_id: int, ba
 async def fetch_article_attachments(client: httpx.AsyncClient, article_id: int, base_url: str, headers: Dict[str, str], auth: Tuple[str, str]) -> List[Dict[str, Any]]:
     """
     지식베이스 문서의 첨부파일 정보를 가져옵니다.
-    Freshdesk API 문서에 따라 folder_id가 필요한 경우를 처리합니다.
     
     Args:
         client: httpx 클라이언트 객체
         article_id: 아티클 ID
-        base_url: Freshdesk API 베이스 URL
+        base_url: API 베이스 URL
         headers: 요청 헤더
         auth: 인증 정보
         
@@ -274,24 +276,37 @@ async def fetch_article_attachments(client: httpx.AsyncClient, article_id: int, 
         logger.error(f"지식베이스 문서 {article_id}의 첨부파일 가져오기 오류: {e}")
         return []
 
-async def fetch_tickets(domain: Optional[str] = None, api_key: Optional[str] = None, per_page: int = 50, max_tickets: int = 10000) -> List[Dict[str, Any]]:
+async def fetch_tickets(domain: Optional[str] = None, api_key: Optional[str] = None, per_page: int = 50, max_tickets: int = 10000, company_id: Optional[str] = None, platform: str = "freshdesk", store_immediately: bool = True) -> List[Dict[str, Any]]:
     """
-    Freshdesk에서 티켓 목록을 비동기로 가져옵니다.
+    티켓 목록을 비동기로 가져옵니다.
     페이지네이션을 처리하여 모든 티켓을 가져옵니다.
     updated_since 파라미터를 사용하여 매우 오래된 날짜부터 모든 티켓을 가져옵니다.
     티켓의 대화 내역과 첨부파일도 함께 가져옵니다.
     
     Args:
-        domain: Freshdesk 도메인 (파라미터로 전달되지 않으면 환경변수 사용)
-        api_key: Freshdesk API 키 (파라미터로 전달되지 않으면 환경변수 사용)
+        domain: 도메인 (파라미터로 전달되지 않으면 환경변수 사용)
+        api_key: API 키 (파라미터로 전달되지 않으면 환경변수 사용)
         per_page: 페이지당 가져올 티켓 수 (기본값: 50)
-        max_tickets: 최대 가져올 티켓 수 (기본값: 10000)
+        max_tickets: 최대 가져올 티켓 수
+        company_id: 회사 ID (멀티테넌트용)
+        platform: 플랫폼명
+        store_immediately: 즉시 저장 여부 (기본값: True)
         
     Returns:
         List[Dict[str, Any]]: 티켓 목록
     """
-    # Freshdesk 설정 가져오기
-    company_id, base_url, final_api_key, headers, auth = get_freshdesk_config(domain, api_key)
+    # 설정 가져오기
+    extracted_company_id, base_url, final_api_key, headers, auth = get_platform_config(domain, api_key)
+    
+    # company_id가 별도로 제공되지 않으면 domain에서 추출한 값 사용
+    final_company_id = company_id or extracted_company_id
+    
+    # 즉시 저장 모드인 경우 DB 연결 초기화
+    db = None
+    if store_immediately:
+        from core.database.database import get_database
+        db = get_database(final_company_id, platform)
+        logger.info(f"즉시 저장 모드: DB 연결 완료 - {db.db_path}")
     
     all_tickets = []
     page = 1
@@ -300,7 +315,7 @@ async def fetch_tickets(domain: Optional[str] = None, api_key: Optional[str] = N
     include_conversations = True  # 대화 내역 포함 여부
     include_attachments = True    # 첨부파일 포함 여부
 
-    logger.info(f"티켓 데이터 가져오기 시작 - 도메인: {domain or DEFAULT_FRESHDESK_DOMAIN}")
+    logger.info(f"티켓 데이터 가져오기 시작 - 도메인: {domain or DEFAULT_DOMAIN}")
     
     async with httpx.AsyncClient() as client:
         # 먼저 총 티켓 수를 확인
@@ -332,27 +347,82 @@ async def fetch_tickets(domain: Optional[str] = None, api_key: Optional[str] = N
                 
                 tickets = await fetch_with_retry(client, f"{base_url}/tickets", headers, auth, params)
                 
+                # 디버깅을 위한 상세 로깅
+                logger.info(f"페이지 {page} 응답: {type(tickets)}, 길이: {len(tickets) if isinstance(tickets, list) else 'N/A'}")
+                if isinstance(tickets, list) and len(tickets) > 0:
+                    logger.info(f"첫 번째 티켓 ID: {tickets[0].get('id', 'N/A')}")
+                
                 if not tickets or not isinstance(tickets, list):
                     logger.info(f"더 이상 티켓이 없습니다. (페이지 {page})")
                     break
                 
                 # 각 티켓에 대한 추가 정보 가져오기
-                for ticket in tickets:
+                for i, ticket in enumerate(tickets):
                     if not isinstance(ticket, dict):
                         continue
                     ticket_id = ticket.get("id")
                     if not ticket_id:
                         continue
                     
-                    # 대화 내역 가져오기
-                    if include_conversations:
-                        conversations = await fetch_ticket_conversations(client, ticket_id, base_url, headers, auth)
-                        ticket["conversations"] = conversations
-                    
-                    # 첨부파일 가져오기
-                    if include_attachments:
-                        attachments = await fetch_ticket_attachments(client, ticket_id, base_url, headers, auth)
-                        ticket["all_attachments"] = attachments
+                    try:
+                        logger.info(f"티켓 {ticket_id} 처리 시작 ({i+1}/{len(tickets)})")
+                        
+                        # 대화 내역 가져오기
+                        if include_conversations:
+                            try:
+                                conversations = await fetch_ticket_conversations(client, ticket_id, base_url, headers, auth)
+                                ticket["conversations"] = conversations
+                                logger.info(f"티켓 {ticket_id} 대화 내역 완료: {len(conversations)}개")
+                            except Exception as e:
+                                logger.error(f"티켓 {ticket_id} 대화 내역 수집 실패: {e}")
+                                ticket["conversations"] = []
+                        
+                        # 첨부파일 가져오기
+                        if include_attachments:
+                            try:
+                                # 이미 가져온 대화 내역을 재사용하여 중복 API 호출 방지
+                                conversations_for_attachments = ticket.get("conversations", [])
+                                attachments = await fetch_ticket_attachments(
+                                    client, ticket_id, base_url, headers, auth,
+                                    conversations=conversations_for_attachments  # 기존 대화 재사용
+                                )
+                                ticket["all_attachments"] = attachments
+                                logger.info(f"티켓 {ticket_id} 첨부파일 완료: {len(attachments)}개")
+                            except Exception as e:
+                                logger.error(f"티켓 {ticket_id} 첨부파일 수집 실패: {e}")
+                                ticket["all_attachments"] = []
+                        
+                        logger.info(f"티켓 {ticket_id} 처리 완료")
+                        
+                        # 즉시 저장 모드인 경우 DB에 저장
+                        if store_immediately and db:
+                            try:
+                                logger.info(f"[STORE] 티켓 {ticket_id} 즉시 저장 시작")
+                                
+                                # 통합 객체 생성
+                                from core.ingest.integrator import create_integrated_ticket_object
+                                integrated_ticket = create_integrated_ticket_object(ticket, company_id=final_company_id)
+                                logger.info(f"[STORE] 통합 티켓 객체 생성 완료: ID={integrated_ticket.get('id')}")
+                                
+                                # DB에 저장
+                                from core.ingest.storage import store_integrated_object_to_sqlite
+                                store_result = store_integrated_object_to_sqlite(db, integrated_ticket, final_company_id, platform)
+                                
+                                if store_result:
+                                    logger.info(f"[STORE] ✅ 티켓 {ticket_id} 저장 성공")
+                                else:
+                                    logger.error(f"[STORE] ❌ 티켓 {ticket_id} 저장 실패")
+                                    
+                            except Exception as e:
+                                logger.error(f"[STORE] 티켓 {ticket_id} 저장 중 오류: {e}", exc_info=True)
+                        
+                    except Exception as e:
+                        logger.error(f"티켓 {ticket_id} 전체 처리 실패: {e}")
+                        # 에러가 발생해도 계속 진행
+                        if "conversations" not in ticket:
+                            ticket["conversations"] = []
+                        if "all_attachments" not in ticket:
+                            ticket["all_attachments"] = []
                     
                 all_tickets.extend(tickets)
                 logger.info(f"티켓 {len(tickets)}개 수신 완료 (총 {len(all_tickets)}개)")
@@ -386,35 +456,71 @@ async def fetch_tickets(domain: Optional[str] = None, api_key: Optional[str] = N
         if page > max_pages:
             logger.warning(f"최대 페이지 수({max_pages})에 도달했습니다. 일부 티켓만 가져왔을 수 있습니다.")
     
-    logger.info(f"티켓 데이터 가져오기 완료. 총 {len(all_tickets)}개 티켓")
+    # DB 연결 정리
+    if store_immediately and db:
+        db.disconnect()
+        logger.info("즉시 저장 모드: DB 연결 해제")
+    
+    logger.info(f"🎉 티켓 데이터 수집 완전 완료! 총 {len(all_tickets)}개 티켓")
+    logger.info(f"[DEBUG] ===== fetch_tickets 함수 종료 준비 =====")
+    logger.info(f"[DEBUG] 수집된 티켓 수: {len(all_tickets)}")
+    logger.info(f"[DEBUG] 티켓 ID 목록 (처음 10개): {[t.get('id') for t in all_tickets[:10]]}")
+    logger.info(f"[DEBUG] 각 티켓의 conversations/attachments 여부:")
+    for i, ticket in enumerate(all_tickets[:5]):  # 처음 5개만 확인
+        conv_count = len(ticket.get('conversations', []))
+        att_count = len(ticket.get('all_attachments', []))
+        logger.info(f"[DEBUG]   티켓 {ticket.get('id')}: conversations={conv_count}, attachments={att_count}")
+    
+    if store_immediately:
+        logger.info(f"[DEBUG] 즉시 저장 모드로 실행되었습니다 - 모든 티켓이 개별적으로 저장되었습니다")
+    else:
+        logger.info(f"[DEBUG] 배치 저장 모드 - processor.py로 반환 시작...")
+        
+    logger.info("fetch_tickets 함수 정상 종료 - processor로 복귀합니다.")
     return all_tickets
 
 async def fetch_kb_articles(
     domain: Optional[str] = None, 
     api_key: Optional[str] = None, 
-    max_articles: Optional[int] = None
+    max_articles: Optional[int] = None,
+    company_id: Optional[str] = None,
+    platform: str = "freshdesk",
+    store_immediately: bool = True
 ) -> List[Dict[str, Any]]:
     """
-    Freshdesk에서 지식베이스(솔루션) 문서 전체를 비동기로 가져옵니다.
+    지식베이스(솔루션) 문서 전체를 비동기로 가져옵니다.
     카테고리 → 폴더 → 문서 순으로 전체를 순회합니다.
     페이지네이션을 적용하여 모든 문서를 가져옵니다.
     문서의 첨부파일도 함께 가져옵니다.
     
     Args:
-        domain: Freshdesk 도메인 (파라미터로 전달되지 않으면 환경변수 사용)
-        api_key: Freshdesk API 키 (파라미터로 전달되지 않으면 환경변수 사용)
+        domain: 도메인 (파라미터로 전달되지 않으면 환경변수 사용)
+        api_key: API 키 (파라미터로 전달되지 않으면 환경변수 사용)
         max_articles: 최대 수집할 문서 수 (None이면 무제한)
+        company_id: 회사 ID (멀티테넌트용)
+        platform: 플랫폼명
+        store_immediately: 즉시 저장 여부 (기본값: True)
         
     Returns:
         List[Dict[str, Any]]: 지식베이스 문서 목록
     """
-    # Freshdesk 설정 가져오기
-    company_id, base_url, final_api_key, headers, auth = get_freshdesk_config(domain, api_key)
+    # 설정 가져오기
+    extracted_company_id, base_url, final_api_key, headers, auth = get_platform_config(domain, api_key)
+    
+    # company_id가 별도로 제공되지 않으면 domain에서 추출한 값 사용
+    final_company_id = company_id or extracted_company_id
+    
+    # 즉시 저장 모드인 경우 DB 연결 초기화
+    db = None
+    if store_immediately:
+        from core.database.database import get_database
+        db = get_database(final_company_id, platform)
+        logger.info(f"[KB] 즉시 저장 모드: DB 연결 완료 - {db.db_path}")
     
     articles: List[Dict[str, Any]] = []
     include_attachments = True  # 첨부파일 포함 여부
     
-    logger.info(f"지식베이스 문서 가져오기 시작 - 도메인: {domain or DEFAULT_FRESHDESK_DOMAIN}")
+    logger.info(f"지식베이스 문서 가져오기 시작 - 도메인: {domain or DEFAULT_DOMAIN}")
     
     async with httpx.AsyncClient() as client:
         try:
@@ -476,6 +582,15 @@ async def fetch_kb_articles(
                             if not isinstance(article, dict):
                                 continue
                             
+                            # KB 문서 status 필터링: draft 상태(status=1)는 제외하고 published 상태(status=2)만 수집
+                            article_status = article.get("status")
+                            if article_status == 1:  # draft 상태는 건너뛰기
+                                logger.debug(f"Draft 문서 건너뛰기 - ID: {article.get('id')}, 제목: {article.get('title', 'Unknown')}")
+                                continue
+                            elif article_status != 2:  # published 상태가 아닌 다른 상태도 로그에 기록
+                                logger.warning(f"예상하지 못한 status 값 ({article_status}) - ID: {article.get('id')}, 제목: {article.get('title', 'Unknown')}")
+                                continue
+                            
                             # max_articles 제한 체크
                             if max_articles is not None and len(articles) >= max_articles:
                                 logger.info(f"최대 문서 수 제한 ({max_articles}개)에 도달하여 수집을 중단합니다.")
@@ -492,6 +607,29 @@ async def fetch_kb_articles(
                                 if article_id:
                                     attachments = await fetch_article_attachments(client, article_id, base_url, headers, auth)
                                     article["attachments"] = attachments
+                                    
+                            # 즉시 저장 모드인 경우 개별 문서를 바로 저장
+                            if store_immediately and db:
+                                article_id = article.get("id")
+                                try:
+                                    logger.info(f"[KB STORE] KB 문서 {article_id} 즉시 저장 시작")
+                                    
+                                    # 통합 객체 생성
+                                    from core.ingest.integrator import create_integrated_article_object
+                                    integrated_article = create_integrated_article_object(article, company_id=final_company_id)
+                                    logger.info(f"[KB STORE] 통합 KB 문서 객체 생성 완료: ID={integrated_article.get('id')}")
+                                    
+                                    # DB에 저장
+                                    from core.ingest.storage import store_integrated_object_to_sqlite
+                                    store_result = store_integrated_object_to_sqlite(db, integrated_article, final_company_id, platform)
+                                    
+                                    if store_result:
+                                        logger.info(f"[KB STORE] ✅ KB 문서 {article_id} 저장 성공")
+                                    else:
+                                        logger.error(f"[KB STORE] ❌ KB 문서 {article_id} 저장 실패")
+                                        
+                                except Exception as e:
+                                    logger.error(f"[KB STORE] KB 문서 {article_id} 저장 중 오류: {e}", exc_info=True)
                         
                         articles.extend(folder_articles)
                         logger.info(f"폴더 '{folder_name}'에서 문서 {len(folder_articles)}개 수신 완료 (총 {len(articles)}개)")
@@ -514,6 +652,10 @@ async def fetch_kb_articles(
             raise
             
     logger.info(f"지식베이스 문서 가져오기 완료. 총 {len(articles)}개 문서")
+    logger.info(f"[DEBUG] ===== fetch_kb_articles 함수 종료 준비 =====")
+    logger.info(f"[DEBUG] 수집된 문서 수: {len(articles)}")
+    logger.info(f"[DEBUG] 문서 ID 목록 (처음 10개): {[a.get('id') for a in articles[:10]]}")
+    logger.info(f"[DEBUG] processor.py로 반환 시작...")
     
     # max_articles 제한 적용 (최종 체크)
     if max_articles is not None and len(articles) > max_articles:
@@ -524,21 +666,21 @@ async def fetch_kb_articles(
 
 async def fetch_ticket_details(ticket_id: int, domain: Optional[str] = None, api_key: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """
-    Freshdesk에서 특정 티켓의 상세 정보를 비동기로 가져옵니다.
+    특정 티켓의 상세 정보를 비동기로 가져옵니다.
     대화 내역과 첨부파일도 함께 가져옵니다.
     
     Args:
         ticket_id: 티켓 ID
-        domain: Freshdesk 도메인 (파라미터로 전달되지 않으면 환경변수 사용)
-        api_key: Freshdesk API 키 (파라미터로 전달되지 않으면 환경변수 사용)
+        domain: 플랫폼 도메인 (파라미터로 전달되지 않으면 환경변수 사용)
+        api_key: 플랫폼 API 키 (파라미터로 전달되지 않으면 환경변수 사용)
         
     Returns:
         Optional[Dict[str, Any]]: 티켓 상세 정보 (대화내역, 첨부파일 포함) 또는 None (티켓이 없는 경우)
     """
-    # Freshdesk 설정 가져오기
-    company_id, base_url, final_api_key, headers, auth = get_freshdesk_config(domain, api_key)
+    # 플랫폼 설정 가져오기
+    company_id, base_url, final_api_key, headers, auth = get_platform_config(domain, api_key)
     
-    logger.info(f"티켓 {ticket_id} 상세 정보 가져오기 시작 - 도메인: {domain or DEFAULT_FRESHDESK_DOMAIN}")
+    logger.info(f"티켓 {ticket_id} 상세 정보 가져오기 시작 - 도메인: {domain or DEFAULT_DOMAIN}")
     
     async with httpx.AsyncClient() as client:
         try:

@@ -336,6 +336,7 @@ async def query_endpoint(
     # 콘텐츠 타입에 "images" 또는 "attachments"가 포함된 경우만 이미지 정보 추출
     if any(t in ["images", "attachments"] for t in content_types):
         for i, metadata in enumerate(optimized_metadatas): # optimized_metadatas 사용
+            # 1. 기존 image_attachments 처리 (하위 호환성)
             image_attachments = metadata.get("image_attachments", "")
             if image_attachments:
                 try:
@@ -350,7 +351,7 @@ async def query_endpoint(
                                     "url": img.get("url", ""),
                                     "content_type": img.get("content_type", ""),
                                     "doc_index": i,  # 어떤 문서에서 이미지가 왔는지 추적하기 위한 인덱스입니다.
-                                    "source_type": img.get("source_type", ""),
+                                    "source_type": "attachment",  # 기존 방식
                                     "source_id": metadata.get("source_id", ""),
                                     "title": (
                                         structured_docs[i].title
@@ -360,7 +361,77 @@ async def query_endpoint(
                                 }
                             )
                 except Exception as e:
-                    logger.error(f"이미지 정보 파싱 중 오류 발생: {e}") # 오류 로깅 메시지를 한글로 변경합니다.
+                    logger.error(f"기존 이미지 정보 파싱 중 오류 발생: {e}")
+            
+            # 2. 새로운 통합 이미지 처리 (all_images)
+            all_images = metadata.get("all_images", [])
+            if all_images and isinstance(all_images, list):
+                for img in all_images:
+                    # 중복 방지를 위해 attachment_id 확인
+                    attachment_id = img.get("attachment_id")
+                    if attachment_id:
+                        # 이미 추가된 이미지인지 확인
+                        existing = any(
+                            ctx_img.get("attachment_id") == attachment_id 
+                            for ctx_img in context_images
+                        )
+                        
+                        if not existing:
+                            image_type = img.get("type", "unknown")  # "attachment" 또는 "inline"
+                            
+                            context_images.append({
+                                "attachment_id": attachment_id,
+                                "name": img.get("name", ""),
+                                "content_type": img.get("content_type", ""),
+                                "size": img.get("size", 0),
+                                "alt_text": img.get("alt_text", ""),  # 인라인 이미지용
+                                "doc_index": i,
+                                "source_type": image_type,  # "attachment" 또는 "inline"
+                                "source_id": metadata.get("source_id", ""),
+                                "title": (
+                                    structured_docs[i].title
+                                    if i < len(structured_docs)
+                                    else ""
+                                ),
+                                "position": img.get("position", 0),  # 인라인 이미지 위치
+                                "conversation_id": img.get("conversation_id"),  # 대화 ID (있는 경우)
+                                # URL은 포함하지 않음 (보안상 이유로 실시간 발급 필요)
+                            })
+            
+            # 3. 인라인 이미지만 별도 처리 (선택적)
+            inline_images = metadata.get("inline_images", [])
+            if inline_images and isinstance(inline_images, list):
+                try:
+                    for img in inline_images:
+                        attachment_id = img.get("attachment_id")
+                        if attachment_id:
+                            # 이미 all_images에서 처리되었는지 확인
+                            existing = any(
+                                ctx_img.get("attachment_id") == attachment_id and 
+                                ctx_img.get("source_type") == "inline"
+                                for ctx_img in context_images
+                            )
+                            
+                            if not existing:
+                                context_images.append({
+                                    "attachment_id": attachment_id,
+                                    "alt_text": img.get("alt_text", ""),
+                                    "doc_index": i,
+                                    "source_type": "inline",
+                                    "source_id": metadata.get("source_id", ""),
+                                    "title": (
+                                        structured_docs[i].title
+                                        if i < len(structured_docs)
+                                        else ""
+                                    ),
+                                    "position": img.get("position", 0),
+                                    "conversation_id": img.get("conversation_id"),
+                                    # URL은 포함하지 않음 (실시간 발급 필요)
+                                })
+                except Exception as e:
+                    logger.error(f"인라인 이미지 정보 파싱 중 오류 발생: {e}")
+
+    logger.info(f"검색 결과에서 총 {len(context_images)}개의 이미지 정보 추출됨")
 
     # 3. LLM 호출 단계: 생성된 프롬프트를 LLM에 전달하여 답변을 생성합니다.
     llm_start = time.time()

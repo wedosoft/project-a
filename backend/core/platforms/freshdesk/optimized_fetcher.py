@@ -25,15 +25,12 @@ from core.logger import get_logger
 
 logger = get_logger(__name__)
 
-FRESHDESK_DOMAIN = os.getenv("FRESHDESK_DOMAIN")
-FRESHDESK_API_KEY = os.getenv("FRESHDESK_API_KEY")
-
-if not FRESHDESK_DOMAIN or not FRESHDESK_API_KEY:
-    raise RuntimeError("FRESHDESK_DOMAIN, FRESHDESK_API_KEY 환경 변수가 필요합니다.")
+# 새 환경변수 체계 사용 (표준 4개 헤더)
+# 클래스 생성 시 company_id, platform, domain, api_key를 파라미터로 받음
 
 def extract_company_id_from_domain(domain: str) -> str:
     """
-    FRESHDESK_DOMAIN에서 company_id를 추출합니다.
+    DOMAIN에서 company_id를 추출합니다.
     
     Args:
         domain: Freshdesk 도메인 (예: "your-company.freshdesk.com" 또는 "your-company")
@@ -58,20 +55,7 @@ def extract_company_id_from_domain(domain: str) -> str:
     
     return company_id
 
-# company_id 자동 추출
-COMPANY_ID = extract_company_id_from_domain(FRESHDESK_DOMAIN)
-logger.debug(f"FRESHDESK_DOMAIN '{FRESHDESK_DOMAIN}'에서 추출된 company_id: '{COMPANY_ID}'")
-
-BASE_URL = f"https://{FRESHDESK_DOMAIN}" if ".freshdesk.com" in FRESHDESK_DOMAIN else f"https://{FRESHDESK_DOMAIN}.freshdesk.com"
-BASE_URL += "/api/v2"
-
-# X-Company-ID 헤더를 포함한 기본 헤더 설정
-HEADERS = {
-    "Content-Type": "application/json",
-    "X-Company-ID": COMPANY_ID
-}
-AUTH = (FRESHDESK_API_KEY, "X")
-
+# company_id 및 인증 정보는 클래스 생성 시 받도록 변경됨
 # 최적화된 설정
 MAX_RETRIES = 5
 RETRY_DELAY = 2
@@ -93,12 +77,46 @@ class OptimizedFreshdeskFetcher:
     티켓 상세정보와 지식베이스를 raw 데이터로 저장하여 임베딩 실패 시 재수집 방지
     """
     
-    def __init__(self, output_dir: str = "freshdesk_full_data"):
+    def __init__(self, 
+                 company_id: str,
+                 platform: str,
+                 domain: str,
+                 api_key: str,
+                 output_dir: str = "freshdesk_full_data"):
+        """
+        표준 4개 헤더 정보를 받아 초기화
+        
+        Args:
+            company_id: 테넌트/회사 ID (X-Company-ID)
+            platform: 플랫폼 타입 (X-Platform)
+            domain: Freshdesk 도메인 (X-Domain)
+            api_key: API 키 (X-API-Key)
+            output_dir: 출력 디렉토리
+        """
+        self.company_id = company_id
+        self.platform = platform
+        self.domain = domain
+        self.api_key = api_key
+        
+        # Freshdesk Base URL 생성
+        self.base_url = f"https://{domain}" if ".freshdesk.com" in domain else f"https://{domain}.freshdesk.com"
+        self.base_url += "/api/v2"
+        
+        # 표준 4개 헤더를 포함한 기본 헤더 설정
+        self.headers = {
+            "Content-Type": "application/json",
+            "X-Company-ID": company_id,
+            "X-Platform": platform,
+            "X-Domain": domain,
+            "X-API-Key": api_key
+        }
+        self.auth = (api_key, "X")
+        
         # output_dir이 절대경로가 아니면 backend/ 기준으로 보정
         output_path = Path(output_dir)
         if not output_path.is_absolute():
             # backend/ 하위로 강제
-            backend_root = Path(__file__).parent.parent
+            backend_root = Path(__file__).parent.parent.parent
             output_path = backend_root / output_path
         self.output_dir = output_path.resolve()
         self.output_dir.mkdir(exist_ok=True)
@@ -172,7 +190,7 @@ class OptimizedFreshdeskFetcher:
         retries = 0
         while retries < self.MAX_RETRIES:
             try:
-                resp = await self.client.get(url, headers=HEADERS, auth=AUTH, params=params)
+                resp = await self.client.get(url, headers=self.headers, auth=self.auth, params=params)
                 
                 # Rate limit 체크 (명시적인 429 상태 코드)
                 if resp.status_code == 429:
@@ -278,7 +296,7 @@ class OptimizedFreshdeskFetcher:
             Dict: 티켓 상세정보 또는 None (실패 시)
         """
         try:
-            detail = await self.fetch_with_retry(f"{BASE_URL}/tickets/{ticket_id}")
+            detail = await self.fetch_with_retry(f"{self.base_url}/tickets/{ticket_id}")
             await asyncio.sleep(self.REQUEST_DELAY)
             return detail
         except Exception as e:
@@ -296,7 +314,7 @@ class OptimizedFreshdeskFetcher:
             List[Dict]: 대화내역 목록
         """
         try:
-            conversations = await self.fetch_with_retry(f"{BASE_URL}/tickets/{ticket_id}/conversations")
+            conversations = await self.fetch_with_retry(f"{self.base_url}/tickets/{ticket_id}/conversations")
             await asyncio.sleep(self.REQUEST_DELAY)
             # API 응답이 dict인 경우 빈 리스트 반환, list인 경우 그대로 반환
             if isinstance(conversations, dict):
@@ -349,12 +367,12 @@ class OptimizedFreshdeskFetcher:
             categories = []
             if category_id:
                 # 특정 카테고리만 조회
-                category = await self.fetch_with_retry(f"{BASE_URL}/solutions/categories/{category_id}")
+                category = await self.fetch_with_retry(f"{self.base_url}/solutions/categories/{category_id}")
                 if category:
                     categories = [category]
             else:
                 # 전체 카테고리 조회
-                categories = await self.fetch_with_retry(f"{BASE_URL}/solutions/categories")
+                categories = await self.fetch_with_retry(f"{self.base_url}/solutions/categories")
             
             logger.info(f"카테고리 {len(categories)}개 수신 완료")
             
@@ -365,7 +383,7 @@ class OptimizedFreshdeskFetcher:
                 logger.info(f"카테고리 '{cat_name}' (ID: {cat_id}) 처리 중...")
                 
                 # 폴더 목록 가져오기
-                folders = await self.fetch_with_retry(f"{BASE_URL}/solutions/categories/{cat_id}/folders")
+                folders = await self.fetch_with_retry(f"{self.base_url}/solutions/categories/{cat_id}/folders")
                 logger.info(f"카테고리 '{cat_name}'에서 폴더 {len(folders)}개 수신 완료")
                 
                 # 3. 각 폴더별 아티클 수집
@@ -384,7 +402,7 @@ class OptimizedFreshdeskFetcher:
                         
                         logger.info(f"폴더 '{folder_name}'의 아티클 페이지 {page} 요청 중...")
                         folder_articles = await self.fetch_with_retry(
-                            f"{BASE_URL}/solutions/folders/{folder_id}/articles", 
+                            f"{self.base_url}/solutions/folders/{folder_id}/articles", 
                             params
                         )
                         
@@ -392,12 +410,29 @@ class OptimizedFreshdeskFetcher:
                             logger.info(f"폴더 '{folder_name}'에 더 이상 아티클이 없습니다")
                             break
                         
-                        # 카테고리 및 폴더 정보 추가
+                        # KB 문서 status 필터링 및 카테고리/폴더 정보 추가
+                        filtered_articles = []
                         for article in folder_articles:
+                            # KB 문서 status 필터링: draft 상태(status=1)는 제외하고 published 상태(status=2)만 수집
+                            article_status = article.get("status")
+                            if article_status == 1:  # draft 상태는 건너뛰기
+                                logger.debug(f"Draft 문서 건너뛰기 - ID: {article.get('id')}, 제목: {article.get('title', 'Unknown')}")
+                                continue
+                            elif article_status != 2:  # published 상태가 아닌 다른 상태도 로그에 기록
+                                logger.warning(f"예상하지 못한 status 값 ({article_status}) - ID: {article.get('id')}, 제목: {article.get('title', 'Unknown')}")
+                                continue
+                                
+                            # 카테고리 및 폴더 정보 추가
                             article["category_id"] = cat_id
                             article["category_name"] = cat_name
                             article["folder_id"] = folder_id
                             article["folder_name"] = folder_name
+                            filtered_articles.append(article)
+                        
+                        # 필터링된 결과로 업데이트
+                        folder_articles = filtered_articles
+                        if len(filtered_articles) < len(folder_articles):
+                            logger.info(f"폴더 '{folder_name}': status 필터링으로 {len(folder_articles) - len(filtered_articles)}개 draft 문서 제외")
                         
                         # 최대 항목 수 제한이 있을 경우
                         if max_articles is not None:
@@ -840,7 +875,7 @@ class OptimizedFreshdeskFetcher:
             # 종료 날짜 필터 추가 (Freshdesk는 updated_until 파라미터가 없으므로 클라이언트에서 필터링)
             
             try:
-                batch_tickets = await self.fetch_with_retry(f"{BASE_URL}/tickets", params)
+                batch_tickets = await self.fetch_with_retry(f"{self.base_url}/tickets", params)
                 
                 if not batch_tickets:
                     break
@@ -1239,7 +1274,7 @@ class OptimizedFreshdeskFetcher:
             logger.info(f"🔍 [DEBUG] collect_raw_details=False 이므로 티켓 상세정보 수집 건너뜀")
         elif not collected_ticket_ids:
             logger.warning("수집된 티켓 ID가 없어 티켓 상세정보 raw 데이터 수집을 건너뜁니다.")
-            logger.warning(f"🔍 [DEBUG] collected_ticket_ids가 비어있어 티켓 상세정보 수집 건너뜀")
+            logger.warning(f"🔍 [DEBUG] collected_ticket_ids가 비어있어 티켓 상세정보 수집 건너뜁니다")
         
         if collect_raw_conversations and collected_ticket_ids:
             logger.info("티켓 대화내역 raw 데이터 수집 시작...")
@@ -1431,10 +1466,24 @@ class OptimizedFreshdeskFetcher:
         logger.info("진행 상황 업데이트 완료")
 
 
+def get_headers_from_env():
+    """
+    환경변수에서 표준 4개 헤더 정보를 가져오는 헬퍼 함수
+    """
+    company_id = os.getenv("COMPANY_ID", "test-company")
+    platform = os.getenv("PLATFORM", "freshdesk")
+    domain = os.getenv("DOMAIN", "test.freshdesk.com")
+    api_key = os.getenv("API_KEY", "test-api-key")
+    
+    return company_id, platform, domain, api_key
+
+
 async def main():
     """전체 데이터 수집 함수 - freshdesk_full_data 디렉토리 사용"""
     output_dir = "freshdesk_full_data"
-    async with OptimizedFreshdeskFetcher(output_dir) as fetcher:
+    company_id, platform, domain, api_key = get_headers_from_env()
+    
+    async with OptimizedFreshdeskFetcher(company_id, platform, domain, api_key, output_dir) as fetcher:
         stats = await fetcher.collect_all_tickets(
             start_date="2015-01-01",  # 가능한 가장 오래된 날짜부터
             end_date=None,  # 현재까지
@@ -1459,8 +1508,10 @@ async def test_collection_limit():
     # 테스트 디렉토리 생성
     Path(output_dir).mkdir(exist_ok=True)
     
+    company_id, platform, domain, api_key = get_headers_from_env()
+    
     start_time = datetime.now()
-    async with OptimizedFreshdeskFetcher(output_dir) as fetcher:
+    async with OptimizedFreshdeskFetcher(company_id, platform, domain, api_key, output_dir) as fetcher:
         stats = await fetcher.collect_all_tickets(
             start_date="2015-01-01",
             end_date=None,
@@ -1493,7 +1544,9 @@ async def collect_only_raw_data():
     logging.info("======= RAW 데이터만 수집 모드 =======")
     output_dir = "freshdesk_full_data"
     
-    async with OptimizedFreshdeskFetcher(output_dir) as fetcher:
+    company_id, platform, domain, api_key = get_headers_from_env()
+    
+    async with OptimizedFreshdeskFetcher(company_id, platform, domain, api_key, output_dir) as fetcher:
         progress = fetcher.load_progress()
         
         # 기존 티켓 청크 파일에서 티켓 ID 추출
@@ -1547,7 +1600,9 @@ async def split_existing_chunks():
     logging.info("======= 기존 청크 파일 분할 시작 =======")
     output_dir = "freshdesk_full_data"
     
-    async with OptimizedFreshdeskFetcher(output_dir) as fetcher:
+    company_id, platform, domain, api_key = get_headers_from_env()
+    
+    async with OptimizedFreshdeskFetcher(company_id, platform, domain, api_key, output_dir) as fetcher:
         await fetcher.split_large_ticket_chunks()
     
     logging.info("======= 청크 파일 분할 완료 =======")

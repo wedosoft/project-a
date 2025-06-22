@@ -12,7 +12,7 @@ import time
 import os
 
 from ..models.responses import HealthCheckResponse
-from ..dependencies import get_platform, get_vector_db
+from ..dependencies import get_platform, get_vector_db, get_domain, get_api_key, get_domain, get_api_key
 from core.database.vectordb import vector_db
 
 # 라우터 생성
@@ -25,19 +25,18 @@ logger = logging.getLogger(__name__)
 async def health_check(
     platform: str = Depends(get_platform),
     vector_db = Depends(get_vector_db),
-    x_freshdesk_domain: Optional[str] = Header(None, alias="X-Freshdesk-Domain"),
-    x_freshdesk_api_key: Optional[str] = Header(None, alias="X-Freshdesk-API-Key")
+    domain: Optional[str] = Depends(get_domain),
+    api_key: Optional[str] = Depends(get_api_key)
 ):
     """
-    애플리케이션 헬스 체크 엔드포인트
+    애플리케이션 헬스 체크 엔드포인트 (멀티플랫폼 지원)
     
-    애플리케이션 상태와 외부 의존성(벡터 DB, Freshdesk API 등)의 상태를 확인합니다.
+    애플리케이션 상태와 외부 의존성(벡터 DB, 플랫폼 API 등)의 상태를 확인합니다.
     
-    Args:
-        platform: 플랫폼 정보 (헤더에서 자동 추출)
-        vector_db: 벡터 데이터베이스 클라이언트
-        x_freshdesk_domain: Freshdesk 도메인 (헤더에서 전달, 선택사항)
-        x_freshdesk_api_key: Freshdesk API 키 (헤더에서 전달, 선택사항)
+    Headers:
+        X-Platform: 플랫폼 식별자 (freshdesk, zendesk 등)
+        X-Domain: 플랫폼 도메인 (선택사항)
+        X-API-Key: API 키 (선택사항)
         
     Returns:
         HealthCheckResponse: 헬스 체크 결과
@@ -93,25 +92,26 @@ async def health_check(
             "variables": env_checks
         }
         
-        # 3. Freshdesk API 연결 확인 (헤더에 API 정보가 있는 경우)
-        if x_freshdesk_domain and x_freshdesk_api_key:
+        # 3. 플랫폼 API 연결 확인 (헤더에 API 정보가 있는 경우)
+        if domain and api_key:
             try:
                 # 간단한 API 호출로 연결 상태 확인 (실제 구현 필요)
-                health_status["checks"]["freshdesk_api"] = {
+                health_status["checks"]["platform_api"] = {
                     "status": "healthy",
-                    "message": f"Freshdesk API 연결 가능 (도메인: {x_freshdesk_domain})",
-                    "domain": x_freshdesk_domain
+                    "message": f"{platform.upper()} API 연결 가능 (도메인: {domain})",
+                    "platform": platform,
+                    "domain": domain
                 }
             except Exception as e:
-                health_status["checks"]["freshdesk_api"] = {
+                health_status["checks"]["platform_api"] = {
                     "status": "unhealthy",
-                    "message": f"Freshdesk API 연결 실패: {str(e)}"
+                    "message": f"{platform.upper()} API 연결 실패: {str(e)}"
                 }
                 overall_status = "degraded"
         else:
-            health_status["checks"]["freshdesk_api"] = {
+            health_status["checks"]["platform_api"] = {
                 "status": "not_configured",
-                "message": "Freshdesk API 정보가 헤더에 제공되지 않음"
+                "message": f"{platform.upper()} API 정보가 헤더에 제공되지 않음"
             }
         
         # 4. 디스크 공간 확인

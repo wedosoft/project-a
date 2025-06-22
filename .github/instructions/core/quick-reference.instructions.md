@@ -4,50 +4,92 @@ applyTo: "**"
 
 # 🚀 빠른 참조 지침서 (Quick Reference)
 
-_AI 즉시 참조용 핵심 패턴 및 구현 가이드 - 최대 500라인 제한_
+_AI 즉시 참조용 핵심 패턴 - 2025-06-22 멀티테넌트 파이프라인 완성 + API 엔드포인트 실전 경험 반영_
 
-## 📂 **새로운 Instructions 구조** _(2024-06-21 최적화)_
+## 🎯 **2025-06-22 최신 업데이트** 🔥
 
-### 🎯 **필수 참조 순서**
-1. **[Quick Reference](../core/quick-reference.instructions.md)** ← 현재 파일
-2. **[Global Instructions](../core/global.instructions.md)** ← 전역 규칙
-3. **작업별 디렉터리** ← 해당 영역 참조
+### 🚨 **API 엔드포인트 핵심 교훈**
+**가장 중요한 발견**: `/ingest`와 `/ingest/jobs`는 완전히 다른 용도!
+- ✅ `/ingest` → **즉시 실행** (동기식, 테스트용, 소량 데이터)
+- ✅ `/ingest/jobs` → **백그라운드 실행** (비동기식, 대량 데이터)
 
-### 📁 **디렉터리 구조**
-- **`/core/`** - 필수 참조 (아키텍처, 전역 규칙)
-- **`/development/`** - 개발 패턴 (FDK, Backend, 디버깅)
-- **`/data/`** - 데이터 처리 (수집, LLM, 벡터, 저장소)
-- **`/specialized/`** - 특화 기능 (LLM 필터링, 플랫폼 어댑터)
-- **`/legacy/`** - 참고용 (이전 버전)
+### 🔄 **표준 4개 헤더 체계 (완성)**
+- ✅ **X-Company-ID**: 테넌트 식별자 (예: "your_company")
+- ✅ **X-Platform**: 플랫폼 (항상 "freshdesk")  
+- ✅ **X-Domain**: API 도메인 (예: "your_company.freshdesk.com")
+- ✅ **X-API-Key**: 플랫폼 API 키
+
+### 🔄 **주요 변경사항**
+- ❌ **제거됨**: 레거시 환경변수 (FRESHDESK_DOMAIN, FRESHDESK_API_KEY)
+- ❌ **제거됨**: Query 파라미터, 중복 헤더
+- ✅ **구현됨**: 멀티테넌트 DB 정책 (회사별 SQLite 파일)
+- ✅ **통합됨**: fetch_tickets 파라미터 일관성
+- ✅ **검증됨**: 즉시 저장 로직 (store_immediately=True)
+
+### 🧪 **즉시 테스트 가능 (검증됨)**
+```bash
+# 올바른 방법: /ingest로 즉시 실행
+curl -X POST "http://localhost:8000/ingest" \
+  -H "Content-Type: application/json" \
+  -H "X-Company-ID: your_company" \
+  -H "X-Platform: freshdesk" \
+  -H "X-Domain: your_company.freshdesk.com" \
+  -H "X-API-Key: your_api_key" \
+  -d '{"max_tickets": 100, "include_kb": true}'
+
+# 잘못된 방법: 즉시 확인하려고 /ingest/jobs 사용
+# 결과: 작업만 생성되고 완료를 기다려야 함!
+```
 
 ---
 
-## 🎯 **즉시 참조용 핵심 포인트**
+### 📋 **API 엔드포인트 빠른 참조**
 
-### **📋 프로젝트 개요**
+| 엔드포인트 | 용도 | 언제 사용? | 응답 |
+|------------|------|------------|------|
+| **POST /ingest** | 즉시 실행 | 테스트, 소량 데이터, 즉시 확인 | 실행 결과 바로 반환 |
+| **POST /ingest/jobs** | 작업 생성 | 대량 데이터, 스케줄링 | job_id 반환, 상태 추적 필요 |
+| **GET /ingest/jobs/{job_id}** | 상태 확인 | 백그라운드 작업 모니터링 | 진행 상황 및 결과 |
 
+---
+
+## 📂 **필수 참조 구조**
+
+### 🎯 **즉시 참조 순서**
+1. **이 파일** (Quick Reference) - 5분
+2. **[API 엔드포인트 가이드](../data/api-endpoints-data-ingestion-guide.instructions.md)** - 실전 API 사용법
+3. **[Pipeline Updates 2025-06-22](../data/pipeline-updates-20250622.instructions.md)** - 최신 변경사항
+4. **작업별 디렉터리** - 해당 영역 상세
+
+### 📁 **디렉터리 맵**
+- **`/core/`** ← 필수 참조 (아키텍처, 보안, 전역)
+- **`/data/`** ← 데이터 파이프라인 (**최우선**: api-endpoints-data-ingestion-guide)
+- **`/development/`** ← 개발 패턴 (FDK, Backend, 디버깅)
+- **`/specialized/`** ← 특화 기능 (LLM, 어댑터, 모니터링)
+
+---
+
+## 🎯 **프로젝트 핵심**
+
+### **📋 시스템 정의**
 - **목적**: Freshdesk Custom App (RAG 기반 유사 티켓 추천)
-- **스택**: Python FastAPI + FDK (JavaScript) + Qdrant + SQLite
-- **아키텍처**: 멀티테넌트 SaaS (company_id 기반 격리)
+- **아키텍처**: 멀티테넌트 SaaS (company_id 기반 완전 격리)
+- **스택**: Python FastAPI + FDK (JavaScript) + Qdrant + SQLite/PostgreSQL
 
-### **🏗️ 핵심 아키텍처**
-
-```
-FDK Frontend → FastAPI Backend → [LLM + Qdrant + SQLite]
-     ↓              ↓                    ↓
-  iparams        API 엔드포인트        데이터 저장소
+### **🏗️ 데이터 흐름 (최신)**
+```mermaid
+표준 4개 헤더 → FastAPI 라우터 → 멀티테넌트 DB → 즉시 저장 → 벡터 저장 → 검색
 ```
 
-### **📊 데이터 흐름**
+1. **수집**: fetch_tickets(domain, api_key, max_tickets, store_immediately=True)
+2. **저장**: {company_id}_{platform}.db (예: your_company_freshdesk.db)
+3. **벡터화**: company_id 필터링으로 완전 격리
+4. **검색**: 테넌트별 독립된 결과 반환
 
-```
-플랫폼 수집 → 데이터 검증 → 통합 객체 생성 → LLM 요약 → 임베딩 생성 → Vector DB 저장
-```
-
-### **🔐 보안 원칙**
-
-- **멀티테넌트**: 모든 데이터에 company_id 필수
-- **Row-level Security**: PostgreSQL + Qdrant 필터링
+### **🔒 멀티테넌트 보안 (완성)**
+- **DB 격리**: 개발환경 SQLite 파일별, 운영환경 PostgreSQL 스키마별
+- **벡터 격리**: Qdrant company_id 필터링
+- **API 격리**: 모든 엔드포인트에서 헤더 기반 테넌트 검증
 - **API 키**: secrets manager 참조만 저장
 
 ---
@@ -72,59 +114,101 @@ const domain = window.location.hostname; // xxx.freshdesk.com
 const companyId = domain.split(".")[0]; // "xxx"
 ```
 
-**3. 백엔드 API 호출**
+**3. 백엔드 API 호출 (올바른 엔드포인트 사용)**
 
 ```javascript
-const apiUrl = `${iparam.backend_url}/api/v1/recommendations`;
-const response = await fetch(apiUrl, {
+---
+
+## 🛠️ **핵심 구현 패턴 (2025-06-22 최신)**
+
+### **🎨 FDK 패턴 (표준 헤더 기반)**
+
+**1. company_id 자동 추출**
+```javascript
+// iparams.html에서 자동으로 추출
+const domain = window.location.hostname; // xxx.freshdesk.com
+const companyId = domain.split(".")[0];   // "xxx"
+```
+
+**2. 백엔드 API 호출 (표준 4개 헤더)**
+```javascript
+const response = await fetch(`${iparam.backend_url}/search`, {
   method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ company_id: companyId, ticket_data: ticketData }),
+  headers: {
+    "Content-Type": "application/json",
+    "X-Company-ID": companyId,
+    "X-Platform": "freshdesk",
+    "X-Domain": window.location.hostname,
+    "X-API-Key": iparam.api_key
+  },
+  body: JSON.stringify({ query: ticketSubject })
 });
 ```
 
-### **🐍 백엔드 필수 패턴**
+### **🐍 Backend 패턴 (멀티테넌트 완성)**
 
-**1. 멀티테넌트 보안**
-
+**1. 표준 헤더 의존성**
 ```python
-# 모든 데이터 처리에 company_id 필수
-async def process_ticket(ticket_data: dict, company_id: str):
-    if not company_id:
-        raise ValueError("company_id is required")
+from fastapi import Header
 
-    # 데이터에 company_id 태깅
-    ticket_data["company_id"] = company_id
+async def get_tenant_info(
+    company_id: str = Header(..., alias="X-Company-ID"),
+    platform: str = Header(..., alias="X-Platform"),
+    domain: str = Header(..., alias="X-Domain"), 
+    api_key: str = Header(..., alias="X-API-Key")
+):
+    return {"company_id": company_id, "platform": platform, 
+            "domain": domain, "api_key": api_key}
 ```
 
-**2. 비동기 처리 패턴**
-
+**2. 멀티테넌트 DB 접근**
 ```python
-import asyncio
-from asyncio import Semaphore
+# 회사별 DB 파일 자동 생성
+def get_database(company_id: str, platform: str):
+    db_filename = f"{company_id}_{platform}.db"
+    return SQLiteDatabase(db_filename)
 
-# 동시성 제한
-semaphore = Semaphore(max_concurrent=5)
-
-async def process_with_limit(data):
-    async with semaphore:
-        return await process_data(data)
+# 사용 예시
+db = get_database("your_company", "freshdesk")  # your_company_freshdesk.db
 ```
 
-**3. 에러 처리 및 재시도**
-
+**3. fetch_tickets 최신 시그니처**
 ```python
-import asyncio
-from functools import wraps
+async def fetch_tickets(
+    domain: str,           # your_company.freshdesk.com
+    api_key: str,          # API 키
+    max_tickets: int = 100,
+    include_description: bool = True
+) -> List[Dict]:
+    # company_id는 내부에서 domain에서 추출
+    company_id = domain.split('.')[0]
+    # 처리 로직...
+```
 
-async def retry_on_failure(func, max_retries=3):
-    for attempt in range(max_retries):
-        try:
-            return await func()
-        except Exception as e:
-            if attempt == max_retries - 1:
-                raise
-            await asyncio.sleep(2 ** attempt)  # 지수 백오프
+### **🔍 벡터 검색 패턴**
+
+**1. 테넌트별 검색**
+```python
+# Qdrant에서 company_id 필터링
+search_results = await qdrant_client.search(
+    collection_name="tickets",
+    query_vector=embedding,
+    query_filter=models.Filter(
+        must=[models.FieldCondition(
+            key="company_id",
+            match=models.MatchValue(value=company_id)
+        )]
+    ),
+    limit=10
+)
+```
+
+**2. 하이브리드 검색 (Vector + BM25)**
+```python
+# 벡터 검색 + 키워드 검색 결합
+vector_results = await vector_search(query, company_id)
+keyword_results = await keyword_search(query, company_id) 
+combined = await merge_results(vector_results, keyword_results)
 ```
 
 ### **🗄️ 데이터 저장 패턴**

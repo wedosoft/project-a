@@ -29,7 +29,7 @@ class SmartConversationFilter:
     - 다국어 지원 (한국어/영어)
     """
 
-    def __init__(self, config_path: str = "config/multilingual_keywords.json"):
+    def __init__(self, config_path: str = "config/data/multilingual_keywords.json"):
         self.logger = logging.getLogger(__name__)
         self.config = self._load_config()
         self.keyword_patterns = self._load_keyword_patterns(config_path)
@@ -54,11 +54,13 @@ class SmartConversationFilter:
     def _load_keyword_patterns(self, config_path: str) -> Dict:
         """다국어 키워드 패턴 로드"""
         try:
-            full_path = Path(__file__).parent.parent.parent / config_path
+            # backend/core/llm/filters/ -> backend/ (4번 parent)
+            full_path = Path(__file__).parent.parent.parent.parent / config_path
             with open(full_path, 'r', encoding='utf-8') as f:
+                self.logger.info(f"키워드 파일 로드 성공: {full_path}")
                 return json.load(f)
         except FileNotFoundError:
-            self.logger.warning(f"키워드 파일 없음: {config_path}, 기본 패턴 사용")
+            self.logger.warning(f"키워드 파일 없음: {config_path} (시도한 경로: {Path(__file__).parent.parent.parent.parent / config_path}), 기본 패턴 사용")
             return self._get_default_patterns()
 
     def _get_default_patterns(self) -> Dict:
