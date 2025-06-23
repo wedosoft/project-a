@@ -9,6 +9,7 @@
 import asyncio
 import logging
 import os
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
@@ -116,30 +117,52 @@ async def fetch_with_retry(client: httpx.AsyncClient, url: str, headers: Dict[st
     retries = 0
     while retries < MAX_RETRIES:
         try:
+            logger.debug(f"API 요청: {url} (params: {params})")
             resp = await client.get(url, headers=headers, auth=auth, params=params)
             resp.raise_for_status()
-            return resp.json()
+            
+            # JSON 응답 파싱 및 None 체크
+            try:
+                json_data = resp.json()
+                if json_data is None:
+                    logger.warning(f"API 응답이 None입니다. URL: {url}")
+                    return []  # None 대신 빈 리스트 반환
+                
+                # 응답 데이터 크기 로깅
+                if isinstance(json_data, list):
+                    logger.debug(f"API 응답 수신: {len(json_data)}개 항목")
+                else:
+                    logger.debug(f"API 응답 수신: {type(json_data)}")
+                    
+                return json_data
+            except ValueError as json_error:
+                logger.error(f"JSON 파싱 오류: {json_error}. URL: {url}, 응답 텍스트: {resp.text[:200]}")
+                return []  # JSON 파싱 실패 시 빈 리스트 반환
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:  # Rate limit 초과
                 retry_after = int(e.response.headers.get('Retry-After', RETRY_DELAY))
-                logger.warning(f"Rate limit 초과. {retry_after}초 후 재시도합니다.")
+                logger.warning(f"Rate limit 초과. {retry_after}초 후 재시도합니다. (URL: {url})")
                 await asyncio.sleep(retry_after)
                 retries += 1
                 continue
             elif e.response.status_code >= 500:  # 서버 오류
-                logger.warning(f"서버 오류 발생: {e}. 재시도 중...")
+                logger.warning(f"서버 오류 발생: {e.response.status_code}. 재시도 중... (URL: {url})")
                 await asyncio.sleep(RETRY_DELAY * (retries + 1))
                 retries += 1
                 continue
             else:
-                logger.error(f"HTTP 오류: {e}")
+                logger.error(f"HTTP 오류: {e.response.status_code} - {e.response.text[:200]} (URL: {url})")
                 raise
         except httpx.RequestError as e:
-            logger.warning(f"요청 오류: {e}. 재시도 중...")
+            logger.warning(f"요청 오류: {e}. 재시도 중... (URL: {url})")
             await asyncio.sleep(RETRY_DELAY * (retries + 1))
             retries += 1
             continue
+        except Exception as e:
+            logger.error(f"예상하지 못한 오류: {e} (URL: {url})")
+            raise
     
+    logger.error(f"최대 재시도 횟수({MAX_RETRIES})를 초과했습니다. (URL: {url})")
     raise Exception(f"최대 재시도 횟수({MAX_RETRIES})를 초과했습니다.")
 
 async def fetch_ticket_conversations(client: httpx.AsyncClient, ticket_id: int, base_url: str, headers: Dict[str, str], auth: Tuple[str, str]) -> List[Dict[str, Any]]:
@@ -276,30 +299,47 @@ async def fetch_article_attachments(client: httpx.AsyncClient, article_id: int, 
         logger.error(f"지식베이스 문서 {article_id}의 첨부파일 가져오기 오류: {e}")
         return []
 
-async def fetch_tickets(domain: Optional[str] = None, api_key: Optional[str] = None, per_page: int = 50, max_tickets: int = 10000, company_id: Optional[str] = None, platform: str = "freshdesk", store_immediately: bool = True) -> List[Dict[str, Any]]:
+async def fetch_tickets(domain: Optional[str] = None, api_key: Optional[str] = None, per_page: int = 50, max_tickets: Optional[int] = None, company_id: Optional[str] = None, platform: str = "freshdesk", store_immediately: bool = True, start_date: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     티켓 목록을 비동기로 가져옵니다.
     페이지네이션을 처리하여 모든 티켓을 가져옵니다.
-    updated_since 파라미터를 사용하여 매우 오래된 날짜부터 모든 티켓을 가져옵니다.
+    updated_since 파라미터를 사용하여 지정된 날짜 또는 10년 전부터 모든 티켓을 가져옵니다.
     티켓의 대화 내역과 첨부파일도 함께 가져옵니다.
     
     Args:
         domain: 도메인 (파라미터로 전달되지 않으면 환경변수 사용)
         api_key: API 키 (파라미터로 전달되지 않으면 환경변수 사용)
         per_page: 페이지당 가져올 티켓 수 (기본값: 50)
-        max_tickets: 최대 가져올 티켓 수
+        max_tickets: 최대 가져올 티켓 수 (None이면 무제한, 기본값: None)
         company_id: 회사 ID (멀티테넌트용)
         platform: 플랫폼명
         store_immediately: 즉시 저장 여부 (기본값: True)
+        start_date: 수집 시작 날짜 (YYYY-MM-DD 형식, None이면 현재부터 10년 전)
         
     Returns:
         List[Dict[str, Any]]: 티켓 목록
     """
+    # start_date가 None이면 현재부터 10년 전으로 설정
+    if start_date is None:
+        ten_years_ago = datetime.now() - timedelta(days=365 * 10)
+        start_date = ten_years_ago.strftime("%Y-%m-%d")
+        logger.info(f"start_date가 지정되지 않아 기본값으로 10년 전 날짜를 사용합니다: {start_date}")
+    else:
+        logger.info(f"지정된 시작 날짜 사용: {start_date}")
+    
     # 설정 가져오기
     extracted_company_id, base_url, final_api_key, headers, auth = get_platform_config(domain, api_key)
     
     # company_id가 별도로 제공되지 않으면 domain에서 추출한 값 사용
     final_company_id = company_id or extracted_company_id
+    
+    # max_tickets 처리: None이면 무제한, 그렇지 않으면 지정된 값 사용
+    if max_tickets is None:
+        effective_max_tickets = float('inf')  # 무제한
+        logger.info("최대 티켓 수 제한 없음 (무제한 수집)")
+    else:
+        effective_max_tickets = max_tickets
+        logger.info(f"최대 티켓 수 제한: {max_tickets}개")
     
     # 즉시 저장 모드인 경우 DB 연결 초기화
     db = None
@@ -334,13 +374,26 @@ async def fetch_tickets(domain: Optional[str] = None, api_key: Optional[str] = N
         # 페이지별로 티켓 가져오기
         while page <= max_pages:
             try:
-                # updated_since 파라미터 추가 (2015-01-01부터 모든 티켓)
+                # max_tickets에 따라 per_page 동적 조정
+                if max_tickets is not None:
+                    # 남은 티켓 수 계산
+                    remaining_tickets = max_tickets - len(all_tickets)
+                    if remaining_tickets <= 0:
+                        logger.info(f"max_tickets({max_tickets})에 도달하여 수집을 중단합니다.")
+                        break
+                    # per_page를 남은 티켓 수와 기본 per_page 중 작은 값으로 설정
+                    effective_per_page = min(per_page, remaining_tickets)
+                    logger.info(f"남은 티켓 수: {remaining_tickets}개, 이번 페이지 요청 수: {effective_per_page}개")
+                else:
+                    effective_per_page = per_page
+                
+                # updated_since 파라미터 추가 (지정된 날짜 또는 10년 전부터 모든 티켓)
                 params = {
                     "page": page, 
-                    "per_page": per_page, 
+                    "per_page": effective_per_page,  # 동적으로 조정된 per_page 사용
                     "order_type": "asc", 
                     "order_by": "created_at",
-                    "updated_since": "2015-01-01T00:00:00Z",  # 오래된 날짜부터 모든 티켓
+                    "updated_since": f"{start_date}T00:00:00Z",  # 계산된 시작 날짜 사용
                     "include": "description"  # description 필드 포함
                 }
                 logger.info(f"티켓 데이터 페이지 {page} 요청 중...")
@@ -349,10 +402,16 @@ async def fetch_tickets(domain: Optional[str] = None, api_key: Optional[str] = N
                 
                 # 디버깅을 위한 상세 로깅
                 logger.info(f"페이지 {page} 응답: {type(tickets)}, 길이: {len(tickets) if isinstance(tickets, list) else 'N/A'}")
-                if isinstance(tickets, list) and len(tickets) > 0:
-                    logger.info(f"첫 번째 티켓 ID: {tickets[0].get('id', 'N/A')}")
                 
-                if not tickets or not isinstance(tickets, list):
+                # tickets가 None이거나 빈 리스트인 경우 처리
+                if tickets is None:
+                    logger.warning(f"페이지 {page}에서 None 응답을 받았습니다. 빈 리스트로 처리합니다.")
+                    tickets = []
+                elif not isinstance(tickets, list):
+                    logger.warning(f"페이지 {page}에서 예상하지 못한 타입 응답: {type(tickets)}. 빈 리스트로 처리합니다.")
+                    tickets = []
+                
+                if len(tickets) == 0:
                     logger.info(f"더 이상 티켓이 없습니다. (페이지 {page})")
                     break
                 
@@ -427,31 +486,42 @@ async def fetch_tickets(domain: Optional[str] = None, api_key: Optional[str] = N
                 all_tickets.extend(tickets)
                 logger.info(f"티켓 {len(tickets)}개 수신 완료 (총 {len(all_tickets)}개)")
                 
-                # 최대 티켓 수 제한에 도달했는지 확인
-                if len(all_tickets) >= max_tickets:
+                # 최대 티켓 수 제한에 도달했는지 확인 (무제한이 아닌 경우에만)
+                if max_tickets is not None and len(all_tickets) >= effective_max_tickets:
                     logger.info(f"최대 티켓 수 제한({max_tickets}개)에 도달했습니다.")
                     all_tickets = all_tickets[:max_tickets]  # 정확히 max_tickets개로 자르기
                     break
                 
-                if len(tickets) < per_page:
-                    logger.info("마지막 페이지 도달")
+                # 마지막 페이지 확인 (받은 티켓 수가 요청한 effective_per_page보다 적으면 마지막 페이지)
+                if len(tickets) < effective_per_page:
+                    logger.info(f"마지막 페이지 도달 - 받은 티켓 수: {len(tickets)}, 요청 수: {effective_per_page}")
                     break  # 마지막 페이지
-                    
-                page += 1
-                
-                # API 요청 사이에 지연 추가
-                await asyncio.sleep(REQUEST_DELAY)
                 
                 # 총 티켓 수를 알고 있고, 모든 티켓을 가져왔다면 종료
                 if total_count > 0 and len(all_tickets) >= total_count:
                     logger.info(f"모든 티켓을 가져왔습니다. ({len(all_tickets)}/{total_count})")
                     break
                 
+                # 다음 페이지로 이동
+                page += 1
+                logger.info(f"다음 페이지로 이동: {page}")
+                
+                # API 요청 사이에 지연 추가
+                await asyncio.sleep(REQUEST_DELAY)
+                
             except Exception as e:
                 logger.error(f"티켓 데이터 가져오기 오류 (페이지 {page}): {e}")
-                # 오류 발생 시 더 긴 지연 후 재시도
+                # 오류 발생 시 더 긴 지연 후 다음 페이지로 넘어감
                 await asyncio.sleep(RETRY_DELAY * 2)
-                continue
+                
+                # 최대 재시도 횟수 체크를 위한 변수 (옵션)
+                page += 1  # 에러 발생 시에도 페이지 증가
+                logger.warning(f"에러로 인해 페이지 {page-1}를 건너뜁니다. 다음 페이지: {page}")
+                
+                # 최대 페이지 수 체크 (무한 루프 방지)
+                if page > max_pages:
+                    logger.error(f"최대 페이지 수({max_pages})에 도달하여 중단합니다.")
+                    break
         
         if page > max_pages:
             logger.warning(f"최대 페이지 수({max_pages})에 도달했습니다. 일부 티켓만 가져왔을 수 있습니다.")
@@ -563,7 +633,20 @@ async def fetch_kb_articles(
                     page = 1
                     
                     while True:
-                        params = {"page": page, "per_page": PER_PAGE}
+                        # max_articles에 따라 per_page 동적 조정
+                        if max_articles is not None:
+                            # 남은 문서 수 계산
+                            remaining_articles = max_articles - len(articles)
+                            if remaining_articles <= 0:
+                                logger.info(f"max_articles({max_articles})에 도달하여 수집을 중단합니다.")
+                                break
+                            # per_page를 남은 문서 수와 기본 PER_PAGE 중 작은 값으로 설정
+                            effective_per_page = min(PER_PAGE, remaining_articles)
+                            logger.info(f"남은 문서 수: {remaining_articles}개, 이번 페이지 요청 수: {effective_per_page}개")
+                        else:
+                            effective_per_page = PER_PAGE
+                        
+                        params = {"page": page, "per_page": effective_per_page}
                         logger.info(f"폴더 '{folder_name}'의 문서 페이지 {page} 요청 중...")
                         
                         folder_articles = await fetch_with_retry(
@@ -574,10 +657,15 @@ async def fetch_kb_articles(
                             params
                         )
                         
-                        if not folder_articles or not isinstance(folder_articles, list):
+                        if not folder_articles:
+                            logger.info(f"폴더 '{folder_name}' 페이지 {page}: 더 이상 문서가 없음")
+                            break
+                        elif not isinstance(folder_articles, list):
+                            logger.warning(f"폴더 '{folder_name}' 페이지 {page}: 예상하지 못한 응답 형식 - {type(folder_articles)}")
                             break
                             
-                        # 카테고리 및 폴더 정보 추가
+                        # 카테고리 및 폴더 정보 추가와 필터링된 문서만 수집
+                        valid_articles = []
                         for article in folder_articles:
                             if not isinstance(article, dict):
                                 continue
@@ -585,16 +673,15 @@ async def fetch_kb_articles(
                             # KB 문서 status 필터링: draft 상태(status=1)는 제외하고 published 상태(status=2)만 수집
                             article_status = article.get("status")
                             if article_status == 1:  # draft 상태는 건너뛰기
-                                logger.debug(f"Draft 문서 건너뛰기 - ID: {article.get('id')}, 제목: {article.get('title', 'Unknown')}")
                                 continue
                             elif article_status != 2:  # published 상태가 아닌 다른 상태도 로그에 기록
                                 logger.warning(f"예상하지 못한 status 값 ({article_status}) - ID: {article.get('id')}, 제목: {article.get('title', 'Unknown')}")
                                 continue
                             
                             # max_articles 제한 체크
-                            if max_articles is not None and len(articles) >= max_articles:
+                            if max_articles is not None and len(articles) + len(valid_articles) >= max_articles:
                                 logger.info(f"최대 문서 수 제한 ({max_articles}개)에 도달하여 수집을 중단합니다.")
-                                return articles
+                                break
                                 
                             article["category_id"] = cat_id
                             article["category_name"] = cat_name
@@ -630,16 +717,19 @@ async def fetch_kb_articles(
                                         
                                 except Exception as e:
                                     logger.error(f"[KB STORE] KB 문서 {article_id} 저장 중 오류: {e}", exc_info=True)
+                            
+                            valid_articles.append(article)
                         
-                        articles.extend(folder_articles)
-                        logger.info(f"폴더 '{folder_name}'에서 문서 {len(folder_articles)}개 수신 완료 (총 {len(articles)}개)")
+                        articles.extend(valid_articles)
+                        logger.info(f"폴더 '{folder_name}' 페이지 {page}: 원본 {len(folder_articles)}개 → 필터링 후 {len(valid_articles)}개 → 누적 총 {len(articles)}개")
                         
                         # max_articles 제한 체크 (extend 후)
                         if max_articles is not None and len(articles) >= max_articles:
                             logger.info(f"최대 문서 수 제한 ({max_articles}개)에 도달하여 수집을 중단합니다.")
                             return articles[:max_articles]  # 정확히 제한 수만큼 반환
                         
-                        if len(folder_articles) < PER_PAGE:
+                        if len(valid_articles) < effective_per_page:
+                            logger.info(f"폴더 '{folder_name}' 페이지 {page}: 유효 문서 {len(valid_articles)}개 < 요청 크기 {effective_per_page} → 마지막 페이지로 판단")
                             break  # 마지막 페이지
                             
                         page += 1
@@ -652,10 +742,6 @@ async def fetch_kb_articles(
             raise
             
     logger.info(f"지식베이스 문서 가져오기 완료. 총 {len(articles)}개 문서")
-    logger.info(f"[DEBUG] ===== fetch_kb_articles 함수 종료 준비 =====")
-    logger.info(f"[DEBUG] 수집된 문서 수: {len(articles)}")
-    logger.info(f"[DEBUG] 문서 ID 목록 (처음 10개): {[a.get('id') for a in articles[:10]]}")
-    logger.info(f"[DEBUG] processor.py로 반환 시작...")
     
     # max_articles 제한 적용 (최종 체크)
     if max_articles is not None and len(articles) > max_articles:

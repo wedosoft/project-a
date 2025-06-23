@@ -50,6 +50,7 @@ class IngestJobConfig(BaseModel):
     process_attachments: bool = Field(default=True, description="첨부파일 처리")
     force_rebuild: bool = Field(default=False, description="강제 재구축")
     include_kb: bool = Field(default=True, description="지식베이스 포함")
+    start_date: Optional[str] = Field(default=None, description="티켓 수집 시작 날짜 (YYYY-MM-DD 형식)")
     
     # 고급 옵션
     batch_size: int = Field(default=50, description="배치 크기")

@@ -78,6 +78,10 @@ class IngestRequest(BaseModel):
     include_kb: bool = True  # 지식베이스 데이터 포함 여부
     max_tickets: Optional[int] = None  # 최대 수집 티켓 수 (None=무제한, 테스트용으로 100 지정 가능)
     max_articles: Optional[int] = None  # 최대 수집 KB 문서 수 (None=무제한, 테스트용으로 100 지정 가능)
+    start_date: Optional[str] = Field(
+        default=None,
+        description="티켓 수집 시작 날짜 (YYYY-MM-DD 형식, None이면 현재부터 10년 전)"
+    )
 
 
 class IngestJobCreateRequest(BaseModel):
@@ -88,6 +92,10 @@ class IngestJobCreateRequest(BaseModel):
     process_attachments: bool = True  # 첨부파일 처리 여부
     force_rebuild: bool = False  # 데이터베이스 강제 재구축 여부
     include_kb: bool = True  # 지식베이스 데이터 포함 여부
+    start_date: Optional[str] = Field(
+        default=None,
+        description="티켓 수집 시작 날짜 (YYYY-MM-DD 형식, None이면 현재부터 10년 전)"
+    )
     
     # 고급 옵션
     batch_size: int = Field(default=50, ge=1, le=200, description="배치 크기")
@@ -135,3 +143,42 @@ class GenerateReplyRequest(BaseModel):
     instructions: Optional[str] = None  # 추가 응답 생성 지침
     include_greeting: bool = True  # 인사말 포함 여부
     include_signature: bool = True  # 서명 포함 여부
+
+
+class DataSecurityRequest(BaseModel):
+    """데이터 보안 관리 요청 모델 (GDPR/완전 삭제)"""
+    
+    action: str = Field(description="수행할 작업 (purge_all, reset_company, delete_platform)")
+    confirmation_token: str = Field(description="보안 확인 토큰 (안전장치)")
+    reason: Optional[str] = Field(default=None, description="삭제/초기화 사유")
+    
+    # 범위 지정
+    company_id: Optional[str] = Field(default=None, description="특정 회사 데이터만 삭제 (None=전체)")
+    platform: Optional[str] = Field(default=None, description="특정 플랫폼 데이터만 삭제 (None=전체)")
+    
+    # 백업 옵션
+    create_backup: bool = Field(default=True, description="삭제 전 백업 생성 여부")
+    backup_location: Optional[str] = Field(default=None, description="백업 저장 위치")
+    
+    # 안전장치 옵션
+    force_delete: bool = Field(default=False, description="강제 삭제 모드 (위험)")
+    include_vectors: bool = Field(default=True, description="벡터 DB 데이터도 삭제")
+    include_cache: bool = Field(default=True, description="캐시 데이터도 삭제")
+    include_logs: bool = Field(default=False, description="로그 데이터도 삭제 (감사용)")
+    include_secrets: bool = Field(default=True, description="AWS Secrets Manager 비밀키도 삭제")
+    
+    # AWS Secrets Manager 설정
+    aws_region: Optional[str] = Field(default=None, description="AWS 리전 (기본값: 환경변수에서 추출)")
+    secret_name_pattern: Optional[str] = Field(default=None, description="삭제할 시크릿 이름 패턴")
+
+
+class SecurityActionRequest(BaseModel):
+    """보안 액션 확인 요청 모델"""
+    
+    action_type: str = Field(description="액션 타입 (data_purge, company_reset, platform_cleanup)")
+    security_code: str = Field(description="보안 코드 (2FA/SMS 등)")
+    user_confirmation: str = Field(description="사용자 확인 문구 ('DELETE_ALL_DATA' 등)")
+    
+    # 추가 보안 검증
+    admin_approval: Optional[str] = Field(default=None, description="관리자 승인 토큰")
+    audit_trail: bool = Field(default=True, description="감사 로그 기록 여부")

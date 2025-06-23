@@ -28,10 +28,6 @@ def store_integrated_object_to_sqlite(
         bool: 저장 성공 여부
     """
     try:
-        logger.info(f"[DEBUG] store_integrated_object_to_sqlite 함수 시작")
-        logger.info(f"[DEBUG] 매개변수 - company_id: {company_id}, platform: {platform}")
-        logger.info(f"[DEBUG] integrated_object keys: {list(integrated_object.keys()) if integrated_object else 'None'}")
-        
         # 지침서 준수: company_id 필수 검증
         if not company_id:
             raise ValueError("company_id는 멀티테넌트 지원을 위해 필수입니다")
@@ -39,13 +35,11 @@ def store_integrated_object_to_sqlite(
         object_type = integrated_object.get("object_type", "unknown")
         object_id = integrated_object.get("id")
         
-        logger.info(f"[DEBUG] 객체 정보 - object_type: {object_type}, object_id: {object_id}")
-        
         if not object_id:
-            logger.error(f"[DEBUG] 객체 ID가 없음: {integrated_object}")
+            logger.error(f"객체 ID가 없음: object_type={object_type}")
             return False
         
-        logger.info(f"[DEBUG] 통합 객체 저장 시작: ID={object_id}, Type={object_type}, company_id={company_id}")
+        logger.info(f"통합 객체 저장 시작: ID={object_id}, type={object_type}, company={company_id}")
         
         # 1. integrated_objects 테이블에 저장
         integrated_data = {
@@ -64,38 +58,33 @@ def store_integrated_object_to_sqlite(
             }
         }
         
-        logger.info(f"[DEBUG] integrated_objects 테이블 저장 시도: object_id={object_id}")
-        logger.debug(f"[DEBUG] 저장할 integrated_data: {integrated_data}")
         try:
             # DB 연결 상태 확인 및 재연결
             if not db or not hasattr(db, 'connection') or not db.connection:
-                logger.warning(f"[DEBUG] DB 연결이 없습니다. 재연결 시도...")
+                logger.debug("DB 재연결 시도...")
                 from core.database.database import get_database
                 db = get_database(company_id, platform or "freshdesk")
-                logger.info(f"[DEBUG] DB 재연결 완료: {db.db_path}")
+                logger.debug("DB 재연결 완료")
             
             result = db.insert_integrated_object(integrated_data)
-            logger.info(f"[DEBUG] integrated_objects 테이블 저장 성공: object_id={object_id}, result={result}")
+            logger.debug(f"integrated_objects 테이블 저장 완료: ID={object_id}")
         except Exception as e:
-            logger.error(f"[DEBUG] integrated_objects 테이블 저장 실패: {e}", exc_info=True)
+            logger.error(f"integrated_objects 테이블 저장 실패: {e}")
             raise
         
         # 2. 기존 테이블에도 저장 (호환성 유지)
-        logger.info(f"[DEBUG] 호환성 저장 시작: object_type={object_type}")
         if object_type == "integrated_ticket":
             result = _store_ticket_compatibility(db, integrated_object, company_id, platform)
-            logger.info(f"[DEBUG] 티켓 호환성 저장 결과: {result}")
             return result
         elif object_type == "integrated_article":
             result = _store_article_compatibility(db, integrated_object, company_id, platform)
-            logger.info(f"[DEBUG] 아티클 호환성 저장 결과: {result}")
             return result
         else:
-            logger.error(f"[DEBUG] 알 수 없는 객체 타입: {object_type}")
+            logger.error(f"알 수 없는 객체 타입: {object_type}")
             return False
             
     except Exception as e:
-        logger.error(f"[DEBUG] 통합 객체 저장 실패 (company_id={company_id}, object_id={integrated_object.get('id')}): {e}", exc_info=True)
+        logger.error(f"통합 객체 저장 실패: ID={integrated_object.get('id')}, error={str(e)}")
         return False
 
 
@@ -133,38 +122,39 @@ def _store_ticket_compatibility(db, integrated_object: Dict[str, Any], company_i
         
         # 대화내역도 개별적으로 저장 (옵션)
         conversations = integrated_object.get("conversations", [])
-        logger.info(f"대화내역 저장 시작: {len(conversations)}개")
-        for i, conv in enumerate(conversations):
-            conversation_data = conv.copy()
-            conversation_data.update({
-                'ticket_id': ticket_id,
-                'company_id': company_id,
-                'platform': platform
-            })
-            
-            # insert_conversation은 딕셔너리를 받아서 raw_data에 저장
-            db.insert_conversation(conversation_data)
-            
-            # 대화 첨부파일 저장
-            conv_attachments = conv.get("attachments", [])
-            for attachment in conv_attachments:
-                attachment_data = attachment.copy()
-                
-                # 아이디 체계 명확화:
-                # - 대화 첨부파일의 parent_original_id는 소속 티켓의 플랫폼 원본 ID
-                # - conv.get("ticket_id")는 대화가 소속된 티켓의 플랫폼 원본 ID
-                parent_ticket_id = conv.get("ticket_id") or ticket_original_id
-                
-                attachment_data.update({
-                    'parent_type': 'conversation',
-                    'parent_original_id': parent_ticket_id,  # 소속 티켓의 플랫폼 원본 ID
-                    'conversation_id': conv.get("id"),  # 대화 자체의 ID (추가 정보)
+        if conversations:
+            logger.debug(f"대화내역 저장: {len(conversations)}개")
+            for i, conv in enumerate(conversations):
+                conversation_data = conv.copy()
+                conversation_data.update({
+                    'ticket_id': ticket_id,
                     'company_id': company_id,
                     'platform': platform
                 })
                 
-                # 첨부파일 개별 저장
-                db.insert_attachment(attachment_data)
+                # insert_conversation은 딕셔너리를 받아서 raw_data에 저장
+                db.insert_conversation(conversation_data)
+                
+                # 대화 첨부파일 저장
+                conv_attachments = conv.get("attachments", [])
+                for attachment in conv_attachments:
+                    attachment_data = attachment.copy()
+                    
+                    # 아이디 체계 명확화:
+                    # - 대화 첨부파일의 parent_original_id는 소속 티켓의 플랫폼 원본 ID
+                    # - conv.get("ticket_id")는 대화가 소속된 티켓의 플랫폼 원본 ID
+                    parent_ticket_id = conv.get("ticket_id") or ticket_original_id
+                    
+                    attachment_data.update({
+                        'parent_type': 'conversation',
+                        'parent_original_id': parent_ticket_id,  # 소속 티켓의 플랫폼 원본 ID
+                        'conversation_id': conv.get("id"),  # 대화 자체의 ID (추가 정보)
+                        'company_id': company_id,
+                        'platform': platform
+                    })
+                    
+                    # 첨부파일 개별 저장
+                    db.insert_attachment(attachment_data)
         
         # 첨부파일도 개별적으로 저장
         attachments = integrated_object.get("all_attachments", [])
@@ -186,7 +176,7 @@ def _store_ticket_compatibility(db, integrated_object: Dict[str, Any], company_i
             # 첨부파일 개별 저장
             db.insert_attachment(attachment_data)
         
-        logger.info(f"통합 티켓 객체 저장 완료: ID={ticket_id}, 대화={len(conversations)}개, 첨부파일={len(attachments)}개, company_id={company_id}")
+        logger.info(f"티켓 저장 완료: ID={ticket_id}, 대화={len(conversations)}개, 첨부파일={len(attachments)}개")
         return True
         
     except Exception as e:
@@ -232,7 +222,7 @@ def _store_article_compatibility(db, integrated_object: Dict[str, Any], company_
             # 첨부파일 개별 저장
             db.insert_attachment(attachment_data)
         
-        logger.info(f"통합 문서 객체 저장 완료: ID={article_id}, 첨부파일={len(attachments)}개, company_id={company_id}")
+        logger.info(f"문서 저장 완료: ID={article_id}, 첨부파일={len(attachments)}개")
         return True
         
     except Exception as e:

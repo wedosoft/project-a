@@ -602,10 +602,11 @@ window.Data = {
   /**
    * 백엔드에서 초기 데이터를 로드하는 함수 (/init 엔드포인트 호출)
    * @param {Object} client - FDK 클라이언트 객체
-   * @param {Object} basicTicketInfo - 기본 티켓 정보
+   * @param {Object} ticket - 기본 티켓 정보
+   * @param {string} agentLanguage - 에이전트 UI 언어 (선택사항)
    * @returns {Promise<Object>} 로드된 데이터 또는 null
    */
-  async loadInitialDataFromBackend(client, ticket) {
+  async loadInitialDataFromBackend(client, ticket, agentLanguage = null) {
     try {
       console.log('🚀 백엔드 초기 데이터 로드 시작:', ticket.id);
       
@@ -618,8 +619,19 @@ window.Data = {
         return false;
       }
       
-      // 백엔드 /init 엔드포인트 호출
-      const response = await API.loadInitData(client, ticket.id);
+      // 에이전트 언어가 제공되지 않은 경우 자동 감지
+      if (!agentLanguage && window.API.detectAgentLanguage) {
+        try {
+          agentLanguage = await API.detectAgentLanguage(client);
+          console.log(`🌍 에이전트 언어 자동 감지: ${agentLanguage}`);
+        } catch (error) {
+          console.warn('⚠️ 언어 감지 실패, 기본값 사용:', error);
+          agentLanguage = 'en';
+        }
+      }
+      
+      // 백엔드 /init 엔드포인트 호출 (에이전트 언어 포함)
+      const response = await API.loadInitData(client, ticket.id, agentLanguage);
       
       console.log('🔍 백엔드 응답 상세 분석:', {
         response: response,

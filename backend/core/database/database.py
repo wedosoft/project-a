@@ -439,8 +439,6 @@ class SQLiteDatabase:
         if not integrated_data.get('platform'):
             raise ValueError("platform은 필수입니다")
         
-        logger.info(f"DB insert_integrated_object 호출됨: original_id={integrated_data.get('original_id')}, company_id={integrated_data.get('company_id')}")
-        
         cursor.execute("""
             INSERT OR REPLACE INTO integrated_objects (
                 original_id, company_id, platform, object_type,
@@ -458,7 +456,6 @@ class SQLiteDatabase:
         ))
         
         self.connection.commit()
-        logger.info(f"DB insert_integrated_object 완료: lastrowid={cursor.lastrowid}")
         return cursor.lastrowid
     
     def insert_attachment(self, attachment_data: Dict[str, Any]) -> int:

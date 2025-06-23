@@ -8,10 +8,11 @@
 1. **[Quick Reference](./core/quick-reference.instructions.md)** ⭐ - 핵심 패턴 (5분 읽기)
 2. **[Global Instructions](./core/global.instructions.md)** - 전역 규칙과 원칙
 
-### 🚨 최신 업데이트 (2025-06-22)
-- **[Pipeline Updates](./data/pipeline-updates-20250622.instructions.md)** 🔥 - 멀티테넌트 파이프라인 완성
-- **[Session Summary](./core/session-summary-20250622.instructions.md)** - 오늘 해결한 문제들
-- **[Multitenant Security](./core/multitenant-security.instructions.md)** - 업데이트된 보안 정책
+### 🚨 최신 업데이트 (2025-06-23)
+- **[Security & Data Purge](./core/security-data-purge.instructions.md)** 🔥 - 완전한 데이터 삭제 기능
+- **[API Complete Reference](./data/api-complete-reference.instructions.md)** 🔥 - 모든 API 엔드포인트 완성
+- **[Pipeline Updates](./data/pipeline-updates-20250622.instructions.md)** - 멀티테넌트 파이프라인 완성
+- **[Session Summary](./core/session-summary-20250622.instructions.md)** - 이전 해결 문제들
 
 ## 📂 디렉터리별 가이드
 
@@ -21,9 +22,9 @@
 | 파일 | 용도 | 크기 | 참조 시점 |
 |------|------|------|-----------|
 | **[Quick Reference](./core/quick-reference.instructions.md)** | 핵심 패턴 요약 | ~8KB | 모든 작업 시작 |
+| **[Security & Data Purge](./core/security-data-purge.instructions.md)** | 🔥 **NEW** | 보안/GDPR 대응 | ~12KB | 데이터 삭제 시 |
 | **[Global Instructions](./core/global.instructions.md)** | 전역 개발 원칙 | ~15KB | 새 기능 개발 시 |
 | **[Multitenant Security](./core/multitenant-security.instructions.md)** | 보안 정책 | ~20KB | 데이터 처리 시 |
-| **[System Architecture](./core/system-architecture.instructions.md)** | 전체 구조 | ~25KB | 아키텍처 변경 시 |
 
 ## 💻 Development - 개발 패턴 가이드
 **🔧 개발 작업 시 참조**
@@ -40,7 +41,8 @@
 
 | 파일 | 중요도 | 설명 |
 |------|--------|------|
-| **[API 엔드포인트 가이드](./data/api-endpoints-data-ingestion-guide.instructions.md)** | 🔥 **NEW** | **실전 API 사용법 (시행착오 기반)** |
+| **[API Complete Reference](./data/api-complete-reference.instructions.md)** | 🔥 **NEW** | **완성된 모든 API 엔드포인트** |
+| **[API 엔드포인트 가이드](./data/api-endpoints-data-ingestion-guide.instructions.md)** | 🔥 **기존** | **실전 API 사용법 (시행착오 기반)** |
 | **[Pipeline Updates 2025-06-22](./data/pipeline-updates-20250622.instructions.md)** | 🔥 최우선 | 최신 파이프라인 변경사항 |
 | **[Data Workflow](./data/data-workflow.instructions.md)** | ⭐ 필수 | 전체 데이터 처리 흐름 |
 | **[Vector Storage Core](./data/vector-storage-core.instructions.md)** | ⭐ 핵심 | 벡터DB 핵심 패턴 |

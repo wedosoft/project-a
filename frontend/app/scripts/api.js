@@ -561,13 +561,62 @@ const API = {
   },
 
   /**
-   * 백엔드에서 초기 데이터를 로드하는 함수
+   * 에이전트의 UI 언어 감지 (FDK 기반 간소화)
+   * @param {Object} client - FDK 클라이언트 객체
+   * @returns {string} 감지된 언어 코드 (ko, en, ja, zh)
    */
-  async loadInitData(client, ticketId) {
-    return await this.callBackendAPIWithCache(client, `init/${ticketId}`, null, 'GET', {
-      cacheTTL: 600000, // 10분 캐시
-      loadingContext: '초기 데이터 로드',
-    });
+  async detectAgentLanguage(client) {
+    try {
+      // FDK loggedInUser에서 직접 언어 정보 획득
+      const data = await client.data.get("loggedInUser");
+      const agentLanguage = data.loggedInUser.contact.language;
+      
+      console.log('[언어감지] FDK에서 감지된 에이전트 언어:', agentLanguage);
+      
+      // 지원되는 언어로 매핑
+      if (agentLanguage) {
+        const langCode = agentLanguage.toLowerCase();
+        if (langCode === 'ko' || langCode.startsWith('ko')) return 'ko';
+        if (langCode === 'ja' || langCode.startsWith('ja')) return 'ja';
+        if (langCode === 'zh' || langCode.startsWith('zh')) return 'zh';
+        if (langCode === 'en' || langCode.startsWith('en')) return 'en';
+      }
+      
+      // 기본값: 영어 (국제 표준)
+      console.log('[언어감지] 지원되지 않는 언어, 기본값 사용: en');
+      return 'en';
+    } catch (error) {
+      console.warn('[언어감지] FDK 언어 감지 실패, 기본값 사용:', error);
+      return 'en';
+    }
+  },
+
+  /**
+   * 백엔드에서 초기 데이터를 로드하는 함수
+   * @param {Object} client - FDK 클라이언트 객체
+   * @param {string} ticketId - 티켓 ID
+   * @param {string} agentLanguage - 에이전트 UI 언어 (선택사항)
+   */
+  async loadInitData(client, ticketId, agentLanguage = null) {
+    try {
+      // 에이전트 언어가 제공되지 않은 경우 자동 감지
+      if (!agentLanguage) {
+        agentLanguage = await this.detectAgentLanguage(client);
+      }
+      
+      console.log(`[API] 초기 데이터 로드 - 티켓: ${ticketId}, 언어: ${agentLanguage}`);
+      
+      // agent_language 쿼리 매개변수를 포함하여 API 호출
+      const endpoint = `init/${ticketId}?agent_language=${agentLanguage}`;
+      
+      return await this.callBackendAPIWithCache(client, endpoint, null, 'GET', {
+        cacheTTL: 600000, // 10분 캐시
+        loadingContext: '초기 데이터 로드',
+      });
+    } catch (error) {
+      console.error('[API] 초기 데이터 로드 중 오류:', error);
+      throw error;
+    }
   },
 
   /**
@@ -620,6 +669,68 @@ const API = {
       return false;
     }
   },
+
+  /**
+   * 현재 감지된 에이전트 언어를 확인하는 유틸리티 함수 (FDK 기반)
+   * @param {Object} client - FDK 클라이언트 객체
+   * @returns {Promise<string>} 현재 언어 코드
+   */
+  async getCurrentAgentLanguage(client) {
+    try {
+      const language = await this.detectAgentLanguage(client);
+      console.log(`[언어확인] FDK 기반 에이전트 언어: ${language}`);
+      return language;
+    } catch (error) {
+      console.error('[언어확인] 언어 확인 중 오류:', error);
+      return 'en';
+    }
+  },
+
+  /**
+   * 언어별 현지화 테스트 함수 (개발용)
+   * @param {Object} client - FDK 클라이언트 객체
+   * @param {string} testLanguage - 테스트할 언어 (ko, en, ja, zh)
+   * @returns {Promise<Object>} 테스트 결과
+   */
+  async testLanguageLocalization(client, testLanguage = 'ko') {
+    try {
+      console.log(`[언어테스트] ${testLanguage} 언어로 API 테스트 시작`);
+      
+      // 현재 티켓 정보 가져오기
+      const ticketData = await client.data.get('ticket');
+      if (!ticketData || !ticketData.ticket) {
+        throw new Error('티켓 정보를 가져올 수 없습니다');
+      }
+      
+      // 테스트 언어로 API 호출
+      const response = await this.loadInitData(client, ticketData.ticket.id, testLanguage);
+      
+      console.log(`[언어테스트] ${testLanguage} 언어 응답:`, response);
+      
+      // 유사 티켓의 섹션 제목 확인
+      if (response && response.similar_tickets && response.similar_tickets.length > 0) {
+        const firstTicket = response.similar_tickets[0];
+        console.log(`[언어테스트] 첫 번째 유사 티켓 섹션 제목:`, {
+          issue: firstTicket.issue ? firstTicket.issue.substring(0, 100) : null,
+          solution: firstTicket.solution ? firstTicket.solution.substring(0, 100) : null
+        });
+      }
+      
+      return {
+        success: true,
+        language: testLanguage,
+        similarTicketsCount: response?.similar_tickets?.length || 0,
+        response: response
+      };
+    } catch (error) {
+      console.error(`[언어테스트] ${testLanguage} 언어 테스트 실패:`, error);
+      return {
+        success: false,
+        language: testLanguage,
+        error: error.message
+      };
+    }
+  },
 };
 
 // 의존성 확인 함수
@@ -646,3 +757,57 @@ if (typeof window.ModuleDependencyManager !== 'undefined') {
 
 // 전역으로 export
 window.API = API;
+
+/**
+ * 🌍 다국어 지원 테스트 함수 (개발/테스트용)
+ * 브라우저 콘솔에서 직접 호출 가능
+ */
+window.testMultiLanguageSupport = async function(language = 'ko') {
+  try {
+    if (!window.API) {
+      console.error('❌ API 모듈이 로드되지 않았습니다.');
+      return;
+    }
+    
+    const client = GlobalState.getClient();
+    if (!client) {
+      console.error('❌ FDK 클라이언트가 설정되지 않았습니다.');
+      return;
+    }
+    
+    console.log(`🌍 ${language} 언어 지원 테스트 시작...`);
+    
+    // FDK에서 현재 감지된 언어 확인
+    const detectedLang = await API.getCurrentAgentLanguage(client);
+    console.log(`🔍 FDK에서 자동 감지된 언어: ${detectedLang}`);
+    
+    // 지정된 언어로 테스트
+    const testResult = await API.testLanguageLocalization(client, language);
+    
+    if (testResult.success) {
+      console.log(`✅ ${language} 언어 테스트 성공!`);
+      console.log(`📊 유사 티켓 ${testResult.similarTicketsCount}개 로드됨`);
+      
+      // UI 업데이트 (글로벌 상태에 저장된 데이터 사용)
+      const globalData = GlobalState.getGlobalTicketData();
+      if (globalData.similar_tickets && globalData.similar_tickets.length > 0) {
+        console.log('🎨 UI에 현지화된 유사 티켓 표시 중...');
+        if (window.UI && window.UI.displaySimilarTickets) {
+          UI.displaySimilarTickets(globalData.similar_tickets);
+        }
+      }
+    } else {
+      console.error(`❌ ${language} 언어 테스트 실패:`, testResult.error);
+    }
+    
+    return testResult;
+  } catch (error) {
+    console.error('❌ 다국어 테스트 중 오류:', error);
+  }
+};
+
+console.log('🌍 다국어 지원 테스트 함수가 로드되었습니다. 사용법:');
+console.log('testMultiLanguageSupport("ko") - 한국어 테스트');
+console.log('testMultiLanguageSupport("en") - 영어 테스트');
+console.log('testMultiLanguageSupport("ja") - 일본어 테스트');
+console.log('testMultiLanguageSupport("zh") - 중국어 테스트');

@@ -52,6 +52,9 @@ def create_integrated_ticket_object(
     if attachments is None:
         attachments = ticket.get("all_attachments", [])
     
+    # 디버깅 로그 추가
+    logger.debug(f"통합 객체 생성 - 티켓 ID: {ticket.get('id')}, 대화: {len(conversations)}개, 첨부파일: {len(attachments)}개")
+    
     # 인라인 이미지 처리
     inline_images = []
     
@@ -163,7 +166,7 @@ def create_integrated_ticket_object(
     
     logger.debug(
         f"통합 티켓 객체 생성 완료: ID={ticket.get('id')}, company_id={company_id}, "
-        f"첨부파일={len(attachments)}, 인라인이미지={len(sanitized_inline_images)}"
+        f"대화={len(conversations)}개, 첨부파일={len(attachments)}개, 인라인이미지={len(sanitized_inline_images)}개"
     )
     return integrated_object
 

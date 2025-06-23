@@ -384,6 +384,7 @@ class JobManager:
                 include_kb=config.include_kb,
                 domain=config.domain,
                 api_key=config.api_key,
+                start_date=config.start_date,  # 시작 날짜 파라미터 추가
                 cancel_event=cancel_event,
                 pause_event=pause_event,
                 progress_callback=progress_callback

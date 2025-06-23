@@ -200,6 +200,7 @@ async def ingest(
     api_key: Optional[str] = None,
     max_tickets: Optional[int] = None,
     max_articles: Optional[int] = None,
+    start_date: Optional[str] = None,
     cancel_event: Optional[asyncio.Event] = None,
     pause_event: Optional[asyncio.Event] = None,
     progress_callback: Optional[callable] = None
@@ -220,6 +221,7 @@ async def ingest(
         api_key: API 키
         max_tickets: 최대 티켓 수 (선택사항)
         max_articles: 최대 문서 수 (선택사항)
+        start_date: 티켓 수집 시작 날짜 (YYYY-MM-DD 형식, None이면 현재부터 10년 전)
         cancel_event: 취소 이벤트 (작업 제어용)
         pause_event: 일시정지 이벤트 (작업 제어용)
         progress_callback: 진행상황 콜백 함수
@@ -291,22 +293,18 @@ async def ingest(
                 
                 logger.info("티켓 데이터 수집 중...")
                 try:
-                    logger.info(f"[DEBUG] fetch_tickets 함수 호출 시작 - domain: {domain}, max_tickets: {max_tickets}")
-                    logger.info(f"[DEBUG] 즉시 저장 모드로 호출합니다 - company_id: {company_id}, platform: {platform}")
                     tickets = await fetch_tickets(
                         domain=domain, 
                         api_key=api_key,
                         max_tickets=max_tickets,
                         company_id=company_id,
                         platform=platform,
-                        store_immediately=True  # 즉시 저장 모드 활성화
+                        store_immediately=True,  # 즉시 저장 모드 활성화
+                        start_date=start_date  # 시작 날짜 파라미터 추가
                     )
-                    logger.info(f"[DEBUG] fetch_tickets 함수 호출 완료")
-                    logger.info(f"[DEBUG] 티켓 수집 완료: {len(tickets)}개")
-                    logger.info(f"[DEBUG] 즉시 저장 모드로 실행되어 모든 티켓이 개별 저장되었습니다")
-                    logger.info(f"[DEBUG] 티켓 샘플 (첫 3개): {[t.get('id') for t in tickets[:3]] if tickets else 'None'}")
+                    logger.info(f"티켓 수집 완료: {len(tickets)}개")
                 except Exception as e:
-                    logger.error(f"[DEBUG] 티켓 수집 중 오류: {e}", exc_info=True)
+                    logger.error(f"티켓 수집 중 오류: {e}", exc_info=True)
                     tickets = []  # 오류 시 빈 리스트
                 
                 # 취소 확인
@@ -321,38 +319,26 @@ async def ingest(
                     
                     logger.info("KB 데이터 수집 중...")
                     try:
-                        logger.info(f"[DEBUG] fetch_kb_articles 함수 호출 시작 - domain: {domain}, max_articles: {max_articles}")
                         articles = await fetch_kb_articles(
                             domain=domain,
                             api_key=api_key,
                             max_articles=max_articles
                         )
-                        logger.info(f"[DEBUG] fetch_kb_articles 함수 호출 완료")
-                        logger.info(f"[DEBUG] KB 수집 완료: {len(articles)}개")
-                        logger.info(f"[DEBUG] 문서 샘플 (첫 3개): {[a.get('id') for a in articles[:3]] if articles else 'None'}")
+                        logger.info(f"KB 수집 완료: {len(articles)}개")
                     except Exception as e:
-                        logger.error(f"[DEBUG] KB 수집 중 오류: {e}", exc_info=True)
+                        logger.error(f"KB 수집 중 오류: {e}", exc_info=True)
                         articles = []  # 오류 시 빈 리스트
                 else:
-                    logger.info("[DEBUG] include_kb=False이므로 KB 수집을 건너뜁니다.")
+                    logger.info("include_kb=False이므로 KB 수집을 건너뜁니다.")
             else:
                 raise ValueError(f"지원되지 않는 플랫폼: {platform}")
         
-        logger.info(f"[DEBUG] ===== 데이터 수집 단계 완전 완료 =====")
-        logger.info(f"[DEBUG] platform: {platform}")
-        logger.info(f"[DEBUG] local_data_dir: {local_data_dir}")
-        logger.info(f"[DEBUG] 수집 결과 - 티켓: {len(tickets)}개, 문서: {len(articles)}개")
+        logger.info(f"데이터 수집 완료 - 티켓: {len(tickets)}개, 문서: {len(articles)}개")
         
         # 취소 확인
         if cancel_event and cancel_event.is_set():
             result["message"] = "작업이 취소되었습니다"
             return result
-        
-        logger.info(f"[DEBUG] 데이터 수집 단계 완료 - 티켓: {len(tickets)}개, 문서: {len(articles)}개")
-        logger.info(f"[DEBUG] 저장 단계로 진입합니다...")
-        logger.info(f"[DEBUG] 매개변수 확인 - company_id: {company_id}, platform: {platform}")
-        logger.info(f"[DEBUG] 티켓 샘플 확인 - 첫 번째 티켓: {tickets[0] if tickets else 'None'}")
-        logger.info(f"[DEBUG] 문서 샘플 확인 - 첫 번째 문서: {articles[0] if articles else 'None'}")
         
         # 진행상황 업데이트
         if progress_callback:
@@ -368,9 +354,6 @@ async def ingest(
             result["message"] = "수집할 데이터가 없습니다 (데이터베이스 생성 완료)"
             result["success"] = True
             return result
-        
-        logger.info(f"[DEBUG] 데이터 존재 확인 - 티켓: {len(tickets)}개, 문서: {len(articles)}개")
-        logger.info(f"[DEBUG] 저장 로직 시작 - force_rebuild: {force_rebuild}")
         
         # force_rebuild 모드인 경우 기존 데이터 삭제
         if force_rebuild:
@@ -400,12 +383,7 @@ async def ingest(
         total_attachments = 0
         total_conversations = 0
         
-        logger.info(f"[DEBUG] ===== 티켓 처리 루프 시작 =====")
-        logger.info(f"[DEBUG] 처리할 티켓 수: {len(tickets)}")
-        
         for i, ticket in enumerate(tickets):
-            logger.info(f"[DEBUG] 티켓 루프 진입: {i+1}/{len(tickets)}, ticket_id={ticket.get('id')}")
-            
             # 취소 확인
             if cancel_event and cancel_event.is_set():
                 result["message"] = "작업이 취소되었습니다"
@@ -424,32 +402,40 @@ async def ingest(
                 progress_callback(f"티켓 처리 중 ({i+1}/{len(tickets)})", progress)
             
             # 통합 객체 생성 및 저장
-            logger.info(f"[DEBUG] 티켓 처리 시작: ID={ticket.get('id')}, company_id={company_id}")
+            logger.debug(f"티켓 처리 시작: ID={ticket.get('id')}")
+            
+            # 대화와 첨부파일 데이터 확인
+            conversations = ticket.get("conversations", [])
+            attachments = ticket.get("all_attachments", [])
             
             try:
-                integrated_ticket = create_integrated_ticket_object(ticket, company_id=company_id)
-                logger.info(f"[DEBUG] 통합 티켓 객체 생성 완료: ID={integrated_ticket.get('id')}, company_id={company_id}")
-                logger.info(f"[DEBUG] 저장 함수 호출 시작: store_integrated_object_to_sqlite")
+                # 대화와 첨부파일을 명시적으로 전달
+                integrated_ticket = create_integrated_ticket_object(
+                    ticket=ticket, 
+                    conversations=conversations,
+                    attachments=attachments,
+                    company_id=company_id
+                )
+                
+                # 통합 객체에서 대화와 첨부파일 수 재확인
+                integrated_conversations = integrated_ticket.get("conversations", [])
+                integrated_attachments = integrated_ticket.get("all_attachments", [])
                 
                 store_result = store_integrated_object_to_sqlite(db, integrated_ticket, company_id, platform)
-                logger.info(f"[DEBUG] 저장 함수 호출 완료: result={store_result}")
                 
                 if store_result:
                     tickets_saved += 1
-                    # 첨부파일 및 대화 수 카운트
-                    attachments = integrated_ticket.get("all_attachments", [])
-                    total_attachments += len(attachments)
-                    conversations = integrated_ticket.get("all_conversations", [])
-                    total_conversations += len(conversations)
-                    logger.info(f"[DEBUG] 티켓 저장 성공: ID={integrated_ticket.get('id')}, 첨부파일={len(attachments)}개, 대화={len(conversations)}개")
+                    # 첨부파일 및 대화 수 카운트 (통합 객체에서 가져오기)
+                    total_attachments += len(integrated_attachments)
+                    total_conversations += len(integrated_conversations)
+                    logger.debug(f"티켓 저장 성공: ID={integrated_ticket.get('id')}, 첨부파일={len(integrated_attachments)}개, 대화={len(integrated_conversations)}개")
                 else:
-                    logger.error(f"[DEBUG] 티켓 저장 실패: ID={ticket.get('id')}, company_id={company_id}")
+                    logger.error(f"티켓 저장 실패: ID={ticket.get('id')}")
                     
             except Exception as e:
-                logger.error(f"[DEBUG] 티켓 처리 중 예외 발생: ID={ticket.get('id')}, 오류={e}", exc_info=True)
+                logger.error(f"티켓 처리 중 예외 발생: ID={ticket.get('id')}, 오류={e}")
                 
-        logger.info(f"[DEBUG] ===== 티켓 처리 루프 완료 =====")
-        logger.info(f"[DEBUG] 저장된 티켓 수: {tickets_saved}/{len(tickets)}")
+        logger.info(f"티켓 처리 완료: 저장된 티켓 {tickets_saved}/{len(tickets)}개")
         
         # 문서 데이터 처리
         articles_saved = 0
@@ -472,19 +458,16 @@ async def ingest(
                 progress_callback(f"문서 처리 중 ({i+1}/{len(articles)})", progress)
             
             # 통합 객체 생성 및 저장
-            logger.info(f"[DEBUG] 문서 처리 시작: ID={article.get('id')}, company_id={company_id}")
+            logger.debug(f"문서 처리 시작: ID={article.get('id')}")
             integrated_article = create_integrated_article_object(article, company_id=company_id)
-            logger.info(f"[DEBUG] 통합 아티클 객체 생성 완료: ID={integrated_article.get('id')}, company_id={company_id}")
-            logger.info(f"[DEBUG] 저장 함수 호출 시작: store_integrated_object_to_sqlite")
             
             store_result = store_integrated_object_to_sqlite(db, integrated_article, company_id, platform)
-            logger.info(f"[DEBUG] 저장 함수 호출 완료: result={store_result}")
             
             if store_result:
                 articles_saved += 1
-                logger.info(f"[DEBUG] 아티클 저장 성공: ID={integrated_article.get('id')}")
+                logger.debug(f"문서 저장 성공: ID={integrated_article.get('id')}")
             else:
-                logger.error(f"[DEBUG] 아티클 저장 실패: ID={article.get('id')}, company_id={company_id}")
+                logger.error(f"문서 저장 실패: ID={article.get('id')}")
         
         logger.info(f"SQLite 저장 완료 - 티켓: {tickets_saved}개, 문서: {articles_saved}개")
         
@@ -607,25 +590,48 @@ async def generate_and_store_summaries(
                 original_id = str(ticket.get('original_id', ''))
                 
                 # 기존 요약 확인 (force_update가 False인 경우)
-                if not force_update:
-                    # integrated_objects에서 기존 요약 확인
-                    cursor = db.connection.cursor()
-                    cursor.execute("""
-                        SELECT summary FROM integrated_objects 
-                        WHERE company_id = ? AND platform = ? AND object_type = ? AND original_id = ?
-                    """, (company_id, platform, 'integrated_ticket', original_id))
-                    existing = cursor.fetchone()
+                existing_data = None
+                cursor = db.connection.cursor()
+                cursor.execute("""
+                    SELECT original_data, integrated_content, metadata, summary FROM integrated_objects 
+                    WHERE company_id = ? AND platform = ? AND object_type = ? AND original_id = ?
+                """, (company_id, platform, 'integrated_ticket', original_id))
+                existing_row = cursor.fetchone()
+                
+                if existing_row:
+                    existing_original_data, existing_integrated_content, existing_metadata_str, existing_summary = existing_row
                     
-                    if existing and existing[0]:
+                    # 기존 데이터가 있고 force_update가 False인 경우 요약만 확인
+                    if not force_update and existing_summary:
                         logger.debug(f"티켓 {original_id}: 기존 요약 존재, 건너뜀")
                         result["skipped_count"] += 1
                         continue
+                    
+                    # 기존 데이터 파싱
+                    try:
+                        existing_data = {
+                            'original_data': json.loads(existing_original_data) if existing_original_data else None,
+                            'integrated_content': existing_integrated_content,
+                            'metadata': json.loads(existing_metadata_str) if existing_metadata_str else {}
+                        }
+                    except json.JSONDecodeError:
+                        logger.warning(f"티켓 {original_id}: 기존 데이터 파싱 실패, 새로 생성")
+                        existing_data = None
                 
-                # 통합 티켓 객체 생성
-                integrated_ticket = create_integrated_ticket_object(
-                    ticket=ticket,
-                    company_id=company_id
-                )
+                # 통합 티켓 객체 생성 (기존 데이터가 없는 경우에만)
+                if existing_data and existing_data['original_data']:
+                    # 기존 데이터 사용 (대화, 첨부파일 보존)
+                    integrated_ticket = existing_data['original_data']
+                    integrated_content = existing_data['integrated_content']
+                    base_metadata = existing_data['metadata']
+                else:
+                    # 새로 생성
+                    integrated_ticket = create_integrated_ticket_object(
+                        ticket=ticket,
+                        company_id=company_id
+                    )
+                    integrated_content = integrated_ticket.get('integrated_text', '')
+                    base_metadata = {}
                 
                 # LLM 요약 생성
                 content_text = ticket.get('description_text', '') or ticket.get('description', '')
@@ -645,22 +651,69 @@ async def generate_and_store_summaries(
                     }
                 )
                 
-                # integrated_objects에 저장
+                # integrated_objects에 저장 (기존 데이터 보존)
+                # 메타데이터 스마트 업데이트: 변경 가능한 필드는 업데이트, 고정 필드는 보존
+                updated_metadata = base_metadata.copy()  # 기존 메타데이터 복사
+                
+                # 변경 가능한 기본 정보 (항상 최신으로 업데이트)
+                changeable_fields = {
+                    'subject': ticket.get('subject', ''),
+                    'status': ticket.get('status', ''),
+                    'priority': ticket.get('priority', ''),
+                    'updated_at': ticket.get('updated_at', ''),
+                    # 추가 변경 가능한 필드들
+                    'tags': ticket.get('tags', []),
+                    'custom_fields': ticket.get('custom_fields', {}),
+                    'assigned_to': ticket.get('responder_id', ''),
+                    'group_id': ticket.get('group_id', ''),
+                    'source': ticket.get('source', ''),
+                    'type': ticket.get('type', '')
+                }
+                
+                # 변경 감지 및 업데이트
+                for field, new_value in changeable_fields.items():
+                    if field in updated_metadata:
+                        old_value = updated_metadata[field]
+                        if old_value != new_value:
+                            logger.debug(f"티켓 {original_id}: {field} 변경됨 {old_value} → {new_value}")
+                            updated_metadata[field] = new_value
+                    else:
+                        updated_metadata[field] = new_value
+                
+                # 고정 필드 (생성 시에만 설정, 이후 변경 안됨)
+                immutable_fields = {
+                    'created_at': ticket.get('created_at', ''),
+                    'requester_id': ticket.get('requester_id', ''),
+                    'company_id': ticket.get('company_id', '')
+                }
+                
+                # 고정 필드는 기존 값이 없을 때만 설정
+                for field, value in immutable_fields.items():
+                    if field not in updated_metadata and value:
+                        updated_metadata[field] = value
+                
+                # 통합 객체 정보 (기존 값 우선, 없으면 새로 계산)
+                integration_fields = {
+                    'has_conversations': integrated_ticket.get('has_conversations', False),
+                    'has_attachments': integrated_ticket.get('has_attachments', False),
+                    'conversation_count': integrated_ticket.get('conversation_count', 0),
+                    'attachment_count': integrated_ticket.get('attachment_count', 0)
+                }
+                
+                # 통합 정보는 기존 값이 있으면 보존, 없으면 새로 설정
+                for field, new_value in integration_fields.items():
+                    if field not in updated_metadata:
+                        updated_metadata[field] = new_value
+                
                 integrated_data = {
                     'original_id': original_id,
                     'company_id': company_id,
                     'platform': platform,
                     'object_type': 'integrated_ticket',
-                    'original_data': ticket,
-                    'integrated_content': integrated_ticket.get('integrated_text', ''),
-                    'summary': summary,
-                    'metadata': {
-                        'subject': ticket.get('subject', ''),
-                        'status': ticket.get('status', ''),
-                        'priority': ticket.get('priority', ''),
-                        'created_at': ticket.get('created_at', ''),
-                        'updated_at': ticket.get('updated_at', '')
-                    }
+                    'original_data': integrated_ticket,  # 기존 통합 객체 보존 (대화, 첨부파일 포함)
+                    'integrated_content': integrated_content,  # 기존 통합 텍스트 보존
+                    'summary': summary,  # 새로 생성된 요약만 업데이트
+                    'metadata': updated_metadata
                 }
                 
                 db.insert_integrated_object(integrated_data)
@@ -682,24 +735,48 @@ async def generate_and_store_summaries(
                 original_id = str(article.get('original_id', ''))
                 
                 # 기존 요약 확인 (force_update가 False인 경우)
-                if not force_update:
-                    cursor = db.connection.cursor()
-                    cursor.execute("""
-                        SELECT summary FROM integrated_objects 
-                        WHERE company_id = ? AND platform = ? AND object_type = ? AND original_id = ?
-                    """, (company_id, platform, 'integrated_article', original_id))
-                    existing = cursor.fetchone()
+                existing_data = None
+                cursor = db.connection.cursor()
+                cursor.execute("""
+                    SELECT original_data, integrated_content, metadata, summary FROM integrated_objects 
+                    WHERE company_id = ? AND platform = ? AND object_type = ? AND original_id = ?
+                """, (company_id, platform, 'integrated_article', original_id))
+                existing_row = cursor.fetchone()
+                
+                if existing_row:
+                    existing_original_data, existing_integrated_content, existing_metadata_str, existing_summary = existing_row
                     
-                    if existing and existing[0]:
+                    # 기존 데이터가 있고 force_update가 False인 경우 요약만 확인
+                    if not force_update and existing_summary:
                         logger.debug(f"KB {original_id}: 기존 요약 존재, 건너뜀")
                         result["skipped_count"] += 1
                         continue
+                    
+                    # 기존 데이터 파싱
+                    try:
+                        existing_data = {
+                            'original_data': json.loads(existing_original_data) if existing_original_data else None,
+                            'integrated_content': existing_integrated_content,
+                            'metadata': json.loads(existing_metadata_str) if existing_metadata_str else {}
+                        }
+                    except json.JSONDecodeError:
+                        logger.warning(f"KB {original_id}: 기존 데이터 파싱 실패, 새로 생성")
+                        existing_data = None
                 
-                # 통합 문서 객체 생성
-                integrated_article = create_integrated_article_object(
-                    article=article,
-                    company_id=company_id
-                )
+                # 통합 문서 객체 생성 (기존 데이터가 없는 경우에만)
+                if existing_data and existing_data['original_data']:
+                    # 기존 데이터 사용 (첨부파일 보존)
+                    integrated_article = existing_data['original_data']
+                    integrated_content = existing_data['integrated_content']
+                    base_metadata = existing_data['metadata']
+                else:
+                    # 새로 생성
+                    integrated_article = create_integrated_article_object(
+                        article=article,
+                        company_id=company_id
+                    )
+                    integrated_content = integrated_article.get('integrated_text', '')
+                    base_metadata = {}
                 
                 # LLM 요약 생성
                 content_text = article.get('description_text', '') or article.get('description', '')
@@ -719,22 +796,69 @@ async def generate_and_store_summaries(
                     }
                 )
                 
-                # integrated_objects에 저장
+                # integrated_objects에 저장 (기존 데이터 보존)
+                # 메타데이터 스마트 업데이트: 변경 가능한 필드는 업데이트, 고정 필드는 보존
+                updated_metadata = base_metadata.copy()  # 기존 메타데이터 복사
+                
+                # 변경 가능한 기본 정보 (항상 최신으로 업데이트)
+                changeable_fields = {
+                    'title': article.get('title', ''),
+                    'status': article.get('status', ''),
+                    'category_id': article.get('category_id', ''),
+                    'updated_at': article.get('updated_at', ''),
+                    # 추가 변경 가능한 필드들
+                    'tags': article.get('tags', []),
+                    'folder_id': article.get('folder_id', ''),
+                    'type': article.get('type', ''),
+                    'agent_id': article.get('agent_id', ''),
+                    'thumbs_up': article.get('thumbs_up', 0),
+                    'thumbs_down': article.get('thumbs_down', 0)
+                }
+                
+                # 변경 감지 및 업데이트
+                for field, new_value in changeable_fields.items():
+                    if field in updated_metadata:
+                        old_value = updated_metadata[field]
+                        if old_value != new_value:
+                            logger.debug(f"KB {original_id}: {field} 변경됨 {old_value} → {new_value}")
+                            updated_metadata[field] = new_value
+                    else:
+                        updated_metadata[field] = new_value
+                
+                # 고정 필드 (생성 시에만 설정, 이후 변경 안됨)
+                immutable_fields = {
+                    'created_at': article.get('created_at', ''),
+                    'author_id': article.get('author_id', ''),
+                    'original_category': article.get('category', {})
+                }
+                
+                # 고정 필드는 기존 값이 없을 때만 설정
+                for field, value in immutable_fields.items():
+                    if field not in updated_metadata and value:
+                        updated_metadata[field] = value
+                
+                # 통합 객체 정보 (기존 값 우선, 없으면 새로 계산)
+                integration_fields = {
+                    'has_attachments': integrated_article.get('has_attachments', False),
+                    'attachment_count': integrated_article.get('attachment_count', 0),
+                    'has_inline_images': integrated_article.get('has_inline_images', False),
+                    'inline_image_count': integrated_article.get('inline_image_count', 0)
+                }
+                
+                # 통합 정보는 기존 값이 있으면 보존, 없으면 새로 설정
+                for field, new_value in integration_fields.items():
+                    if field not in updated_metadata:
+                        updated_metadata[field] = new_value
+                
                 integrated_data = {
                     'original_id': original_id,
                     'company_id': company_id,
                     'platform': platform,
                     'object_type': 'integrated_article',
-                    'original_data': article,
-                    'integrated_content': integrated_article.get('integrated_text', ''),
-                    'summary': summary,
-                    'metadata': {
-                        'title': article.get('title', ''),
-                        'status': article.get('status', ''),
-                        'category_id': article.get('category_id', ''),
-                        'created_at': article.get('created_at', ''),
-                        'updated_at': article.get('updated_at', '')
-                    }
+                    'original_data': integrated_article,  # 기존 통합 객체 보존 (첨부파일 포함)
+                    'integrated_content': integrated_content,  # 기존 통합 텍스트 보존
+                    'summary': summary,  # 새로 생성된 요약만 업데이트
+                    'metadata': updated_metadata
                 }
                 
                 db.insert_integrated_object(integrated_data)

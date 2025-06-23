@@ -30,6 +30,9 @@ from ..models.shared import TicketSummaryContent, SimilarTicketItem, DocumentInf
 # Langchain 기반 init_chain import
 from core.llm.integrations.langchain.chains import execute_init_parallel_chain
 
+# 언어 현지화를 위한 summarizer 모듈 import
+from core.llm.summarizer import get_agent_localized_summary, determine_agent_ui_language
+
 # 로거
 import logging
 logger = logging.getLogger(__name__)
@@ -52,6 +55,7 @@ async def get_initial_context(
     include_similar_tickets: bool = True,
     top_k_tickets: int = Query(default=5, ge=1, le=5, description="유사 티켓 검색 결과 수 (1-5)"),
     top_k_kb: int = Query(default=5, ge=1, le=5, description="지식베이스 문서 검색 결과 수 (1-5)"),
+    agent_language: Optional[str] = Query(default=None, description="에이전트 UI 언어 (ko, en)"),
     x_freshdesk_domain: Optional[str] = Header(None, alias="X-Freshdesk-Domain"),
     x_freshdesk_api_key: Optional[str] = Header(None, alias="X-Freshdesk-API-Key"),
     x_zendesk_domain: Optional[str] = Header(None, alias="X-Zendesk-Domain"),
@@ -75,6 +79,7 @@ async def get_initial_context(
         include_similar_tickets: 유사 티켓 포함 여부
         top_k_tickets: 유사 티켓 검색 결과 수
         top_k_kb: 지식베이스 문서 검색 결과 수
+        agent_language: 에이전트 UI 언어 (ko, en) - 유사 티켓 요약 현지화에 사용
         
     Returns:
         InitResponse: 초기화된 컨텍스트 정보
@@ -298,6 +303,48 @@ async def get_initial_context(
                     if include_similar_tickets:
                         similar_tickets_data = unified_result.get('similar_tickets', [])
                         similar_tickets = similar_tickets_data if isinstance(similar_tickets_data, list) else []
+                        
+                        # 🌍 에이전트 언어 기반 유사 티켓 요약 현지화
+                        if similar_tickets and agent_language:
+                            try:
+                                localized_tickets = []
+                                agent_profile = {"language": agent_language}
+                                
+                                for ticket in similar_tickets:
+                                    # SimilarTicketItem 객체인 경우 처리
+                                    if hasattr(ticket, 'issue') and ticket.issue:
+                                        localized_issue = await get_agent_localized_summary(
+                                            ticket_id=str(ticket.id),
+                                            original_summary=ticket.issue,
+                                            agent_profile=agent_profile
+                                        )
+                                        ticket.issue = localized_issue
+                                    
+                                    if hasattr(ticket, 'solution') and ticket.solution:
+                                        localized_solution = await get_agent_localized_summary(
+                                            ticket_id=str(ticket.id),
+                                            original_summary=ticket.solution,
+                                            agent_profile=agent_profile
+                                        )
+                                        ticket.solution = localized_solution
+                                    
+                                    if hasattr(ticket, 'ticket_summary') and ticket.ticket_summary:
+                                        localized_summary = await get_agent_localized_summary(
+                                            ticket_id=str(ticket.id),
+                                            original_summary=ticket.ticket_summary,
+                                            agent_profile=agent_profile
+                                        )
+                                        ticket.ticket_summary = localized_summary
+                                    
+                                    localized_tickets.append(ticket)
+                                
+                                similar_tickets = localized_tickets
+                                logger.debug(f"유사 티켓 {len(similar_tickets)}개 현지화 완료 (언어: {agent_language})")
+                                
+                            except Exception as e:
+                                logger.warning(f"유사 티켓 현지화 중 오류 (계속 진행): {e}")
+                                # 오류 발생 시 원본 유지
+                        
                         task_times['similar_tickets'] = unified_result.get('execution_time', 0)
                         task_names_ordered.append('similar_tickets')
                     
