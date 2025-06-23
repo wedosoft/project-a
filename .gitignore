@@ -64,12 +64,27 @@ db.sqlite3
 db.sqlite3-journal
 
 # Database files (SQLite, etc.)
-*.db
-*.sqlite
-*.sqlite3
-**/*.db
-**/*.sqlite
-**/*.sqlite3
+*.db*
+*.sqlite*
+*.sqlite3*
+**/*.db*
+**/*.sqlite*
+**/*.sqlite3*
+# Database backup files
+*.db.backup*
+*.sqlite.backup*
+*.sqlite3.backup*
+**/*.db.backup*
+**/*.sqlite.backup*
+**/*.sqlite3.backup*
+# Database logs
+*.db-journal
+*.sqlite-journal
+**/*.db-journal
+**/*.sqlite-journal
+# Freshdesk data files
+**/wedosoft_freshdesk_data*.db
+**/wedosoft_freshdesk_data*.sqlite*
 
 # Flask stuff:
 instance/
