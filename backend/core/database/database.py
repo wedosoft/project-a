@@ -460,14 +460,29 @@ class SQLiteDatabase:
         return cursor.lastrowid
     
     def insert_attachment(self, attachment_data: Dict[str, Any]) -> int:
-        """첨부파일 데이터 삽입 (platform-neutral 3-tuple 기반)"""
-        # DB 연결 상태 확인 및 재연결
-        if not self.connection:
-            logger.warning("DB 연결이 끊어짐. 재연결 시도...")
-            self.connect()
-            # self.create_tables() # 이미 connect()에서 처리됨
-            logger.info("DB 재연결 완료")
+        """첨부파일 데이터 삽입
         
+        Args:
+            attachment_data: 첨부파일 데이터 딕셔너리
+                - original_id: 첨부파일 원본 ID
+                - company_id: 회사 ID
+                - platform: 플랫폼
+                - parent_type: 부모 타입 ('ticket', 'conversation', 'article')
+                - parent_original_id: 부모 객체 원본 ID
+                - name: 파일명
+                - content_type: 콘텐츠 타입
+                - size: 파일 크기
+                - attachment_url: 첨부파일 URL
+                - created_at: 생성일시
+                - updated_at: 수정일시
+                - raw_data: 원본 데이터
+                
+        Returns:
+            int: 생성된 레코드 ID
+        """
+        if not self.connection:
+            self.connect()
+            
         cursor = self.connection.cursor()
         
         # 필수 필드 검증
@@ -475,29 +490,33 @@ class SQLiteDatabase:
             raise ValueError("company_id는 필수입니다")
         if not attachment_data.get('platform'):
             raise ValueError("platform은 필수입니다")
-        
+        if not attachment_data.get('original_id'):
+            raise ValueError("original_id는 필수입니다")
+            
         cursor.execute("""
             INSERT OR REPLACE INTO attachments (
                 original_id, company_id, platform, parent_type, parent_original_id,
-                name, content_type, size, attachment_url, 
-                created_at, updated_at, raw_data
+                name, content_type, size, created_at, updated_at, 
+                attachment_url, raw_data
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            str(attachment_data.get('id')),  # original_id (첨부파일 자체의 Freshdesk ID)
+            attachment_data.get('original_id'),
             attachment_data.get('company_id'),
             attachment_data.get('platform'),
-            attachment_data.get('parent_type'),  # 'ticket', 'conversation', 'article'
-            str(attachment_data.get('parent_original_id')),  # 부모 객체의 Freshdesk 원본 ID
+            attachment_data.get('parent_type'),
+            attachment_data.get('parent_original_id'),
             attachment_data.get('name'),
             attachment_data.get('content_type'),
             attachment_data.get('size'),
-            attachment_data.get('attachment_url'),
             attachment_data.get('created_at'),
             attachment_data.get('updated_at'),
-            json.dumps(attachment_data)
+            attachment_data.get('attachment_url'),
+            json.dumps(attachment_data.get('raw_data', {}))
         ))
         
         self.connection.commit()
+        logger.debug(f"첨부파일 저장 완료: {attachment_data.get('name')} (ID: {attachment_data.get('original_id')})")
+        
         return cursor.lastrowid
 
     def log_collection_job(self, job_data: Dict[str, Any]) -> int:
@@ -743,6 +762,54 @@ class SQLiteDatabase:
             articles.append(article)
         
         return articles
+
+    def get_attachments_by_ticket(self, ticket_original_id: str) -> List[Dict[str, Any]]:
+        """티켓의 첨부파일 조회
+        
+        Args:
+            ticket_original_id: 티켓 원본 ID
+            
+        Returns:
+            List[Dict[str, Any]]: 첨부파일 데이터 리스트
+        """
+        if not self.connection:
+            self.connect()
+            
+        cursor = self.connection.cursor()
+        
+        # 티켓과 관련된 모든 첨부파일 조회 (티켓 직접 첨부 + 대화 첨부파일)
+        cursor.execute("""
+            SELECT 
+                a.original_id as attachment_id,
+                a.name,
+                a.content_type,
+                a.size,
+                a.attachment_url as download_url,
+                a.parent_type,
+                a.parent_original_id as conversation_id,
+                a.created_at,
+                a.raw_data
+            FROM attachments a
+            WHERE a.company_id = ? 
+            AND a.platform = ?
+            AND (
+                (a.parent_type = 'ticket' AND a.parent_original_id = ?) OR
+                (a.parent_type = 'conversation' AND a.parent_original_id IN (
+                    SELECT c.original_id FROM conversations c 
+                    WHERE c.company_id = ? AND c.platform = ? AND c.ticket_original_id = ?
+                ))
+            )
+            ORDER BY a.created_at
+        """, (
+            self.company_id, self.platform, ticket_original_id,
+            self.company_id, self.platform, ticket_original_id
+        ))
+        
+        attachments = [dict(row) for row in cursor.fetchall()]
+        
+        logger.debug(f"티켓 {ticket_original_id}의 첨부파일 조회 완료: {len(attachments)}개")
+        
+        return attachments
 
     def clear_all_data(self, company_id: str = None, platform: str = None):
         """모든 데이터 삭제 (force_rebuild용)

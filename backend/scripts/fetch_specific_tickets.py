@@ -127,95 +127,26 @@ class SpecificTicketIngester:
                         content_length = len(content_text)
                         logger.info(f"🔍 [DEBUG] 콘텐츠 길이: {content_length:,} 문자")
                         
-                        # OptimizedSummarizer 사용
-                        from core.llm.summarizer import get_summarizer
-                        summarizer = get_summarizer()
+                        # 하이브리드 요약 사용 (이메일 체인 제거 + 적응형 전략)
+                        logger.info(f"📝 하이브리드 요약 방식을 사용합니다 ({content_length:,}자)")
                         
-                        # 10,000자보다 긴 경우 2단계 요약 방식 사용
-                        if content_length > 10000:
-                            logger.info(f"📝 콘텐츠가 깁니다 ({content_length:,}자). 2단계 요약 방식을 사용합니다.")
-                            
-                            # 텍스트를 8000자 단위로 분할 (오버랩 500자)
-                            chunk_size = 8000
-                            overlap = 500
-                            chunks = []
-                            
-                            for i in range(0, len(content_text), chunk_size - overlap):
-                                chunk = content_text[i:i + chunk_size]
-                                if chunk.strip():
-                                    chunks.append(chunk)
-                            
-                            logger.info(f"📊 1단계: {len(chunks)}개 청크로 분할됨")
-                            
-                            # 1단계: 각 청크별로 간단 요약 생성 (200-300자)
-                            chunk_summaries = []
-                            for idx, chunk in enumerate(chunks):
-                                try:
-                                    # 청크별 간단 요약 생성 (핵심 내용만)
-                                    chunk_summary = await summarizer.generate_summary(
-                                        content=chunk,
-                                        content_type="ticket",
-                                        subject=f"{subject} - 청크 {idx+1}",
-                                        metadata={
-                                            'status': ticket_data.get('status', ''),
-                                            'priority': ticket_data.get('priority', ''),
-                                            'created_at': ticket_data.get('created_at', ''),
-                                            'chunk_index': idx + 1,
-                                            'total_chunks': len(chunks),
-                                            'summary_type': 'brief'  # 간단 요약 지시
-                                        }
-                                    )
-                                    chunk_summaries.append(chunk_summary)
-                                    logger.info(f"✅ 1단계: 청크 {idx+1}/{len(chunks)} 간단 요약 완료")
-                                except Exception as e:
-                                    logger.error(f"❌ 청크 {idx+1} 간단 요약 실패: {e}")
-                                    chunk_summaries.append(f"청크 {idx+1}: 요약 생성 실패")
-                            
-                            # 2단계: 모든 청크 요약을 하나의 통합 요약으로 재요약
-                            if chunk_summaries:
-                                logger.info(f"� 2단계: {len(chunk_summaries)}개 청크 요약을 통합 요약으로 생성 중...")
-                                
-                                # 청크 요약들을 하나로 결합
-                                combined_summaries = "\n\n".join([f"청크 {i+1}: {summary}" for i, summary in enumerate(chunk_summaries)])
-                                
-                                # 통합 요약 생성
-                                try:
-                                    summary = await summarizer.generate_summary(
-                                        content=combined_summaries,
-                                        content_type="ticket",
-                                        subject=subject,
-                                        metadata={
-                                            'status': ticket_data.get('status', ''),
-                                            'priority': ticket_data.get('priority', ''),
-                                            'created_at': ticket_data.get('created_at', ''),
-                                            'original_length': content_length,
-                                            'chunks_processed': len(chunks),
-                                            'summary_type': 'integrated'  # 통합 요약 지시
-                                        }
-                                    )
-                                    logger.info(f"✅ 2단계: 티켓 {ticket_id} 통합 요약 생성 완료")
-                                except Exception as e:
-                                    logger.error(f"❌ 2단계 통합 요약 실패: {e}")
-                                    # 실패 시 청크 요약들을 간단히 결합
-                                    summary = f"**🔍 장문 티켓 요약 ({len(chunks)}개 부분 처리)**\n\n" + "\n\n".join([f"• {summary}" for summary in chunk_summaries])
-                            else:
-                                summary = "긴 콘텐츠의 요약 생성에 실패했습니다."
-                                logger.error(f"❌ 1단계 청크 요약 모두 실패")
-                        else:
-                            # 일반 요약 사용
-                            logger.info(f"📝 일반 요약을 사용합니다.")
-                            summary = await summarizer.generate_summary(
-                                content=content_text,
-                                content_type="ticket",
-                                subject=subject,
-                                metadata={
-                                    'status': ticket_data.get('status', ''),
-                                    'priority': ticket_data.get('priority', ''),
-                                    'created_at': ticket_data.get('created_at', ''),
-                                    'original_length': content_length
-                                }
-                            )
-                            logger.info(f"✅ 티켓 {ticket_id} 일반 요약 생성 완료")
+                        from core.llm.optimized_summarizer import generate_hybrid_summary
+                        
+                        summary = await generate_hybrid_summary(
+                            content=content_text,
+                            content_type="ticket",
+                            subject=subject,
+                            metadata={
+                                'status': ticket_data.get('status', ''),
+                                'priority': ticket_data.get('priority', ''),
+                                'created_at': ticket_data.get('created_at', ''),
+                                'ticket_id': ticket_id,
+                                'company_id': self.company_id,
+                                'original_length': content_length
+                            },
+                            ui_language="ko"
+                        )
+                        logger.info(f"✅ 티켓 {ticket_id} 하이브리드 요약 생성 완료")
                         
                         integrated_ticket['summary'] = summary
                         logger.info(f"🔍 [DEBUG] 요약 길이: {len(summary)} 문자")

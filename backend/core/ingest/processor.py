@@ -695,17 +695,60 @@ async def generate_and_store_summaries(
                     logger.warning(f"티켓 {original_id}: 요약할 내용이 없음")
                     result["skipped_count"] += 1
                     continue
+
+                # 첨부파일 정보 포함해서 요약 생성
+                ticket_metadata = {
+                    'status': ticket.get('status', ''),
+                    'priority': ticket.get('priority', ''),
+                    'created_at': ticket.get('created_at', ''),
+                    'ticket_id': original_id
+                }
                 
+                # 첨부파일 정보 추가
+                attachments = db.get_attachments_by_ticket(original_id)
+                logger.debug(f"티켓 {original_id}: DB에서 가져온 첨부파일 수 = {len(attachments) if attachments else 0}")
+                
+                if attachments:
+                    ticket_metadata['attachments'] = [
+                        {
+                            'id': att.get('attachment_id'),
+                            'name': att.get('name'),
+                            'content_type': att.get('content_type'),
+                            'size': att.get('size'),
+                            'ticket_id': original_id,
+                            'conversation_id': att.get('conversation_id'),
+                            'attachment_url': att.get('download_url')
+                        }
+                        for att in attachments
+                    ]
+                    logger.debug(f"티켓 {original_id}: 첨부파일 메타데이터 설정 완료 - {len(ticket_metadata['attachments'])}개")
+                else:
+                    ticket_metadata['attachments'] = []
+                    logger.debug(f"티켓 {original_id}: 첨부파일 없음")
+
+                # LLM 요약 생성 (항상 기본 방식 사용)
                 summary = await generate_summary(
                     content=content_text,
                     content_type="ticket",
                     subject=ticket.get('subject', ''),
-                    metadata={
-                        'status': ticket.get('status', ''),
-                        'priority': ticket.get('priority', ''),
-                        'created_at': ticket.get('created_at', '')
-                    }
+                    metadata=ticket_metadata
                 )
+                
+                # 요약 생성 후 추가 메타데이터 설정
+                ticket_metadata['summary_generated_at'] = get_kst_time()
+                ticket_metadata['summary_length'] = len(summary) if summary else 0
+                
+                # 요약에서 중요한 키워드 추출 (간단한 버전)
+                if summary:
+                    # 에러/문제 관련 키워드 감지
+                    error_keywords = ['오류', '에러', '문제', '실패', '버그', 'error', 'bug', 'issue', 'problem', 'fail']
+                    has_error = any(keyword in summary.lower() for keyword in error_keywords)
+                    ticket_metadata['contains_error'] = has_error
+                    
+                    # 해결 상태 키워드 감지
+                    resolved_keywords = ['해결', '완료', '수정', '성공', 'resolved', 'fixed', 'completed', 'success']
+                    is_resolved = any(keyword in summary.lower() for keyword in resolved_keywords)
+                    ticket_metadata['appears_resolved'] = is_resolved
                 
                 # integrated_objects에 저장 (기존 데이터 보존)
                 # 메타데이터 스마트 업데이트: 변경 가능한 필드는 업데이트, 고정 필드는 보존
@@ -761,6 +804,22 @@ async def generate_and_store_summaries(
                     if field not in updated_metadata:
                         updated_metadata[field] = new_value
                 
+                # 첨부파일 메타데이터 업데이트 (항상 최신 상태로 유지)
+                attachments_metadata = ticket_metadata.get('attachments', [])
+                updated_metadata['attachments'] = attachments_metadata
+                logger.debug(f"티켓 {original_id}: 첨부파일 메타데이터 업데이트 완료 - {len(attachments_metadata)}개")
+                
+                # 요약 생성 관련 메타데이터도 업데이트
+                updated_metadata['summary_generated_at'] = ticket_metadata.get('summary_generated_at')
+                updated_metadata['summary_length'] = ticket_metadata.get('summary_length', 0)
+                updated_metadata['contains_error'] = ticket_metadata.get('contains_error', False)
+                updated_metadata['appears_resolved'] = ticket_metadata.get('appears_resolved', False)
+                
+                # 최종 메타데이터 확인 로그
+                logger.debug(f"티켓 {original_id}: 최종 메타데이터 - attachments={len(updated_metadata.get('attachments', []))}개, "
+                           f"summary_length={updated_metadata.get('summary_length', 0)}, "
+                           f"contains_error={updated_metadata.get('contains_error', False)}")
+
                 integrated_data = {
                     'original_id': original_id,
                     'company_id': company_id,
@@ -935,6 +994,11 @@ async def generate_and_store_summaries(
         logger.info(f"  - 건너뜀: {result['skipped_count']}")
         logger.info(f"  - 총 처리: {result['total_processed']}")
         logger.info(f"  - 소요 시간: {result['processing_time']:.2f}초")
+        
+        # 메타데이터 포함하여 반환
+        if return_metadata and attachment_metadata:
+            result["attachment_metadata"] = attachment_metadata
+            logger.info(f"  - 첨부파일 메타데이터: {len(attachment_metadata)}개 티켓")
         
         return result
         

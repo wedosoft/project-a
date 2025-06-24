@@ -11,7 +11,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, Any
 import logging
 import boto3
 import json
@@ -425,12 +425,19 @@ async def trigger_data_ingestion(
             summary_result = await generate_and_store_summaries(
                 company_id=company_id,
                 platform=platform,
-                force_update=False
+                force_update=False,
+                return_metadata=request.return_attachment_metadata
             )
             
             logger.info(f"요약 생성 완료 - 성공: {summary_result.get('success_count', 0)}개, "
                        f"실패: {summary_result.get('failure_count', 0)}개, "
                        f"건너뜀: {summary_result.get('skipped_count', 0)}개")
+            
+            # 메타데이터 정보 로깅
+            if request.return_attachment_metadata and 'attachment_metadata' in summary_result:
+                metadata_count = len(summary_result['attachment_metadata'])
+                logger.info(f"첨부파일 메타데이터 수집: {metadata_count}개 티켓")
+            
             progress_callback("요약 생성 완료", 88.0)
             
         except Exception as e:
@@ -483,13 +490,22 @@ async def trigger_data_ingestion(
         logger.info(f"   ├─ 시작시간: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
         logger.info(f"   └─ 완료시간: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
         
-        return IngestResponse(
-            success=True,
-            message=f"데이터 수집이 성공적으로 완료되었습니다. (소요시간: {duration:.1f}초)",
-            start_time=start_time.isoformat(),
-            end_time=end_time.isoformat(),
-            duration_seconds=duration
-        )
+        # 기본 응답 생성
+        response_data = {
+            "success": True,
+            "message": f"데이터 수집이 성공적으로 완료되었습니다. (소요시간: {duration:.1f}초)",
+            "start_time": start_time.isoformat(),
+            "end_time": end_time.isoformat(),
+            "duration_seconds": duration
+        }
+        
+        # 메타데이터 포함 (요약 결과에서 추출)
+        if request.return_attachment_metadata and 'summary_result' in locals():
+            if 'attachment_metadata' in summary_result:
+                response_data["attachment_metadata"] = summary_result["attachment_metadata"]
+            response_data["summaries_generated"] = summary_result.get("success_count", 0)
+        
+        return IngestResponse(**response_data)
         
     except HTTPException as e:
         raise e
