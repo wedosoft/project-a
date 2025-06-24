@@ -264,8 +264,47 @@ class QdrantAdapter(VectorDBInterface):
                         points = []
                     except Exception as batch_error:
                         logger.error(f"배치 저장 실패: {batch_error}")
-                        success = False
-                        break
+                        
+                        # 컬렉션이 없다는 404 오류인 경우 컬렉션 생성 후 재시도
+                        error_str = str(batch_error).lower()
+                        if "404" in error_str or "not found" in error_str or "doesn't exist" in error_str:
+                            logger.warning(f"컬렉션 '{self.collection_name}'이 존재하지 않음. 자동 생성 시도...")
+                            try:
+                                # 먼저 컬렉션 존재 여부 확인
+                                collections = self.client.get_collections()
+                                collection_exists = any(col.name == self.collection_name for col in collections.collections)
+                                
+                                if not collection_exists:
+                                    logger.info(f"컬렉션 '{self.collection_name}' 확인: 존재하지 않음, 생성 중...")
+                                    # 컬렉션 재생성
+                                    self._ensure_collection_exists()
+                                    logger.info(f"컬렉션 '{self.collection_name}' 자동 생성 완료")
+                                else:
+                                    logger.info(f"컬렉션 '{self.collection_name}' 확인: 이미 존재함")
+                                
+                                # 잠시 대기 후 재시도 (컬렉션 생성 완료 대기)
+                                import time
+                                time.sleep(1)
+                                
+                                # 재시도
+                                logger.info(f"컬렉션 확인 후 배치 저장 재시도 (크기: {len(points)})")
+                                self.client.upsert(
+                                    collection_name=self.collection_name,
+                                    points=points,
+                                    wait=True
+                                )
+                                logger.info(f"재시도 후 배치 저장 성공 (크기: {len(points)})")
+                                points = []
+                            except Exception as retry_error:
+                                logger.error(f"컬렉션 재생성/재시도 실패: {retry_error}")
+                                # 세부 오류 정보 로깅
+                                logger.error(f"재시도 실패 상세: 컬렉션={self.collection_name}, 배치크기={len(points)}")
+                                success = False
+                                break
+                        else:
+                            logger.error(f"배치 저장 실패 (재시도 불가능한 오류): {batch_error}")
+                            success = False
+                            break
             return success
         except Exception as e:
             logger.error(f"문서 추가 실패: {e}")

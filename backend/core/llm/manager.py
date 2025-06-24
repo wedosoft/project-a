@@ -16,6 +16,7 @@ from .filters.conversation import SmartConversationFilter
 from .utils.config import ConfigManager
 from .utils.routing import ProviderRouter
 from .utils.metrics import MetricsCollector
+from .scalable_key_manager import scalable_key_manager, APIKeyStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,9 @@ class LLMManager:
         self.router = ProviderRouter()
         self.metrics = MetricsCollector()
         self.conversation_filter = SmartConversationFilter()
+        
+        # 확장 가능한 API 키 관리자
+        self.key_manager = scalable_key_manager
         
         # Provider 인스턴스들
         self.providers: Dict[LLMProvider, Any] = {}

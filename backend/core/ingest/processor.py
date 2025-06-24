@@ -16,6 +16,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 import pytz
+from dotenv import load_dotenv
+
+# 환경변수 로드
+load_dotenv()
 
 from core.search.embeddings.embedder import embed_documents, process_documents
 from core.database.vectordb import vector_db
@@ -41,14 +45,66 @@ def get_kst_time() -> str:
 COLLECTION_NAME = "documents"  # Qdrant 컬렉션 이름
 PROCESS_ATTACHMENTS = True  # 첨부파일 처리 여부 설정
 
-# DOMAIN에서 company_id 자동 추출
-DEFAULT_DOMAIN = os.getenv("DOMAIN")
-if DEFAULT_DOMAIN:
-    DEFAULT_COMPANY_ID = extract_company_id_from_domain(DEFAULT_DOMAIN)
-    logger.debug(f"DOMAIN '{DEFAULT_DOMAIN}'에서 추출된 company_id: '{DEFAULT_COMPANY_ID}'")
-else:
-    DEFAULT_COMPANY_ID = "default"
-    logger.warning("DOMAIN 환경변수가 설정되지 않아 기본값 'default'를 사용합니다.")
+# 멀티플랫폼 런타임 고객 검증 함수들
+
+def validate_runtime_customer_credentials(domain: str, api_key: str, platform: str = "freshdesk") -> str:
+    """
+    런타임에 고객이 제공한 도메인과 API 키를 검증하고 company_id를 반환합니다.
+    
+    Args:
+        domain: 고객 도메인 (예: company.platform.com)
+        api_key: 고객 API 키
+        platform: 플랫폼 식별자 (freshdesk, zendesk 등)
+        
+    Returns:
+        str: 검증된 company_id
+        
+    Raises:
+        ValueError: 인증 실패 또는 유효하지 않은 도메인
+    """
+    if not domain or not domain.strip():
+        logger.error("런타임 보안: 도메인이 제공되지 않았습니다")
+        raise ValueError("고객 도메인이 필수입니다")
+    
+    if not api_key or not api_key.strip():
+        logger.error("런타임 보안: API 키가 제공되지 않았습니다")
+        raise ValueError("고객 API 키가 필수입니다")
+    
+    # 도메인에서 company_id 추출
+    try:
+        company_id = extract_company_id_from_domain(domain.strip())
+        logger.info(f"런타임 도메인 '{domain}'에서 추출된 company_id: '{company_id}'")
+        return company_id
+        
+    except Exception as e:
+        logger.error(f"런타임 보안: 도메인 '{domain}' 검증 실패: {e}")
+        raise ValueError(f"유효하지 않은 고객 도메인: {e}")
+
+
+def create_runtime_customer_context(domain: str, api_key: str, platform: str = "freshdesk") -> Dict[str, str]:
+    """
+    런타임에 고객별 컨텍스트를 생성합니다 (메모리에서만 사용).
+    
+    Args:
+        domain: 고객 도메인
+        api_key: 고객 API 키
+        platform: 플랫폼 식별자
+        
+    Returns:
+        Dict: 고객 컨텍스트 정보
+    """
+    company_id = validate_runtime_customer_credentials(domain, api_key, platform)
+    
+    context = {
+        'company_id': company_id,
+        'domain': domain.strip(),
+        'api_key': api_key.strip(),  # 주의: 로그에 출력하지 말 것
+        'platform': platform,
+        'created_at': get_kst_time()
+    }
+    
+    logger.info(f"런타임 고객 컨텍스트 생성: company_id='{company_id}', platform='{platform}'")
+    return context
 
 
 def load_local_data(data_dir: str):

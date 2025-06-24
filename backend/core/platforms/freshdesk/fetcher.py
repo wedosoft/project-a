@@ -23,8 +23,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 # 환경변수에서 기본값을 가져오되, 파라미터로 오버라이드 가능하도록 수정
-DEFAULT_DOMAIN = os.getenv("FRESHDESK_DOMAIN")
-DEFAULT_API_KEY = os.getenv("FRESHDESK_API_KEY")
+DEFAULT_DOMAIN = os.getenv("DOMAIN") or os.getenv("FRESHDESK_DOMAIN")
+DEFAULT_API_KEY = os.getenv("API_KEY") or os.getenv("FRESHDESK_API_KEY")
 
 def extract_company_id_from_domain(domain: str) -> str:
     """

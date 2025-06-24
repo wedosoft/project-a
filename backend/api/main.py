@@ -10,6 +10,10 @@ import logging
 from cachetools import TTLCache
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from dotenv import load_dotenv
+
+# 환경변수 로드 (애플리케이션 시작 시 최우선 로드)
+load_dotenv()
 
 # 새로운 모듈화된 LLM 매니저 사용
 from core.llm import LLMManager

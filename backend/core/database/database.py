@@ -44,6 +44,7 @@ class SQLiteDatabase:
         self.db_path.parent.mkdir(exist_ok=True)
         
         self.connection = None
+        self._tables_created = False  # 테이블 생성 여부 추적
         logger.info(f"SQLite 데이터베이스 초기화: {self.db_path} (회사: {company_id}, 플랫폼: {platform})")
     
     def connect(self):
@@ -52,8 +53,9 @@ class SQLiteDatabase:
         self.connection.row_factory = sqlite3.Row  # dict 형태로 결과 반환
         logger.info(f"데이터베이스 연결 완료: {self.db_path}")
         
-        # 연결 후 자동으로 테이블 생성
-        self.create_tables()
+        # 테이블이 아직 생성되지 않았다면 생성
+        if not self._tables_created:
+            self.create_tables()
     
     def disconnect(self):
         """데이터베이스 연결 해제"""
@@ -274,6 +276,7 @@ class SQLiteDatabase:
         
         self.connection.commit()
         logger.info("모든 테이블 생성 완료")
+        self._tables_created = True  # 테이블 생성 완료 표시
     
     def insert_ticket(self, ticket_data: Dict[str, Any]) -> int:
         """티켓 데이터 삽입 (platform-neutral 3-tuple 기반)"""
@@ -281,7 +284,6 @@ class SQLiteDatabase:
         if not self.connection:
             logger.warning("DB 연결이 끊어짐. 재연결 시도...")
             self.connect()
-            self.create_tables()
             logger.info("DB 재연결 완료")
         
         cursor = self.connection.cursor()
@@ -335,7 +337,6 @@ class SQLiteDatabase:
         if not self.connection:
             logger.warning("DB 연결이 끊어짐. 재연결 시도...")
             self.connect()
-            self.create_tables()
             logger.info("DB 재연결 완료")
         
         cursor = self.connection.cursor()
@@ -378,7 +379,7 @@ class SQLiteDatabase:
         if not self.connection:
             logger.warning("DB 연결이 끊어짐. 재연결 시도...")
             self.connect()
-            self.create_tables()
+            # self.create_tables() # 이미 connect()에서 처리됨
             logger.info("DB 재연결 완료")
         
         cursor = self.connection.cursor()
@@ -428,7 +429,7 @@ class SQLiteDatabase:
         if not self.connection:
             logger.warning("DB 연결이 끊어짐. 재연결 시도...")
             self.connect()
-            self.create_tables()
+            # self.create_tables() # 이미 connect()에서 처리됨
             logger.info("DB 재연결 완료")
         
         cursor = self.connection.cursor()
@@ -464,7 +465,7 @@ class SQLiteDatabase:
         if not self.connection:
             logger.warning("DB 연결이 끊어짐. 재연결 시도...")
             self.connect()
-            self.create_tables()
+            # self.create_tables() # 이미 connect()에서 처리됨
             logger.info("DB 재연결 완료")
         
         cursor = self.connection.cursor()
@@ -610,7 +611,7 @@ class SQLiteDatabase:
         if not self.connection:
             logger.warning("DB 연결이 끊어짐. 재연결 시도...")
             self.connect()
-            self.create_tables()
+            # self.create_tables() # 이미 connect()에서 처리됨
             logger.info("DB 재연결 완료")
         
         cursor = self.connection.cursor()
@@ -649,7 +650,7 @@ class SQLiteDatabase:
         if not self.connection:
             logger.warning("DB 연결이 끊어짐. 재연결 시도...")
             self.connect()
-            self.create_tables()
+            # self.create_tables() # 이미 connect()에서 처리됨
             logger.info("DB 재연결 완료")
         
         cursor = self.connection.cursor()
@@ -700,7 +701,7 @@ class SQLiteDatabase:
         if not self.connection:
             logger.warning("DB 연결이 끊어짐. 재연결 시도...")
             self.connect()
-            self.create_tables()
+            # self.create_tables() # 이미 connect()에서 처리됨
             logger.info("DB 재연결 완료")
         
         cursor = self.connection.cursor()
@@ -753,7 +754,7 @@ class SQLiteDatabase:
         if not self.connection:
             logger.warning("DB 연결이 끊어짐. 재연결 시도...")
             self.connect()
-            self.create_tables()
+            # self.create_tables() # 이미 connect()에서 처리됨
             logger.info("DB 재연결 완료")
         
         cursor = self.connection.cursor()
@@ -808,6 +809,5 @@ def get_database(company_id: str, platform: str = "freshdesk") -> SQLiteDatabase
     
     if not db.connection:
         db.connect()
-        db.create_tables()
-    
+
     return db
