@@ -28,6 +28,9 @@ logger = logging.getLogger(__name__)
 @router.get("/download/{attachment_id}")
 async def download_attachment(
     attachment_id: int,
+    ticket_id: Optional[int] = None,
+    conversation_id: Optional[int] = None,
+    article_id: Optional[int] = None,
     company_id: str = Depends(get_company_id),
     platform: str = Depends(get_platform),
     domain: str = Depends(get_domain),
@@ -43,10 +46,18 @@ async def download_attachment(
         X-Platform: 플랫폼 식별자 (freshdesk, zendesk 등)
         X-Domain: 플랫폼 도메인
         X-API-Key: API 키
+        
+    Query Parameters:
+        ticket_id: 티켓 ID (첨부파일이 티켓에 직접 속한 경우)
+        conversation_id: 대화 ID (첨부파일이 대화에 속한 경우)
+        article_id: 지식베이스 문서 ID (첨부파일이 문서에 속한 경우)
     """
     try:
         return await download_attachment_proxy(
             attachment_id=attachment_id,
+            ticket_id=ticket_id,
+            conversation_id=conversation_id,
+            article_id=article_id,
             freshdesk_domain=domain,
             api_key=api_key
         )
@@ -57,6 +68,9 @@ async def download_attachment(
 @router.get("/url/{attachment_id}")
 async def get_attachment_url(
     attachment_id: int,
+    ticket_id: Optional[int] = None,
+    conversation_id: Optional[int] = None,
+    article_id: Optional[int] = None,
     company_id: str = Depends(get_company_id),
     platform: str = Depends(get_platform),
     domain: str = Depends(get_domain),
@@ -72,10 +86,18 @@ async def get_attachment_url(
         X-Platform: 플랫폼 식별자 (freshdesk, zendesk 등)
         X-Domain: 플랫폼 도메인
         X-API-Key: API 키
+        
+    Query Parameters:
+        ticket_id: 티켓 ID (첨부파일이 티켓에 직접 속한 경우)
+        conversation_id: 대화 ID (첨부파일이 대화에 속한 경우)
+        article_id: 지식베이스 문서 ID (첨부파일이 문서에 속한 경우)
     """
     try:
         url = await get_attachment_download_url(
             attachment_id=attachment_id,
+            ticket_id=ticket_id,
+            conversation_id=conversation_id,
+            article_id=article_id,
             freshdesk_domain=domain,
             api_key=api_key
         )

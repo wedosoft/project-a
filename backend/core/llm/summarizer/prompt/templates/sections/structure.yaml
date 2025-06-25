@@ -1,0 +1,49 @@
+# 요약 섹션 구조 정의
+version: "2.0"
+last_updated: "2025-06-25"
+
+# 기본 4섹션 구조
+sections:
+  ko:
+    problem: "🔍 **문제 상황**"
+    cause: "🎯 **근본 원인**"
+    solution: "🔧 **해결 과정**"
+    insights: "💡 **핵심 포인트**"
+  
+  en:
+    problem: "🔍 **Problem Analysis**"
+    cause: "🎯 **Root Cause**"
+    solution: "🔧 **Solution Process**"
+    insights: "💡 **Key Insights**"
+
+# KB 문서용 섹션 (다른 구조)
+kb_sections:
+  ko:
+    purpose: "📚 **문서 개요**"
+    procedure: "🔧 **핵심 절차**"
+    requirements: "⚙️ **요구사항**"
+    technical: "🛠️ **기술 사양**"
+  
+  en:
+    purpose: "📚 **Document Overview**"
+    procedure: "🔧 **Core Procedures**"
+    requirements: "⚙️ **Requirements**"
+    technical: "🛠️ **Technical Specifications**"
+
+# 첨부파일 형식
+attachment_format:
+  ko: |
+    첨부파일이 있는 경우 다음과 같이 표시하세요:
+    - **참고 자료**:
+      - 📎 파일명1
+      - 📎 파일명2
+      - 📎 파일명3
+    관련 첨부파일이 없으면 대화에서 언급된 중요한 문서나 자료를 기재하세요.
+  
+  en: |
+    If relevant attachments exist, display them as follows:
+    - **Reference Materials**:
+      - 📎 filename1
+      - 📎 filename2
+      - 📎 filename3
+    If no relevant attachments exist, mention key documentation or resources referenced in the conversation.

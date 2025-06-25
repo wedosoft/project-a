@@ -23,13 +23,28 @@ logger = logging.getLogger(__name__)
 
 class LLMManager:
     """
-    통합 LLM 관리자
+    통합 LLM 관리자 (싱글톤 패턴)
     
     여러 LLM 제공자를 관리하고, 요청을 적절한 제공자로 라우팅하며,
     성능 모니터링과 캐싱을 제공합니다.
     """
     
+    _instance = None
+    _initialized = False
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(LLMManager, cls).__new__(cls)
+        return cls._instance
+    
     def __init__(self):
+        # 싱글톤 중복 초기화 방지
+        if LLMManager._initialized:
+            logger.debug("LLMManager 이미 초기화됨 (싱글톤)")
+            return
+            
+        logger.info("LLMManager 초기화 시작...")
+        
         self.config_manager = ConfigManager()
         self.router = ProviderRouter()
         self.metrics = MetricsCollector()
@@ -47,6 +62,10 @@ class LLMManager:
         
         # 초기화
         self._initialize_providers()
+        
+        # 초기화 완료 플래그
+        LLMManager._initialized = True
+        logger.info("LLMManager 싱글톤 초기화 완료")
         
         logger.info(f"LLMManager 초기화 완료 - {len(self.providers)}개 제공자 로드됨")
     
@@ -292,3 +311,24 @@ class LLMManager:
                 success=False,
                 error=str(e)
             )
+
+
+# 전역 싱글톤 인스턴스 (편의성 제공)
+_global_llm_manager = None
+
+def get_llm_manager() -> LLMManager:
+    """
+    전역 LLMManager 싱글톤 인스턴스를 반환합니다.
+    
+    이 함수를 사용하면 어디서든 동일한 LLMManager 인스턴스에 접근할 수 있습니다.
+    
+    Returns:
+        LLMManager: 싱글톤 인스턴스
+    """
+    global _global_llm_manager
+    if _global_llm_manager is None:
+        _global_llm_manager = LLMManager()
+    return _global_llm_manager
+
+# 기본 인스턴스 생성 (하위 호환성)
+default_llm_manager = get_llm_manager()

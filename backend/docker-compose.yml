@@ -1,6 +1,6 @@
 # Freshdesk Custom App 백엔드 서비스
 # 프로젝트 규칙 및 가이드라인: /PROJECT_RULES.md 참조
-version: "3.8"
+#version: "3.8"
 services:
   backend:
     build: 

@@ -529,7 +529,25 @@ async def ingest(
         
         # 진행상황 업데이트
         if progress_callback:
-            progress_callback("임베딩 및 벡터 저장 중", 85)
+            progress_callback("LLM 요약 생성 중", 85)
+        
+        # LLM 요약 생성 (새로 추가)
+        logger.info("LLM 요약 생성 시작...")
+        try:
+            summary_result = await generate_and_store_summaries(
+                company_id=company_id,
+                platform=platform,
+                force_update=False  # 기존 요약이 있으면 건너뜀
+            )
+            logger.info(f"LLM 요약 생성 완료: 성공={summary_result['success_count']}개, "
+                       f"실패={summary_result['failure_count']}개, 건너뜀={summary_result['skipped_count']}개")
+        except Exception as e:
+            logger.error(f"LLM 요약 생성 중 오류: {e}")
+            # 요약 생성 실패해도 전체 작업은 계속 진행
+        
+        # 진행상황 업데이트
+        if progress_callback:
+            progress_callback("임베딩 및 벡터 저장 중", 90)
         
         # 임베딩 및 벡터 저장 (기존 로직)
         logger.info("문서 임베딩 및 벡터 저장 시작...")
@@ -609,7 +627,7 @@ async def generate_and_store_summaries(
     force_update: bool = False
 ) -> Dict[str, Any]:
     """
-    티켓과 KB 문서의 LLM 요약을 생성하고 integrated_objects 테이블에 저장합니다.
+    통합 객체에서 직접 요약을 생성하고 저장합니다 (간소화된 버전)
     
     Args:
         company_id: 회사 식별자
@@ -636,14 +654,150 @@ async def generate_and_store_summaries(
     db = get_database(company_id, platform)
     
     try:
-        # 1. 티켓 요약 생성
-        logger.info("티켓 요약 생성 중...")
-        tickets = db.get_tickets_by_company_and_platform(company_id, platform)
-        logger.info(f"처리할 티켓 수: {len(tickets)}")
+        cursor = db.connection.cursor()
         
-        for ticket in tickets:
+        # 요약이 없는 통합 객체들 조회 (티켓 + KB 문서)
+        if force_update:
+            # 강제 업데이트: 모든 통합 객체
+            cursor.execute("""
+                SELECT original_id, object_type, original_data, integrated_content, metadata 
+                FROM integrated_objects 
+                WHERE company_id = ? AND platform = ? 
+                AND object_type IN ('integrated_ticket', 'integrated_article')
+                AND integrated_content IS NOT NULL AND integrated_content != ''
+            """, (company_id, platform))
+        else:
+            # 일반 모드: 요약이 없는 것만
+            cursor.execute("""
+                SELECT original_id, object_type, original_data, integrated_content, metadata 
+                FROM integrated_objects 
+                WHERE company_id = ? AND platform = ? 
+                AND object_type IN ('integrated_ticket', 'integrated_article')
+                AND (summary IS NULL OR summary = '')
+                AND integrated_content IS NOT NULL AND integrated_content != ''
+            """, (company_id, platform))
+        
+        rows = cursor.fetchall()
+        logger.info(f"처리할 통합 객체 수: {len(rows)}개")
+        
+        for row in rows:
+            try:
+                original_id, object_type, original_data_str, integrated_content, metadata_str = row
+                
+                # 디버깅 로그
+                logger.debug(f"{object_type} {original_id}: integrated_content 길이 = {len(integrated_content) if integrated_content else 0}")
+                
+                # 데이터 파싱
+                try:
+                    original_data = json.loads(original_data_str) if original_data_str else {}
+                    metadata = json.loads(metadata_str) if metadata_str else {}
+                except json.JSONDecodeError:
+                    logger.warning(f"{object_type} {original_id}: 데이터 파싱 실패")
+                    original_data = {}
+                    metadata = {}
+                
+                # integrated_content 확인
+                if not integrated_content or not integrated_content.strip():
+                    logger.warning(f"{object_type} {original_id}: integrated_content가 없거나 비어있음 - 요약 생성 불가")
+                    result["skipped_count"] += 1
+                    continue
+
+                # 객체 타입에 따른 요약 생성
+                if object_type == 'integrated_ticket':
+                    # 티켓 요약 생성
+                    content_type = "ticket"
+                    subject = original_data.get('subject', '')
+                    
+                    # 첨부파일 정보 추가
+                    ticket_metadata = {
+                        'status': original_data.get('status', ''),
+                        'priority': original_data.get('priority', ''),
+                        'created_at': original_data.get('created_at', ''),
+                        'ticket_id': original_id
+                    }
+                    
+                    # DB에서 첨부파일 정보 가져오기
+                    attachments = db.get_attachments_by_ticket(original_id)
+                    if attachments:
+                        ticket_metadata['attachments'] = [
+                            {
+                                'id': att.get('attachment_id'),
+                                'name': att.get('name'),
+                                'content_type': att.get('content_type'),
+                                'size': att.get('size'),
+                                'ticket_id': original_id,
+                                'conversation_id': att.get('conversation_id'),
+                                'attachment_url': att.get('download_url')
+                            }
+                            for att in attachments
+                        ]
+                        logger.debug(f"티켓 {original_id}: 첨부파일 메타데이터 설정 완료 - {len(ticket_metadata['attachments'])}개")
+                    else:
+                        ticket_metadata['attachments'] = []
+                    
+                    summary_metadata = ticket_metadata
+                    
+                elif object_type == 'integrated_article':
+                    # KB 문서 요약 생성
+                    content_type = "knowledge_base"
+                    subject = original_data.get('title', '')
+                    
+                    summary_metadata = {
+                        'status': original_data.get('status', ''),
+                        'category_id': original_data.get('category_id', ''),
+                        'created_at': original_data.get('created_at', '')
+                    }
+                else:
+                    logger.warning(f"알 수 없는 객체 타입: {object_type}")
+                    result["skipped_count"] += 1
+                    continue
+
+                # LLM 요약 생성
+                summary = await generate_summary(
+                    content=integrated_content,
+                    content_type=content_type,
+                    subject=subject,
+                    metadata=summary_metadata
+                )
+                
+                # 요약만 업데이트 (기존 데이터는 보존)
+                cursor.execute("""
+                    UPDATE integrated_objects 
+                    SET summary = ? 
+                    WHERE company_id = ? AND platform = ? AND object_type = ? AND original_id = ?
+                """, (summary, company_id, platform, object_type, original_id))
+                db.connection.commit()
+                
+                result["success_count"] += 1
+                logger.debug(f"{object_type} {original_id}: 요약 생성 및 저장 완료")
+                
+            except Exception as e:
+                logger.error(f"{object_type} {original_id} 요약 생성 중 오류: {e}")
+                result["failure_count"] += 1
+                result["errors"].append(f"{object_type} {original_id}: {str(e)}")
+        
+        result["total_processed"] = result["success_count"] + result["failure_count"] + result["skipped_count"]
+        result["processing_time"] = time.time() - start_time
+        
+        logger.info(f"✅ LLM 요약 생성 완료:")
+        logger.info(f"  - 성공: {result['success_count']}")
+        logger.info(f"  - 실패: {result['failure_count']}")
+        logger.info(f"  - 건너뜀: {result['skipped_count']}")
+        logger.info(f"  - 총 처리: {result['total_processed']}")
+        logger.info(f"  - 소요 시간: {result['processing_time']:.2f}초")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"LLM 요약 생성 중 오류 발생: {e}")
+        result["errors"].append(str(e))
+        result["processing_time"] = time.time() - start_time
+        raise
+    finally:
+        db.disconnect()
             try:
                 original_id = str(ticket.get('original_id', ''))
+                logger.debug(f"티켓 처리 시작 - original_id: {original_id}")
                 
                 # 기존 요약 확인 (force_update가 False인 경우)
                 existing_data = None
@@ -654,8 +808,11 @@ async def generate_and_store_summaries(
                 """, (company_id, platform, 'integrated_ticket', original_id))
                 existing_row = cursor.fetchone()
                 
+                logger.debug(f"티켓 {original_id}: DB 조회 결과 - existing_row: {existing_row is not None}")
+                
                 if existing_row:
                     existing_original_data, existing_integrated_content, existing_metadata_str, existing_summary = existing_row
+                    logger.debug(f"티켓 {original_id}: integrated_content 길이 = {len(existing_integrated_content) if existing_integrated_content else 0}")
                     
                     # 기존 데이터가 있고 force_update가 False인 경우 요약만 확인
                     if not force_update and existing_summary:
@@ -674,25 +831,40 @@ async def generate_and_store_summaries(
                         logger.warning(f"티켓 {original_id}: 기존 데이터 파싱 실패, 새로 생성")
                         existing_data = None
                 
-                # 통합 티켓 객체 생성 (기존 데이터가 없는 경우에만)
-                if existing_data and existing_data['original_data']:
-                    # 기존 데이터 사용 (대화, 첨부파일 보존)
-                    integrated_ticket = existing_data['original_data']
-                    integrated_content = existing_data['integrated_content']
-                    base_metadata = existing_data['metadata']
+                # 통합 티켓 객체 처리
+                if existing_data:
+                    # 기존 데이터가 있는 경우
+                    if existing_data['integrated_content']:
+                        # integrated_content가 있으면 그것을 사용
+                        integrated_content = existing_data['integrated_content']
+                        base_metadata = existing_data['metadata']
+                        logger.debug(f"티켓 {original_id}: 기존 integrated_content 사용 - 길이: {len(integrated_content)}")
+                    else:
+                        # integrated_content가 없으면 새로 생성
+                        logger.debug(f"티켓 {original_id}: integrated_content가 없어서 새로 생성")
+                        integrated_ticket = create_integrated_ticket_object(
+                            ticket=ticket,
+                            company_id=company_id
+                        )
+                        integrated_content = integrated_ticket.get('integrated_text', '')
+                        base_metadata = existing_data['metadata']
                 else:
-                    # 새로 생성
+                    # 기존 데이터가 전혀 없는 경우 새로 생성
+                    logger.debug(f"티켓 {original_id}: 완전히 새로운 통합 객체 생성")
                     integrated_ticket = create_integrated_ticket_object(
                         ticket=ticket,
                         company_id=company_id
                     )
                     integrated_content = integrated_ticket.get('integrated_text', '')
                     base_metadata = {}
+                    logger.debug(f"티켓 {original_id}: 새로 생성된 integrated_content 길이: {len(integrated_content) if integrated_content else 0}")
                 
-                # LLM 요약 생성
-                content_text = ticket.get('description_text', '') or ticket.get('description', '')
-                if not content_text:
-                    logger.warning(f"티켓 {original_id}: 요약할 내용이 없음")
+                # LLM 요약 생성 - integrated_content만 사용
+                content_text = integrated_content
+                logger.debug(f"티켓 {original_id}: 최종 content_text 길이: {len(content_text) if content_text else 0}")
+                
+                if not content_text or not content_text.strip():
+                    logger.warning(f"티켓 {original_id}: integrated_content가 없거나 비어있음 - 요약 생성 불가")
                     result["skipped_count"] += 1
                     continue
 
@@ -840,14 +1012,22 @@ async def generate_and_store_summaries(
                 result["failure_count"] += 1
                 result["errors"].append(f"티켓 {original_id}: {str(e)}")
         
-        # 2. KB 문서 요약 생성
-        logger.info("KB 문서 요약 생성 중...")
-        articles = db.get_articles_by_company_and_platform(company_id, platform)
-        logger.info(f"처리할 KB 문서 수: {len(articles)}")
+        # 2. 통합 객체에서 요약이 없는 KB 문서들을 직접 조회
+        logger.info("요약이 없는 KB 문서 통합 객체 조회 중...")
+        cursor.execute("""
+            SELECT original_id, original_data, integrated_content, metadata 
+            FROM integrated_objects 
+            WHERE company_id = ? AND platform = ? AND object_type = 'integrated_article'
+            AND (summary IS NULL OR summary = '')
+        """, (company_id, platform))
         
-        for article in articles:
+        article_rows = cursor.fetchall()
+        logger.info(f"처리할 KB 문서 수: {len(article_rows)}")
+        
+        for row in article_rows:
             try:
                 original_id = str(article.get('original_id', ''))
+                logger.debug(f"KB 문서 처리 시작 - original_id: {original_id}")
                 
                 # 기존 요약 확인 (force_update가 False인 경우)
                 existing_data = None
@@ -858,8 +1038,11 @@ async def generate_and_store_summaries(
                 """, (company_id, platform, 'integrated_article', original_id))
                 existing_row = cursor.fetchone()
                 
+                logger.debug(f"KB {original_id}: DB 조회 결과 - existing_row: {existing_row is not None}")
+                
                 if existing_row:
                     existing_original_data, existing_integrated_content, existing_metadata_str, existing_summary = existing_row
+                    logger.debug(f"KB {original_id}: integrated_content 길이 = {len(existing_integrated_content) if existing_integrated_content else 0}")
                     
                     # 기존 데이터가 있고 force_update가 False인 경우 요약만 확인
                     if not force_update and existing_summary:
@@ -878,25 +1061,40 @@ async def generate_and_store_summaries(
                         logger.warning(f"KB {original_id}: 기존 데이터 파싱 실패, 새로 생성")
                         existing_data = None
                 
-                # 통합 문서 객체 생성 (기존 데이터가 없는 경우에만)
-                if existing_data and existing_data['original_data']:
-                    # 기존 데이터 사용 (첨부파일 보존)
-                    integrated_article = existing_data['original_data']
-                    integrated_content = existing_data['integrated_content']
-                    base_metadata = existing_data['metadata']
+                # 통합 문서 객체 처리
+                if existing_data:
+                    # 기존 데이터가 있는 경우
+                    if existing_data['integrated_content']:
+                        # integrated_content가 있으면 그것을 사용
+                        integrated_content = existing_data['integrated_content']
+                        base_metadata = existing_data['metadata']
+                        logger.debug(f"KB {original_id}: 기존 integrated_content 사용 - 길이: {len(integrated_content)}")
+                    else:
+                        # integrated_content가 없으면 새로 생성
+                        logger.debug(f"KB {original_id}: integrated_content가 없어서 새로 생성")
+                        integrated_article = create_integrated_article_object(
+                            article=article,
+                            company_id=company_id
+                        )
+                        integrated_content = integrated_article.get('integrated_text', '')
+                        base_metadata = existing_data['metadata']
                 else:
-                    # 새로 생성
+                    # 기존 데이터가 전혀 없는 경우 새로 생성
+                    logger.debug(f"KB {original_id}: 완전히 새로운 통합 객체 생성")
                     integrated_article = create_integrated_article_object(
                         article=article,
                         company_id=company_id
                     )
                     integrated_content = integrated_article.get('integrated_text', '')
                     base_metadata = {}
+                    logger.debug(f"KB {original_id}: 새로 생성된 integrated_content 길이: {len(integrated_content) if integrated_content else 0}")
                 
-                # LLM 요약 생성
-                content_text = article.get('description_text', '') or article.get('description', '')
-                if not content_text:
-                    logger.warning(f"KB {original_id}: 요약할 내용이 없음")
+                # LLM 요약 생성 - integrated_content만 사용
+                content_text = integrated_content
+                logger.debug(f"KB {original_id}: 최종 content_text 길이: {len(content_text) if content_text else 0}")
+                
+                if not content_text or not content_text.strip():
+                    logger.warning(f"KB {original_id}: integrated_content가 없거나 비어있음 - 요약 생성 불가")
                     result["skipped_count"] += 1
                     continue
                 
@@ -994,11 +1192,6 @@ async def generate_and_store_summaries(
         logger.info(f"  - 건너뜀: {result['skipped_count']}")
         logger.info(f"  - 총 처리: {result['total_processed']}")
         logger.info(f"  - 소요 시간: {result['processing_time']:.2f}초")
-        
-        # 메타데이터 포함하여 반환
-        if return_metadata and attachment_metadata:
-            result["attachment_metadata"] = attachment_metadata
-            logger.info(f"  - 첨부파일 메타데이터: {len(attachment_metadata)}개 티켓")
         
         return result
         

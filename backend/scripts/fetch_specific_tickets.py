@@ -20,6 +20,7 @@ import sys
 import os
 from pathlib import Path
 from typing import List, Optional
+from datetime import datetime
 import logging
 
 # 프로젝트 루트를 Python 패스에 추가
@@ -35,6 +36,7 @@ from core.platforms.freshdesk.fetcher import fetch_ticket_details
 from core.database.database import get_database
 from core.ingest.integrator import create_integrated_ticket_object
 from core.ingest.storage import store_integrated_object_to_sqlite
+from core.llm.summarizer import generate_summary
 
 # 로깅 설정
 logging.basicConfig(
@@ -115,51 +117,56 @@ class SpecificTicketIngester:
                 )
                 logger.info(f"🔧 통합 티켓 객체 생성 완료: ID={integrated_ticket.get('id')}")
                 
-                # LLM 요약 생성
-                logger.info(f"✨ 티켓 {ticket_id} LLM 요약 생성 중...")
+                # LLM을 사용해 요약 생성
+                logger.info(f"🧠 티켓 {ticket_id} LLM 요약 생성 중...")
                 try:
-                    # 요약할 텍스트 준비
-                    content_text = integrated_ticket.get('integrated_text', '')
-                    subject = ticket_data.get('subject', '')
+                    # 티켓 내용 추출
+                    content_parts = []
                     
-                    if content_text:
-                        # 긴 텍스트 처리를 위한 길이 체크
-                        content_length = len(content_text)
-                        logger.info(f"🔍 [DEBUG] 콘텐츠 길이: {content_length:,} 문자")
-                        
-                        # 하이브리드 요약 사용 (이메일 체인 제거 + 적응형 전략)
-                        logger.info(f"📝 하이브리드 요약 방식을 사용합니다 ({content_length:,}자)")
-                        
-                        from core.llm.optimized_summarizer import generate_hybrid_summary
-                        
-                        summary = await generate_hybrid_summary(
-                            content=content_text,
-                            content_type="ticket",
-                            subject=subject,
-                            metadata={
-                                'status': ticket_data.get('status', ''),
-                                'priority': ticket_data.get('priority', ''),
-                                'created_at': ticket_data.get('created_at', ''),
-                                'ticket_id': ticket_id,
-                                'company_id': self.company_id,
-                                'original_length': content_length
-                            },
-                            ui_language="ko"
-                        )
-                        logger.info(f"✅ 티켓 {ticket_id} 하이브리드 요약 생성 완료")
-                        
-                        integrated_ticket['summary'] = summary
-                        logger.info(f"🔍 [DEBUG] 요약 길이: {len(summary)} 문자")
-                        logger.info(f"🔍 [DEBUG] integrated_ticket에 summary 필드 존재: {'summary' in integrated_ticket}")
-                    else:
-                        logger.warning(f"⚠️ 티켓 {ticket_id}: 요약할 텍스트가 없음")
-                        
+                    # 티켓 제목과 설명
+                    subject = integrated_ticket.get('subject', '')
+                    description = integrated_ticket.get('description_text', '')
+                    if subject:
+                        content_parts.append(f"제목: {subject}")
+                    if description:
+                        content_parts.append(f"설명: {description}")
+                    
+                    # 대화 내용 추가
+                    conversations = integrated_ticket.get('conversations', [])
+                    if conversations:
+                        content_parts.append("대화 내용:")
+                        for conv in conversations[:10]:  # 최근 10개만
+                            if isinstance(conv, dict):
+                                sender = "고객" if conv.get('user_id') else "상담원"
+                                body = conv.get('body_text', conv.get('body', ''))
+                                if body:
+                                    content_parts.append(f"- {sender}: {body[:200]}...")
+                    
+                    full_content = "\n".join(content_parts)
+                    
+                    # 첨부파일 메타데이터 추가
+                    attachments = integrated_ticket.get('attachments', [])
+                    metadata = {'attachments': attachments} if attachments else None
+                    
+                    # 요약 생성
+                    summary = await generate_summary(
+                        content=full_content,
+                        content_type="ticket",
+                        subject=subject,
+                        metadata=metadata,
+                        ui_language="ko"
+                    )
+                    
+                    # 통합 객체에 요약 추가
+                    integrated_ticket['ai_summary'] = summary
+                    integrated_ticket['summary_generated_at'] = datetime.now().isoformat()
+                    
+                    logger.info(f"✅ 티켓 {ticket_id} LLM 요약 생성 완료 (길이: {len(summary)} 문자)")
+                    
                 except Exception as e:
-                    logger.error(f"❌ 티켓 {ticket_id} LLM 요약 생성 실패: {e}")
-                    logger.error(f"🔍 [DEBUG] 오류 상세: {type(e).__name__}: {str(e)}")
-                    # 요약 생성 실패해도 통합 객체는 저장 (summary 필드는 None/빈 상태로)
-                    integrated_ticket['summary'] = None
-                    logger.info(f"⚠️ 티켓 {ticket_id}: 요약 없이 통합 객체만 저장합니다")
+                    logger.warning(f"⚠️  티켓 {ticket_id} 요약 생성 실패: {e}")
+                    integrated_ticket['ai_summary'] = "요약 생성에 실패했습니다."
+                    integrated_ticket['summary_error'] = str(e)
                 
                 # SQL DB에만 저장 (벡터 DB 제외)
                 store_result = store_integrated_object_to_sqlite(

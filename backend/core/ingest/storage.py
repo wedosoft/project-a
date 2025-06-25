@@ -33,7 +33,7 @@ def store_integrated_object_to_sqlite(
             raise ValueError("company_id는 멀티테넌트 지원을 위해 필수입니다")
             
         object_type = integrated_object.get("object_type", "unknown")
-        object_id = integrated_object.get("id")
+        object_id = integrated_object.get("object_id")
         
         if not object_id:
             logger.error(f"객체 ID가 없음: object_type={object_type}")
@@ -41,7 +41,96 @@ def store_integrated_object_to_sqlite(
         
         logger.info(f"통합 객체 저장 시작: ID={object_id}, type={object_type}, company={company_id}")
         
+        # 🔍 디버깅: 통합객체 구조 확인
+        logger.debug(f"🔍 통합객체 키 목록: {list(integrated_object.keys())}")
+        logger.debug(f"🔍 all_attachments 존재 여부: {'all_attachments' in integrated_object}")
+        logger.debug(f"🔍 attachments 존재 여부: {'attachments' in integrated_object}")
+        
+        # 🔍 추가 디버깅: 통합객체 전체 구조 출력 (첫 번째 객체만)
+        if object_id:  # 첫 번째 객체에서만 구조 확인
+            logger.info(f"🔍 [METADATA DEBUG] 통합객체 전체 구조 (키별):")
+            for key, value in integrated_object.items():
+                if isinstance(value, list):
+                    logger.info(f"  - {key}: 리스트 ({len(value)}개)")
+                    if value and key in ['all_attachments', 'attachments', 'conversations']:
+                        logger.info(f"    첫 번째 항목 구조: {type(value[0]).__name__} with keys: {list(value[0].keys()) if isinstance(value[0], dict) else 'N/A'}")
+                elif isinstance(value, dict):
+                    logger.info(f"  - {key}: 딕셔너리 ({len(value)}개 키)")
+                else:
+                    logger.info(f"  - {key}: {type(value).__name__}")
+        
         # 1. integrated_objects 테이블에 저장
+        # 첨부파일 메타데이터 구성 (상세 정보 포함)
+        attachments = integrated_object.get("all_attachments", [])
+        
+        # 🔍 디버깅: 첨부파일 정보 상세 확인
+        logger.debug(f"🔍 all_attachments 필드에서 가져온 첨부파일 수: {len(attachments)}")
+        if attachments:
+            logger.debug(f"🔍 첫 번째 첨부파일 구조: {attachments[0] if attachments else None}")
+        
+        # 대체 첨부파일 필드 확인 (혹시 다른 필드명일 경우)
+        if not attachments:
+            alternative_attachments = integrated_object.get("attachments", [])
+            if alternative_attachments:
+                logger.debug(f"🔍 대체 첨부파일 필드 (attachments)에서 {len(alternative_attachments)}개 발견")
+                attachments = alternative_attachments
+        attachments_metadata = []
+        
+        if attachments:
+            for att in attachments:
+                att_meta = {
+                    'id': att.get('id'),
+                    'name': att.get('name'),
+                    'content_type': att.get('content_type'),
+                    'size': att.get('size'),
+                    'created_at': att.get('created_at'),
+                    'updated_at': att.get('updated_at'),
+                    'conversation_id': att.get('conversation_id'),
+                    # attachment_url은 보안상 메타데이터에 저장하지 않음
+                }
+                # None 값들 제거
+                attachments_metadata.append({k: v for k, v in att_meta.items() if v is not None})
+        
+        # 🔍 최종 첨부파일 메타데이터 확인
+        logger.info(f"🔍 [METADATA DEBUG] 최종 첨부파일 메타데이터: {len(attachments_metadata)}개")
+        if attachments_metadata:
+            logger.info(f"🔍 [METADATA DEBUG] 첫 번째 첨부파일 메타데이터: {attachments_metadata[0]}")
+        
+        # 대화 메타데이터 구성
+        conversations = integrated_object.get("conversations", [])
+        conversations_metadata = []
+        
+        if conversations:
+            for conv in conversations:
+                conv_meta = {
+                    'id': conv.get('id'),
+                    'created_at': conv.get('created_at'),
+                    'updated_at': conv.get('updated_at'),
+                    'from_email': conv.get('from_email'),
+                    'user_id': conv.get('user_id'),
+                    'to_emails': conv.get('to_emails'),
+                    'private': conv.get('private', False),
+                    'attachments_count': len(conv.get('attachments', []))
+                }
+                # None 값들 제거
+                conversations_metadata.append({k: v for k, v in conv_meta.items() if v is not None})
+        
+        # 인라인 이미지 메타데이터 구성
+        inline_images = integrated_object.get("inline_images", [])
+        inline_images_metadata = []
+        
+        if inline_images:
+            for img in inline_images:
+                img_meta = {
+                    'attachment_id': img.get('attachment_id'),
+                    'alt_text': img.get('alt_text'),
+                    'content_type': img.get('content_type'),
+                    'size': img.get('size'),
+                    'conversation_id': img.get('conversation_id')
+                }
+                # None 값들 제거
+                inline_images_metadata.append({k: v for k, v in img_meta.items() if v is not None})
+
         integrated_data = {
             'original_id': object_id,  # 필드명 수정: object_id → original_id
             'company_id': company_id,
@@ -51,10 +140,29 @@ def store_integrated_object_to_sqlite(
             'integrated_content': integrated_object.get("integrated_text", ""),
             'summary': integrated_object.get("summary"),
             'metadata': {
+                # 기본 통계 정보
                 'has_conversations': integrated_object.get("has_conversations", False),
                 'has_attachments': integrated_object.get("has_attachments", False),
-                'conversation_count': len(integrated_object.get("conversations", [])),
-                'attachment_count': len(integrated_object.get("all_attachments", []))
+                'has_inline_images': integrated_object.get("has_inline_images", False),
+                'conversation_count': len(conversations),
+                'attachment_count': len(attachments),
+                'inline_image_count': len(inline_images),
+                'total_image_count': integrated_object.get("total_image_count", 0),
+                
+                # 상세 메타데이터 (첨부파일 처리 방안 대응)
+                'attachments': attachments_metadata,
+                'conversations': conversations_metadata,
+                'inline_images': inline_images_metadata,
+                
+                # 기본 티켓/문서 정보
+                'subject': integrated_object.get('subject'),
+                'status': integrated_object.get('status'),
+                'priority': integrated_object.get('priority'),
+                'created_at': integrated_object.get('created_at'),
+                'updated_at': integrated_object.get('updated_at'),
+                
+                # 통합 타임스탬프
+                'integration_timestamp': integrated_object.get('integration_timestamp')
             }
         }
         
@@ -68,6 +176,11 @@ def store_integrated_object_to_sqlite(
             
             result = db.insert_integrated_object(integrated_data)
             logger.debug(f"integrated_objects 테이블 저장 완료: ID={object_id}")
+            
+            # 🔍 저장된 메타데이터 확인
+            logger.info(f"🔍 [METADATA DEBUG] 저장된 메타데이터의 첨부파일 개수: {len(integrated_data['metadata'].get('attachments', []))}")
+            if integrated_data['metadata'].get('attachments'):
+                logger.info(f"🔍 [METADATA DEBUG] 저장된 첨부파일 메타데이터 예시: {integrated_data['metadata']['attachments'][0]}")
         except Exception as e:
             logger.error(f"integrated_objects 테이블 저장 실패: {e}")
             raise
@@ -91,9 +204,9 @@ def store_integrated_object_to_sqlite(
 def _store_ticket_compatibility(db, integrated_object: Dict[str, Any], company_id: str, platform: str) -> bool:
     """티켓 호환성 저장"""
     try:
-        ticket_id = integrated_object.get("id")
+        ticket_id = integrated_object.get("object_id")
         if not ticket_id:
-            logger.error("티켓 ID가 없습니다.")
+            logger.error("티켓 object_id가 없습니다.")
             return False
         
         logger.info(f"티켓 호환성 저장 시작: ticket_id={ticket_id}")
@@ -103,11 +216,21 @@ def _store_ticket_compatibility(db, integrated_object: Dict[str, Any], company_i
         # - ticket_original_id는 티켓의 플랫폼 원본 ID (parent_original_id에 사용)
         ticket_original_id = integrated_object.get("original_id") or integrated_object.get("id")
         
+        # 🔍 디버깅: original_id 확인
+        logger.debug(f"🔍 integrated_object에서 original_id: {integrated_object.get('original_id')}")
+        logger.debug(f"🔍 integrated_object에서 id: {integrated_object.get('id')}")
+        logger.debug(f"🔍 최종 ticket_original_id: {ticket_original_id}")
+        
+        if not ticket_original_id:
+            logger.error("original_id는 필수입니다")
+            return False
+        
         # 통합 객체를 ticket_data 형식으로 변환
         ticket_data = integrated_object.copy()
         ticket_data.update({
             'company_id': company_id,
-            'platform': platform
+            'platform': platform,
+            'original_id': str(ticket_original_id)  # 명시적으로 original_id 설정
         })
         
         logger.info(f"tickets 테이블 insert 시도: ticket_id={ticket_id}, original_id={ticket_original_id}")
@@ -140,41 +263,76 @@ def _store_ticket_compatibility(db, integrated_object: Dict[str, Any], company_i
                 for attachment in conv_attachments:
                     attachment_data = attachment.copy()
                     
+                    # 🔍 디버깅: 대화 첨부파일 원본 데이터 구조 확인
+                    logger.debug(f"🔍 대화 첨부파일 원본 데이터: {attachment}")
+                    
                     # 아이디 체계 명확화:
                     # - 대화 첨부파일의 parent_original_id는 소속 티켓의 플랫폼 원본 ID
                     # - conv.get("ticket_id")는 대화가 소속된 티켓의 플랫폼 원본 ID
                     parent_ticket_id = conv.get("ticket_id") or ticket_original_id
                     
+                    # 첨부파일 자체의 ID 확인
+                    attachment_id = attachment.get('id') or attachment.get('attachment_id')
+                    
                     attachment_data.update({
+                        'original_id': str(attachment_id),  # 첨부파일 자체의 원본 ID
                         'parent_type': 'conversation',
-                        'parent_original_id': parent_ticket_id,  # 소속 티켓의 플랫폼 원본 ID
+                        'parent_original_id': str(parent_ticket_id),  # 문자열로 변환
                         'conversation_id': conv.get("id"),  # 대화 자체의 ID (추가 정보)
                         'company_id': company_id,
                         'platform': platform
                     })
                     
+                    # 🔍 최종 저장 데이터 확인
+                    logger.debug(f"🔍 대화 첨부파일 최종 저장 데이터: {attachment_data}")
+                    
                     # 첨부파일 개별 저장
-                    db.insert_attachment(attachment_data)
+                    try:
+                        db.insert_attachment(attachment_data)
+                        logger.debug(f"🔍 대화 첨부파일 저장 성공: {attachment_id}")
+                    except Exception as e:
+                        logger.error(f"대화 첨부파일 저장 실패: {attachment_id}, error: {e}")
+                        # 첨부파일 하나 실패해도 전체는 계속 진행
         
         # 첨부파일도 개별적으로 저장
         attachments = integrated_object.get("all_attachments", [])
+        logger.debug(f"🔍 저장할 첨부파일 수: {len(attachments)}개")
         for attachment in attachments:
             attachment_data = attachment.copy()
+            
+            # 🔍 디버깅: 첨부파일 원본 데이터 구조 확인
+            logger.debug(f"🔍 첨부파일 원본 데이터: {attachment}")
             
             # 아이디 체계 명확화:
             # - ticket_id는 우리 DB의 내부 ID
             # - original_id는 티켓의 플랫폼 원본 ID (parent_original_id에 사용)
             ticket_original_id = integrated_object.get("original_id") or integrated_object.get("id")
             
+            # 첨부파일 자체의 ID 확인
+            attachment_id = attachment.get('id') or attachment.get('attachment_id')
+            
+            # 🔍 디버깅: 첨부파일 저장 정보
+            logger.debug(f"🔍 첨부파일 저장: attachment_id={attachment_id}, parent_original_id={ticket_original_id}")
+            
+            # 첨부파일에 original_id 필드 추가 (첨부파일 자체의 ID)
             attachment_data.update({
+                'original_id': str(attachment_id),  # 첨부파일 자체의 원본 ID
                 'parent_type': 'ticket',
-                'parent_original_id': ticket_original_id,  # 티켓의 플랫폼 원본 ID
+                'parent_original_id': str(ticket_original_id),  # 문자열로 변환
                 'company_id': company_id,
                 'platform': platform
             })
             
+            # 🔍 최종 저장 데이터 확인
+            logger.debug(f"🔍 첨부파일 최종 저장 데이터: {attachment_data}")
+            
             # 첨부파일 개별 저장
-            db.insert_attachment(attachment_data)
+            try:
+                db.insert_attachment(attachment_data)
+                logger.debug(f"🔍 첨부파일 저장 성공: {attachment_id}")
+            except Exception as e:
+                logger.error(f"첨부파일 저장 실패: {attachment_id}, error: {e}")
+                # 첨부파일 하나 실패해도 전체는 계속 진행
         
         logger.info(f"티켓 저장 완료: ID={ticket_id}, 대화={len(conversations)}개, 첨부파일={len(attachments)}개")
         return True
@@ -187,9 +345,9 @@ def _store_ticket_compatibility(db, integrated_object: Dict[str, Any], company_i
 def _store_article_compatibility(db, integrated_object: Dict[str, Any], company_id: str, platform: str) -> bool:
     """문서 호환성 저장"""
     try:
-        article_id = integrated_object.get("id")
+        article_id = integrated_object.get("object_id")
         if not article_id:
-            logger.error("문서 ID가 없습니다.")
+            logger.error("문서 object_id가 없습니다.")
             return False
             
         # 통합 객체를 article_data 형식으로 변환

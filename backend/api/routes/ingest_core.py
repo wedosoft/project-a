@@ -419,88 +419,132 @@ async def trigger_data_ingestion(
         logger.info("   └─ 3단계: LLM 요약 생성 🔄")
         progress_callback("LLM 요약 생성 중...", 85.0)
         
+        summary_success = False
+        summary_result = {}
+        
         try:
             # 요약 생성 단계 추가
             from core.ingest.processor import generate_and_store_summaries
             summary_result = await generate_and_store_summaries(
                 company_id=company_id,
                 platform=platform,
-                force_update=False,
-                return_metadata=request.return_attachment_metadata
+                force_update=False
             )
             
-            logger.info(f"요약 생성 완료 - 성공: {summary_result.get('success_count', 0)}개, "
-                       f"실패: {summary_result.get('failure_count', 0)}개, "
-                       f"건너뜀: {summary_result.get('skipped_count', 0)}개")
+            # 성공 여부 확인
+            success_count = summary_result.get('success_count', 0)
+            total_processed = summary_result.get('total_processed', 0)
             
-            # 메타데이터 정보 로깅
-            if request.return_attachment_metadata and 'attachment_metadata' in summary_result:
-                metadata_count = len(summary_result['attachment_metadata'])
-                logger.info(f"첨부파일 메타데이터 수집: {metadata_count}개 티켓")
-            
-            progress_callback("요약 생성 완료", 88.0)
+            if success_count > 0:
+                summary_success = True
+                logger.info(f"요약 생성 완료 - 성공: {success_count}개, "
+                           f"실패: {summary_result.get('failure_count', 0)}개, "
+                           f"건너뜀: {summary_result.get('skipped_count', 0)}개")
+                
+                # 메타데이터 정보 로깅
+                if 'attachment_metadata' in summary_result:
+                    metadata_count = len(summary_result['attachment_metadata'])
+                    logger.info(f"첨부파일 메타데이터 수집: {metadata_count}개 티켓")
+                
+                progress_callback("요약 생성 완료", 88.0)
+            else:
+                logger.warning(f"요약 생성 결과: 성공한 항목이 없음 (총 {total_processed}개 처리)")
+                progress_callback("요약 생성 완료 (성공 0건)", 88.0)
             
         except Exception as e:
             logger.error(f"요약 생성 실패: {e}")
             progress_callback("요약 생성 실패", 88.0)
         
-        # 벡터 DB 동기화 자동 실행 (같은 DB 연결 재사용)
-        logger.info("   ├─ 3단계: LLM 요약 생성 ✅")
-        logger.info("   └─ 4단계: 벡터 DB 동기화 🔄")
-        progress_callback("벡터 DB 동기화 중...", 90.0)
-        
-        try:
-            # sync_summaries 기능 직접 호출
-            from core.ingest.processor import sync_summaries_to_vector_db
-            sync_result = await sync_summaries_to_vector_db(
-                company_id=company_id,
-                platform=platform,
-                batch_size=25,
-                force_update=False
-            )
+        # 요약 생성 결과에 따른 로깅
+        if summary_success:
+            logger.info("   ├─ 3단계: LLM 요약 생성 ✅")
             
-            if sync_result.get("status") == "success":
-                synced_count = sync_result.get('synced_count', 0)
-                logger.info(f"   └─ 4단계: 벡터 DB 동기화 ✅ ({synced_count:,}개 문서 처리)")
-                progress_callback("벡터 DB 동기화 완료", 100.0)
-            else:
-                errors = sync_result.get('errors', [])
-                error_count = len(errors) if errors else 0
+            # 요약 생성이 성공한 경우에만 벡터 DB 동기화 진행
+            logger.info("   └─ 4단계: 벡터 DB 동기화 🔄")
+            progress_callback("벡터 DB 동기화 중...", 90.0)
+            
+            sync_success = False
+            
+            try:
+                # sync_summaries 기능 직접 호출
+                from core.ingest.processor import sync_summaries_to_vector_db
+                sync_result = await sync_summaries_to_vector_db(
+                    company_id=company_id,
+                    platform=platform,
+                    batch_size=25,
+                    force_update=False
+                )
+                
                 synced_count = sync_result.get('synced_count', 0)
                 
-                if errors:
-                    logger.error(f"   └─ 4단계: 벡터 DB 동기화 ⚠️ (성공: {synced_count}개, 오류: {error_count}개)")
-                    logger.error(f"      └─ 주요 오류: {errors[:3]}")  # 첫 3개 오류만 표시
+                if sync_result.get("status") == "success" and synced_count > 0:
+                    sync_success = True
+                    logger.info(f"   └─ 4단계: 벡터 DB 동기화 ✅ ({synced_count:,}개 문서 처리)")
+                    progress_callback("벡터 DB 동기화 완료", 100.0)
                 else:
-                    logger.warning(f"   └─ 4단계: 벡터 DB 동기화 ⚠️ (처리: {synced_count}개, 새로 추가: 0개)")
-                progress_callback("벡터 DB 동기화 완료 (일부 오류)", 95.0)
-        except Exception as e:
-            logger.error(f"   └─ 4단계: 벡터 DB 동기화 ❌ (오류: {str(e)[:100]}...)")
-            progress_callback("벡터 DB 동기화 실패", 95.0)
+                    errors = sync_result.get('errors', [])
+                    error_count = len(errors) if errors else 0
+                    
+                    if errors:
+                        logger.error(f"   └─ 4단계: 벡터 DB 동기화 ❌ (성공: {synced_count}개, 오류: {error_count}개)")
+                        logger.error(f"      └─ 주요 오류: {errors[:3]}")  # 첫 3개 오류만 표시
+                    elif synced_count == 0:
+                        logger.warning(f"   └─ 4단계: 벡터 DB 동기화 ⚠️ (처리할 데이터 없음)")
+                    else:
+                        logger.warning(f"   └─ 4단계: 벡터 DB 동기화 ⚠️ (처리: {synced_count}개, 상태: {sync_result.get('status', 'unknown')})")
+                    
+                    progress_callback("벡터 DB 동기화 완료 (일부 오류)", 95.0)
+            except Exception as e:
+                logger.error(f"   └─ 4단계: 벡터 DB 동기화 ❌ (오류: {str(e)[:100]}...)")
+                progress_callback("벡터 DB 동기화 실패", 95.0)
+        else:
+            logger.error("   ├─ 3단계: LLM 요약 생성 ❌")
+            logger.warning("   └─ 4단계: 벡터 DB 동기화 건너뜀 (요약 생성 실패로 인해)")
+            progress_callback("요약 생성 실패로 벡터 DB 동기화 건너뜀", 95.0)
+            sync_success = False
         
         end_time = datetime.now()
         duration = (end_time - start_time).total_seconds()
         
+        # 전체 성공 여부 판단
+        overall_success = summary_success and sync_success
+        
         # 수집 결과 요약 로깅
-        logger.info(f"✅ 데이터 수집 완료!")
+        if overall_success:
+            logger.info(f"✅ 데이터 수집 완료!")
+        else:
+            logger.warning(f"⚠️ 데이터 수집 부분 완료 (일부 실패)")
+        
         logger.info(f"📈 수집 결과 요약:")
         logger.info(f"   ├─ 회사: {company_id}")
         logger.info(f"   ├─ 플랫폼: {platform}")
         logger.info(f"   ├─ 소요시간: {duration:.2f}초 ({duration/60:.1f}분)")
         logger.info(f"   ├─ 시작시간: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
-        logger.info(f"   └─ 완료시간: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info(f"   ├─ 완료시간: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info(f"   ├─ 요약 생성: {'✅' if summary_success else '❌'}")
+        logger.info(f"   └─ 벡터 DB: {'✅' if sync_success else '❌'}")
+        
+        # 상황에 맞는 메시지 생성
+        if overall_success:
+            message = f"데이터 수집이 성공적으로 완료되었습니다. (소요시간: {duration:.1f}초)"
+        elif summary_success and not sync_success:
+            message = f"데이터 수집 및 요약 생성 완료, 벡터 DB 동기화 실패. (소요시간: {duration:.1f}초)"
+        elif not summary_success and sync_success:
+            message = f"데이터 수집 및 벡터 DB 동기화 완료, 요약 생성 실패. (소요시간: {duration:.1f}초)"
+        else:
+            message = f"데이터 수집은 완료했으나 요약 생성 및 벡터 DB 동기화 실패. (소요시간: {duration:.1f}초)"
         
         # 기본 응답 생성
         response_data = {
-            "success": True,
-            "message": f"데이터 수집이 성공적으로 완료되었습니다. (소요시간: {duration:.1f}초)",
+            "success": overall_success,
+            "message": message,
             "start_time": start_time.isoformat(),
             "end_time": end_time.isoformat(),
             "duration_seconds": duration
         }
         
         # 메타데이터 포함 (요약 결과에서 추출)
-        if request.return_attachment_metadata and 'summary_result' in locals():
+        if 'summary_result' in locals() and summary_result:
             if 'attachment_metadata' in summary_result:
                 response_data["attachment_metadata"] = summary_result["attachment_metadata"]
             response_data["summaries_generated"] = summary_result.get("success_count", 0)

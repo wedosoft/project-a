@@ -78,8 +78,13 @@ logger = logging.getLogger(__name__)
 ticket_context_cache = TTLCache(maxsize=1000, ttl=3600)  # 1시간 유효
 ticket_summary_cache = TTLCache(maxsize=500, ttl=1800)  # 30분 유효
 
-# LLMManager 인스턴스 생성 (새로운 모듈화된 구조)
-llm_manager = LLMManager()
+# LLM Manager import
+from core.llm.manager import get_llm_manager
+
+# 전역 싱글톤 LLM Manager 사용
+logger.info("🧠 LLM Manager 초기화 시작...")
+llm_manager = get_llm_manager()
+logger.info("🧠 LLM Manager 초기화 완료")
 
 # 하이브리드 검색 매니저 초기화
 hybrid_search_manager = HybridSearchManager(

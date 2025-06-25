@@ -1,12 +1,34 @@
 """
-최적화된 LLM 요약 생성기 - 영어 프롬프트 기반
+LEGACY MODULE - DEPRECATED
 
-티켓과 KB 문서에 대한 정확하고 상세한 요약을 생성합니다.
+This module is being phased out in favor of the new modular summarizer system.
+
+NEW SYSTEM LOCATION: backend.core.llm.summarizer
+
+MIGRATION GUIDE:
+- Old: from backend.core.llm.optimized_summarizer import generate_optimized_summary
+- New: from backend.core.llm.summarizer import generate_optimized_summary
+
+MODULAR COMPONENTS:
+- CoreSummarizer: Main summarization logic
+- PromptBuilder: Template-based prompt generation  
+- AttachmentSelector: LLM-based attachment selection
+- QualityValidator: Multi-dimensional quality assessment
+- ContextOptimizer: Content size optimization
+- EmailProcessor: Email-specific processing
+- HybridSummarizer: Large content adaptive strategies
+- LanguageDetector: Advanced language detection
+
+For new development, use the modular system directly.
+This file provides backward compatibility wrappers only.
+
+Last updated: 2025-06-25
 """
 
 import logging
 import re
 import hashlib
+import warnings
 from datetime import datetime
 from typing import Dict, Any, Optional, Tuple, Set, List, Union
 from .manager import LLMManager
@@ -14,20 +36,32 @@ from .models.base import LLMProvider
 
 logger = logging.getLogger(__name__)
 
+# Issue deprecation warning when module is imported
+warnings.warn(
+    "optimized_summarizer module is deprecated. Use 'backend.core.llm.summarizer' instead.",
+    DeprecationWarning,
+    stacklevel=2
+)
+
 # 전역 LLM 매니저 인스턴스
 llm_manager = LLMManager()
 
 
 def detect_content_language(content: str) -> str:
     """
-    콘텐츠 언어 자동 감지
+    DEPRECATED - Use LanguageDetector from summarizer.utils instead
     
-    Args:
-        content: 분석할 텍스트
-        
-    Returns:
-        str: 감지된 언어 코드 ('ko', 'en', 'ja', 'zh', 'other')
+    This function is maintained for backward compatibility only.
     """
+    import warnings
+    warnings.warn(
+        "detect_content_language is deprecated. Use LanguageDetector from summarizer.utils instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    
+    from .summarizer.utils import detect_content_language as new_detect_language
+    return new_detect_language(content)
     if not content or len(content.strip()) < 10:
         return 'ko'  # 기본값
     
@@ -71,6 +105,14 @@ def detect_content_language(content: str) -> str:
 
 def get_section_titles(ui_language: str = 'ko') -> Dict[str, str]:
     """
+    LEGACY WRAPPER - Redirects to new utils system
+    
+    Get section titles for specified language.
+    Use summarizer.utils.get_section_titles directly for new code.
+    """
+    from .summarizer.utils import get_section_titles as new_get_section_titles
+    return new_get_section_titles(ui_language)
+    """
     UI 언어에 따른 섹션 타이틀 반환
     
     Args:
@@ -96,6 +138,24 @@ def get_section_titles(ui_language: str = 'ko') -> Dict[str, str]:
 
 
 def get_subsection_titles(ui_language: str = 'ko') -> Dict[str, Dict[str, str]]:
+    """
+    LEGACY WRAPPER - Redirects to new utils system
+    
+    This function maintains backward compatibility.
+    Use get_section_titles from summarizer.utils instead.
+    """
+    from .summarizer.utils import get_section_titles
+    
+    # Convert new format to legacy format
+    section_titles = get_section_titles(ui_language)
+    
+    # Legacy format expected by old code
+    return {
+        'problem': section_titles['problem'],
+        'cause': section_titles['cause'], 
+        'solution': section_titles['solution'],
+        'insights': section_titles['insights']
+    }
     """
     UI 언어에 따른 서브섹션 타이틀 반환
     
@@ -162,6 +222,23 @@ async def generate_optimized_summary(
     metadata: Optional[Dict[str, Any]] = None,
     ui_language: str = "ko"
 ) -> str:
+    """
+    LEGACY WRAPPER - Redirects to new modular summarizer system
+    
+    This function maintains backward compatibility while using the new modular system.
+    All new development should use the modular system directly.
+    """
+    # Import the new modular system
+    from .summarizer import generate_optimized_summary as new_generate_summary
+    
+    # Delegate to new system
+    return await new_generate_summary(
+        content=content,
+        content_type=content_type,
+        subject=subject,
+        metadata=metadata,
+        ui_language=ui_language
+    )
     """
     최적화된 프롬프트로 콘텐츠 요약을 생성합니다.
     
@@ -241,6 +318,21 @@ async def generate_optimized_summary(
 
 
 def _get_optimized_system_prompt(content_type: str, content_language: str = "ko", ui_language: str = "ko") -> str:
+    """
+    DEPRECATED - Use PromptBuilder from summarizer.prompt instead
+    
+    This function is maintained for backward compatibility only.
+    """
+    import warnings
+    warnings.warn(
+        "_get_optimized_system_prompt is deprecated. Use PromptBuilder from summarizer.prompt instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    
+    from .summarizer.prompt import PromptBuilder
+    builder = PromptBuilder()
+    return builder.build_system_prompt(content_type, content_language, ui_language)
     """
     최적화된 시스템 프롬프트 반환 - 언어 일관성을 위해 한국어 기반으로 변경
     """
@@ -489,16 +581,20 @@ FORMATTING RULES:
 
 def _select_relevant_attachments(attachments: List[Dict[str, Any]], content: str, subject: str = "") -> List[Dict[str, Any]]:
     """
-    첨부파일 중에서 티켓 내용과 가장 관련성이 높은 첨부파일을 선택
+    DEPRECATED - Use AttachmentSelector from summarizer.attachment instead
     
-    Args:
-        attachments: 첨부파일 리스트
-        content: 티켓 내용
-        subject: 티켓 제목
-        
-    Returns:
-        관련성이 높은 첨부파일 리스트 (최대 3개)
+    This function is maintained for backward compatibility only.
     """
+    import warnings
+    warnings.warn(
+        "_select_relevant_attachments is deprecated. Use AttachmentSelector from summarizer.attachment instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    
+    from .summarizer.attachment import AttachmentSelector
+    selector = AttachmentSelector()
+    return selector.select_relevant_attachments(attachments, content, subject)
     if not attachments:
         return []
     
@@ -605,8 +701,20 @@ def _build_optimized_user_prompt(
     ui_language: str
 ) -> str:
     """
-    최적화된 사용자 프롬프트 구성
+    DEPRECATED - Use PromptBuilder from summarizer.prompt instead
+    
+    This function is maintained for backward compatibility only.
     """
+    import warnings
+    warnings.warn(
+        "_build_optimized_user_prompt is deprecated. Use PromptBuilder from summarizer.prompt instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    
+    from .summarizer.prompt import PromptBuilder
+    builder = PromptBuilder()
+    return builder.build_user_prompt(content, content_type, subject, metadata, content_language, ui_language)
     
     prompt_parts = []
     
@@ -729,10 +837,6 @@ ATTACHMENT HANDLING:
   - 📎 filename2
   - 📎 filename3
 - Include maximum 3 files, only those directly related to the main issue or solution
-- If no relevant attachments are provided, mention other resources or documentation referenced in the conversation
-- Use the clean format: 📎 filename (no technical details in the summary)
-- The metadata contains attachment IDs, URLs, and ticket IDs for download functionality
-- Only include attachments directly related to the main issue or solution
 - If no relevant attachments are provided, mention other resources or documentation referenced in the conversation"""
     
     prompt_parts.append(instruction)
@@ -742,11 +846,21 @@ ATTACHMENT HANDLING:
 
 def _validate_summary_quality(summary: str, original_content: str, content_language: str) -> float:
     """
-    요약 품질 검증
+    DEPRECATED - Use QualityValidator from summarizer.quality instead
     
-    Returns:
-        float: 품질 점수 (0.0 ~ 1.0)
+    This function is maintained for backward compatibility only.
     """
+    import warnings
+    warnings.warn(
+        "_validate_summary_quality is deprecated. Use QualityValidator from summarizer.quality instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    
+    from .summarizer.quality import QualityValidator
+    validator = QualityValidator()
+    result = validator.validate_summary_quality(summary, original_content, content_language)
+    return result['quality_score']
     if not summary or len(summary.strip()) < 50:
         return 0.0
     
@@ -788,9 +902,19 @@ def _validate_summary_quality(summary: str, original_content: str, content_langu
 
 
 class AdaptiveContextManager:
-    """대용량 처리를 위한 적응형 컨텍스트 관리자"""
+    """
+    DEPRECATED - Use ContextOptimizer from summarizer.context instead
+    
+    This class is maintained for backward compatibility only.
+    """
     
     def __init__(self):
+        import warnings
+        warnings.warn(
+            "AdaptiveContextManager is deprecated. Use ContextOptimizer from summarizer.context instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         self.max_tokens_per_request = 6000  # Conservative limit for quality
         self.min_tokens_per_doc = 200
         self.quality_threshold = 0.8
@@ -971,9 +1095,19 @@ class AdaptiveContextManager:
 
 
 class QualityGuard:
-    """대용량 처리 시 품질 보장"""
+    """
+    DEPRECATED - Use QualityValidator from summarizer.quality instead
+    
+    This class is maintained for backward compatibility only.
+    """
     
     def __init__(self):
+        import warnings
+        warnings.warn(
+            "QualityGuard is deprecated. Use QualityValidator from summarizer.quality instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         self.min_quality_threshold = 0.85
         self.critical_elements = [
             "문제 상황", "근본 원인", "해결 과정", "핵심 포인트"
@@ -1071,11 +1205,21 @@ class QualityGuard:
             return max(1.0 - (length - 1500) / 1000, 0.5)
 
 
-# 기존 OptimizedSummarizer 클래스에 추가
 class OptimizedSummarizer:
-    # ...existing code...
+    """
+    DEPRECATED - Use CoreSummarizer from summarizer.core instead
+    
+    This class is maintained for backward compatibility only.
+    For new code, use the modular summarizer system.
+    """
 
     def __init__(self):
+        import warnings
+        warnings.warn(
+            "OptimizedSummarizer is deprecated. Use CoreSummarizer from summarizer.core instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         self.adaptive_context_manager = AdaptiveContextManager()
         self.quality_guard = QualityGuard()
         self.large_scale_mode = False
@@ -1291,14 +1435,26 @@ Please review the original content directly for detailed information.
 
 def preprocess_email_chain(content: str) -> str:
     """
-    이메일 체인에서 중복 내용을 제거하여 크기를 대폭 축소
+    DEPRECATED - Use EmailProcessor from summarizer.email instead
     
-    Args:
-        content: 원본 티켓 내용
-        
-    Returns:
-        str: 중복 제거된 정리된 내용
+    This function is maintained for backward compatibility only.
     """
+    import warnings
+    warnings.warn(
+        "preprocess_email_chain is deprecated. Use EmailProcessor from summarizer.email instead.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    
+    try:
+        # For backward compatibility, provide basic email preprocessing
+        from .summarizer.email import EmailProcessor
+        processor = EmailProcessor()
+        processed = processor.process_email_content(content, preserve_thread=True)
+        return processed.content
+    except ImportError:
+        # Fallback if email processor not available
+        return content
     try:
         logger.info(f"📧 이메일 체인 전처리 시작 - 원본 크기: {len(content):,}자")
         
@@ -1562,68 +1718,21 @@ async def generate_hybrid_summary(
     ui_language: str = "ko"
 ) -> str:
     """
-    하이브리드 요약 생성 - 크기에 따른 적응형 전략
+    LEGACY WRAPPER - Redirects to new hybrid summarizer system
     
-    Args:
-        content: 요약할 내용
-        content_type: 콘텐츠 타입
-        subject: 제목
-        metadata: 메타데이터
-        ui_language: UI 언어
-        
-    Returns:
-        str: 생성된 요약
+    This function maintains backward compatibility while using the new modular system.
+    Use HybridSummarizer directly for new code.
     """
-    try:
-        logger.info(f"🎯 하이브리드 요약 시작 - 원본 크기: {len(content):,}자")
-        
-        # 1단계: 이메일 체인 중복 제거 (무료 전처리)
-        cleaned_content = preprocess_email_chain(content)
-        
-        # 2단계: 크기에 따른 적응형 요약 전략
-        if len(cleaned_content) <= 15000:
-            # 소형: 표준 요약
-            logger.info("📝 표준 요약 방식 사용")
-            return await generate_optimized_summary(
-                content=cleaned_content,
-                content_type=content_type,
-                subject=subject,
-                metadata=metadata,
-                ui_language=ui_language
-            )
-        
-        elif len(cleaned_content) <= 35000:
-            # 중형: 큰 청크 처리
-            logger.info("📊 큰 청크 요약 방식 사용")
-            return await _generate_large_chunk_summary(
-                content=cleaned_content,
-                content_type=content_type,
-                subject=subject,
-                metadata=metadata,
-                ui_language=ui_language
-            )
-        
-        else:
-            # 대형: 롤링 요약
-            logger.info("🔄 롤링 요약 방식 사용")
-            return await _generate_rolling_summary(
-                content=cleaned_content,
-                content_type=content_type,
-                subject=subject,
-                metadata=metadata,
-                ui_language=ui_language
-            )
-            
-    except Exception as e:
-        logger.error(f"❌ 하이브리드 요약 생성 실패: {e}")
-        # 실패 시 기본 요약으로 fallback
-        return await generate_optimized_summary(
-            content=content[:20000],  # 20K로 제한
-            content_type=content_type,
-            subject=subject,
-            metadata=metadata,
-            ui_language=ui_language
-        )
+    from .summarizer.hybrid import HybridSummarizer
+    
+    hybrid_summarizer = HybridSummarizer()
+    return await hybrid_summarizer.generate_hybrid_summary(
+        content=content,
+        content_type=content_type,
+        subject=subject,
+        metadata=metadata,
+        ui_language=ui_language
+    )
 
 
 async def _generate_large_chunk_summary(
@@ -1769,14 +1878,15 @@ Analyze the content above and create an integrated summary with the following 4 
 - Verification: How success will be measured or confirmed
 
 {titles['insights']}
-- Technical Specifications: Settings, configurations, technical parameters
-- Service Requirements: Limitations, dependencies, compatibility requirements
-- Process Insights: Best practices, workflows, procedural knowledge
+- Technical Specifications: Settings, configurations, and technical parameters
+
+- Service Requirements: Limitations, dependencies, and compatibility needs
+- Process Insights: Best practices, workflows, and procedural knowledge
 - Reference Materials: Mentioned documentation, tools, resources, and attachments
   - For file attachments: Include filename, type, and reference as "📎 [filename] (Type: [type])" 
   - For documents: Include document names and relevant URLs if mentioned
   - For tools/systems: Include names and key configuration details
-- Future Considerations: Recommendations for similar cases, preventive measures
+- Future Considerations: Recommendations for similar cases or preventive measures
 
 STRICTLY FORBIDDEN:
 - Adding fallback phrases like "insufficient information provided" or "원문에서 충분한 정보가 제공되지 않아"
@@ -1863,3 +1973,80 @@ INTEGRATION PRINCIPLES:
         metadata={"summary_type": "integration"},
         ui_language=ui_language
     )
+# ==========================================
+# MIGRATION GUIDE AND CLEANUP STATUS
+# ==========================================
+
+"""
+LEGACY FILE CLEANUP STATUS:
+
+✅ MIGRATED TO NEW SYSTEM:
+- generate_optimized_summary() → summarizer.core.summarizer
+- get_section_titles() → summarizer.utils.language  
+- get_subsection_titles() → summarizer.utils.language
+- _get_optimized_system_prompt() → summarizer.prompt.builder
+- _build_optimized_user_prompt() → summarizer.prompt.builder
+- _select_relevant_attachments() → summarizer.attachment.selector
+- _validate_summary_quality() → summarizer.quality.validator
+- detect_content_language() → summarizer.utils.language
+- preprocess_email_chain() → summarizer.email.processor
+- generate_hybrid_summary() → summarizer.hybrid.summarizer
+- AdaptiveContextManager → summarizer.context.optimizer
+- QualityGuard → summarizer.quality.validator
+- OptimizedSummarizer → summarizer.core.summarizer
+
+🔄 CURRENT STATUS:
+- All public functions now redirect to new modular system
+- Backward compatibility maintained via wrapper functions
+- Deprecation warnings issued for all legacy usage
+- Internal helper functions marked as deprecated
+
+📋 TODO FOR COMPLETE CLEANUP:
+1. Monitor usage patterns to ensure no critical dependencies
+2. Remove internal helper functions after 1-2 releases
+3. Eventually remove this entire file
+4. Update all imports across codebase to use new system
+
+🚀 NEW SYSTEM BENEFITS:
+- Modular architecture for better maintainability
+- YAML-based prompt templates for easy management
+- LLM-based attachment selection (1-3 relevant only)
+- Advanced quality validation with regeneration
+- Adaptive strategies for large content
+- Comprehensive test coverage
+- Clear separation of concerns
+
+📖 MIGRATION EXAMPLES:
+
+OLD WAY:
+    from backend.core.llm.optimized_summarizer import generate_optimized_summary
+    summary = await generate_optimized_summary(content, "ticket", ui_language="ko")
+
+NEW WAY:
+    from backend.core.llm.summarizer import generate_optimized_summary
+    summary = await generate_optimized_summary(content, "ticket", ui_language="ko")
+
+ADVANCED USAGE:
+    from backend.core.llm.summarizer import CoreSummarizer, HybridSummarizer
+    
+    # For standard summarization
+    core = CoreSummarizer()
+    summary = await core.generate_summary(content, metadata=metadata)
+    
+    # For large content with adaptive strategies
+    hybrid = HybridSummarizer()
+    summary = await hybrid.generate_hybrid_summary(large_content)
+
+DIRECT COMPONENT USAGE:
+    from backend.core.llm.summarizer import PromptBuilder, AttachmentSelector
+    
+    # Custom prompt building
+    builder = PromptBuilder()
+    prompt = builder.build_system_prompt("knowledge_base", "ko", "ko")
+    
+    # Smart attachment selection
+    selector = AttachmentSelector()
+    relevant = selector.select_relevant_attachments(attachments, content, subject)
+
+This file will be removed in a future release once migration is complete.
+"""
