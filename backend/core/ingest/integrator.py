@@ -106,6 +106,7 @@ def create_integrated_ticket_object(
     
     # 간소화된 통합 객체 구성 (용량 최적화)
     integrated_object = {
+        "id": ticket.get("id"),  # 마이그레이션 레이어 호환성을 위해 추가
         "integrated_text": "\n\n".join(text_parts),  # LLM 처리용 텍스트
         "attachments": attachment_refs,  # 최소 첨부파일 정보
         "essential_metadata": essential_metadata,  # 핵심 메타데이터만
@@ -203,6 +204,7 @@ def create_integrated_article_object(
     
     # 간소화된 통합 객체 구성 (용량 최적화)
     integrated_object = {
+        "id": article.get("id"),  # 마이그레이션 레이어 호환성을 위해 추가
         "integrated_text": "\n\n".join(text_parts),  # LLM 처리용 텍스트
         "attachments": attachment_refs,  # 최소 첨부파일 정보
         "essential_metadata": essential_metadata,  # 핵심 메타데이터만

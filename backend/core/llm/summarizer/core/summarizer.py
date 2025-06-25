@@ -22,12 +22,23 @@ class CoreSummarizer:
     Core summarizer class that orchestrates all summarization components
     """
     
-    def __init__(self):
+    def __init__(self, use_llm_attachment_selector: bool = False):
         self.prompt_builder = PromptBuilder()
         self.attachment_selector = AttachmentSelector()
         self.quality_validator = QualityValidator()
         self.context_optimizer = ContextOptimizer()
         self.manager = get_llm_manager()  # 싱글톤 인스턴스 사용
+        self.use_llm_attachment_selector = use_llm_attachment_selector
+        
+        # LLM 기반 첨부파일 선별기 (옵션)
+        if use_llm_attachment_selector:
+            try:
+                from ..attachment.llm_selector import HybridAttachmentSelector
+                self.llm_attachment_selector = HybridAttachmentSelector(prefer_llm=True)
+                logger.info("LLM 기반 첨부파일 선별기 활성화됨")
+            except ImportError:
+                logger.warning("LLM 첨부파일 선별기 로드 실패, rule-based 사용")
+                self.llm_attachment_selector = None
         
     async def generate_summary(
         self,
@@ -53,14 +64,25 @@ class CoreSummarizer:
         try:
             logger.info(f"Starting summary generation - Type: {content_type}, Language: {ui_language}")
             
-            # 1. Select relevant attachments (LLM-based selection)
+            # 1. Select relevant attachments (choose between LLM or rule-based)
             selected_attachments = []
             if metadata and metadata.get('attachments'):
-                selected_attachments = self.attachment_selector.select_relevant_attachments(
-                    attachments=metadata['attachments'],
-                    content=content,
-                    subject=subject
-                )
+                if self.use_llm_attachment_selector and hasattr(self, 'llm_attachment_selector') and self.llm_attachment_selector:
+                    # LLM 기반 지능형 선별
+                    logger.info("LLM 기반 첨부파일 선별 시작")
+                    selected_attachments = await self.llm_attachment_selector.select_relevant_attachments(
+                        attachments=metadata['attachments'],
+                        content=content,
+                        subject=subject
+                    )
+                else:
+                    # 기존 rule-based 선별
+                    logger.info("Rule-based 첨부파일 선별 시작")
+                    selected_attachments = self.attachment_selector.select_relevant_attachments(
+                        attachments=metadata['attachments'],
+                        content=content,
+                        subject=subject
+                    )
                 logger.info(f"Selected {len(selected_attachments)} relevant attachments from {len(metadata['attachments'])} total")
             
             # 2. Update metadata with selected attachments only

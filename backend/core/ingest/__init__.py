@@ -12,7 +12,6 @@ from .processor import (
     clear_checkpoints,
     ingest,
     load_checkpoint,
-    load_local_data,
     save_checkpoint,
     update_status_mappings,
     verify_database_integrity,
@@ -39,8 +38,7 @@ __all__ = [
     # processor
     "clear_checkpoints",
     "ingest",
-    "load_checkpoint", 
-    "load_local_data",
+    "load_checkpoint",
     "save_checkpoint",
     "update_status_mappings",
     "verify_database_integrity",

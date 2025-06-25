@@ -69,9 +69,9 @@ ATTACHMENT_SELECTION_CONFIG = {
     # 점수 임계값
     "score_thresholds": {
         "direct_mention": 10,  # 직접 언급
-        "high_relevance": 7,   # 높은 관련성
-        "medium_relevance": 5, # 중간 관련성
-        "minimum_score": 3     # 최소 점수
+        "high_relevance": 8,   # 높은 관련성 (7→8로 상향)
+        "medium_relevance": 6, # 중간 관련성 (5→6으로 상향)
+        "minimum_score": 4     # 최소 점수 (3→4로 상향)
     },
     
     # 파일 확장자별 기본 점수

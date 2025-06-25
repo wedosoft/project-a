@@ -1,13 +1,34 @@
 """
+SQLite 데이터베이스 저장 및 검색 기능
+
+통합 객체 (integrated_objects) 중심의 데이터 저장소 관리
+"""
+
+import sqlite3
+import json
+import logging
+from datetime import datetime
+from typing import Dict, List, Any
+import traceback
+
+logger = logging.getLogger(__name__)
+
+# ORM 마이그레이션 레이어 import (선택적)
+try:
+    from ..migration_layer import store_integrated_object_with_migration
+    ORM_AVAILABLE = True
+    logger.info("✅ ORM 마이그레이션 레이어 사용 가능")
+except ImportError:
+    ORM_AVAILABLE = False
+    logger.info("⚠️ ORM 마이그레이션 레이어 사용 불가, SQLite 모드로 실행")
+
+"""
 데이터 저장 모듈 - SQLite 및 벡터 DB 저장
 
 지침서 준수: 멀티테넌트 격리 및 성능 최적화
 """
 
-import logging
 from typing import Any, Dict
-
-logger = logging.getLogger(__name__)
 
 def store_integrated_object_to_sqlite(
     db, 
@@ -27,6 +48,25 @@ def store_integrated_object_to_sqlite(
     Returns:
         bool: 저장 성공 여부
     """
+    
+    # ORM 우선 시도 (환경변수 설정된 경우)
+    if ORM_AVAILABLE:
+        import os
+        use_orm = os.getenv('USE_ORM', 'false').lower() == 'true'
+        
+        if use_orm:
+            logger.info(f"🔄 ORM 저장 시도: {integrated_object.get('id')}")
+            orm_success = store_integrated_object_with_migration(
+                integrated_object, company_id, platform or "freshdesk"
+            )
+            
+            if orm_success:
+                logger.info(f"✅ ORM 저장 성공: {integrated_object.get('id')}")
+                return True
+            else:
+                logger.warning(f"⚠️ ORM 저장 실패, SQLite로 fallback: {integrated_object.get('id')}")
+    
+    # 기존 SQLite 저장 로직 (fallback 또는 기본 동작)
     try:
         # 지침서 준수: company_id 필수 검증
         if not company_id:
@@ -447,8 +487,8 @@ def get_integrated_object_from_sqlite(
             # JSON 문자열 필드들을 딕셔너리로 변환
             if result.get('original_data'):
                 result['original_data'] = json.loads(result['original_data'])
-            if result.get('metadata'):
-                result['metadata'] = json.loads(result['metadata'])
+            if result.get('tenant_metadata'):
+                result['tenant_metadata'] = json.loads(result['tenant_metadata'])
             return result
         
         return {}
@@ -509,8 +549,8 @@ def search_integrated_objects_from_sqlite(
             # JSON 문자열 필드들을 딕셔너리로 변환
             if result.get('original_data'):
                 result['original_data'] = json.loads(result['original_data'])
-            if result.get('metadata'):
-                result['metadata'] = json.loads(result['metadata'])
+            if result.get('tenant_metadata'):
+                result['tenant_metadata'] = json.loads(result['tenant_metadata'])
             results.append(result)
         
         return results

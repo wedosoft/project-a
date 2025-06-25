@@ -203,9 +203,22 @@ def _is_critical_file_type(attachment: Dict[str, Any]) -> bool:
 
 
 def _has_content_relevance(combined_text: str, config: Dict[str, Any]) -> bool:
-    """티켓 내용과 최소한의 연관성이 있는지 확인"""
+    """티켓 내용과 최소한의 연관성이 있는지 확인 - 더 엄격한 기준 적용"""
     content_keywords = config['content_keywords']
-    return any(keyword in combined_text for keyword in content_keywords)
+    
+    # 기본 키워드 매칭
+    basic_match = any(keyword in combined_text for keyword in content_keywords)
+    
+    # 추가 엄격한 조건: 구체적인 문제 상황과 관련된 키워드가 있는지 확인
+    strict_keywords = [
+        "오류", "에러", "문제", "버그", "실패", "작동", "동작", "로그", 
+        "error", "problem", "issue", "bug", "fail", "not work", "broken", "log"
+    ]
+    
+    strict_match = any(keyword in combined_text for keyword in strict_keywords)
+    
+    # 두 조건 모두 만족해야 연관성 있다고 판단
+    return basic_match and strict_match
 
 
 def get_attachment_summary_for_display(relevant_attachments: List[Dict[str, Any]]) -> str:
