@@ -11,6 +11,12 @@ from .vectordb import VectorDBFactory, VectorDBInterface, QdrantAdapter, vector_
 from .factory import DatabaseFactory, TenantDataManager, DatabaseType, get_database
 from .tenant_config import TenantConfigManager
 
+# ORM Models (새로 추가)
+from .models import (
+    Base, Ticket, Attachment, Conversation, Summary,
+    Company, Agent, Assignment, Category, IntegratedObject, ProcessingLog
+)
+
 __all__ = [
     # Core database managers
     'DatabaseManager',
@@ -30,4 +36,10 @@ __all__ = [
     
     # Configuration
     'TenantConfigManager',
+    
+    # ORM Models (새로 추가)
+    'Base',
+    'Ticket', 'Attachment', 'Conversation', 'Summary',
+    'Company', 'Agent', 'Assignment', 
+    'Category', 'IntegratedObject', 'ProcessingLog',
 ]

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
-from ..models.integrated_object import IntegratedObject
+from ..database.models.integrated_object import IntegratedObject
 
 
 class IntegratedObjectRepository:

@@ -13,7 +13,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 
-from ..models.base import Base
+from .models.base import Base
 
 logger = logging.getLogger(__name__)
 

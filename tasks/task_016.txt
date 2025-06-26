@@ -3,7 +3,7 @@
 # Status: pending
 # Dependencies: 12, 13
 # Priority: medium
-# Description: Freshdesk Custom App의 전체 UI/UX 디자인을 확정하고, 주요 화면 및 상호작용에 대한 프로토타입을 제작합니다. PRD 및 프론트엔드 가이드라인에 명시된 레이아웃(티켓 요약 카드, 3-탭 영역)과 사용자 경험 원칙을 준수합니다.
+# Description: Copilot Canvas의 전체 UI/UX 디자인을 확정하고, 주요 화면 및 상호작용에 대한 프로토타입을 제작합니다. PRD 및 프론트엔드 가이드라인에 명시된 레이아웃(티켓 요약 카드, 3-탭 영역)과 사용자 경험 원칙을 준수합니다.
 # Details:
 - UI 디자인 시스템 정의 (색상, 타이포그래피, 아이콘, 컴포넌트 스타일 가이드).
 - 주요 화면 디자인:

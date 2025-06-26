@@ -1,9 +1,9 @@
 """
-Freshdesk Custom App 백엔드 서비스
+Copilot Canvas 백엔드 서비스
 
-이 프로젝트는 Freshdesk Custom App(Prompt Canvas)을 위한 백엔드 서비스입니다.
-RAG(Retrieval-Augmented Generation) 기술을 활용하여 멀티플랫폼(Freshdesk, Zendesk 등)
-티켓과 지식베이스를 기반으로 AI 기반 응답 생성 기능을 제공합니다.
+Copilot Canvas를 위한 백엔드 서비스입니다.
+RAG(Retrieval-Augmented Generation) 기술을 활용하여 Freshdesk 티켓과 지식베이스를 
+기반으로 AI 기반 응답 생성 기능을 제공합니다.
 """
 
 import logging
@@ -40,18 +40,18 @@ from .freshdesk_attachments import router as freshdesk_attachments_router
 
 # FastAPI 앱 생성
 app = FastAPI(
-    title="Freshdesk Custom App 백엔드",
-    description="RAG 기반 멀티플랫폼 고객 지원 AI 서비스",
+    title="Copilot Canvas 백엔드",
+    description="RAG 기반 Freshdesk 고객 지원 AI 서비스",
     version="1.0.0"
 )
 
 # CORS 미들웨어 설정 - Freshdesk FDK 환경에서의 크로스 도메인 요청 허용
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 개발용: 모든 도메인 허용 (운영시에는 특정 도메인으로 제한)
+    allow_origins=["*"],  # 개발용: 모든 도메인 허용 (운영시에는 Freshdesk 도메인으로 제한)
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],  # 모든 헤더 허용
+    allow_headers=["*"],
 )
 
 # 분리된 라우터들 등록

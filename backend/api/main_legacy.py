@@ -1,7 +1,7 @@
 """
 Freshdesk Custom App 백엔드 서비스 (레거시)
 
-이 프로젝트는 Freshdesk Custom App(Prompt Canvas)을 위한 백엔드 서비스입니다.
+이 프로젝트는 Copilot Canvas를 위한 백엔드 서비스입니다.
 RAG(Retrieval-Augmented Generation) 기술을 활용하여 멀티플랫폼(Freshdesk, Zendesk 등)
 티켓과 지식베이스를 기반으로 AI 기반 응답 생성 기능을 제공합니다.
 """

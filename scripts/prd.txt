@@ -1,10 +1,10 @@
 # Product Requirements Document (PRD)
-# Prompt Canvas - Freshdesk Custom App (자연어 기반 상담사 지원 시스템)
+# Copilot Canvas (자연어 기반 상담사 지원 시스템)
 
 ## 1. 프로젝트 개요
 
 ### 1.1 제품 비전
-Freshdesk 상담사를 위한 자연어 기반 AI 응답 지원 시스템으로, 상담사가 자연어로 질문/요청을 하면 AI가 유사 티켓·추천 솔루션·이미지·첨부파일을 자동으로 검색하고 제안하는 Freshdesk Custom App 개발
+Freshdesk 상담사를 위한 자연어 기반 AI 응답 지원 시스템으로, 상담사가 자연어로 질문/요청을 하면 AI가 유사 티켓·추천 솔루션·이미지·첨부파일을 자동으로 검색하고 제안하는 Copilot Canvas 개발
 
 ### 1.2 핵심 목표
 - 자연어 명령을 통한 직관적인 상담사 지원 시스템 구축
