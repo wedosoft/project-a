@@ -13,9 +13,87 @@ from fastapi import Depends, Header, HTTPException, Request, status
 from core.config import settings
 from core.exceptions import AuthenticationError, AuthorizationError
 from core.utils import setup_logger
+from core.database.tenant_context import TenantContext
 
 # 로거 설정
 logger = setup_logger(__name__)
+
+
+async def get_tenant_context(
+    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID"),
+    x_platform: Optional[str] = Header(None, alias="X-Platform"),
+) -> TenantContext:
+    """
+    HTTP 헤더에서 테넌트 컨텍스트 추출 및 검증
+    
+    Required Headers:
+        X-Tenant-ID: 테넌트 식별자 (필수)
+        X-Platform: 플랫폼 식별자 (선택, 기본값: freshdesk)
+        
+    Args:
+        x_tenant_id: X-Tenant-ID 헤더 값
+        x_platform: X-Platform 헤더 값
+        
+    Returns:
+        TenantContext: 테넌트 컨텍스트 객체
+        
+    Raises:
+        HTTPException: 테넌트 ID가 누락되거나 유효하지 않은 경우
+    """
+    # 1. tenant_id 검증
+    if not x_tenant_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing X-Tenant-ID header"
+        )
+    
+    # 2. tenant_id 유효성 검증
+    if not _validate_tenant_id(x_tenant_id):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid tenant_id format: {x_tenant_id}"
+        )
+    
+    # 3. 플랫폼 기본값 설정
+    platform = x_platform or "freshdesk"
+    
+    # 4. 테넌트 컨텍스트 생성
+    try:
+        # tenant_id를 int로 변환 (현재는 string이지만 TenantContext는 int를 요구)
+        # 간단한 해시 변환 사용
+        tenant_id_int = hash(x_tenant_id) % (10**9)  # 임시 변환 로직
+        
+        return TenantContext(
+            tenant_id=tenant_id_int,
+            platform=platform
+        )
+    except Exception as e:
+        logger.error(f"Failed to create tenant context for {x_tenant_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to create tenant context"
+        )
+
+
+def _validate_tenant_id(tenant_id: str) -> bool:
+    """tenant_id 유효성 검증"""
+    if not tenant_id:
+        return False
+    
+    # 기본 규칙: 2-50자, 영숫자 및 하이픈만 허용
+    if not (2 <= len(tenant_id) <= 50):
+        return False
+    
+    import re
+    if not re.match(r'^[a-zA-Z0-9-]+$', tenant_id):
+        return False
+    
+    # 예약어 확인
+    reserved_words = {'admin', 'api', 'www', 'mail', 'ftp', 'localhost', 'test'}
+    if tenant_id.lower() in reserved_words:
+        return False
+    
+    return True
 
 
 async def get_tenant_id(
@@ -193,8 +271,7 @@ async def get_ticket_permissions(
 # =================================================================
 
 async def get_company_id(
-    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID"),
-    x_company_id: Optional[str] = Header(None, alias="X-Company-ID")  # 레거시 호환
+    x_company_id: Optional[str] = Header(None, alias="X-Company-ID")
 ) -> str:
     """
     레거시 호환성을 위한 company_id 함수

@@ -201,3 +201,27 @@ async def get_tenant_config(
 
 # 하위 호환성을 위한 별칭
 get_llm_router = get_llm_manager
+
+# Freshdesk 전용 별칭 (하위 호환성)
+async def get_freshdesk_config(
+    tenant_id: str = Depends(get_tenant_id),
+    platform: str = Depends(get_platform), 
+    domain: str = Depends(get_domain),
+    api_key: str = Depends(get_api_key)
+) -> TenantConfig:
+    """
+    Freshdesk 설정을 반환합니다 (get_tenant_config의 별칭)
+    
+    이 함수는 하위 호환성을 위해 제공되며, 
+    내부적으로 get_tenant_config를 호출합니다.
+    
+    Args:
+        tenant_id: X-Tenant-ID 헤더
+        platform: X-Platform 헤더 (freshdesk로 고정)
+        domain: X-Domain 헤더
+        api_key: X-API-Key 헤더
+        
+    Returns:
+        TenantConfig: 테넌트별 설정 객체
+    """
+    return await get_tenant_config(tenant_id, platform, domain, api_key)
