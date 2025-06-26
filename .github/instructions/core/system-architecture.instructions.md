@@ -11,7 +11,6 @@ _AI 참조 최적화 버전 - 확장 가능한 아키텍처 및 모듈 구조_
 **확장 가능한 멀티플랫폼 AI 지원 시스템 구축**
 
 - **모듈화 아키텍처**: 기능별 독립적 모듈로 유지보수성 향상
-- **플랫폼 확장성**: Freshdesk → Zendesk → ServiceNow 순차 지원
 - **글로벌 스케일링**: 다국어 지원 및 지역별 배포
 - **성능 최적화**: 비동기 처리 및 캐싱으로 응답 속도 향상
 
@@ -191,12 +190,8 @@ class FreshdeskAdapter(PlatformAdapter):
             'concurrent_requests': 50
         }
 
-class ZendeskAdapter(PlatformAdapter):
-    """Zendesk 플랫폼 어댑터 (확장용)"""
     
     async def fetch_tickets(self, start_date: str, end_date: str) -> AsyncGenerator[List[Dict], None]:
-        """Zendesk 티켓 수집 구현"""
-        # Zendesk API 특화 로직
         pass
     
     def get_rate_limits(self) -> Dict[str, int]:
@@ -212,7 +207,6 @@ class AdapterFactory:
     def create_adapter(platform: str, company_id: str, credentials: Dict) -> PlatformAdapter:
         adapters = {
             'freshdesk': FreshdeskAdapter,
-            'zendesk': ZendeskAdapter,
             'servicenow': ServiceNowAdapter  # 미래 확장
         }
         

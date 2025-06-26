@@ -12,7 +12,6 @@ _AI 참조 최적화 버전 - 확장성 전략과 단계별 로드맵 가이드_
 ### 🎯 **3단계 확장 전략**
 - **Phase 1 (MVP)**: Freshdesk 어댑터, JSON 스토리지, 기본 최적화 (완료)
 - **Phase 2 (SaaS)**: PostgreSQL, Redis Cluster, 멀티테넌트 완성 (3개월)
-- **Phase 3 (글로벌)**: Zendesk, ServiceNow, 다국어, 멀티리전 (6개월)
 
 ### 📊 **핵심 성능 목표**
 - **동시 사용자**: 1,000명+ (Phase 2)
@@ -144,18 +143,12 @@ services:
 
 #### 🌍 **플랫폼 확장**
 
-**Zendesk 어댑터 구현**:
 
-- [ ] **Zendesk 어댑터**: 완전 구현
   ```python
-  # backend/core/platforms/zendesk/adapter.py
-  class ZendeskAdapter(BasePlatformAdapter):
       async def fetch_tickets(self, company_id: str) -> List[Ticket]:
-          # Zendesk API 연동 구현
           pass
       
       async def fetch_articles(self, company_id: str) -> List[Article]:
-          # Zendesk 지식베이스 연동
           pass
   ```
 
@@ -287,7 +280,6 @@ MUST KNOW 핵심 파일 경로:
 ### 🌍 **Phase 3 성공 지표 (6개월 목표)**
 
 **기술 지표**:
-- [ ] 3개 이상 플랫폼 지원 (Freshdesk, Zendesk, ServiceNow)
 - [ ] 5개 언어 지원 (EN, KO, JA, ZH, DE)
 - [ ] 3개 리전 배포 (US, EU, APAC)
 - [ ] 글로벌 CDN 응답시간 1초 이하

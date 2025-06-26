@@ -286,7 +286,6 @@ curl "http://localhost:8000/ingest/logs?limit=100" \
 ## 확장 가능성
 
 ### 1. 다른 플랫폼 지원
-- 현재 Freshdesk 중심이지만, 동일한 패턴으로 다른 플랫폼(Zendesk, ServiceNow 등) 지원 가능
 - `platform` 필드로 구분하여 멀티 플랫폼 데이터 관리
 
 ### 2. 고급 기능

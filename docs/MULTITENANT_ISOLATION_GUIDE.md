@@ -11,7 +11,6 @@
 고객별 독립 데이터베이스 파일
 ├── acme_corp_freshdesk_data.db
 ├── beta_company_freshdesk_data.db  
-├── gamma_ltd_zendesk_data.db
 └── ...
 ```
 
@@ -149,12 +148,10 @@ python backend/test_multitenant_isolation.py
 1️⃣ 테넌트별 데이터 삽입 테스트
    ✅ acme_corp (freshdesk): 티켓 삽입 성공 (ID: 1)
    ✅ beta_company (freshdesk): 티켓 삽입 성공 (ID: 1)
-   ✅ gamma_ltd (zendesk): 티켓 삽입 성공 (ID: 1)
 
 2️⃣ 데이터 격리 검증
    acme_corp (freshdesk): 1개 객체, ✅ 격리됨
    beta_company (freshdesk): 1개 객체, ✅ 격리됨
-   gamma_ltd (zendesk): 1개 객체, ✅ 격리됨
 
 3️⃣ 크로스 테넌트 액세스 방지 테스트
    ✅ 크로스 테넌트 데이터 액세스 차단됨

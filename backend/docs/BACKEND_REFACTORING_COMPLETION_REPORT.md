@@ -84,7 +84,6 @@ backend/                           backend/
 
 ### ✅ 시스템 상태 확인
 - **GPU 임베딩**: 정상 로드
-- **플랫폼 어댑터**: Freshdesk, Zendesk 등록 완료
 - **벡터 DB**: Qdrant 연결 정상
 - **설정 관리**: 환경별 설정 분리 완료
 
@@ -114,7 +113,6 @@ backend/                           backend/
 - ✅ GPU 임베딩 환경 구축
 
 ### Phase 2: 확장 (진행 예정)
-- 🔄 Zendesk 플랫폼 어댑터 추가
 - 🔄 ServiceNow 플랫폼 어댑터 추가
 - 🔄 다국어 지원 강화
 

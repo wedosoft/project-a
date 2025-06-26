@@ -111,7 +111,6 @@ backend/data/
 CREATE TABLE tickets (
     id SERIAL PRIMARY KEY,
     company_id VARCHAR(100) NOT NULL,
-    platform VARCHAR(50) NOT NULL, -- 'freshdesk', 'zendesk', 'servicenow'
     ticket_id VARCHAR(100) NOT NULL,
     raw_data JSONB NOT NULL,
     processed_data JSONB,
@@ -161,7 +160,6 @@ CREATE POLICY tickets_company_isolation ON tickets
 ```python
 async def collect_platform_data(
     company_id: str,
-    platform: str,  # 'freshdesk', 'zendesk', 'servicenow'
     start_date: str,
     end_date: str,
     chunk_size: int = 100
@@ -369,7 +367,6 @@ async def summarize_single_ticket(company_id: str, ticket: dict) -> dict:
 ```python
 async def store_embeddings(
     company_id: str,
-    platform: str,  # 'freshdesk', 'zendesk', 'servicenow'
     embeddings: List[List[float]],
     metadata: List[Dict],
     data_type: str = "ticket"  # 'ticket' or 'kb'
@@ -503,7 +500,6 @@ async def search_across_platforms(
 ) -> List[Dict]:
     """여러 플랫폼에서 통합 검색 (동일 테넌트 내에서만)"""
 
-    platform_filter = platforms or ["freshdesk", "zendesk", "servicenow"]
 
     # 동일 company_id 내에서 여러 플랫폼 검색
     search_filter = Filter(
@@ -565,7 +561,6 @@ async def search_across_platforms(
 
 - [x] **저장소 변경 용이**: 파일 → DB 전환 시 비즈니스 로직 불변
 - [x] **테스트 편의성**: 인터페이스 기반 모킹 가능
-- [x] **멀티플랫폼 확장**: Freshdesk → Zendesk 추가 시 최소 변경
 - [x] **환경별 구현**: 개발(파일) → 프로덕션(PostgreSQL) 동적 전환
 
 **구현 전략**:
@@ -869,12 +864,10 @@ await storage.save_ticket("wedosoft", "freshdesk", ticket_data)
 
 - [x] **Freshdesk 완전 구현**: 모든 기능 검증 완료
 - [x] **기반 구조 확장 설계**: Adapter 패턴 기반 추상화
-- [x] **Zendesk 스켈레톤**: NotImplementedError로 확장 준비
 - [x] **ServiceNow 제거**: 리소스 집중을 위한 범위 축소
 
 **향후 확장 단계**:
 
-- [ ] **Zendesk 어댑터**: Freshdesk 패턴 기반 구현
 - [ ] **ServiceNow 어댑터**: 추후 시장 요구에 따라 확장
 - [ ] **Microsoft Teams**: Enterprise 고객 요구 시 추가
 
@@ -1014,25 +1007,18 @@ class FreshdeskAdapter(BasePlatformAdapter):
         }
 ```
 
-**Zendesk 구현 (확장용)**:
 
 ```python
-class ZendeskAdapter(BasePlatformAdapter):
-    """Zendesk 구현"""
 
     def get_platform_name(self) -> str:
-        return "zendesk"
 
     async def validate_credentials(self) -> bool:
-        """Zendesk API 자격증명 검증"""
-        # Zendesk API 자격증명 검증 로직
         subdomain = self.api_credentials.get("subdomain")
         email = self.api_credentials.get("email")
         api_token = self.api_credentials.get("api_token")
 
         async with aiohttp.ClientSession() as session:
             auth = aiohttp.BasicAuth(f"{email}/token", api_token)
-            url = f"https://{subdomain}.zendesk.com/api/v2/tickets.json"
 
             try:
                 async with session.get(url, auth=auth, params={"per_page": 1}) as response:
@@ -1046,12 +1032,8 @@ class ZendeskAdapter(BasePlatformAdapter):
         end_date: str,
         chunk_size: int = 100
     ) -> AsyncGenerator[List[Dict], None]:
-        """Zendesk 티켓 수집 (구현 예정)"""
-        raise NotImplementedError("Zendesk adapter implementation coming soon")
 
     def normalize_ticket_data(self, raw_ticket: Dict) -> Dict:
-        """Zendesk 데이터 정규화 (구현 예정)"""
-        raise NotImplementedError("Zendesk data normalization coming soon")
 ```
 
 **플랫폼 어댑터 팩토리**:
@@ -1062,7 +1044,6 @@ class PlatformAdapterFactory:
 
     _adapters = {
         "freshdesk": FreshdeskAdapter,
-        "zendesk": ZendeskAdapter,
         # "servicenow": ServiceNowAdapter,  # 향후 확장
     }
 
@@ -1118,7 +1099,6 @@ async def collect_multi_platform_data(company_id: str, platforms_config: Dict):
 
 ### ⚠️ **멀티플랫폼 확장 주의사항**
 
-- 🚨 **순차 확장**: Freshdesk 완성 후 Zendesk 추가, 동시 개발 금지
 - 🚨 **공통 인터페이스**: 모든 어댑터는 BasePlatformAdapter 준수 필수
 - 🚨 **데이터 정규화**: 플랫폼별 차이를 공통 스키마로 변환
 - 🚨 **에러 처리**: NotImplementedError로 미구현 기능 명시
@@ -1169,7 +1149,6 @@ def validate_company_platform(company_id: str, platform: str) -> bool:
     """company_id와 플랫폼 조합 검증"""
 
     # 허용된 플랫폼 목록
-    allowed_platforms = ["freshdesk", "zendesk", "servicenow"]
 
     if platform not in allowed_platforms:
         return False
@@ -1256,7 +1235,6 @@ async def search_across_platforms(domain: str, query: str, platforms: List[str] 
     company_id = extract_company_id(domain)
     results = []
 
-    target_platforms = platforms or ["freshdesk", "zendesk"]
     for platform in target_platforms:
         async with tenant_platform_context(domain, platform) as context:
             platform_results = await search_platform_data(
@@ -1317,7 +1295,6 @@ async def validate_api_access(company_id: str, platform: str, api_key_hash: str)
 - [x] **LLM 요약 생성**: 구조화된 요약 생성 및 비용 최적화
 - [x] **벡터 검색 구현**: Qdrant 단일 컬렉션 기반 멀티테넌트 검색
 - [x] **파일 기반 스토리지**: MVP용 JSON 기반 데이터 관리
-- [ ] **Zendesk 어댑터 추가**: 기본 스켈레톤 및 확장 준비
 
 ### ✅ **Phase 2: 스테이징 (1-2주) - 향후 계획**
 

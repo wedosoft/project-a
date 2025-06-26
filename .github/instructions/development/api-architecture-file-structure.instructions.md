@@ -51,15 +51,12 @@ backend/
 ├── core/
 │   ├── platforms/                  # 플랫폼별 어댑터 (확장 가능)
 │   │   ├── __init__.py
-│   │   ├── factory.py              # 플랫폼 팩토리 (Freshdesk/Zendesk 지원)
 │   │   ├── freshdesk/              # Freshdesk 완전 구현
 │   │   │   ├── __init__.py
 │   │   │   ├── adapter.py          # Freshdesk 어댑터
 │   │   │   ├── models.py           # Freshdesk 데이터 모델
 │   │   │   └── optimized_fetcher.py # 데이터 수집기
-│   │   └── zendesk/                # Zendesk 추상화 (향후 구현용)
 │   │       ├── __init__.py
-│   │       └── adapter.py          # Zendesk 어댑터 (ImportError 처리)
 │   ├── llm/                        # LLM 모듈 (모듈화 완료)
 │   │   ├── __init__.py
 │   │   ├── router.py               # LLM 라우팅 로직 (메인)

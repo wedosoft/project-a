@@ -346,7 +346,6 @@ db.log_collection_job(job_start_data)
 ## 🔮 향후 확장 계획
 
 ### 1. 다른 플랫폼 지원
-- Zendesk, ServiceNow 등 다른 플랫폼을 위한 통합 객체 어댑터 개발
 - 플랫폼별 특화 필드 지원
 
 ### 2. 실시간 동기화

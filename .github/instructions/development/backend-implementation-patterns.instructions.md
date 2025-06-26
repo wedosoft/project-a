@@ -405,7 +405,6 @@ async def search_and_recommend(
 **플랫폼별 특성**:
 
 - **Freshdesk**: `iparams.html` 사용, 도메인에서 company_id 자동 추출
-- **Zendesk**: `manifest.json` 사용 (추정), 유사한 도메인 구조
 - **ServiceNow**: 별도 설정 방식 (향후 확장)
 
 ```python
@@ -416,7 +415,6 @@ from enum import Enum
 
 class PlatformType(Enum):
     FRESHDESK = "freshdesk"
-    ZENDESK = "zendesk"
     SERVICENOW = "servicenow"
 
 class PlatformInstallConfig(ABC):
@@ -459,7 +457,6 @@ class FreshdeskInstallConfig(PlatformInstallConfig):
 class PlatformConfigFactory:
     _configs = {
         PlatformType.FRESHDESK: FreshdeskInstallConfig,
-        # PlatformType.ZENDESK: ZendeskInstallConfig,  # 향후 구현
         # PlatformType.SERVICENOW: ServiceNowInstallConfig,  # 향후 구현
     }
 

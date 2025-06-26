@@ -143,7 +143,6 @@ async def create_payload_indexes(client: QdrantClient, collection_name: str):
 ```python
 async def store_document_embeddings(
     company_id: str,
-    platform: str,  # 'freshdesk', 'zendesk', 'servicenow'
     documents: List[Dict],  # LLM 요약 완료된 문서들
     data_type: str = "ticket"  # 'ticket' or 'kb'
 ) -> Dict[str, Any]:

@@ -11,7 +11,6 @@ _AI 참조 최적화 버전 - 세션 간 일관성 보장을 위한 아키텍처
 **Freshdesk 기반 글로벌 SaaS 멀티테넌트 AI 상담사 지원 시스템**
 
 - **성능 목표**: LLM 응답 5~10초 → 1~2초 단축
-- **확장성**: Freshdesk → Zendesk → ServiceNow 순차 확장
 - **멀티테넌트**: company_id 기반 완전 데이터 격리
 - **글로벌화**: i18n 다국어 지원 내장
 
@@ -146,7 +145,6 @@ from langchain_qdrant import Qdrant  # 벡터 DB 통합 (완료)
 **현재 MVP 상태**:
 
 - [x] Freshdesk 어댑터 완전 구현 (`backend/core/platforms/freshdesk/`)
-- [x] Zendesk 어댑터 스켈레톤 (`NotImplementedError` 패턴)
 - [x] 다른 플랫폼(ServiceNow, Jira) 코드 완전 제거
 - [x] 팩토리 패턴 기반 플랫폼 감지 자동화
 
@@ -265,15 +263,12 @@ backend/
 ├── core/
 │   ├── platforms/                  # 플랫폼별 어댑터 (확장 가능)
 │   │   ├── __init__.py
-│   │   ├── factory.py              # 플랫폼 팩토리 (Freshdesk/Zendesk 지원)
 │   │   ├── freshdesk/              # Freshdesk 완전 구현
 │   │   │   ├── __init__.py
 │   │   │   ├── adapter.py          # Freshdesk 어댑터
 │   │   │   ├── models.py           # Freshdesk 데이터 모델
 │   │   │   └── optimized_fetcher.py # 데이터 수집기
-│   │   └── zendesk/                # Zendesk 추상화 (향후 구현용)
 │   │       ├── __init__.py
-│   │       └── adapter.py          # Zendesk 어댑터 (ImportError 처리)
 │   ├── llm/                        # LLM 모듈 (모듈화 완료)
 │   │   ├── __init__.py
 │   │   ├── router.py               # LLM 라우팅 로직 (메인)
@@ -328,7 +323,6 @@ with tenant_context(company_id):
 
 ```javascript
 const headers = {
-  "X-Platform-Type": "freshdesk|zendesk", // 플랫폼 타입
   "X-Platform-Domain": "*.freshdesk.com", // 플랫폼 도메인
   "X-Platform-API-Key": "api_key", // 플랫폼별 API 키
   "X-Tenant-ID": "company_id", // 고객사 ID (격리용)
@@ -589,7 +583,6 @@ Docker + Kubernetes + AWS/GCP + Prometheus + Grafana
 **API 보안 헤더**:
 
 - [x] **X-Company-ID**: 모든 요청에 테넌트 식별자 필수
-- [x] **X-Platform-Type**: 플랫폼 타입 검증 (`freshdesk|zendesk`)
 - [x] **X-Platform-Domain**: 도메인 화이트리스트 검증
 - [x] **Authorization**: JWT/API 키 기반 인증
 
@@ -623,7 +616,6 @@ async def tenant_middleware(request: Request, call_next):
 ```python
 ALLOWED_DOMAINS = {
     'freshdesk': ['.freshdesk.com'],
-    'zendesk': ['.zendesk.com']
 }
 
 def validate_platform_domain(platform_type: str, domain: str) -> bool:
@@ -964,9 +956,7 @@ async def test_platform_adapter_factory():
     freshdesk_adapter = await create_platform_adapter("freshdesk", "company1")
     assert isinstance(freshdesk_adapter, FreshdeskAdapter)
 
-    # Zendesk 어댑터 생성 테스트 (NotImplementedError 예상)
     with pytest.raises(NotImplementedError):
-        await create_platform_adapter("zendesk", "company2")
 
     # 지원하지 않는 플랫폼 테스트
     with pytest.raises(UnsupportedPlatformError):
@@ -1121,7 +1111,6 @@ async def setup_test_db(test_settings):
 
 **플랫폼 확장**:
 
-- [ ] **Zendesk 어댑터**: 완전 구현
 - [ ] **ServiceNow 플랫폼**: 향후 확장 고려
 - [ ] **다국어 지원**: i18n 완성
 

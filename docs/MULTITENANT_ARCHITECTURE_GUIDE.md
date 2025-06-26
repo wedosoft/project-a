@@ -251,12 +251,9 @@ setup_new_tenant(
 ### 2. 새 플랫폼 지원
 
 ```python
-# Zendesk 지원 추가
 config_manager.set_platform_config(
     company_id=1,
-    platform="zendesk",  # 새 플랫폼
     config={
-        "domain": "wedosoft.zendesk.com",
         "api_key": "zd_api_key_123"
     }
 )

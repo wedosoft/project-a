@@ -69,7 +69,6 @@ def extract_company_id(domain_or_url: str) -> Optional[str]:
         
     Examples:
         extract_company_id("wedosoft.freshdesk.com") → "wedosoft"
-        extract_company_id("https://acme.zendesk.com") → "acme"
         extract_company_id("company.service-now.com") → "company"
     """
     if not domain_or_url:
@@ -85,7 +84,6 @@ def extract_company_id(domain_or_url: str) -> Optional[str]:
     # 플랫폼별 패턴 매칭
     patterns = {
         'freshdesk': r'^([a-zA-Z0-9-]+)\.freshdesk\.com$',
-        'zendesk': r'^([a-zA-Z0-9-]+)\.zendesk\.com$',
         'servicenow': r'^([a-zA-Z0-9-]+)\.service-now\.com$',
         'custom': r'^([a-zA-Z0-9-]+)\.'  # 일반적인 서브도메인 패턴
     }

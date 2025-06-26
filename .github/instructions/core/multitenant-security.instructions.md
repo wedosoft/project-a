@@ -33,7 +33,6 @@ async def endpoint(
 
 **헤더 우선순위**:
 1. **X-Company-ID** (필수)
-2. **X-Platform** (필수: freshdesk, zendesk 등)
 3. **X-Domain** (필수: API 엔드포인트)
 4. **X-API-Key** (필수: 인증 키)
 
@@ -44,7 +43,6 @@ async def endpoint(
 data/
 ├── company1_freshdesk_data.db     # 물리적 격리
 ├── acme_freshdesk_data.db         # 완전 독립
-└── demo_zendesk_data.db           # 플랫폼별 분리
 ```
 
 **운영환경 (PostgreSQL) - 테넌트별 스키마**:

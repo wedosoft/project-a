@@ -11,7 +11,6 @@ _AI 참조 최적화 버전 - 확장 가능한 멀티플랫폼 어댑터 패턴_
 **플랫폼 추상화를 통한 확장 가능한 데이터 수집 시스템 구축**
 
 - **현재 지원**: Freshdesk (완전 구현)
-- **확장 준비**: Zendesk (스켈레톤), ServiceNow (향후)
 - **공통 인터페이스**: 모든 플랫폼에 동일한 API 제공
 - **멀티테넌트**: company_id 기반 완전한 데이터 격리
 
@@ -26,7 +25,6 @@ _AI 참조 최적화 버전 - 확장 가능한 멀티플랫폼 어댑터 패턴_
 ```
 BasePlatformAdapter (인터페이스)
 ├── FreshdeskAdapter (완전 구현)
-├── ZendeskAdapter (스켈레톤)
 └── ServiceNowAdapter (향후 확장)
 ```
 
@@ -39,7 +37,6 @@ BasePlatformAdapter (인터페이스)
 
 **확장 전략**:
 
-1. **Freshdesk 완성** → **Zendesk 구현** → **ServiceNow 확장**
 2. **순차적 개발**: 동시 개발 금지, 하나씩 완성
 3. **공통 스키마**: 모든 플랫폼 데이터를 동일한 형식으로 정규화
 
@@ -326,26 +323,16 @@ class FreshdeskAdapter(BasePlatformAdapter):
 
 ---
 
-## 🔄 **Zendesk 어댑터 스켈레톤**
 
-### 📋 **ZendeskAdapter 확장 준비**
 
 ```python
-class ZendeskAdapter(BasePlatformAdapter):
-    """Zendesk 구현 (확장용 스켈레톤)"""
 
     def get_platform_name(self) -> str:
-        return "zendesk"
 
     def extract_company_id_from_domain(self, domain: str) -> str:
-        """Zendesk 서브도메인에서 company_id 추출"""
-        # zendesk.com 도메인 처리 로직
-        if ".zendesk.com" in domain:
             return domain.split('.')[0]
-        raise ValueError(f"올바르지 않은 Zendesk 도메인: {domain}")
 
     async def validate_credentials(self) -> bool:
-        """Zendesk API 자격증명 검증"""
         subdomain = self.api_credentials.get("subdomain")
         email = self.api_credentials.get("email")
         api_token = self.api_credentials.get("api_token")
@@ -355,7 +342,6 @@ class ZendeskAdapter(BasePlatformAdapter):
 
         async with aiohttp.ClientSession() as session:
             auth = aiohttp.BasicAuth(f"{email}/token", api_token)
-            url = f"https://{subdomain}.zendesk.com/api/v2/tickets.json"
 
             try:
                 async with session.get(url, auth=auth, params={"per_page": 1}) as response:
@@ -369,18 +355,10 @@ class ZendeskAdapter(BasePlatformAdapter):
         end_date: str,
         chunk_size: int = 100
     ) -> AsyncGenerator[List[Dict], None]:
-        """Zendesk 티켓 수집 (구현 예정)"""
-        # TODO: Freshdesk 패턴을 기반으로 Zendesk API 구현
-        raise NotImplementedError("Zendesk adapter implementation coming soon")
 
     def normalize_ticket_data(self, raw_ticket: Dict) -> Dict:
-        """Zendesk 데이터 정규화 (구현 예정)"""
-        # TODO: Zendesk 데이터 구조를 공통 스키마로 변환
-        raise NotImplementedError("Zendesk data normalization coming soon")
 
     async def fetch_knowledge_base(self) -> List[Dict]:
-        """Zendesk 지식베이스 수집 (구현 예정)"""
-        raise NotImplementedError("Zendesk KB implementation coming soon")
 ```
 
 ---
@@ -395,7 +373,6 @@ class PlatformAdapterFactory:
 
     _adapters = {
         "freshdesk": FreshdeskAdapter,
-        "zendesk": ZendeskAdapter,
         # "servicenow": ServiceNowAdapter,  # 향후 확장
     }
 
@@ -569,7 +546,6 @@ async def collect_platform_data(
 ### 🚨 **구현 시 필수 준수사항**
 
 1. **순차 확장 원칙**
-   - Freshdesk 완전 구현 후 Zendesk 작업 시작
    - 동시 개발 금지, 하나씩 완성하고 다음 진행
 
 2. **공통 인터페이스 준수**

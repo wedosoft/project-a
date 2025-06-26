@@ -8,11 +8,11 @@ _AI 참조 최적화 버전 - 플랫폼별 데이터 수집 및 통합 전략 (2
 
 ## 🎯 데이터 수집 목표
 
-**멀티플랫폼 고객 지원 데이터의 효율적 수집 및 통합**
+**Freshdesk 전용 고객 지원 데이터의 효율적 수집 및 통합**
 
-- **플랫폼 확장성**: Freshdesk → Zendesk → ServiceNow 순차 지원
+- **Freshdesk 전용**: Freshdesk 플랫폼에 특화된 최적화된 수집
 - **멀티테넌트 격리**: company_id 기반 완전한 데이터 분리
-- **Rate Limit 대응**: 플랫폼별 제한 준수 및 청크 처리
+- **Rate Limit 대응**: Freshdesk API 제한 준수 및 청크 처리
 - **중단/재개 지원**: 진행 상황 추적을 통한 안정적 수집
 
 ---
@@ -119,12 +119,9 @@ class FreshdeskAdapter:
                     page += 1
 ```
 
-**Zendesk 어댑터** (확장 구현):
 ```python
-class ZendeskAdapter:
     def __init__(self, company_id: str, api_token: str):
         self.company_id = company_id
-        self.base_url = f"https://{company_id}.zendesk.com"
         self.headers = {'Authorization': f'Bearer {api_token}'}
         self.rate_limit = {'requests_per_minute': 700, 'delay': 0.086}
     
@@ -134,8 +131,6 @@ class ZendeskAdapter:
         end_date: str, 
         chunk_size: int = 100
     ):
-        """Zendesk API 특화 수집 로직"""
-        # Zendesk 특화 구현...
         pass
 ```
 
@@ -151,8 +146,6 @@ class PlatformAdapterFactory:
                 company_id=company_id,
                 api_key=credentials['api_key']
             )
-        elif platform.lower() == 'zendesk':
-            return ZendeskAdapter(
                 company_id=company_id,
                 api_token=credentials['api_token']
             )
@@ -186,7 +179,6 @@ async def collect_platform_data(
     
     Args:
         company_id: 테넌트 식별자
-        platform: 플랫폼 이름 ('freshdesk', 'zendesk', 'servicenow')
         credentials: 플랫폼별 인증 정보
         start_date: 수집 시작일
         end_date: 수집 종료일
@@ -250,7 +242,6 @@ async def filter_duplicates(
     # 2. 플랫폼별 고유 ID 필드 매핑
     id_field_map = {
         'freshdesk': 'id',
-        'zendesk': 'id', 
         'servicenow': 'sys_id'
     }
     
@@ -358,7 +349,6 @@ def validate_ticket_data(ticket: dict, platform: str) -> bool:
     required_fields = ['id', 'subject', 'status', 'created_at']
     platform_specific_fields = {
         'freshdesk': ['requester_id', 'description'],
-        'zendesk': ['submitter_id', 'description'],
         'servicenow': ['caller_id', 'short_description']
     }
     
@@ -409,7 +399,6 @@ def normalize_ticket_data(ticket: dict, platform: str) -> dict:
             'requester_id': ticket.get('requester_id'),
             'tags': ticket.get('tags', [])
         })
-    elif platform == 'zendesk':
         normalized.update({
             'description': ticket.get('description', ''),
             'submitter_id': ticket.get('submitter_id'),

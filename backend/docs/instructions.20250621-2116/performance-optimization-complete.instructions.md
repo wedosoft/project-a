@@ -143,7 +143,6 @@ import time
 class TicketV2(BaseModel):
     """Pydantic v2 기반 티켓 모델"""
     company_id: str = Field(..., min_length=2, max_length=50)
-    platform: str = Field(..., regex=r'^(freshdesk|zendesk|servicenow)$')
     ticket_id: str = Field(..., min_length=1)
     subject: str = Field(..., min_length=1, max_length=500)
     description: Optional[str] = Field(default=None, max_length=10000)
@@ -163,7 +162,6 @@ class TicketV2(BaseModel):
 class IngestRequestV2(BaseModel):
     """데이터 수집 요청 모델"""
     company_id: str = Field(..., min_length=2, max_length=50)
-    platform: str = Field(..., regex=r'^(freshdesk|zendesk|servicenow)$')
     start_date: str = Field(..., regex=r'^\d{4}-\d{2}-\d{2}$')
     end_date: str = Field(..., regex=r'^\d{4}-\d{2}-\d{2}$')
     data_types: List[str] = Field(default=["tickets"], max_items=5)

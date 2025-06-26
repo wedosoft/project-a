@@ -257,9 +257,7 @@ async def test_platform_adapter_factory():
     freshdesk_adapter = await create_platform_adapter("freshdesk", "company1")
     assert isinstance(freshdesk_adapter, FreshdeskAdapter)
 
-    # Zendesk 어댑터 생성 테스트 (NotImplementedError 예상)
     with pytest.raises(NotImplementedError):
-        await create_platform_adapter("zendesk", "company2")
 
     # 지원하지 않는 플랫폼 테스트
     with pytest.raises(UnsupportedPlatformError):

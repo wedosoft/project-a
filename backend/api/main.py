@@ -1,7 +1,7 @@
 """
-Multi-Platform Custom App 백엔드 서비스
+Freshdesk Custom App 백엔드 서비스
 
-이 프로젝트는 Multi-Platform Custom App(Prompt Canvas)을 위한 백엔드 서비스입니다.
+이 프로젝트는 Freshdesk Custom App(Prompt Canvas)을 위한 백엔드 서비스입니다.
 RAG(Retrieval-Augmented Generation) 기술을 활용하여 멀티플랫폼(Freshdesk, Zendesk 등)
 티켓과 지식베이스를 기반으로 AI 기반 응답 생성 기능을 제공합니다.
 """
@@ -36,11 +36,11 @@ from .routes import (
 from .dependencies import set_global_dependencies
 
 # 하위 호환성을 위한 기존 라우터 유지 (추후 제거 예정)
-from .multi_platform_attachments import router as legacy_attachments_router
+from .freshdesk_attachments import router as freshdesk_attachments_router
 
 # FastAPI 앱 생성
 app = FastAPI(
-    title="Multi-Platform Custom App 백엔드",
+    title="Freshdesk Custom App 백엔드",
     description="RAG 기반 멀티플랫폼 고객 지원 AI 서비스",
     version="1.0.0"
 )
@@ -64,7 +64,7 @@ app.include_router(metrics_router)
 app.include_router(attachments_router)
 
 # 하위 호환성을 위한 기존 라우터 유지 (추후 제거 예정)
-app.include_router(legacy_attachments_router)
+app.include_router(freshdesk_attachments_router)
 
 # 로깅 설정
 logging.basicConfig(

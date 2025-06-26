@@ -30,7 +30,6 @@ class StandardHeaders:
 data/
 ├── company1_freshdesk_data.db     # 물리적 격리
 ├── company2_freshdesk_data.db     # 완전 독립
-└── company3_zendesk_data.db       # 플랫폼별 분리
 ```
 
 **구현 코드**:
