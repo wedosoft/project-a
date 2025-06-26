@@ -1,100 +1,99 @@
 """
-FastAPI 의존성 함수 정의
+FastAPI 의존성 함수 정의 - IoC 패턴 적용
 
-모든 엔드포인트에서 공통으로 사용하는 의존성 함수들을 정의합니다.
+개선된 의존성 주입 컨테이너를 사용하여 모든 엔드포인트에서 
+공통으로 사용하는 의존성 함수들을 정의합니다.
 """
 
 from typing import Optional
 from fastapi import Header, HTTPException, Depends
 import logging
 from core.config import get_tenant_manager, TenantConfig
-
-from core.utils import extract_tenant_id
+from core.container import get_container, DependencyContainer
 
 # 로거 설정
 logger = logging.getLogger(__name__)
 
-# 전역 변수들 (main.py에서 설정됨)
-_vector_db = None
-_fetcher = None
-_llm_manager = None
-_ticket_context_cache = None
-_ticket_summary_cache = None
-_hybrid_search_manager = None
+
+# === 새로운 IoC 컨테이너 기반 의존성 함수들 ===
+
+async def get_vector_db():
+    """벡터 데이터베이스 의존성 - IoC 컨테이너에서 반환"""
+    container = await get_container()
+    return container.get_vector_db()
 
 
-def set_global_dependencies(
-    vector_db,
-    fetcher,
-    llm_manager,
-    ticket_context_cache,
-    ticket_summary_cache,
-    hybrid_search_manager=None,
-):
+async def get_fetcher():
+    """Freshdesk fetcher 의존성 - IoC 컨테이너에서 반환"""
+    container = await get_container()
+    return container.get_fetcher()
+
+
+async def get_llm_manager():
+    """LLM 매니저 의존성 - IoC 컨테이너에서 반환"""
+    container = await get_container()
+    return container.get_llm_manager()
+
+
+async def get_llm_router():
+    """LLM 라우터 의존성 - LLM 매니저와 동일 (하위 호환성)"""
+    return await get_llm_manager()
+
+
+async def get_ticket_context_cache():
+    """티켓 컨텍스트 캐시 의존성 - IoC 컨테이너에서 반환"""
+    container = await get_container()
+    return container.get_ticket_context_cache()
+
+
+async def get_ticket_summary_cache():
+    """티켓 요약 캐시 의존성 - IoC 컨테이너에서 반환"""
+    container = await get_container()
+    return container.get_ticket_summary_cache()
+
+
+async def get_hybrid_search_manager():
+    """하이브리드 검색 매니저 의존성 - IoC 컨테이너에서 반환"""
+    container = await get_container()
+    return container.get_hybrid_search_manager()
+
+
+async def get_cache_manager():
+    """캐시 매니저 의존성 - IoC 컨테이너에서 반환"""
+    container = await get_container()
+    return container.get_cache_manager()
+
+
+async def get_llm_response_cache():
+    """LLM 응답 캐시 의존성 - IoC 컨테이너에서 반환"""
+    container = await get_container()
+    return container.get_llm_response_cache()
+
+
+async def get_vector_search_cache():
+    """벡터 검색 결과 캐시 의존성 - IoC 컨테이너에서 반환"""
+    container = await get_container()
+    return container.get_vector_search_cache()
+
+
+async def get_app_settings():
+    """애플리케이션 설정 의존성 - IoC 컨테이너에서 반환"""
+    container = await get_container()
+    return container.get_settings()
+
+
+# === 레거시 지원 함수들 (하위 호환성을 위해 유지) ===
+
+def set_global_dependencies(*args, **kwargs):
     """
-    main.py에서 전역 의존성들을 설정하는 함수
+    레거시 지원 함수 - 더 이상 사용되지 않음
+    
+    이 함수는 하위 호환성을 위해 유지되지만, 새로운 IoC 컨테이너 패턴을 사용해주세요.
     """
-    global _vector_db, _fetcher, _llm_manager, _ticket_context_cache, _ticket_summary_cache, _hybrid_search_manager
-    _vector_db = vector_db
-    _fetcher = fetcher
-    _llm_manager = llm_manager
-    _ticket_context_cache = ticket_context_cache
-    _ticket_summary_cache = ticket_summary_cache
-    _hybrid_search_manager = hybrid_search_manager
-
-
-def get_vector_db():
-    """벡터 데이터베이스 의존성"""
-    if _vector_db is None:
-        raise RuntimeError(
-            "Vector DB가 초기화되지 않았습니다. main.py에서 set_global_dependencies를 호출해주세요."
-        )
-    return _vector_db
-
-
-def get_fetcher():
-    """Freshdesk fetcher 의존성"""
-    if _fetcher is None:
-        raise RuntimeError(
-            "Fetcher가 초기화되지 않았습니다. main.py에서 set_global_dependencies를 호출해주세요."
-        )
-    return _fetcher
-
-
-def get_llm_manager():
-    """LLM 매니저 의존성"""
-    if _llm_manager is None:
-        raise RuntimeError(
-            "LLM Manager가 초기화되지 않았습니다. main.py에서 set_global_dependencies를 호출해주세요."
-        )
-    return _llm_manager
-
-
-def get_ticket_context_cache():
-    """티켓 컨텍스트 캐시 의존성"""
-    if _ticket_context_cache is None:
-        raise RuntimeError(
-            "Ticket context cache가 초기화되지 않았습니다. main.py에서 set_global_dependencies를 호출해주세요."
-        )
-    return _ticket_context_cache
-
-
-def get_ticket_summary_cache():
-    """티켓 요약 캐시 의존성"""
-    if _ticket_summary_cache is None:
-        raise RuntimeError(
-            "Ticket summary cache가 초기화되지 않았습니다. main.py에서 set_global_dependencies를 호출해주세요."
-        )
-    return _ticket_summary_cache
-
-
-def get_hybrid_search_manager():
-    """하이브리드 검색 매니저 의존성"""
-    if _hybrid_search_manager is None:
-        raise RuntimeError(
-            "Hybrid search manager가 초기화되지 않았습니다. main.py에서 set_global_dependencies를 호출해주세요."
-        )
-    return _hybrid_search_manager
+    logger.warning(
+        "set_global_dependencies()는 더 이상 사용되지 않습니다. "
+        "새로운 IoC 컨테이너 패턴을 사용해주세요."
+    )
 
 
 async def get_tenant_id(

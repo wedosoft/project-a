@@ -6,12 +6,10 @@
 """
 
 import time
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Optional
 
 from fastapi import Depends, Header, HTTPException, Request, status
 
-from core.config import settings
-from core.exceptions import AuthenticationError, AuthorizationError
 from core.utils import setup_logger
 from core.database.tenant_context import TenantContext
 
@@ -271,6 +269,7 @@ async def get_ticket_permissions(
 # =================================================================
 
 async def get_company_id(
+    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID"),
     x_company_id: Optional[str] = Header(None, alias="X-Company-ID")
 ) -> str:
     """

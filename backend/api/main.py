@@ -4,10 +4,15 @@ Copilot Canvas 백엔드 서비스
 Copilot Canvas를 위한 백엔드 서비스입니다.
 RAG(Retrieval-Augmented Generation) 기술을 활용하여 Freshdesk 티켓과 지식베이스를 
 기반으로 AI 기반 응답 생성 기능을 제공합니다.
+
+아키텍처 개선사항:
+- IoC (Inversion of Control) 컨테이너 패턴 적용
+- 의존성 주입 개선
+- 성능 최적화된 캐싱 전략
 """
 
 import logging
-from cachetools import TTLCache
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -15,11 +20,10 @@ from dotenv import load_dotenv
 # 환경변수 로드 (애플리케이션 시작 시 최우선 로드)
 load_dotenv()
 
-# 새로운 모듈화된 LLM 매니저 사용
-from core.llm import LLMManager
-from core.database.vectordb import vector_db
-from core.search.hybrid import HybridSearchManager  # 하이브리드 검색 매니저 추가
-from core.platforms.freshdesk import fetcher  # 하위 호환성을 위해 유지
+# 새로운 IoC 컨테이너 사용
+from core.container import get_container
+from core.errors import ErrorHandlingMiddleware, get_error_handler
+from core.middleware import PerformanceMiddleware
 
 # 분리된 라우터들 import
 from .routes import (
@@ -32,18 +36,69 @@ from .routes import (
     attachments_router
 )
 
-# 공통 의존성 함수들 import
-from .dependencies import set_global_dependencies
-
 # 하위 호환성을 위한 기존 라우터 유지 (추후 제거 예정)
 from .freshdesk_attachments import router as freshdesk_attachments_router
 
-# FastAPI 앱 생성
+# 로깅 설정
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s | %(name)s | %(levelname)s | %(message)s',
+    handlers=[logging.StreamHandler()]
+)
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    애플리케이션 생명주기 관리
+    
+    FastAPI 앱 시작과 종료 시 필요한 작업들을 수행합니다.
+    """
+    # 시작 시 실행
+    logger.info("🚀 Copilot Canvas 백엔드 서버 시작...")
+    
+    try:
+        # IoC 컨테이너 초기화
+        container = await get_container()
+        await container.initialize()
+        
+        # 건강 상태 확인
+        health_status = container.health_check()
+        logger.info(f"📊 서비스 상태: {health_status}")
+        
+        logger.info("✅ 백엔드 서버 초기화 완료")
+        
+        yield  # 앱 실행
+        
+    except Exception as e:
+        logger.error(f"❌ 서버 초기화 실패: {e}")
+        raise
+    
+    finally:
+        # 종료 시 실행
+        logger.info("🛑 백엔드 서버 종료 중...")
+        try:
+            container = await get_container()
+            await container.shutdown()
+            logger.info("✅ 백엔드 서버 종료 완료")
+        except Exception as e:
+            logger.error(f"❌ 서버 종료 중 오류: {e}")
+
+
+# FastAPI 앱 생성 - 새로운 생명주기 관리 적용
 app = FastAPI(
     title="Copilot Canvas 백엔드",
-    description="RAG 기반 Freshdesk 고객 지원 AI 서비스",
-    version="1.0.0"
+    description="RAG 기반 Freshdesk 고객 지원 AI 서비스 (아키텍처 개선 버전)",
+    version="2.0.0",
+    lifespan=lifespan
 )
+
+# 성능 최적화 미들웨어 추가 (가장 먼저)
+app.add_middleware(PerformanceMiddleware, enable_detailed_logging=True)
+
+# 에러 핸들링 미들웨어 추가
+app.add_middleware(ErrorHandlingMiddleware, error_handler=get_error_handler())
 
 # CORS 미들웨어 설정 - Freshdesk FDK 환경에서의 크로스 도메인 요청 허용
 app.add_middleware(
@@ -65,45 +120,3 @@ app.include_router(attachments_router)
 
 # 하위 호환성을 위한 기존 라우터 유지 (추후 제거 예정)
 app.include_router(freshdesk_attachments_router)
-
-# 로깅 설정
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s | %(name)s | %(levelname)s | %(message)s',
-    handlers=[logging.StreamHandler()]
-)
-logger = logging.getLogger(__name__)
-
-# 캐시 설정
-ticket_context_cache = TTLCache(maxsize=1000, ttl=3600)  # 1시간 유효
-ticket_summary_cache = TTLCache(maxsize=500, ttl=1800)  # 30분 유효
-
-# LLM Manager import
-from core.llm.manager import get_llm_manager
-
-# 전역 싱글톤 LLM Manager 사용
-logger.info("🧠 LLM Manager 초기화 시작...")
-llm_manager = get_llm_manager()
-logger.info("🧠 LLM Manager 초기화 완료")
-
-# 하이브리드 검색 매니저 초기화
-hybrid_search_manager = HybridSearchManager(
-    vector_db=vector_db,
-    llm_router=llm_manager,  # llm_router -> llm_manager로 변경
-    fetcher=fetcher
-)
-
-# 전역 의존성 설정 (라우터에서 사용하기 위해)
-set_global_dependencies(
-    vector_db=vector_db,
-    fetcher=fetcher,
-    llm_manager=llm_manager,  # 새로운 LLMManager 사용
-    ticket_context_cache=ticket_context_cache,
-    ticket_summary_cache=ticket_summary_cache,
-    hybrid_search_manager=hybrid_search_manager  # 하이브리드 검색 매니저 추가
-)
-
-# 애플리케이션 시작 로그
-logger.info("FastAPI 백엔드 서버 초기화 완료")
-
-# 모든 엔드포인트는 routes/ 디렉터리로 분리되었습니다.
