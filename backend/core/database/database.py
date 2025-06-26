@@ -308,7 +308,7 @@ class SQLiteDatabase:
                 original_data TEXT NOT NULL, -- 원본 데이터 JSON
                 integrated_content TEXT, -- 통합된 콘텐츠 (검색용)
                 summary TEXT, -- LLM 요약
-                metadata TEXT, -- 메타데이터 JSON (parent_id, status, dates 등)
+                tenant_metadata TEXT, -- 메타데이터 JSON (parent_id, status, dates 등)
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(tenant_id, platform, object_type, original_id)
@@ -364,7 +364,7 @@ class SQLiteDatabase:
             'original_data': ticket_data,
             'integrated_content': ticket_data.get('description_text') or ticket_data.get('description'),
             'summary': ticket_data.get('subject'),
-            'metadata': {
+            'tenant_metadata': {
                 'status': ticket_data.get('status'),
                 'priority': ticket_data.get('priority'),
                 'type': ticket_data.get('type'),
@@ -397,7 +397,7 @@ class SQLiteDatabase:
             'original_data': conversation_data,
             'integrated_content': conversation_data.get('body_text') or conversation_data.get('body'),
             'summary': f"Conversation {conversation_data.get('id')} for ticket {conversation_data.get('ticket_id')}",
-            'metadata': {
+            'tenant_metadata': {
                 'ticket_original_id': str(conversation_data.get('ticket_id')),
                 'user_id': conversation_data.get('user_id'),
                 'incoming': conversation_data.get('incoming'),
@@ -421,7 +421,7 @@ class SQLiteDatabase:
             'original_data': article_data,
             'integrated_content': article_data.get('description_text') or article_data.get('description'),
             'summary': article_data.get('title'),
-            'metadata': {
+            'tenant_metadata': {
                 'status': article_data.get('status'),
                 'type': article_data.get('type'),
                 'category_id': article_data.get('category_id'),
@@ -459,7 +459,7 @@ class SQLiteDatabase:
         cursor.execute("""
             INSERT OR REPLACE INTO integrated_objects (
                 original_id, tenant_id, platform, object_type,
-                original_data, integrated_content, summary, metadata
+                original_data, integrated_content, summary, tenant_metadata
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             str(integrated_data.get('original_id')),  # original_id (문자열로 변환)
@@ -469,7 +469,7 @@ class SQLiteDatabase:
             json.dumps(integrated_data.get('original_data', {})),
             integrated_data.get('integrated_content'),
             integrated_data.get('summary'),
-            json.dumps(integrated_data.get('metadata', {}))
+            json.dumps(integrated_data.get('tenant_metadata', {}))
         ))
         
         self.connection.commit()
@@ -505,7 +505,7 @@ class SQLiteDatabase:
             'original_data': attachment_data,
             'integrated_content': f"File: {attachment_data.get('name')}",
             'summary': f"Attachment: {attachment_data.get('name')} ({attachment_data.get('content_type')})",
-            'metadata': {
+            'tenant_metadata': {
                 'parent_type': attachment_data.get('parent_type'),
                 'parent_original_id': attachment_data.get('parent_original_id'),
                 'name': attachment_data.get('name'),
@@ -537,288 +537,121 @@ class SQLiteDatabase:
                    f"attachments={job_data.get('attachments_collected', 0)}")
         return 0
 
-    def log_progress(self, job_id: str, step: int, total_steps: int, message: str = "", 
-                    tenant_id: str = None, percentage: float = None) -> int:
-        """진행상황 로그 저장
+    def log_progress(self, job_id: str = None, tenant_id: str = None, message: str = "", 
+                    percentage: float = 0, step: int = 0, total_steps: int = 100,
+                    stage: str = None, **kwargs) -> int:
+        """
+        작업 진행 상황을 데이터베이스에 로그
         
         Args:
-            job_id: 작업 ID
+            job_id: 작업 ID (선택사항, 없으면 자동 생성)
+            tenant_id: 테넌트 ID (선택사항, 없으면 기본값 사용)
+            message: 진행 상황 메시지
+            percentage: 진행률 (0-100)
             step: 현재 단계
             total_steps: 전체 단계 수
-            message: 메시지
-            tenant_id: 테넌트 ID
-            percentage: 진행률 (0-100)
-            
+            stage: 단계 이름 (호환성을 위해, 무시됨)
+            **kwargs: 기타 파라미터 (호환성을 위해, 무시됨)
+        
         Returns:
-            int: 생성된 로그 ID
+            int: 로그 ID
         """
         if not self.connection:
-            logger.warning("DB 연결이 끊어짐. 재연결 시도...")
             self.connect()
-            # self.create_tables() # 이미 connect()에서 처리됨
-            logger.info("DB 재연결 완료")
+        
+        # 기본값 설정
+        if job_id is None:
+            job_id = "default_job"
+        if tenant_id is None:
+            tenant_id = self.tenant_id or "default_tenant"
         
         cursor = self.connection.cursor()
         
-        # percentage 계산 (제공되지 않은 경우)
-        if percentage is None:
-            percentage = (step / total_steps) * 100 if total_steps > 0 else 0
-        
-        cursor.execute("""
-            INSERT OR REPLACE INTO progress_logs (
-                job_id, tenant_id, message, percentage, step, total_steps
-            ) VALUES (?, ?, ?, ?, ?, ?)
-        """, (
-            job_id,
-            tenant_id or getattr(self, 'tenant_id', None),
-            message,
-            percentage,
-            step,
-            total_steps
-        ))
-        
-        self.connection.commit()
-        logger.info(f"진행상황 로그 저장: job_id={job_id}, step={step}/{total_steps}, message={message}")
-        return cursor.lastrowid
-
-    def get_tickets_by_company_and_platform(self, tenant_id: str, platform: str) -> List[Dict[str, Any]]:
-        """회사 및 플랫폼별 티켓 조회 - integrated_objects 테이블 사용
+        try:
+            cursor.execute("""
+                INSERT OR REPLACE INTO progress_logs (
+                    job_id, tenant_id, message, percentage, step, total_steps
+                ) VALUES (?, ?, ?, ?, ?, ?)
+            """, (job_id, tenant_id, message, percentage, step, total_steps))
+            
+            self.connection.commit()
+            log_id = cursor.lastrowid
+            logger.debug(f"진행 상황 로그 저장: job_id={job_id}, tenant_id={tenant_id}, "
+                        f"message='{message}', percentage={percentage}%")
+            return log_id
+            
+        except Exception as e:
+            logger.error(f"진행 상황 로그 저장 실패: {e}")
+            # 호환성을 위해 예외를 발생시키지 않고 0 반환
+            return 0
+    
+    def get_progress_logs(self, job_id: str = None, tenant_id: str = None, 
+                         limit: int = 100) -> List[Dict[str, Any]]:
+        """
+        진행 상황 로그 조회
         
         Args:
-            tenant_id: 테넌트 ID
-            platform: 플랫폼명
+            job_id: 작업 ID (선택사항)
+            tenant_id: 테넌트 ID (선택사항)
+            limit: 최대 조회 개수
             
         Returns:
-            List[Dict[str, Any]]: 티켓 목록
-        """
-        if not self.connection:
-            logger.warning("DB 연결이 끊어짐. 재연결 시도...")
-            self.connect()
-            logger.info("DB 재연결 완료")
-        
-        cursor = self.connection.cursor()
-        cursor.execute("""
-            SELECT * FROM integrated_objects 
-            WHERE tenant_id = ? AND platform = ? AND object_type = 'ticket'
-            ORDER BY json_extract(metadata, '$.created_at') DESC
-        """, (tenant_id, platform))
-        
-        rows = cursor.fetchall()
-        
-        # Row 객체를 딕셔너리로 변환
-        tickets = []
-        for row in rows:
-            ticket_obj = dict(row)
-            
-            # 메타데이터와 원본 데이터 파싱
-            metadata = json.loads(ticket_obj.get('metadata', '{}'))
-            original_data = json.loads(ticket_obj.get('original_data', '{}'))
-            
-            # 기존 ticket 형태로 변환 (ID 타입 안전 처리)
-            original_id = ticket_obj.get('original_id')
-            try:
-                # 숫자 ID인 경우 정수로 변환, 아니면 문자열 그대로 사용
-                parsed_id = int(original_id) if original_id.isdigit() else original_id
-            except (ValueError, AttributeError):
-                parsed_id = original_id
-            
-            ticket = {
-                'id': parsed_id,
-                'original_id': ticket_obj.get('original_id'),
-                'tenant_id': ticket_obj.get('tenant_id'),
-                'platform': ticket_obj.get('platform'),
-                'subject': ticket_obj.get('summary'),
-                'description': original_data.get('description'),
-                'description_text': ticket_obj.get('integrated_content'),
-                'status': metadata.get('status'),
-                'priority': metadata.get('priority'),
-                'type': metadata.get('type'),
-                'source': metadata.get('source'),
-                'requester_id': metadata.get('requester_id'),
-                'responder_id': metadata.get('responder_id'),
-                'group_id': metadata.get('group_id'),
-                'tags': metadata.get('tags', []),
-                'custom_fields': metadata.get('custom_fields', {}),
-                'created_at': metadata.get('created_at'),
-                'updated_at': metadata.get('updated_at'),
-                'due_by': metadata.get('due_by'),
-                'fr_due_by': metadata.get('fr_due_by'),
-                'is_escalated': metadata.get('is_escalated'),
-                'raw_data': original_data
-            }
-            tickets.append(ticket)
-        
-        return tickets
-
-    def get_articles_by_company_and_platform(self, tenant_id: str, platform: str) -> List[Dict[str, Any]]:
-        """회사 및 플랫폼별 KB 문서 조회 - integrated_objects 테이블 사용
-        
-        Args:
-            tenant_id: 테넌트 ID
-            platform: 플랫폼명
-            
-        Returns:
-            List[Dict[str, Any]]: KB 문서 목록
-        """
-        if not self.connection:
-            logger.warning("DB 연결이 끊어짐. 재연결 시도...")
-            self.connect()
-            logger.info("DB 재연결 완료")
-        
-        cursor = self.connection.cursor()
-        cursor.execute("""
-            SELECT * FROM integrated_objects 
-            WHERE tenant_id = ? AND platform = ? AND object_type = 'article'
-            ORDER BY json_extract(metadata, '$.created_at') DESC
-        """, (tenant_id, platform))
-        
-        rows = cursor.fetchall()
-        
-        # Row 객체를 딕셔너리로 변환
-        articles = []
-        for row in rows:
-            article_obj = dict(row)
-            
-            # 메타데이터와 원본 데이터 파싱
-            metadata = json.loads(article_obj.get('metadata', '{}'))
-            original_data = json.loads(article_obj.get('original_data', '{}'))
-            
-            # 기존 article 형태로 변환 (ID 타입 안전 처리)
-            original_id = article_obj.get('original_id')
-            try:
-                # 숫자 ID인 경우 정수로 변환, 아니면 문자열 그대로 사용
-                parsed_id = int(original_id) if original_id.isdigit() else original_id
-            except (ValueError, AttributeError):
-                parsed_id = original_id
-            
-            article = {
-                'id': parsed_id,
-                'original_id': article_obj.get('original_id'),
-                'tenant_id': article_obj.get('tenant_id'),
-                'platform': article_obj.get('platform'),
-                'title': article_obj.get('summary'),
-                'description': original_data.get('description'),
-                'description_text': article_obj.get('integrated_content'),
-                'status': metadata.get('status'),
-                'type': metadata.get('type'),
-                'category_id': metadata.get('category_id'),
-                'folder_id': metadata.get('folder_id'),
-                'agent_id': metadata.get('agent_id'),
-                'hierarchy': metadata.get('hierarchy', []),
-                'thumbs_up': metadata.get('thumbs_up', 0),
-                'thumbs_down': metadata.get('thumbs_down', 0),
-                'hits': metadata.get('hits', 0),
-                'tags': metadata.get('tags', []),
-                'seo_data': metadata.get('seo_data', {}),
-                'created_at': metadata.get('created_at'),
-                'updated_at': metadata.get('updated_at'),
-                'raw_data': original_data
-            }
-            articles.append(article)
-        
-        return articles
-
-    def get_attachments_by_ticket(self, ticket_original_id: str) -> List[Dict[str, Any]]:
-        """티켓의 첨부파일 조회 - integrated_objects 테이블 사용
-        
-        Args:
-            ticket_original_id: 티켓 원본 ID
-            
-        Returns:
-            List[Dict[str, Any]]: 첨부파일 데이터 리스트
+            List[Dict]: 진행 상황 로그 목록
         """
         if not self.connection:
             self.connect()
-            
+        
         cursor = self.connection.cursor()
         
-        # 티켓과 관련된 모든 첨부파일 조회 (티켓 직접 첨부 + 대화 첨부파일)
-        # 먼저 해당 티켓의 대화들을 찾기
-        conversation_ids_query = """
-            SELECT original_id FROM integrated_objects 
-            WHERE tenant_id = ? AND platform = ? AND object_type = 'conversation'
-            AND json_extract(metadata, '$.ticket_original_id') = ?
-        """
+        query = "SELECT * FROM progress_logs WHERE 1=1"
+        params = []
         
-        cursor.execute(conversation_ids_query, (self.tenant_id, self.platform, ticket_original_id))
-        conversation_ids = [row[0] for row in cursor.fetchall()]
+        if job_id:
+            query += " AND job_id = ?"
+            params.append(job_id)
         
-        # 첨부파일 조회 - 티켓 직접 첨부 또는 대화 첨부
-        placeholders = ','.join(['?'] * len(conversation_ids)) if conversation_ids else "''"
+        if tenant_id:
+            query += " AND tenant_id = ?"
+            params.append(tenant_id)
         
-        query = f"""
-            SELECT * FROM integrated_objects 
-            WHERE tenant_id = ? AND platform = ? AND object_type = 'attachment'
-            AND (
-                json_extract(metadata, '$.parent_type') = 'ticket' 
-                AND json_extract(metadata, '$.parent_original_id') = ?
-                OR (
-                    json_extract(metadata, '$.parent_type') = 'conversation'
-                    AND json_extract(metadata, '$.parent_original_id') IN ({placeholders})
-                )
-            )
-            ORDER BY json_extract(metadata, '$.created_at')
-        """
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
         
-        params = [self.tenant_id, self.platform, ticket_original_id] + conversation_ids
         cursor.execute(query, params)
-        
         rows = cursor.fetchall()
-        attachments = []
         
-        for row in rows:
-            attachment_obj = dict(row)
-            metadata = json.loads(attachment_obj.get('metadata', '{}'))
-            
-            # 기존 형태로 변환
-            attachment = {
-                'attachment_id': attachment_obj.get('original_id'),
-                'name': metadata.get('name'),
-                'content_type': metadata.get('content_type'),
-                'size': metadata.get('size'),
-                'download_url': metadata.get('attachment_url'),
-                'parent_type': metadata.get('parent_type'),
-                'conversation_id': metadata.get('parent_original_id') if metadata.get('parent_type') == 'conversation' else None,
-                'created_at': metadata.get('created_at'),
-                'raw_data': attachment_obj.get('original_data')
-            }
-            attachments.append(attachment)
-        
-        logger.debug(f"티켓 {ticket_original_id}의 첨부파일 조회 완료: {len(attachments)}개")
-        return attachments
-
-    def clear_all_data(self, tenant_id: str = None, platform: str = None):
-        """모든 데이터 삭제 (force_rebuild용) - integrated_objects 테이블 사용
+        return [dict(row) for row in rows]
+    
+    def clear_progress_logs(self, job_id: str = None, tenant_id: str = None) -> int:
+        """
+        진행 상황 로그 삭제
         
         Args:
-            tenant_id: 테넌트 ID (선택사항, 지정시 해당 회사 데이터만 삭제)
-            platform: 플랫폼명 (선택사항, 지정시 해당 플랫폼 데이터만 삭제)
+            job_id: 작업 ID (선택사항)
+            tenant_id: 테넌트 ID (선택사항)
+            
+        Returns:
+            int: 삭제된 로그 개수
         """
         if not self.connection:
-            logger.warning("DB 연결이 끊어짐. 재연결 시도...")
             self.connect()
-            logger.info("DB 재연결 완료")
         
         cursor = self.connection.cursor()
         
-        # 조건부 삭제 - 이제 integrated_objects와 progress_logs만 삭제
-        if tenant_id and platform:
-            # 특정 회사 및 플랫폼 데이터만 삭제
-            cursor.execute("DELETE FROM integrated_objects WHERE tenant_id = ? AND platform = ?", 
-                         (tenant_id, platform))
-            logger.info(f"데이터 삭제 완료: tenant_id={tenant_id}, platform={platform}")
+        if job_id and tenant_id:
+            cursor.execute("DELETE FROM progress_logs WHERE job_id = ? AND tenant_id = ?", 
+                          (job_id, tenant_id))
+        elif job_id:
+            cursor.execute("DELETE FROM progress_logs WHERE job_id = ?", (job_id,))
         elif tenant_id:
-            # 특정 회사 데이터만 삭제  
-            cursor.execute("DELETE FROM integrated_objects WHERE tenant_id = ?", (tenant_id,))
             cursor.execute("DELETE FROM progress_logs WHERE tenant_id = ?", (tenant_id,))
-            logger.info(f"데이터 삭제 완료: tenant_id={tenant_id}")
         else:
-            # 전체 데이터 삭제 - 도메인 데이터만 삭제 (SaaS 테이블은 유지)
-            cursor.execute("DELETE FROM integrated_objects")
             cursor.execute("DELETE FROM progress_logs")
-            logger.info("전체 도메인 데이터 삭제 완료")
         
         self.connection.commit()
+        deleted_count = cursor.rowcount
+        logger.info(f"진행 상황 로그 삭제 완료: {deleted_count}개")
+        return deleted_count
 
     # =====================================================
     # 🏢 SaaS 라이선스 관리 메서드들

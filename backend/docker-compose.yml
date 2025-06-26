@@ -9,11 +9,13 @@ services:
     image: backend
     container_name: project-a
     environment:
+      # 로그 레벨 설정 (ERROR로 설정하여 시작시 상세 로그 숨김)
+      - LOG_LEVEL=ERROR
       # 표준화된 환경변수 사용
       - TENANT_ID=${TENANT_ID}
       - FRESHDESK_API_KEY=${FRESHDESK_API_KEY}
       - FRESHDESK_DOMAIN=${FRESHDESK_DOMAIN}
-      - DEFAULT_TENANT_ID=${DEFAULT_TENANT_ID}
+      #- DEFAULT_TENANT_ID=${DEFAULT_TENANT_ID}
       # LLM API 키들
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
@@ -30,7 +32,6 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./qdrant_data:/app/qdrant_data
       - ./:/app
     env_file:
       - ./.env

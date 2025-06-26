@@ -4,12 +4,19 @@
 
 import os
 import logging
-from typing import Optional, Union
+from typing import Optional, Union, Any
 from enum import Enum
 
 from .database import DatabaseManager
-from .postgresql_database import PostgreSQLDatabase
 from .tenant_config import TenantConfigManager
+
+# PostgreSQL 조건부 import
+try:
+    from .postgresql_database import PostgreSQLDatabase
+    POSTGRESQL_AVAILABLE = True
+except ImportError:
+    POSTGRESQL_AVAILABLE = False
+    PostgreSQLDatabase = None
 
 logger = logging.getLogger(__name__)
 

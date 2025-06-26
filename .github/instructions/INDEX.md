@@ -1,12 +1,27 @@
 # 📚 AI Instructions Directory Index
 
-> **🚀 AI 첫 참조 가이드**: 이 파일 → `core/quick-reference.instructions.md` → 작업별 지침서
+> **🚨 AI 필수 준수사항**: 모든 작업은 **"제안 > 컨펌 > 단계적 작업"** 3단계 프로세스 준수 필요
+
+> **🚀 AI 첫 참조 가이드**: 이 파일 → `core/current-project-status.instructions.md` → `core/quick-reference.instructions.md` → 작업별 지침서
+
+## 🚨 **AI 작업 프로세스 (절대 준수)**
+1. **📋 제안**: 변경사항 상세 설명 및 영향도 분석
+2. **✅ 컨펌**: 사용자 승인 대기 (필수)
+3. **🔧 실행**: 컨펌 후에만 단계적 작업 진행
+
+### 🚨 **최신 업데이트 (2025-06-26)**
+- **[현재 프로젝트 상태](./core/current-project-status.instructions.md)** 🔥 - 완전한 현재 상황 가이드
+- **[Quick Reference](./core/quick-reference.instructions.md)** 🔥 - ORM 통합 및 중복 저장 문제 반영
+- **[Backend Patterns](./development/backend-implementation-patterns.instructions.md)** 🔥 - SQLAlchemy ORM 패턴 추가
+- **[System Architecture](./core/system-architecture.instructions.md)** 🔥 - 백엔드 구조 정리 상황 반영
+- **[API Reference](./data/api-complete-reference.instructions.md)** 🔥 - ORM 기반 API 업데이트
 
 ## 🎯 즉시 참조 (우선순위 순)
 
 ### 🔥 필수 시작점
-1. **[Quick Reference](./core/quick-reference.instructions.md)** ⭐ - 핵심 패턴 (5분 읽기)
-2. **[Global Instructions](./core/global.instructions.md)** - 전역 규칙과 원칙
+1. **[현재 프로젝트 상태](./core/current-project-status.instructions.md)** 🆕 - 최신 상황 및 진행 중인 이슈 (2025-06-26)
+2. **[Quick Reference](./core/quick-reference.instructions.md)** ⭐ - 핵심 패턴 (5분 읽기)
+3. **[Global Instructions](./core/global.instructions.md)** - 전역 규칙과 원칙
 
 ### 🚨 최신 업데이트 (2025-06-23)
 - **[Security & Data Purge](./core/security-data-purge.instructions.md)** 🔥 - 완전한 데이터 삭제 기능
@@ -21,6 +36,7 @@
 
 | 파일 | 용도 | 크기 | 참조 시점 |
 |------|------|------|-----------|
+| **[현재 프로젝트 상태](./core/current-project-status.instructions.md)** | 🆕 **최신 상황** | ~6KB | **모든 작업 시작 전** |
 | **[Quick Reference](./core/quick-reference.instructions.md)** | 핵심 패턴 요약 | ~8KB | 모든 작업 시작 |
 | **[Security & Data Purge](./core/security-data-purge.instructions.md)** | 🔥 **NEW** | 보안/GDPR 대응 | ~12KB | 데이터 삭제 시 |
 | **[Global Instructions](./core/global.instructions.md)** | 전역 개발 원칙 | ~15KB | 새 기능 개발 시 |
@@ -68,19 +84,21 @@
 
 #### 🚀 **새 기능 개발**
 ```mermaid
-AI 시작 → Quick Reference → Development 패턴 → 특화 기능
+AI 시작 → 현재 상황 → Quick Reference → Development 패턴 → 특화 기능
 ```
-1. `core/quick-reference.instructions.md` (5분)
-2. `development/` 관련 패턴 파일 (10분)
-3. `specialized/` 해당 기능 파일 (필요시)
+1. `core/current-project-status.instructions.md` (2분) 🆕
+2. `core/quick-reference.instructions.md` (5분)
+3. `development/` 관련 패턴 파일 (10분)
+4. `specialized/` 해당 기능 파일 (필요시)
 
 #### 🐛 **디버깅 및 오류 수정**
 ```mermaid
-문제 발생 → Error Handling → Quick Reference → 관련 영역
+문제 발생 → 현재 상황 → Error Handling → Quick Reference → 관련 영역
 ```
-1. `development/error-handling-debugging.instructions.md`
-2. `core/quick-reference.instructions.md`
-3. 해당 기능 영역 파일
+1. `core/current-project-status.instructions.md` 🆕
+2. `development/error-handling-debugging.instructions.md`
+3. `core/quick-reference.instructions.md`
+4. 해당 기능 영역 파일
 
 #### 📊 **데이터 처리 작업**
 ```mermaid

@@ -6,42 +6,150 @@ applyTo: "**"
 
 _Python FastAPI 기반 백엔드 시스템 구현 전문 가이드_
 
-## 🎯 **백엔드 구현 목표**
+## 🎯 **백엔드 구현 목표** (2025-06-26 업데이트)
 
-**멀티테넌트 RAG 시스템의 견고한 백엔드 구현**
+**ORM 기반 멀티테넌트 RAG 시스템의 현대적 백엔드 구현**
 
-- **비동기 프로그래밍**: 고성능 비동기 처리 및 동시성 관리
-- **LLM 최적화**: 캐싱, 배치 처리, 토큰 관리를 통한 비용 효율성
-- **벡터 검색**: Qdrant 기반 유사도 검색 및 멀티테넌트 격리
-- **플랫폼 추상화**: Freshdesk 중심의 확장 가능한 플랫폼 지원
+- **SQLAlchemy ORM**: Repository 패턴 기반 데이터 계층 
+- **통합 객체 중심**: integrated_objects 테이블 기반 아키텍처
+- **Freshdesk 전용**: 멀티플랫폼 제거, Freshdesk 완전 최적화
+- **멀티테넌트 보안**: company_id 기반 완전한 테넌트 격리
 
 ---
 
 ## 🚀 **백엔드 핵심 포인트 요약**
 
-### 💡 **즉시 참조용 백엔드 핵심**
+### 💡 **즉시 참조용 백엔드 핵심** (2025-06-26)
+
+**ORM 기반 패턴**:
+- **USE_ORM=true**: SQLAlchemy 기반 데이터 접근
+- **Repository 패턴**: 데이터 계층 추상화 완성
+- **통합 객체**: integrated_objects 테이블 중심 설계
+- **UPSERT 필요**: 중복 저장 방지 패턴 적용
 
 **멀티테넌트 보안**:
-
 - 모든 데이터에 company_id 자동 태깅 필수
-- Row-level Security + Qdrant 필터링 조합
-- API 키는 secrets manager 참조만 저장
-
-**성능 최적화**:
-
-- 동시성 제한: `asyncio.Semaphore(max_concurrent=5)`
-- 재시도 로직: 지수 백오프 + 최대 3회
-- 컨텍스트 매니저로 리소스 관리
-
-**LLM 처리**:
-
-- ⚠️ LLM 캐싱 필수 → Redis 없으면 비용 폭증
-- 배치 처리로 API 호출 최소화
-- 토큰 예산 기반 대화 필터링
+- ORM 모델 기반 테넌트 격리 (Row-level Security)
+- 표준 4개 헤더 기반 API 인증
+- Freshdesk 전용 최적화 (멀티플랫폼 제거)
 
 ---
 
 ## 🏗️ **핵심 구현 패턴**
+
+### **1. SQLAlchemy ORM 패턴** (2025-06-26 핵심)
+
+**Repository 패턴 기반 데이터 접근**
+
+```python
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, and_
+from typing import List, Optional
+from core.database.models import IntegratedObject, Company
+
+class IntegratedObjectRepository:
+    def __init__(self, session: AsyncSession):
+        self.session = session
+    
+    async def create_or_update(
+        self, 
+        company_id: str,
+        object_data: dict
+    ) -> IntegratedObject:
+        """UPSERT 패턴 - 중복 저장 방지"""
+        
+        # 기존 객체 확인
+        stmt = select(IntegratedObject).where(
+            and_(
+                IntegratedObject.tenant_id == company_id,
+                IntegratedObject.platform == "freshdesk",
+                IntegratedObject.original_id == object_data.get('original_id')
+            )
+        )
+        
+        result = await self.session.execute(stmt)
+        existing = result.scalar_one_or_none()
+        
+        if existing:
+            # 업데이트
+            for key, value in object_data.items():
+                setattr(existing, key, value)
+            obj = existing
+        else:
+            # 새로 생성
+            obj = IntegratedObject(
+                tenant_id=company_id,
+                platform="freshdesk",
+                **object_data
+            )
+            self.session.add(obj)
+        
+        await self.session.commit()
+        await self.session.refresh(obj)
+        return obj
+
+    async def get_by_tenant(
+        self, 
+        company_id: str,
+        object_type: str = None,
+        limit: int = 100
+    ) -> List[IntegratedObject]:
+        """테넌트별 객체 조회"""
+        
+        query = select(IntegratedObject).where(
+            IntegratedObject.tenant_id == company_id
+        )
+        
+        if object_type:
+            query = query.where(IntegratedObject.object_type == object_type)
+            
+        query = query.limit(limit)
+        
+        result = await self.session.execute(query)
+        return result.scalars().all()
+
+# 사용 예시
+async def store_integrated_object(session: AsyncSession, company_id: str, data: dict):
+    """중복 방지 통합 객체 저장"""
+    repo = IntegratedObjectRepository(session)
+    
+    # 자동 company_id 태깅
+    data['tenant_id'] = company_id
+    data['platform'] = 'freshdesk'
+    data['created_at'] = datetime.utcnow()
+    
+    return await repo.create_or_update(company_id, data)
+```
+
+**환경별 DB 연결 패턴**
+
+```python
+# 환경변수 기반 DB 선택
+from core.database.connection import get_database_session
+
+async def get_session():
+    """환경에 따른 적절한 DB 세션 반환"""
+    use_orm = os.getenv("USE_ORM", "true").lower() == "true"
+    
+    if use_orm:
+        # SQLAlchemy ORM 사용
+        return get_database_session()
+    else:
+        # 레거시 SQLite 직접 사용 (하위 호환성)
+        from core.database.sqlite import SQLiteDatabase
+        return SQLiteDatabase()
+
+# FastAPI 의존성으로 사용
+from fastapi import Depends
+
+async def get_db_session():
+    session = await get_session()
+    try:
+        yield session
+    finally:
+        if hasattr(session, 'close'):
+            await session.close()
+```
 
 ### **1. 비동기 프로그래밍 패턴**
 
@@ -154,7 +262,7 @@ JSON 형식으로 응답해주세요:
 """
 
     async def __aenter__(self):
-        self.redis_client = await aioredis.from_url(self.redis_url)
+        self.redis_client = await aiorededis.from_url(self.redis_url)
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):

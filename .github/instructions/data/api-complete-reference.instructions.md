@@ -6,21 +6,26 @@ applyTo: "**"
 
 _모든 백엔드 API 엔드포인트 총정리 - 2025-06-23 최종 완성_
 
-## 🎯 **TL;DR - 완성된 API 구조**
+## 🎯 **TL;DR - 완성된 API 구조** (2025-06-26 업데이트)
 
-### 📊 **엔드포인트 구성 (라우터별)**
-1. **즉시 실행 & 동기화** (`/ingest/`)
-2. **작업 관리 & 메트릭스** (`/ingest/jobs/`)  
-3. **진행 상황 모니터링** (`/ingest/progress/`)
-4. **보안 & 데이터 삭제** (`/ingest/security/`)
+### 📊 **엔드포인트 구성 (ORM 기반)**
+1. **데이터 수집** (`/ingest/`) - ORM 저장 지원
+2. **작업 관리** (`/ingest/jobs/`) - 백그라운드 처리  
+3. **벡터 동기화** (`/ingest/sync-summaries`) - 통합 객체 기반
+4. **보안 관리** (`/ingest/security/`) - GDPR 대응
 
-### 🔑 **인증 헤더 (모든 엔드포인트 공통)**
+### 🔑 **표준 헤더 (모든 엔드포인트 필수)**
 ```
 X-Company-ID: 회사 식별자 (멀티테넌트 보안)
-X-Platform: 플랫폼 식별자 (freshdesk 전용)
-X-Domain: 플랫폼 도메인 (선택사항)
-X-API-Key: 플랫폼 API 키 (선택사항)
+X-Platform: freshdesk (플랫폼 고정)
+X-Domain: 플랫폼 도메인 (API 엔드포인트)
+X-API-Key: 플랫폼 API 키 (인증)
 ```
+
+### ⚠️ **현재 주의사항**
+- **중복 저장 방지**: integrated_objects 테이블 UPSERT 필요
+- **ORM 우선**: USE_ORM=true 환경에서 SQLAlchemy 사용
+- **Freshdesk 전용**: 멀티플랫폼 지원 제거됨
 
 ---
 

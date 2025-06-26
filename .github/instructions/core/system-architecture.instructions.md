@@ -18,56 +18,32 @@ _AI 참조 최적화 버전 - 확장 가능한 아키텍처 및 모듈 구조_
 
 ## 🚀 **TL;DR - 핵심 아키텍처 요약**
 
-### 💡 **즉시 참조용 핵심 포인트**
+### 💡 **즉시 참조용 핵심 포인트** (2025-06-26 업데이트)
 
-**디렉터리 구조 (2025년 6월 21일 대규모 리팩토링 완료)**:
+**현재 아키텍처 상태**:
 ```
-backend/
-├── api/                    # FastAPI 라우터 & 엔드포인트
-│   ├── main.py            # 메인 API 애플리케이션
-│   └── main_legacy.py     # 레거시 API (호환성 유지)
-├── core/                   # 핵심 비즈니스 로직 (완전 모듈화)
-│   ├── database/          # 데이터베이스 관련
-│   │   ├── vectordb.py    # Qdrant 벡터 DB
-│   │   └── sqlite.py      # SQLite 관리
-│   ├── data/              # 데이터 모델 및 스키마
-│   │   ├── schemas.py     # Pydantic 모델
-│   │   └── merger.py      # 데이터 병합 로직
-│   ├── search/            # 검색 및 임베딩
-│   │   ├── retriever.py   # 문서 검색
-│   │   ├── hybrid.py      # 하이브리드 검색
-│   │   └── embeddings/    # 임베딩 모델
-│   ├── processing/        # 데이터 처리
-│   │   └── context_builder.py
-│   ├── llm/              # LLM 통합 관리 (완전 통합)
-│   │   ├── router.py     # LLM 라우터
-│   │   ├── clients.py    # LLM 클라이언트
-│   │   └── models.py     # LLM 모델
-│   ├── platforms/        # 플랫폼별 어댑터
-│   │   ├── freshdesk/    # Freshdesk 통합
-│   │   └── factory.py    # 플랫폼 팩토리
-│   ├── ingest/           # 데이터 수집 파이프라인
-│   │   └── processor.py  # 수집 처리기
-│   └── legacy/           # 레거시 코드 보관
-├── config/               # 환경 설정 (분리됨)
-│   ├── settings/         # Python 설정 파일
-│   └── data/            # JSON 설정 데이터
-├── tests/               # 테스트 파일
-└── legacy/              # 백업된 구조
-    ├── backend_freshdesk_backup/
-    └── backend_data_backup/
+Frontend (FDK) → FastAPI → SQLAlchemy ORM → SQLite/PostgreSQL
+                     ↓
+                 Qdrant (벡터DB) + Redis (캐시)
 ```
 
-**핵심 기술 스택**:
-- **Backend**: FastAPI + asyncio + langchain + Redis
-- **Vector DB**: Qdrant Cloud (단일 `documents` 컬렉션)
-- **Cache**: Redis (LLM 응답 캐싱)
-- **DB**: SQLite (개발) → PostgreSQL (프로덕션)
+**ORM 통합 완성**:
+- **USE_ORM=true**: SQLAlchemy 기반 데이터 계층
+- **15개 모델**: 완전한 ORM 모델 구조
+- **Repository 패턴**: 데이터 접근 계층 추상화
+- **통합 객체 중심**: integrated_objects 테이블 기반
 
-**멀티테넌트 전략**:
-- company_id 자동 추출: `domain.split('.')[0]`
-- 모든 컴포넌트에 테넌트 격리 적용
-- X-Company-ID 헤더 기반 API 보안
+**백엔드 구조 정리 중**:
+```
+backend/freshdesk/         # 제거 예정
+core/platforms/freshdesk/  # 메인 (통합 대상)
+backend/data/              # 제거 예정  
+core/data/                 # 메인 (통합 대상)
+```
+
+**현재 해결 중**:
+- **중복 저장 문제**: integrated_objects UPSERT 적용 필요
+- **디렉터리 통합**: 중복 기능 제거 진행 중
 
 ### 🚨 **아키텍처 주의사항**
 

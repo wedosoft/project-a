@@ -154,9 +154,9 @@ CREATE TABLE billing_history (
 CREATE TABLE integrated_objects (
     id SERIAL PRIMARY KEY,                          -- SQLite: INTEGER PRIMARY KEY AUTOINCREMENT
     
-    -- 식별 정보
+    -- 식별 정보 (최신 버전 컬럼명 사용)
     original_id VARCHAR(255) NOT NULL,              -- 원본 시스템의 ID (ticket_id, article_id 등)
-    company_id VARCHAR(100) NOT NULL,               -- 멀티테넌트 지원
+    tenant_id VARCHAR(100) NOT NULL,                -- 멀티테넌트 지원 (company_id → tenant_id)
     platform VARCHAR(50) NOT NULL DEFAULT 'freshdesk', -- 플랫폼 구분
     object_type VARCHAR(50) NOT NULL,               -- 'integrated_ticket', 'integrated_article'
     
@@ -165,8 +165,8 @@ CREATE TABLE integrated_objects (
     integrated_content TEXT,                        -- LLM 처리용 통합 텍스트
     summary TEXT,                                   -- AI 생성 요약
     
-    -- 메타데이터 (검색 및 필터링용)
-    metadata JSONB,                                 -- SQLite: TEXT (구조화된 메타데이터)
+    -- 메타데이터 (검색 및 필터링용) - 최신 버전 컬럼명 사용
+    tenant_metadata JSONB,                          -- SQLite: TEXT (metadata → tenant_metadata)
     -- 메타데이터 구조 예시:
     -- {
     --   "has_conversations": true,
@@ -184,8 +184,8 @@ CREATE TABLE integrated_objects (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- SQLite: TEXT DEFAULT CURRENT_TIMESTAMP
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     
-    -- 인덱스 최적화를 위한 제약조건
-    UNIQUE(company_id, platform, object_type, original_id)
+    -- 인덱스 최적화를 위한 제약조건 (최신 버전 컬럼명 사용)
+    UNIQUE(tenant_id, platform, object_type, original_id)
 );
 
 -- 7. AI 처리 로그 (통합 객체 기반)
@@ -269,6 +269,25 @@ CREATE TABLE collection_logs (
     FOREIGN KEY (company_id) REFERENCES companies(id)
 );
 
+-- 11. 진행 상황 로그 (실시간 작업 진행상황 추적)
+CREATE TABLE progress_logs (
+    id SERIAL PRIMARY KEY,                          -- SQLite: INTEGER PRIMARY KEY AUTOINCREMENT
+    job_id VARCHAR(255) NOT NULL,                   -- 작업 ID
+    tenant_id VARCHAR(100) NOT NULL,                -- 테넌트 ID
+    
+    -- 진행 상황 정보
+    message TEXT NOT NULL,                          -- 진행 상황 메시지
+    percentage DECIMAL(5,2) NOT NULL,               -- 진행률 (0.00 ~ 100.00)
+    step INTEGER NOT NULL,                          -- 현재 단계
+    total_steps INTEGER NOT NULL,                   -- 전체 단계 수
+    
+    -- 시간 정보
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- SQLite: TEXT DEFAULT CURRENT_TIMESTAMP
+    
+    -- 중복 방지를 위한 제약조건
+    UNIQUE(job_id, tenant_id, step)
+);
+
 -- =====================================================
 -- 📊 인덱스 (성능 최적화)
 -- =====================================================
@@ -291,6 +310,11 @@ CREATE INDEX idx_usage_logs_agent ON usage_logs(agent_id);
 -- AI 처리 로그 인덱스
 CREATE INDEX idx_ai_processing_logs_object ON ai_processing_logs(integrated_object_id);
 CREATE INDEX idx_ai_processing_logs_type ON ai_processing_logs(processing_type);
+
+-- 진행 상황 로그 인덱스
+CREATE INDEX idx_progress_logs_job_id ON progress_logs(job_id);
+CREATE INDEX idx_progress_logs_tenant_id ON progress_logs(tenant_id);
+CREATE INDEX idx_progress_logs_created_at ON progress_logs(created_at);
 
 -- =====================================================
 -- 🚀 기본 데이터 삽입
@@ -318,25 +342,25 @@ INSERT INTO system_settings (setting_key, setting_value, is_encrypted, descripti
 -- 회사의 모든 통합 티켓 조회
 SELECT 
     original_id,
-    JSON_EXTRACT(metadata, '$.subject') as subject,
-    JSON_EXTRACT(metadata, '$.status') as status,
-    JSON_EXTRACT(metadata, '$.priority') as priority,
-    JSON_EXTRACT(metadata, '$.conversation_count') as conversation_count,
-    JSON_EXTRACT(metadata, '$.attachment_count') as attachment_count,
+    JSON_EXTRACT(tenant_metadata, '$.subject') as subject,
+    JSON_EXTRACT(tenant_metadata, '$.status') as status,
+    JSON_EXTRACT(tenant_metadata, '$.priority') as priority,
+    JSON_EXTRACT(tenant_metadata, '$.conversation_count') as conversation_count,
+    JSON_EXTRACT(tenant_metadata, '$.attachment_count') as attachment_count,
     created_at
 FROM integrated_objects 
-WHERE company_id = 'wedosoft' 
+WHERE tenant_id = 'wedosoft' 
   AND object_type = 'integrated_ticket'
 ORDER BY created_at DESC;
 
 -- AI 요약이 있는 티켓 조회
 SELECT 
     original_id,
-    JSON_EXTRACT(metadata, '$.subject') as subject,
+    JSON_EXTRACT(tenant_metadata, '$.subject') as subject,
     summary,
     LENGTH(summary) as summary_length
 FROM integrated_objects 
-WHERE company_id = 'wedosoft' 
+WHERE tenant_id = 'wedosoft' 
   AND object_type = 'integrated_ticket'
   AND summary IS NOT NULL
 ORDER BY created_at DESC;
@@ -344,13 +368,13 @@ ORDER BY created_at DESC;
 -- 첨부파일이 있는 티켓 조회
 SELECT 
     original_id,
-    JSON_EXTRACT(metadata, '$.subject') as subject,
-    JSON_EXTRACT(metadata, '$.attachments') as attachments,
-    JSON_EXTRACT(metadata, '$.attachment_count') as attachment_count
+    JSON_EXTRACT(tenant_metadata, '$.subject') as subject,
+    JSON_EXTRACT(tenant_metadata, '$.attachments') as attachments,
+    JSON_EXTRACT(tenant_metadata, '$.attachment_count') as attachment_count
 FROM integrated_objects 
-WHERE company_id = 'wedosoft' 
+WHERE tenant_id = 'wedosoft' 
   AND object_type = 'integrated_ticket'
-  AND JSON_EXTRACT(metadata, '$.has_attachments') = true
+  AND JSON_EXTRACT(tenant_metadata, '$.has_attachments') = true
 ORDER BY created_at DESC;
 
 -- 월별 처리 통계
@@ -360,7 +384,7 @@ SELECT
     COUNT(*) as object_count,
     COUNT(CASE WHEN summary IS NOT NULL THEN 1 END) as summarized_count
 FROM integrated_objects 
-WHERE company_id = 'wedosoft'
+WHERE tenant_id = 'wedosoft'
   AND created_at >= CURRENT_DATE - INTERVAL '6 months'
 GROUP BY month, object_type
 ORDER BY month DESC;
@@ -375,7 +399,7 @@ SELECT
         (COUNT(CASE WHEN a.seat_assigned = true THEN 1 END) * 100.0 / c.purchased_seats), 2
     ) as utilization_rate
 FROM companies c
-LEFT JOIN agents a ON c.id = a.company_id AND a.is_active = true
+LEFT JOIN agents a ON c.id = a.tenant_id AND a.is_active = true
 GROUP BY c.id, c.company_name, c.purchased_seats;
 */
 

@@ -10,22 +10,24 @@ _AI 참조 최적화 버전 - 분할된 지침서들의 통합 인덱스_
 
 ---
 
-## ⚡ **TL;DR - 핵심 데이터 파이프라인 요약**
+## ⚡ **TL;DR - 핵심 데이터 파이프라인 요약** (2025-06-26)
 
 ### 💡 **즉시 참조용 워크플로우**
 
-**전체 데이터 흐름**:
+**현재 데이터 흐름 (ORM 기반)**:
 ```
-플랫폼 수집 → 데이터 검증 → 통합 객체 생성 → LLM 요약 → 임베딩 생성 → Vector DB 저장 → 검색/추천 → 피드백 루프
+Freshdesk API → 데이터 검증 → 통합 객체 생성 → ORM 저장 (UPSERT) → LLM 요약 → 벡터 저장 → 검색 준비
 ```
 
-**핵심 구성 요소**:
-1. **[데이터 수집](data-collection-patterns.instructions.md)**: 플랫폼별 티켓/KB 수집
-2. **[LLM 처리](data-processing-llm.instructions.md)**: 구조화된 요약 생성  
-3. **[벡터 저장](vector-storage-core.instructions.md)**: Qdrant 기반 임베딩 관리
-4. **[스토리지 추상화](storage-abstraction-core.instructions.md)**: 파일→DB 전환
-5. **[플랫폼 어댑터](../specialized/platform-adapters-multiplatform.instructions.md)**: 멀티플랫폼 확장
-6. **[멀티테넌트 보안](../core/multitenant-security.instructions.md)**: company_id 기반 격리
+**핵심 변화사항**:
+- **ORM 우선**: SQLAlchemy Repository 패턴 사용
+- **통합 객체 중심**: integrated_objects 테이블 기반
+- **Freshdesk 전용**: 멀티플랫폼 제거, 최적화 완료
+- **중복 방지**: UPSERT 패턴으로 중복 저장 해결 중
+
+**현재 해결 중인 문제**:
+- **중복 저장**: store_integrated_object_to_sqlite 함수 UPSERT 적용
+- **백엔드 정리**: backend/freshdesk → core/platforms/freshdesk 통합
 
 ### 🚨 **데이터 워크플로우 핵심 원칙**
 

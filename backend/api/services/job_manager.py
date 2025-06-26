@@ -364,29 +364,54 @@ class JobManager:
         pause_event = self.pause_signals.get(job_id, asyncio.Event())
         
         # 진행상황 콜백 함수
-        def progress_callback(message: str, percentage: float):
+        def progress_callback(progress_data: dict):
+            """
+            progress_data 형식: {"stage": "tickets|articles", "progress": 0-100}
+            """
+            stage = progress_data.get("stage", "processing")
+            progress = progress_data.get("progress", 0)
+            
+            if stage == "tickets":
+                message = f"티켓 수집 중 ({progress:.1f}%)"
+            elif stage == "articles":
+                message = f"지식베이스 수집 중 ({progress:.1f}%)"
+            else:
+                message = f"데이터 처리 중 ({progress:.1f}%)"
+                
             job.progress.current_step_name = message
             # percentage를 current_step으로 변환 (0-100% → 0-total_steps)
             if job.progress.total_steps > 0:
-                job.progress.current_step = int((percentage / 100.0) * job.progress.total_steps)
-            logger.info(f"작업 {job_id} 진행상황: {message} ({percentage:.1f}%)")
+                job.progress.current_step = int((progress / 100.0) * job.progress.total_steps)
+            
+            # 데이터베이스에 진행상황 저장
+            try:
+                from core.database.database import get_database
+                db = get_database(job.tenant_id, "freshdesk")
+                db.log_progress(
+                    job_id=job_id,
+                    tenant_id=job.tenant_id,
+                    message=message,
+                    percentage=progress,
+                    step=int(progress),
+                    total_steps=100
+                )
+                db.disconnect()
+            except Exception as e:
+                logger.error(f"진행상황 DB 저장 실패: {e}")
+            
+            logger.info(f"작업 {job_id} 진행상황: {message}")
         
         try:
-            # 기존 ingest 함수 호출 (신호 전달)
+            # 기존 ingest 함수 호출 (올바른 파라미터 사용)
             result = await ingest(
                 tenant_id=job.tenant_id,
-                platform="freshdesk",  # TODO: config에서 가져오기
+                platform="freshdesk",
                 incremental=config.incremental,
                 purge=config.purge,
-                process_attachments=config.process_attachments,
-                force_rebuild=config.force_rebuild,
-                local_data_dir=None,
-                include_kb=config.include_kb,
-                domain=config.domain,
-                api_key=config.api_key,
-                start_date=config.start_date,  # 시작 날짜 파라미터 추가
-                cancel_event=cancel_event,
-                pause_event=pause_event,
+                skip_embeddings=False,  # config에서 가져오거나 기본값
+                skip_summaries=False,   # config에서 가져오거나 기본값
+                max_tickets=None,       # 무제한
+                max_articles=None,      # 무제한
                 progress_callback=progress_callback
             )
             

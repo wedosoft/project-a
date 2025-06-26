@@ -251,6 +251,15 @@ async def ingest(
         if progress_callback:
             progress_callback({"stage": "tickets", "progress": 0})
         
+        # 진행 상황을 데이터베이스에 로그
+        db.log_progress(
+            tenant_id=tenant_id,
+            message="티켓 수집 시작",
+            percentage=0,
+            step=0,
+            total_steps=100
+        )
+        
         logger.info(f"티켓 수집 시작... (최대 {max_tickets}개)" if max_tickets else "티켓 수집 시작...")
         tickets = await fetch_tickets(domain=domain, api_key=api_key, max_tickets=max_tickets)
         logger.info(f"수집된 티켓 수: {len(tickets)}")
@@ -274,6 +283,15 @@ async def ingest(
                 if progress_callback:
                     progress = (i + 1) / len(tickets) * 100
                     progress_callback({"stage": "tickets", "progress": progress})
+                
+                # 진행 상황을 데이터베이스에 로그
+                db.log_progress(
+                    tenant_id=tenant_id,
+                    message=f"티켓 {i + 1}/{len(tickets)} 처리 완료",
+                    percentage=progress if 'progress' in locals() else (i + 1) / len(tickets) * 100,
+                    step=i + 1,
+                    total_steps=len(tickets)
+                )
                     
             except Exception as e:
                 logger.error(f"티켓 처리 오류 (ID: {ticket.get('id', 'unknown')}): {e}")
@@ -282,6 +300,15 @@ async def ingest(
         # 2. KB 문서 수집
         if progress_callback:
             progress_callback({"stage": "articles", "progress": 0})
+        
+        # 진행 상황을 데이터베이스에 로그
+        db.log_progress(
+            tenant_id=tenant_id,
+            message="KB 문서 수집 시작",
+            percentage=0,
+            step=0,
+            total_steps=100
+        )
         
         logger.info(f"KB 문서 수집 시작... (최대 {max_articles}개)" if max_articles else "KB 문서 수집 시작...")
         articles = await fetch_kb_articles(domain=domain, api_key=api_key, max_articles=max_articles)
@@ -306,6 +333,15 @@ async def ingest(
                 if progress_callback:
                     progress = (i + 1) / len(articles) * 100
                     progress_callback({"stage": "articles", "progress": progress})
+                
+                # 진행 상황을 데이터베이스에 로그
+                db.log_progress(
+                    tenant_id=tenant_id,
+                    message=f"KB 문서 {i + 1}/{len(articles)} 처리 완료",
+                    percentage=progress if 'progress' in locals() else (i + 1) / len(articles) * 100,
+                    step=i + 1,
+                    total_steps=len(articles)
+                )
                     
             except Exception as e:
                 logger.error(f"KB 문서 처리 오류 (ID: {article.get('id', 'unknown')}): {e}")
@@ -315,6 +351,15 @@ async def ingest(
         if not skip_summaries:
             if progress_callback:
                 progress_callback({"stage": "summaries", "progress": 0})
+            
+            # 진행 상황을 데이터베이스에 로그
+            db.log_progress(
+                tenant_id=tenant_id,
+                message="요약 생성 시작",
+                percentage=0,
+                step=0,
+                total_steps=100
+            )
             
             logger.info("요약 생성 시작...")
             summary_result = await generate_and_store_summaries(
@@ -326,11 +371,29 @@ async def ingest(
             
             if progress_callback:
                 progress_callback({"stage": "summaries", "progress": 100})
+            
+            # 진행 상황을 데이터베이스에 로그
+            db.log_progress(
+                tenant_id=tenant_id,
+                message=f"요약 생성 완료: {result['summaries_created']}개",
+                percentage=100,
+                step=100,
+                total_steps=100
+            )
         
         # 4. 임베딩 생성 및 벡터 DB 저장
         if not skip_embeddings:
             if progress_callback:
                 progress_callback({"stage": "embeddings", "progress": 0})
+            
+            # 진행 상황을 데이터베이스에 로그
+            db.log_progress(
+                tenant_id=tenant_id,
+                message="임베딩 생성 시작",
+                percentage=0,
+                step=0,
+                total_steps=100
+            )
             
             logger.info("임베딩 생성 시작...")
             embedding_result = await sync_summaries_to_vector_db(
@@ -341,6 +404,15 @@ async def ingest(
             
             if progress_callback:
                 progress_callback({"stage": "embeddings", "progress": 100})
+            
+            # 진행 상황을 데이터베이스에 로그
+            db.log_progress(
+                tenant_id=tenant_id,
+                message=f"임베딩 생성 완료: {result['embeddings_created']}개",
+                percentage=100,
+                step=100,
+                total_steps=100
+            )
         
         result["processing_time"] = time.time() - start_time
         result["end_time"] = get_kst_time()

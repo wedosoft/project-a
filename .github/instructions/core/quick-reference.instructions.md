@@ -6,50 +6,59 @@ applyTo: "**"
 
 _AI 즉시 참조용 핵심 패턴 - 2025-06-23 보안/데이터 삭제 기능 완성_
 
-## 🎯 **2025-06-23 최신 업데이트** 🔥
+## 🎯 **2025-06-26 최신 업데이트** 🔥
 
-### 🔐 **보안/데이터 삭제 기능 완성**
-**GDPR 대응 완전한 데이터 초기화 구현**
-- ✅ **SQLite 데이터**: 티켓, 지식베이스, 요약 등 완전 삭제
-- ✅ **벡터 DB**: Qdrant 임베딩 및 메타데이터 삭제
-- ✅ **캐시 데이터**: Redis, 메모리 캐시 정리
-- ✅ **AWS Secrets Manager**: API 키, 인증 토큰 등 비밀키 삭제
-- ✅ **백업 생성**: 삭제 전 자동 백업 (선택사항)
-- ✅ **감사 로그**: 모든 삭제 작업 기록
+### 🏗️ **ORM 통합 완성** 
+**SQLAlchemy 기반 현대적 데이터 계층 완성**
+- ✅ **USE_ORM=true**: SQLAlchemy ORM 활성화 완료
+- ✅ **15개 모델**: 완전한 ORM 모델 구조 구축
+- ✅ **Repository 패턴**: 데이터 접근 계층 추상화
+- ✅ **마이그레이션 레이어**: ORM/SQLite 전환 지원
+- ⚠️ **중복 저장 문제**: integrated_objects 테이블 UPSERT 필요
+- ✅ **멀티테넌트 완성**: company_id 기반 완전 격리
 
-### 🛡️ **작업 제어 & 모니터링 (완성)**
-**사용자 데이터 민감성 고려한 완전한 제어**
-- ✅ **즉시 실행** (/ingest): 제어 불가, 소량 테스트용
-- ✅ **백그라운드 작업** (/ingest/jobs): pause/resume/cancel 지원
-- ✅ **진행상황 추적**: 실시간 상태 모니터링
-- ✅ **데이터 보안**: 토큰 기반 보안 검증
+### 🎯 **프로젝트 핵심 변화**
+**멀티플랫폼 제거 → Freshdesk 전용 최적화**
+- ❌ **멀티플랫폼 지원 제거**: ServiceNow, Zendesk 등 제거
+- ✅ **Freshdesk 전용**: 완전한 Freshdesk 특화 최적화
+- ✅ **백엔드 구조 정리**: 중복 디렉터리 통합 진행 중
+- ✅ **통합 객체 중심**: integrated_objects 테이블 기반
 
-### 📋 **새로운 보안 API 엔드포인트**
-```bash
-# 보안 토큰 생성
-POST /ingest/security/generate-token
-
-# 완전한 데이터 삭제 (GDPR 대응)
-POST /ingest/security/purge-data
+### � **현재 해결 중인 핵심 문제**
+**데이터 중복 저장 문제 (최우선)**
+```sql
+-- 동일 original_id로 중복 레코드 생성됨
+SELECT original_id, object_type, COUNT(*) 
+FROM integrated_objects 
+GROUP BY original_id, object_type 
+HAVING COUNT(*) > 1;
 ```
+
+**해결 방향**: 
+- UPSERT 패턴 적용 (INSERT OR REPLACE)
+- store_integrated_object_to_sqlite 함수 수정
+- ORM/SQLite 이중 저장 방지
 
 ### 🚨 **API 엔드포인트 핵심 교훈**
 **가장 중요한 발견**: `/ingest`와 `/ingest/jobs`는 완전히 다른 용도!
 - ✅ `/ingest` → **즉시 실행** (동기식, 테스트용, 소량 데이터)
 - ✅ `/ingest/jobs` → **백그라운드 실행** (비동기식, 대량 데이터)
 
-### 🔄 **표준 4개 헤더 체계 (완성)**
-- ✅ **X-Company-ID**: 테넌트 식별자 (예: "your_company")
-- ✅ **X-Platform**: 플랫폼 (항상 "freshdesk")  
-- ✅ **X-Domain**: API 도메인 (예: "your_company.freshdesk.com")
-- ✅ **X-API-Key**: 플랫폼 API 키
+### 🔄 **현재 기술 스택 (2025-06-26)**
+- ✅ **Frontend**: FDK (Freshdesk 전용)
+- ✅ **Backend**: FastAPI + SQLAlchemy ORM
+- ✅ **Database**: SQLite(개발) → PostgreSQL(운영)
+- ✅ **Vector DB**: Qdrant (단일 documents 컬렉션)
+- ✅ **Cache**: Redis (LLM 응답 캐싱)
+- ✅ **테넌트 격리**: company_id 기반 완전 분리
 
-### 🔄 **주요 변경사항**
-- ❌ **제거됨**: 레거시 환경변수 (FRESHDESK_DOMAIN, FRESHDESK_API_KEY)
-- ❌ **제거됨**: Query 파라미터, 중복 헤더
-- ✅ **구현됨**: 멀티테넌트 DB 정책 (회사별 SQLite 파일)
-- ✅ **통합됨**: fetch_tickets 파라미터 일관성
-- ✅ **검증됨**: 즉시 저장 로직 (store_immediately=True)
+### 🔄 **환경 설정 (현재)**
+```bash
+USE_ORM=true              # ORM 모드 활성화
+LOG_LEVEL=ERROR           # 디버그 로그 제거  
+DATABASE_TYPE=sqlite      # 개발 환경
+ENVIRONMENT=development   # 개발 모드
+```
 
 ### 🧪 **즉시 테스트 가능 (검증됨)**
 ```bash

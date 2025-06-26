@@ -40,10 +40,10 @@ class DependencyContainer:
     async def initialize(self) -> None:
         """컨테이너 초기화 - 모든 서비스 등록"""
         if self._initialized:
-            logger.warning("Container가 이미 초기화되어 있습니다.")
+            # 이미 초기화됨 - 조용히 건너뛰기
             return
             
-        logger.info("🏗️ 의존성 컨테이너 초기화 시작...")
+        logger.debug("🏗️ 의존성 컨테이너 초기화 시작...")
         
         try:
             # 설정 관리자
@@ -57,13 +57,13 @@ class DependencyContainer:
             self._services['fetcher'] = fetcher
             
             # LLM Manager (비동기 초기화)
-            logger.info("🧠 LLM Manager 초기화 중...")
+            logger.debug("🧠 LLM Manager 초기화 중...")
             llm_manager = get_llm_manager()
             self._services['llm_manager'] = llm_manager
-            logger.info("🧠 LLM Manager 초기화 완료")
+            logger.debug("🧠 LLM Manager 초기화 완료")
             
             # 성능 최적화된 캐싱 매니저 초기화
-            logger.info("🚀 성능 최적화된 캐싱 시스템 초기화 중...")
+            logger.debug("🚀 성능 최적화된 캐싱 시스템 초기화 중...")
             cache_manager = CacheManager()
             
             # 다양한 캐시 생성
@@ -106,20 +106,20 @@ class DependencyContainer:
             self._services['ticket_summary_cache'] = ticket_summary_cache
             self._services['llm_response_cache'] = llm_response_cache
             self._services['vector_search_cache'] = vector_search_cache
-            logger.info("🚀 캐싱 시스템 초기화 완료")
+            logger.debug("🚀 캐싱 시스템 초기화 완료")
             
             # 하이브리드 검색 매니저
-            logger.info("🔍 하이브리드 검색 매니저 초기화 중...")
+            logger.debug("🔍 하이브리드 검색 매니저 초기화 중...")
             hybrid_search_manager = HybridSearchManager(
                 vector_db=self._services['vector_db'],
                 llm_router=self._services['llm_manager'],
                 fetcher=self._services['fetcher']
             )
             self._services['hybrid_search_manager'] = hybrid_search_manager
-            logger.info("🔍 하이브리드 검색 매니저 초기화 완료")
+            logger.debug("🔍 하이브리드 검색 매니저 초기화 완료")
             
             self._initialized = True
-            logger.info("✅ 의존성 컨테이너 초기화 완료")
+            logger.debug("✅ 의존성 컨테이너 초기화 완료")
             
         except Exception as e:
             logger.error(f"❌ 의존성 컨테이너 초기화 실패: {e}")

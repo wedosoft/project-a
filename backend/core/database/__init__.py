@@ -6,7 +6,6 @@ Freshdesk 플랫폼만 지원합니다.
 """
 
 from .database import DatabaseManager
-from .postgresql_database import PostgreSQLDatabase
 from .vectordb import VectorDBFactory, VectorDBInterface, QdrantAdapter, vector_db
 from .factory import DatabaseFactory, TenantDataManager, DatabaseType, get_database
 from .tenant_config import TenantConfigManager
@@ -20,7 +19,6 @@ from .models import (
 __all__ = [
     # Core database managers
     'DatabaseManager',
-    'PostgreSQLDatabase',
     
     # Vector database (Freshdesk 전용)
     'VectorDBFactory',
