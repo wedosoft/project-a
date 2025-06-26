@@ -56,12 +56,6 @@ def create_test_tenant_secrets():
             "api_key": "test-api-key-company-a"
         },
         {
-            "company_id": "company-b",
-            "platform": "zendesk",
-            "domain": "companyb.zendesk.com",
-            "api_key": "test-api-key-company-b"
-        },
-        {
             "company_id": "demo-corp",
             "platform": "freshdesk", 
             "domain": "democorp.freshdesk.com",

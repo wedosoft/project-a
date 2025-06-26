@@ -285,7 +285,7 @@ async def trigger_data_ingestion(
     
     **새로운 표준 헤더 (권장):**
     - X-Company-ID: 회사 식별자 (또는 X-Domain에서 자동 추출)
-    - X-Platform: 플랫폼 식별자 (freshdesk, zendesk 등)
+    - X-Platform: 플랫폼 식별자 (freshdesk만 지원)
     - X-Domain: 플랫폼 도메인 (예: company-domain)
     - X-API-Key: 플랫폼 API 키
     

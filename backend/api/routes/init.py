@@ -57,9 +57,7 @@ async def get_initial_context(
     top_k_kb: int = Query(default=5, ge=1, le=5, description="지식베이스 문서 검색 결과 수 (1-5)"),
     agent_language: Optional[str] = Query(default=None, description="에이전트 UI 언어 (ko, en)"),
     x_freshdesk_domain: Optional[str] = Header(None, alias="X-Freshdesk-Domain"),
-    x_freshdesk_api_key: Optional[str] = Header(None, alias="X-Freshdesk-API-Key"),
-    x_zendesk_domain: Optional[str] = Header(None, alias="X-Zendesk-Domain"),
-    x_zendesk_api_key: Optional[str] = Header(None, alias="X-Zendesk-API-Key")
+    x_freshdesk_api_key: Optional[str] = Header(None, alias="X-Freshdesk-API-Key")
 ):
     """
     티켓 초기화 및 컨텍스트 생성
@@ -91,23 +89,14 @@ async def get_initial_context(
         
         logger.info(f"티켓 ID {ticket_id} 초기화 시작 (company_id: {company_id}, platform: {platform})")
         
-        # 플랫폼별 검색 company_id 결정
-        if platform == "freshdesk":
-            # Freshdesk의 경우 헤더에서 제공된 company_id를 그대로 사용
-            search_company_id = company_id
-        elif platform == "zendesk":
-            # Zendesk의 경우 별도 처리 (미래 확장용)
-            search_company_id = company_id
-        else:
-            # 기본값 또는 다른 플랫폼
-            search_company_id = company_id
+        # Freshdesk 전용 처리 (platform은 항상 "freshdesk")
+        search_company_id = company_id
         
-        # 동적 API 설정 (헤더 기반)
-        if platform == "freshdesk":
-            domain = x_freshdesk_domain or os.getenv("FRESHDESK_DOMAIN")
-            api_key = x_freshdesk_api_key or os.getenv("FRESHDESK_API_KEY")
-            
-            if not domain or not api_key:
+        # Freshdesk API 설정 (헤더 기반)
+        domain = x_freshdesk_domain or os.getenv("FRESHDESK_DOMAIN")
+        api_key = x_freshdesk_api_key or os.getenv("FRESHDESK_API_KEY")
+        
+        if not domain or not api_key:
                 raise HTTPException(
                     status_code=400,
                     detail="Freshdesk 도메인과 API 키가 필요합니다. 헤더 또는 환경변수로 제공해주세요."

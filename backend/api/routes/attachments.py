@@ -37,15 +37,15 @@ async def download_attachment(
     api_key: str = Depends(get_api_key)
 ):
     """
-    첨부파일 다운로드 프록시 엔드포인트 (멀티플랫폼 지원)
+    첨부파일 다운로드 프록시 엔드포인트 (Freshdesk 전용)
     
-    표준 헤더를 사용하여 첨부파일을 프록시를 통해 다운로드합니다.
+    표준 헤더를 사용하여 Freshdesk 첨부파일을 프록시를 통해 다운로드합니다.
     
     Headers:
         X-Company-ID: 회사 ID
-        X-Platform: 플랫폼 식별자 (freshdesk, zendesk 등)
-        X-Domain: 플랫폼 도메인
-        X-API-Key: API 키
+        X-Platform: 플랫폼 식별자 (freshdesk만 지원)
+        X-Domain: Freshdesk 도메인
+        X-API-Key: Freshdesk API 키
         
     Query Parameters:
         ticket_id: 티켓 ID (첨부파일이 티켓에 직접 속한 경우)
@@ -77,13 +77,13 @@ async def get_attachment_url(
     api_key: str = Depends(get_api_key)
 ):
     """
-    첨부파일 다운로드 URL 조회 엔드포인트 (멀티플랫폼 지원)
+    첨부파일 다운로드 URL 조회 엔드포인트 (Freshdesk 전용)
     
     표준 헤더를 사용하여 첨부파일의 다운로드 URL을 조회합니다.
     
     Headers:
         X-Company-ID: 회사 ID
-        X-Platform: 플랫폼 식별자 (freshdesk, zendesk 등)
+        X-Platform: 플랫폼 식별자 (freshdesk만 지원)
         X-Domain: 플랫폼 도메인
         X-API-Key: API 키
         
@@ -113,13 +113,13 @@ async def get_attachment_info(
     platform: str = Depends(get_platform)
 ):
     """
-    첨부파일 메타데이터 조회 엔드포인트 (멀티플랫폼 지원)
+    첨부파일 메타데이터 조회 엔드포인트 (Freshdesk 전용)
     
     첨부파일의 메타데이터 정보를 조회합니다.
     
     Headers:
         X-Company-ID: 회사 ID
-        X-Platform: 플랫폼 식별자 (freshdesk, zendesk 등)
+        X-Platform: 플랫폼 식별자 (freshdesk만 지원)
     """
     try:
         metadata = await get_attachment_metadata(attachment_id)
@@ -137,13 +137,13 @@ async def get_bulk_urls(
     api_key: str = Depends(get_api_key)
 ):
     """
-    대량 첨부파일 URL 조회 엔드포인트 (멀티플랫폼 지원)
+    대량 첨부파일 URL 조회 엔드포인트 (Freshdesk 전용)
     
     여러 첨부파일의 다운로드 URL을 한 번에 조회합니다.
     
     Headers:
         X-Company-ID: 회사 ID
-        X-Platform: 플랫폼 식별자 (freshdesk, zendesk 등)
+        X-Platform: 플랫폼 식별자 (freshdesk만 지원)
         X-Domain: 플랫폼 도메인
         X-API-Key: API 키
     """
@@ -171,13 +171,13 @@ async def get_freshdesk_url(
     api_key: str = Depends(get_api_key)
 ):
     """
-    Freshdesk 첨부파일 URL 조회 엔드포인트 (멀티플랫폼 지원)
+    Freshdesk 첨부파일 URL 조회 엔드포인트 (Freshdesk 전용)
     
     표준 헤더를 사용하여 Freshdesk API를 통해 첨부파일 URL을 조회합니다.
     
     Headers:
         X-Company-ID: 회사 ID
-        X-Platform: 플랫폼 식별자 (freshdesk, zendesk 등)
+        X-Platform: 플랫폼 식별자 (freshdesk만 지원)
         X-Domain: 플랫폼 도메인
         X-API-Key: API 키
     """

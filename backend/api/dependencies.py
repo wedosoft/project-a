@@ -114,19 +114,22 @@ async def get_company_id(
 
 
 async def get_platform(
-    x_platform: str = Header(..., alias="X-Platform", description="플랫폼 식별자 (필수, 예: freshdesk, zendesk)")
+    x_platform: str = Header(..., alias="X-Platform", description="플랫폼 식별자 (필수, freshdesk만 지원)")
 ) -> str:
     """
-    현재 요청의 플랫폼을 반환합니다 (멀티플랫폼 지원)
+    현재 요청의 플랫폼을 반환합니다 (Freshdesk 전용)
     
     Args:
-        x_platform: 플랫폼 식별자 헤더 (필수)
+        x_platform: 플랫폼 식별자 헤더 (필수, "freshdesk"만 허용)
         
     Returns:
-        str: 플랫폼 식별자 (소문자)
+        str: 플랫폼 식별자 ("freshdesk"로 고정)
     """
     platform = x_platform.lower()
-    logger.info(f"X-Platform 헤더 사용: {platform}")
+    if platform != "freshdesk":
+        logger.warning(f"지원하지 않는 플랫폼 요청: {platform}, freshdesk로 설정")
+        platform = "freshdesk"
+    logger.info(f"X-Platform 헤더 사용: {platform} (Freshdesk 전용)")
     return platform
 
 
