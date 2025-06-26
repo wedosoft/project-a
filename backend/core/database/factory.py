@@ -8,8 +8,8 @@ from typing import Optional, Union
 from enum import Enum
 
 from .database import DatabaseManager
-from .postgresql_database import PostgreSQLDatabaseManager
-from .tenant_config import TenantConfig
+from .postgresql_database import PostgreSQLDatabase
+from .tenant_config import TenantConfigManager
 
 logger = logging.getLogger(__name__)
 
@@ -39,13 +39,13 @@ class DatabaseFactory:
         tenant_id: Optional[str] = None,
         platform: Optional[str] = None,
         db_type: Optional[DatabaseType] = None
-    ) -> Union[DatabaseManager, PostgreSQLDatabaseManager]:
+    ) -> Union[DatabaseManager, PostgreSQLDatabase]:
         """
         적절한 데이터베이스 매니저 인스턴스 생성
         
         Args:
             tenant_id: 테넌트 ID (멀티테넌트 환경에서)
-            platform: 플랫폼 (freshdesk, zendesk 등)
+            platform: 플랫폼 (현재는 Freshdesk만 지원)
             db_type: 강제로 지정할 데이터베이스 타입
         
         Returns:
@@ -56,10 +56,10 @@ class DatabaseFactory:
         
         if db_type == DatabaseType.POSTGRESQL:
             logger.info(f"PostgreSQL 데이터베이스 매니저 생성 - tenant: {tenant_id}, platform: {platform}")
-            return PostgreSQLDatabaseManager(tenant_id=tenant_id, platform=platform)
+            return PostgreSQLDatabase(tenant_id, platform or "freshdesk")
         else:
             logger.info(f"SQLite 데이터베이스 매니저 생성 - tenant: {tenant_id}, platform: {platform}")
-            return DatabaseManager(tenant_id=tenant_id, platform=platform)
+            return DatabaseManager(tenant_id, platform or "freshdesk")
     
     @staticmethod
     def validate_environment() -> bool:

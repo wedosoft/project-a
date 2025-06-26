@@ -1,8 +1,8 @@
 """
-SQLite 데이터베이스 연결 및 모델 정의
+SQLite 데이터베이스 연결 및 모델 정의 (Freshdesk 전용)
 
-멀티플랫폼 데이터 수집을 위한 SQLite 데이터베이스 구조를 정의합니다.
-플랫폼별로 별도 데이터베이스 파일이 생성됩니다 (예: freshdesk_data.db, zendesk_data.db).
+Freshdesk 멀티테넌트 데이터 수집을 위한 SQLite 데이터베이스 구조를 정의합니다.
+회사별로 별도 데이터베이스 파일이 생성됩니다 (예: company1_data.db, company2_data.db).
 """
 
 import sqlite3
@@ -31,28 +31,30 @@ class SQLiteDatabase:
     
     def __init__(self, company_id: str, platform: str = "freshdesk"):
         """
-        SQLite 데이터베이스 초기화 (멀티테넌트 지원)
+        SQLite 데이터베이스 초기화 (Freshdesk 전용 멀티테넌트)
         
         Args:
             company_id: 회사 ID (필수, 예: "wedosoft", "acme")
-            platform: 플랫폼 이름 (기본값: "freshdesk")
-                     {company_id}_{platform}_data.db 형식으로 회사별 데이터베이스 파일이 생성됩니다.
+            platform: 플랫폼 이름 (기본값: "freshdesk", 현재는 Freshdesk만 지원)
+                     {company_id}_data.db 형식으로 회사별 데이터베이스 파일이 생성됩니다.
         """
         if not company_id:
             raise ValueError("company_id는 필수 매개변수입니다")
-        if not platform:
-            raise ValueError("platform은 필수 매개변수입니다")
         
-        # 멀티테넌트: 회사별 데이터베이스 파일 분리
-        db_name = f"{company_id}_{platform}_data.db"
+        # Freshdesk 전용 플랫폼으로 고정 (점진적 단순화)
+        if platform and platform != "freshdesk":
+            logger.warning(f"현재는 Freshdesk만 지원됩니다. platform='{platform}' 무시하고 'freshdesk'로 설정")
+        
+        # 멀티테넌트: 회사별 데이터베이스 파일 분리 (Freshdesk 전용)
+        db_name = f"{company_id}_data.db"
         self.company_id = company_id
-        self.platform = platform
+        self.platform = "freshdesk"  # 항상 고정
         self.db_path = Path(__file__).parent.parent / "data" / db_name
         self.db_path.parent.mkdir(exist_ok=True)
         
         self.connection = None
         self._tables_created = False  # 테이블 생성 여부 추적
-        logger.info(f"SQLite 데이터베이스 초기화: {self.db_path} (회사: {company_id}, 플랫폼: {platform})")
+        logger.info(f"SQLite 데이터베이스 초기화: {self.db_path} (회사: {company_id}, 플랫폼: Freshdesk 전용)")
     
     @property
     def tenant_id(self) -> str:
@@ -1143,19 +1145,19 @@ DatabaseManager = SQLiteDatabase
 
 def get_database(company_id: str = None, platform: str = "freshdesk") -> SQLiteDatabase:
     """
-    데이터베이스 인스턴스 반환 (멀티테넌트 지원)
+    데이터베이스 인스턴스 반환 (Freshdesk 전용 멀티테넌트)
     
     Args:
         company_id: 회사 ID (테넌트 ID)
-        platform: 플랫폼 이름
+        platform: 플랫폼 이름 (현재는 Freshdesk만 지원, 다른 값은 무시됨)
     
     Returns:
-        SQLiteDatabase 인스턴스
+        SQLiteDatabase 인스턴스 (항상 Freshdesk 전용)
     """
     if not company_id:
         raise ValueError("멀티테넌트 환경에서는 company_id(tenant_id)가 필수입니다")
     
-    return SQLiteDatabase(company_id, platform)
+    return SQLiteDatabase(company_id, platform)  # platform은 내부적으로 "freshdesk"로 고정됨
 
 
 def validate_multitenant_setup() -> Dict[str, Any]:

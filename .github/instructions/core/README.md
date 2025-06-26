@@ -158,7 +158,7 @@ _AI 참조 최적화를 위한 지침서 구조 및 사용법 (2025.01.20 업데
 
 - 전체 데이터 흐름 (Freshdesk → Vector DB → LLM → 응답)
 - Qdrant Vector DB 스키마 및 컬렉션 구조
-- 멀티플랫폼 지원 (Freshdesk, Zendesk, ServiceNow)
+- Freshdesk 전용 플랫폼 지원 (멀티플랫폼 단순화 완료)
 - 보안 데이터 처리 및 피드백 루프
 
 ### 🏗️ **core-architecture.instructions.md** (1,185줄 - 🔴 분할 예정)

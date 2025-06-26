@@ -44,7 +44,7 @@ search_filter = Filter(
 ```python
 async def store_document_embeddings(
     company_id: str,
-    platform: str,  # 'freshdesk', 'zendesk', 'servicenow'
+    platform: str,  # 'freshdesk' (전용)
     documents: List[Dict],  # LLM 요약 완료된 문서들
     data_type: str = "ticket"  # 'ticket' or 'kb'
 ) -> Dict[str, Any]:

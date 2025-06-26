@@ -18,18 +18,22 @@ class PostgreSQLDatabase:
     
     def __init__(self, company_id: str, platform: str = "freshdesk"):
         """
-        PostgreSQL 멀티테넌트 데이터베이스 초기화
+        PostgreSQL 멀티테넌트 데이터베이스 초기화 (Freshdesk 전용)
         
         Args:
             company_id: 회사 ID (스키마명으로 사용)
-            platform: 플랫폼명 (테이블 접두사로 사용)
+            platform: 플랫폼명 (현재는 Freshdesk만 지원, 다른 값은 무시됨)
         """
         if not company_id:
             raise ValueError("company_id는 필수 매개변수입니다")
+        
+        # Freshdesk 전용 플랫폼으로 고정 (점진적 단순화)
+        if platform and platform != "freshdesk":
+            logger.warning(f"현재는 Freshdesk만 지원됩니다. platform='{platform}' 무시하고 'freshdesk'로 설정")
             
         # 스키마명 정규화 (PostgreSQL 네이밍 규칙 준수)
         self.company_id = self._normalize_schema_name(company_id)
-        self.platform = platform.lower()
+        self.platform = "freshdesk"  # 항상 고정
         self.schema_name = f"tenant_{self.company_id}"
         
         # 연결 정보
@@ -45,7 +49,7 @@ class PostgreSQLDatabase:
             'password': os.getenv('POSTGRES_PASSWORD', 'password')
         }
         
-        logger.info(f"PostgreSQL 멀티테넌트 DB 초기화: schema={self.schema_name}, platform={self.platform}")
+        logger.info(f"PostgreSQL 멀티테넌트 DB 초기화: schema={self.schema_name}, platform=Freshdesk 전용")
     
     def _normalize_schema_name(self, company_id: str) -> str:
         """스키마명 정규화 (PostgreSQL 규칙 준수)"""
@@ -428,8 +432,8 @@ class PostgreSQLDatabase:
 
 
 def get_postgresql_database(company_id: str, platform: str = "freshdesk") -> PostgreSQLDatabase:
-    """PostgreSQL 멀티테넌트 데이터베이스 인스턴스 반환"""
-    return PostgreSQLDatabase(company_id, platform)
+    """PostgreSQL 멀티테넌트 데이터베이스 인스턴스 반환 (Freshdesk 전용)"""
+    return PostgreSQLDatabase(company_id, platform)  # platform은 내부적으로 "freshdesk"로 고정됨
 
 
 # 테넌트 관리 유틸리티

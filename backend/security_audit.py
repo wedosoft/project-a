@@ -145,7 +145,7 @@ class DatabaseSecurityAuditor:
             'api_key', 'api-key', 'apikey',
             'password', 'passwd', 'pwd',
             'secret', 'token', 'credential',
-            'domain', 'freshdesk_domain', 'zendesk_domain',
+            'domain', 'freshdesk_domain',
             'private_key', 'certificate', 'cert'
         ]
         
@@ -249,7 +249,7 @@ class DatabaseSecurityAuditor:
             'api_key', 'api-key', 'apikey',
             'password', 'passwd', 'pwd',
             'secret', 'token', 'credential',
-            'domain', 'freshdesk_domain', 'zendesk_domain',
+            'domain', 'freshdesk_domain',
             'private_key', 'certificate', 'cert'
         ]
         

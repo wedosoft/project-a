@@ -1,9 +1,9 @@
 """
-멀티플랫폼 첨부파일 API 엔드포인트
-기존 attachments.py를 멀티플랫폼/멀티테넌트 구조로 리팩토링
+Freshdesk 첨부파일 API 엔드포인트 (Freshdesk 전용)
+멀티테넌트 구조 지원
 
 S3 pre-signed URL 만료 문제를 해결하기 위한 실시간 URL 발급 및 상담사 검색 지원
-표준 4개 헤더(X-Company-ID, X-Platform, X-Domain, X-API-Key) 사용
+표준 3개 헤더(X-Company-ID, X-Domain, X-API-Key) 사용 - Freshdesk 전용
 """
 
 import asyncio
@@ -19,8 +19,8 @@ from fastapi import APIRouter, Depends, HTTPException, Header, Query
 from pydantic import BaseModel
 from qdrant_client.http.models import FieldCondition, Filter, MatchValue
 
-# 표준 헤더 의존성 import (절대경로)
-from api.dependencies import get_company_id, get_platform, get_api_key, get_domain
+# 표준 헤더 의존성 import (절대경로) - Freshdesk 전용
+from api.dependencies import get_company_id, get_api_key, get_domain
 
 # .env 파일 로드
 load_dotenv()
@@ -32,7 +32,7 @@ router = APIRouter(prefix="/attachments", tags=["attachments"])
 
 
 class AttachmentResponse(BaseModel):
-    """첨부파일 응답 모델 - 멀티플랫폼 지원"""
+    """첨부파일 응답 모델 - Freshdesk 전용"""
     id: str
     name: str
     content_type: str
@@ -41,38 +41,40 @@ class AttachmentResponse(BaseModel):
     expires_at: str
     ticket_id: Optional[str] = None
     conversation_id: Optional[str] = None
-    platform: str
+    platform: str = "freshdesk"  # 항상 고정
     company_id: str
 
 
 class AttachmentMetadata(BaseModel):
-    """첨부파일 메타데이터 모델 - 멀티플랫폼 지원"""
+    """첨부파일 메타데이터 모델 - Freshdesk 전용"""
     id: str
     name: str
     content_type: str
     size: int
     ticket_id: Optional[str] = None
     conversation_id: Optional[str] = None
-    platform: str
+    platform: str = "freshdesk"  # 항상 고정
     company_id: str
 
 
-def get_platform_adapter(platform: str, company_id: str, domain: str, api_key: str):
+def get_freshdesk_adapter(company_id: str, domain: str, api_key: str):
     """
-    플랫폼별 어댑터 생성 - 표준 헤더 기반
+    Freshdesk 어댑터 생성 - 표준 헤더 기반 (Freshdesk 전용)
     """
+    if not domain or not api_key:
+        logger.warning(f"Freshdesk 연결 정보 부족: domain={domain}, api_key={'***' if api_key else 'None'}")
+    
     config = {
-        "platform": platform,
+        "platform": "freshdesk",  # 항상 고정
         "company_id": company_id,
         "domain": domain,
         "api_key": api_key
     }
-    return PlatformFactory.create_adapter(platform, config)
+    return PlatformFactory.create_adapter("freshdesk", config)
 
 
-async def get_attachment_download_url_multi_platform(
+async def get_attachment_download_url_freshdesk(
     attachment_id: str,
-    platform: str,
     company_id: str,
     domain: str,
     api_key: str,
@@ -80,14 +82,13 @@ async def get_attachment_download_url_multi_platform(
     conversation_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    멀티플랫폼 첨부파일의 최신 pre-signed URL을 발급받습니다.
+    Freshdesk 첨부파일의 최신 pre-signed URL을 발급받습니다 (Freshdesk 전용).
     
     Args:
         attachment_id: 첨부파일 ID
-        platform: 플랫폼 이름 (freshdesk, zendesk 등)
         company_id: 테넌트 식별자
-        domain: 플랫폼 도메인
-        api_key: 플랫폼 API 키
+        domain: Freshdesk 도메인
+        api_key: Freshdesk API 키
         ticket_id: 티켓 ID (선택사항)
         conversation_id: 대화 ID (선택사항)
         
@@ -98,8 +99,8 @@ async def get_attachment_download_url_multi_platform(
         HTTPException: API 호출 실패 시
     """
     try:
-        # 플랫폼별 어댑터 생성
-        adapter = get_platform_adapter(platform, company_id, domain, api_key)
+        # Freshdesk 어댑터 생성
+        adapter = get_freshdesk_adapter(company_id, domain, api_key)
         
         async with adapter:
             # 어댑터를 통해 첨부파일 URL 발급
@@ -109,11 +110,11 @@ async def get_attachment_download_url_multi_platform(
                 conversation_id=conversation_id
             )
             
-            logger.info(f"첨부파일 {attachment_id} URL 발급 완료 (platform={platform}, company_id={company_id}): {attachment_data.get('name', 'Unknown')}")
+            logger.info(f"첨부파일 {attachment_id} URL 발급 완료 (Freshdesk, company_id={company_id}): {attachment_data.get('name', 'Unknown')}")
             return attachment_data
             
     except Exception as e:
-        logger.error(f"첨부파일 URL 발급 중 오류 (platform={platform}, company_id={company_id}): {e}")
+        logger.error(f"첨부파일 URL 발급 중 오류 (Freshdesk, company_id={company_id}): {e}")
         raise HTTPException(status_code=500, detail=f"첨부파일 URL 발급 실패: {str(e)}")
 
 
@@ -121,40 +122,37 @@ async def get_attachment_download_url_multi_platform(
 async def get_attachment_download_url(
     attachment_id: str,
     company_id: str = Depends(get_company_id),
-    platform: str = Depends(get_platform),
     domain: str = Depends(get_domain),
     api_key: str = Depends(get_api_key),
     ticket_id: Optional[str] = None,
     conversation_id: Optional[str] = None
 ):
     """
-    멀티플랫폼 첨부파일의 최신 다운로드 URL을 발급받습니다.
+    Freshdesk 첨부파일의 최신 다운로드 URL을 발급받습니다 (Freshdesk 전용).
     
-    이 엔드포인트는 플랫폼별 pre-signed URL 만료 문제를 해결하기 위해
+    이 엔드포인트는 Freshdesk pre-signed URL 만료 문제를 해결하기 위해
     매번 새로운 URL을 동적으로 발급받습니다.
     
-    표준 4개 헤더(X-Company-ID, X-Platform, X-Domain, X-API-Key)를 통해
-    플랫폼 정보를 받습니다.
+    표준 3개 헤더(X-Company-ID, X-Domain, X-API-Key)를 통해
+    Freshdesk 정보를 받습니다.
     
     Args:
         attachment_id: 첨부파일 고유 ID
         company_id: 회사 ID (헤더)
-        platform: 플랫폼 이름 (헤더)
-        domain: 플랫폼 도메인 (헤더)
-        api_key: API 키 (헤더)
+        domain: Freshdesk 도메인 (헤더)
+        api_key: Freshdesk API 키 (헤더)
         ticket_id: 첨부파일이 속한 티켓 ID (선택사항)
         conversation_id: 첨부파일이 속한 대화 ID (선택사항)
         
     Returns:
         AttachmentResponse: 첨부파일 정보와 유효한 다운로드 URL
     """
-    logger.info(f"첨부파일 {attachment_id} 다운로드 URL 요청 (platform={platform}, company_id={company_id}, ticket_id={ticket_id}, conversation_id={conversation_id})")
+    logger.info(f"첨부파일 {attachment_id} 다운로드 URL 요청 (Freshdesk 전용, company_id={company_id}, ticket_id={ticket_id}, conversation_id={conversation_id})")
     
     try:
-        # 멀티플랫폼 URL 발급
-        attachment_data = await get_attachment_download_url_multi_platform(
+        # Freshdesk URL 발급
+        attachment_data = await get_attachment_download_url_freshdesk(
             attachment_id=attachment_id,
-            platform=platform,
             company_id=company_id,
             domain=domain,
             api_key=api_key,
@@ -172,8 +170,8 @@ async def get_attachment_download_url(
             expires_at=attachment_data["expires_at"],
             ticket_id=attachment_data.get("ticket_id"),
             conversation_id=attachment_data.get("conversation_id"),
-            platform=attachment_data["platform"],
-            company_id=attachment_data["company_id"]
+            platform="freshdesk",  # 항상 고정
+            company_id=company_id
         )
         
         logger.info(f"첨부파일 {attachment_id} URL 발급 완료: {attachment_data['name']}")
@@ -189,16 +187,15 @@ async def get_attachment_download_url(
 @router.get("/{attachment_id}/metadata", response_model=AttachmentMetadata)
 async def get_attachment_metadata(
     attachment_id: str,
-    company_id: str = Depends(get_company_id),
-    platform: str = Depends(get_platform)
+    company_id: str = Depends(get_company_id)
 ):
     """
-    벡터 DB에서 첨부파일 메타데이터를 조회합니다.
+    벡터 DB에서 첨부파일 메타데이터를 조회합니다 (Freshdesk 전용).
     
     실제 파일 다운로드 없이 첨부파일의 기본 정보만 조회할 때 사용합니다.
     이 정보는 벡터 DB에 캐시되어 있어 빠르게 응답됩니다.
     
-    표준 4개 헤더를 통해 멀티플랫폼/멀티테넌트 보안이 적용됩니다.
+    표준 3개 헤더를 통해 Freshdesk 멀티테넌트 보안이 적용됩니다.
     
     Args:
         attachment_id: 첨부파일 고유 ID

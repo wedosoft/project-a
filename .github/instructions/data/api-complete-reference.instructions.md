@@ -17,7 +17,7 @@ _모든 백엔드 API 엔드포인트 총정리 - 2025-06-23 최종 완성_
 ### 🔑 **인증 헤더 (모든 엔드포인트 공통)**
 ```
 X-Company-ID: 회사 식별자 (멀티테넌트 보안)
-X-Platform: 플랫폼 식별자 (freshdesk, zendesk 등)
+X-Platform: 플랫폼 식별자 (freshdesk 전용)
 X-Domain: 플랫폼 도메인 (선택사항)
 X-API-Key: 플랫폼 API 키 (선택사항)
 ```
