@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-멀티플랫폼 구조 테스트 스크립트
+Freshdesk 플랫폼 구조 테스트 스크립트
 
-새로운 플랫폼 팩토리 패턴이 올바르게 작동하는지 확인합니다.
+Freshdesk 전용 아키텍처가 올바르게 작동하는지 확인합니다.
 """
 
 import asyncio
@@ -27,10 +27,10 @@ logger = logging.getLogger(__name__)
 
 
 async def test_platform_factory():
-    """플랫폼 팩토리 테스트"""
-    logger.info("=== 플랫폼 팩토리 테스트 시작 ===")
+    """플랫폼 팩토리 테스트 (Freshdesk 전용)"""
+    logger.info("=== Freshdesk 플랫폼 팩토리 테스트 시작 ===")
     
-    # 1. 지원 플랫폼 목록 확인
+    # 1. 지원 플랫폼 목록 확인 (Freshdesk만 지원)
     supported_platforms = PlatformFactory.get_supported_platforms()
     logger.info(f"지원 플랫폼: {supported_platforms}")
     
@@ -48,28 +48,14 @@ async def test_platform_factory():
     except Exception as e:
         logger.error(f"Freshdesk 어댑터 생성 실패: {e}")
     
-    # 3. Zendesk 어댑터 테스트 (NotImplementedError 예상)
+    # 3. 지원하지 않는 플랫폼 테스트 (Zendesk 등)
     try:
-        zendesk_adapter = PlatformFactory.create_adapter("zendesk", {})
-        logger.info(f"Zendesk 어댑터 생성 성공: {zendesk_adapter.get_platform_name()}")
-        
-        # 메서드 호출 시 NotImplementedError 발생 확인
-        try:
-            await zendesk_adapter.fetch_tickets()
-        except NotImplementedError as e:
-            logger.info(f"Zendesk NotImplementedError 정상 동작: {e}")
-        
-    except Exception as e:
-        logger.error(f"Zendesk 어댑터 생성 실패: {e}")
-    
-    # 4. 지원하지 않는 플랫폼 테스트
-    try:
-        invalid_adapter = PlatformFactory.create_adapter("invalid_platform", {})
-        logger.error("지원하지 않는 플랫폼에서 어댑터가 생성되었습니다 (버그)")
+        invalid_adapter = PlatformFactory.create_adapter("zendesk", {})
+        logger.error("Zendesk 플랫폼이 생성되었습니다 (버그 - Freshdesk 전용이어야 함)")
     except ValueError as e:
-        logger.info(f"지원하지 않는 플랫폼 정상 거부: {e}")
+        logger.info(f"비지원 플랫폼 정상 거부: {e}")
     
-    logger.info("=== 플랫폼 팩토리 테스트 완료 ===")
+    logger.info("=== Freshdesk 플랫폼 팩토리 테스트 완료 ===")
 
 
 async def test_freshdesk_collector():
@@ -100,12 +86,12 @@ async def test_freshdesk_collector():
 
 async def main():
     """메인 테스트 함수"""
-    logger.info("새로운 멀티플랫폼 구조 테스트 시작")
+    logger.info("Freshdesk 전용 플랫폼 구조 테스트 시작")
     
     await test_platform_factory()
     await test_freshdesk_collector()
     
-    logger.info("새로운 멀티플랫폼 구조 테스트 완료")
+    logger.info("Freshdesk 전용 플랫폼 구조 테스트 완료")
 
 
 if __name__ == "__main__":
