@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from qdrant_client.http.models import FieldCondition, Filter, MatchValue
 
 # 표준 헤더 의존성 import (절대경로) - Freshdesk 전용
-from api.dependencies import get_tenant_id, get_api_key, get_domain
+from api.dependencies import get_tenant_id, get_api_key, get_domain, get_platform
 
 # .env 파일 로드
 load_dotenv()

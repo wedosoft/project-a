@@ -49,7 +49,7 @@ def store_integrated_object_to_sqlite(
         bool: 저장 성공 여부
     """
     
-    # ORM 우선 시도 (환경변수 설정된 경우)
+    # ORM 사용 여부 확인 - USE_ORM=true일 때만 ORM 시도
     if ORM_AVAILABLE:
         import os
         use_orm = os.getenv('USE_ORM', 'false').lower() == 'true'
@@ -65,8 +65,10 @@ def store_integrated_object_to_sqlite(
                 return True
             else:
                 logger.warning(f"⚠️ ORM 저장 실패, SQLite로 fallback: {integrated_object.get('id')}")
+        else:
+            logger.debug(f"📝 USE_ORM=false, SQLite 직접 저장: {integrated_object.get('id')}")
     
-    # 기존 SQLite 저장 로직 (fallback 또는 기본 동작)
+    # SQLite 저장 로직 (USE_ORM=false이거나 ORM 실패 시)
     try:
         # 지침서 준수: tenant_id 필수 검증
         if not tenant_id:
@@ -225,16 +227,24 @@ def store_integrated_object_to_sqlite(
             logger.error(f"integrated_objects 테이블 저장 실패: {e}")
             raise
         
-        # 2. 기존 테이블에도 저장 (호환성 유지)
-        if object_type == "integrated_ticket":
-            result = _store_ticket_compatibility(db, integrated_object, tenant_id, platform)
-            return result
-        elif object_type == "integrated_article":
-            result = _store_article_compatibility(db, integrated_object, tenant_id, platform)
-            return result
+        # 2. 기존 테이블에도 저장 (호환성 유지) - 환경변수로 제어
+        import os
+        enable_compatibility_storage = os.getenv('ENABLE_COMPATIBILITY_STORAGE', 'false').lower() == 'true'
+        
+        if enable_compatibility_storage:
+            logger.info(f"호환성 저장 활성화됨: {object_type}")
+            if object_type == "integrated_ticket":
+                result = _store_ticket_compatibility(db, integrated_object, tenant_id, platform)
+                return result
+            elif object_type == "integrated_article":
+                result = _store_article_compatibility(db, integrated_object, tenant_id, platform)
+                return result
+            else:
+                logger.error(f"알 수 없는 객체 타입: {object_type}")
+                return False
         else:
-            logger.error(f"알 수 없는 객체 타입: {object_type}")
-            return False
+            logger.debug(f"호환성 저장 비활성화됨, integrated_objects 테이블만 사용: {object_type}")
+            return True
             
     except Exception as e:
         logger.error(f"통합 객체 저장 실패: ID={integrated_object.get('id')}, error={str(e)}")

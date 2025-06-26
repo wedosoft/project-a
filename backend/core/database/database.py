@@ -47,7 +47,7 @@ class SQLiteDatabase:
         
         # 멀티테넌트: 회사별 데이터베이스 파일 분리 (Freshdesk 전용)
         db_name = f"{tenant_id}_data.db"
-        self.tenant_id = tenant_id
+        self._tenant_id = tenant_id  # 내부 저장용 변수명 변경
         self.platform = "freshdesk"  # 항상 고정
         self.db_path = Path(__file__).parent.parent / "data" / db_name
         self.db_path.parent.mkdir(exist_ok=True)
@@ -58,8 +58,13 @@ class SQLiteDatabase:
     
     @property
     def tenant_id(self) -> str:
-        """호환성을 위한 tenant_id property (tenant_id와 동일)"""
-        return self.tenant_id
+        """호환성을 위한 tenant_id property"""
+        return self._tenant_id
+    
+    @tenant_id.setter
+    def tenant_id(self, value: str) -> None:
+        """tenant_id setter for compatibility"""
+        self._tenant_id = value
     
     def connect(self):
         """데이터베이스 연결"""

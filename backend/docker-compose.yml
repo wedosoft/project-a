@@ -9,13 +9,19 @@ services:
     image: backend
     container_name: project-a
     environment:
+      # 표준화된 환경변수 사용
+      - TENANT_ID=${TENANT_ID}
+      - FRESHDESK_API_KEY=${FRESHDESK_API_KEY}
+      - FRESHDESK_DOMAIN=${FRESHDESK_DOMAIN}
+      - DEFAULT_TENANT_ID=${DEFAULT_TENANT_ID}
+      # LLM API 키들
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - API_KEY=${API_KEY}
-      - DOMAIN=${DOMAIN}
-      - COMPANY_ID=${COMPANY_ID}
-      - PLATFORM=${PLATFORM}
-      - QDRANT_HOST=qdrant
-      - QDRANT_PORT=6333
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      # Qdrant Cloud 사용 (로컬 Qdrant 서비스 제거됨)
+      - QDRANT_URL=${QDRANT_URL}
+      - QDRANT_API_KEY=${QDRANT_API_KEY}
+      # Redis 설정 (필요시)
       - REDIS_URL=redis://redis:6379/0
       - REDIS_HOST=redis
       - REDIS_PORT=6379
@@ -29,20 +35,7 @@ services:
     env_file:
       - ./.env
     depends_on:
-      - qdrant
       - redis
-
-  qdrant:
-    image: qdrant/qdrant:latest
-    container_name: project-a-qdrant
-    ports:
-      - "6333:6333"
-      - "6334:6334"
-    volumes:
-      - ./qdrant_storage:/qdrant/storage
-    environment:
-      - QDRANT_ALLOW_ORIGIN=*
-    restart: unless-stopped
 
   redis:
     image: redis:7.2-alpine

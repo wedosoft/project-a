@@ -373,8 +373,22 @@ async def trigger_data_ingestion(
     
     try:
         # 진행상황 콜백 함수 정의
-        def progress_callback(message: str, percentage: float):
+        def progress_callback(progress_data, percentage=None):
             try:
+                # progress_data가 딕셔너리인 경우 (ingest 함수에서 호출)
+                if isinstance(progress_data, dict):
+                    stage = progress_data.get("stage", "processing")
+                    progress = progress_data.get("progress", 0)
+                    message = f"{stage} 처리 중..."
+                    percentage_value = float(progress)
+                # 기존 시그니처 호환성 (직접 호출하는 경우)
+                elif isinstance(progress_data, str) and percentage is not None:
+                    message = progress_data
+                    percentage_value = float(percentage)
+                else:
+                    message = str(progress_data) if progress_data else "처리 중..."
+                    percentage_value = 0.0
+                
                 from core.database.database import get_database
                 db = get_database(tenant_id, platform)
                 # 임시 job_id 생성
@@ -384,31 +398,26 @@ async def trigger_data_ingestion(
                     job_id=temp_job_id,
                     tenant_id=tenant_id,
                     message=message,
-                    percentage=percentage,
-                    step=int(percentage),
+                    percentage=percentage_value,
+                    step=int(percentage_value),
                     total_steps=100
                 )
                 db.disconnect()
             except Exception as e:
                 logger.error(f"즉시 실행 진행상황 로그 저장 실패: {e}")
             
-            logger.info(f"즉시 실행 진행상황: {message} ({percentage:.1f}%)")
+            logger.info(f"즉시 실행 진행상황: {message} ({percentage_value:.1f}%)")
         
-        # 멀티플랫폼 데이터 수집 실행
-        result = await ingest(
+        # 데이터 수집 실행
+        ingest_result = await ingest(
             tenant_id=tenant_id,
             platform=platform,
             incremental=request.incremental,
             purge=request.purge,
-            process_attachments=request.process_attachments,
-            force_rebuild=request.force_rebuild,
-            local_data_dir=None,  # API 호출이므로 로컬 데이터 사용 안함
-            include_kb=request.include_kb,
-            domain=domain,
-            api_key=api_key,
+            skip_embeddings=False,
+            skip_summaries=False,
             max_tickets=request.max_tickets,
             max_articles=request.max_articles,
-            start_date=request.start_date,  # 시작 날짜 파라미터 추가
             progress_callback=progress_callback
         )
         

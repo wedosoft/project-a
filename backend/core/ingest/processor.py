@@ -10,12 +10,20 @@
 
 import json
 import logging
+import os
+import sys
 import time
 import pytz
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional, Callable
 from dotenv import load_dotenv
+
+# backend 디렉토리를 Python 경로에 추가
+current_dir = Path(__file__).resolve().parent
+backend_dir = current_dir.parent.parent
+if str(backend_dir) not in sys.path:
+    sys.path.insert(0, str(backend_dir))
 
 from core.search.embeddings.embedder import embed_documents
 from core.database.vectordb import vector_db
@@ -173,6 +181,8 @@ async def ingest(
     purge: bool = False,
     skip_embeddings: bool = False,
     skip_summaries: bool = False,
+    max_tickets: Optional[int] = None,
+    max_articles: Optional[int] = None,
     progress_callback: Optional[Callable] = None
 ) -> Dict[str, Any]:
     """
@@ -185,6 +195,8 @@ async def ingest(
         purge: 기존 데이터 삭제 여부
         skip_embeddings: 임베딩 건너뛰기
         skip_summaries: 요약 생성 건너뛰기
+        max_tickets: 최대 티켓 수집 개수 (None이면 무제한)
+        max_articles: 최대 KB 문서 수집 개수 (None이면 무제한)
         progress_callback: 진행률 콜백 함수
         
     Returns:
@@ -204,10 +216,27 @@ async def ingest(
         "errors": []
     }
     
+    # db 변수를 먼저 None으로 초기화
+    db = None
+    
     try:
+        # 환경변수에서 domain과 api_key 가져오기
+        import os
+        domain = os.getenv("FRESHDESK_DOMAIN")
+        api_key = os.getenv("FRESHDESK_API_KEY")
+        
+        if not domain or not api_key:
+            raise ValueError(f"tenant_id {tenant_id}에 대한 Freshdesk 설정이 환경변수에 없습니다. FRESHDESK_DOMAIN과 FRESHDESK_API_KEY를 설정해주세요.")
+        
+        logger.info(f"사용할 설정 - 도메인: {domain}, tenant_id: {tenant_id}")
+        
         # 멀티테넌트 데이터베이스 연결
         from core.database.database import get_database
         db = get_database(tenant_id, platform)
+        
+        # 데이터베이스 연결 확인 및 연결
+        if not db.connection:
+            db.connect()
         
         if purge:
             # 기존 데이터 삭제
@@ -222,8 +251,8 @@ async def ingest(
         if progress_callback:
             progress_callback({"stage": "tickets", "progress": 0})
         
-        logger.info("티켓 수집 시작...")
-        tickets = await fetch_tickets(tenant_id, platform=platform)
+        logger.info(f"티켓 수집 시작... (최대 {max_tickets}개)" if max_tickets else "티켓 수집 시작...")
+        tickets = await fetch_tickets(domain=domain, api_key=api_key, max_tickets=max_tickets)
         logger.info(f"수집된 티켓 수: {len(tickets)}")
         
         for i, ticket in enumerate(tickets):
@@ -254,8 +283,8 @@ async def ingest(
         if progress_callback:
             progress_callback({"stage": "articles", "progress": 0})
         
-        logger.info("KB 문서 수집 시작...")
-        articles = await fetch_kb_articles(tenant_id, platform=platform)
+        logger.info(f"KB 문서 수집 시작... (최대 {max_articles}개)" if max_articles else "KB 문서 수집 시작...")
+        articles = await fetch_kb_articles(domain=domain, api_key=api_key, max_articles=max_articles)
         logger.info(f"수집된 KB 문서 수: {len(articles)}")
         
         for i, article in enumerate(articles):
@@ -334,7 +363,12 @@ async def ingest(
         result["end_time"] = get_kst_time()
         raise
     finally:
-        db.disconnect()
+        # db가 정의되어 있고 연결되어 있는 경우에만 disconnect
+        if db is not None:
+            try:
+                db.disconnect()
+            except Exception as disconnect_error:
+                logger.warning(f"데이터베이스 연결 해제 중 오류: {disconnect_error}")
 
 # 요약 생성 함수
 
@@ -368,9 +402,15 @@ async def generate_and_store_summaries(
     
     # 멀티테넌트 데이터베이스 연결
     from core.database.database import get_database
-    db = get_database(tenant_id, platform)
+    db = None
     
     try:
+        db = get_database(tenant_id, platform)
+        
+        # 데이터베이스 연결 확인 및 연결
+        if not db.connection:
+            db.connect()
+        
         cursor = db.connection.cursor()
         
         # 요약이 없는 통합 객체들 조회 (티켓 + KB 문서)
@@ -511,7 +551,12 @@ async def generate_and_store_summaries(
         result["processing_time"] = time.time() - start_time
         raise
     finally:
-        db.disconnect()
+        # db가 정의되어 있고 연결되어 있는 경우에만 disconnect
+        if db is not None:
+            try:
+                db.disconnect()
+            except Exception as disconnect_error:
+                logger.warning(f"데이터베이스 연결 해제 중 오류: {disconnect_error}")
 
 # 벡터 DB 동기화 함수
 
@@ -543,9 +588,15 @@ async def sync_summaries_to_vector_db(
     
     # 멀티테넌트 데이터베이스 연결
     from core.database.database import get_database
-    db = get_database(tenant_id, platform)
+    db = None
     
     try:
+        db = get_database(tenant_id, platform)
+        
+        # 데이터베이스 연결 확인 및 연결
+        if not db.connection:
+            db.connect()
+        
         cursor = db.connection.cursor()
         
         # 요약이 있는 통합 객체들 조회
@@ -643,7 +694,12 @@ async def sync_summaries_to_vector_db(
         result["processing_time"] = time.time() - start_time
         raise
     finally:
-        db.disconnect()
+        # db가 정의되어 있고 연결되어 있는 경우에만 disconnect
+        if db is not None:
+            try:
+                db.disconnect()
+            except Exception as disconnect_error:
+                logger.warning(f"데이터베이스 연결 해제 중 오류: {disconnect_error}")
 
 # 상태 매핑 업데이트 함수
 
