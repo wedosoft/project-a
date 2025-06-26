@@ -21,7 +21,7 @@ from botocore.exceptions import ClientError, NoCredentialsError
 from ..models.requests import IngestRequest, DataSecurityRequest
 from ..models.responses import IngestResponse
 from ..dependencies import (
-    get_company_id, get_platform, get_api_key, get_domain
+    get_tenant_id, get_platform, get_api_key, get_domain
 )
 from core.ingest.processor import ingest
 
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 
 async def delete_aws_secrets(
-    company_id: str,
+    tenant_id: str,
     platform: str,
     action: str,
     aws_region: Optional[str] = None,
@@ -45,7 +45,7 @@ async def delete_aws_secrets(
     AWS Secrets Manager에서 회사/플랫폼 관련 비밀키를 삭제합니다.
     
     Args:
-        company_id: 회사 ID
+        tenant_id: 테넌트 ID
         platform: 플랫폼 ID
         action: 삭제 액션 (purge_all, reset_company, delete_platform)
         aws_region: AWS 리전 (기본값: 환경변수 AWS_DEFAULT_REGION)
@@ -70,18 +70,18 @@ async def delete_aws_secrets(
             # 기본 패턴 생성
             if action == "purge_all":
                 patterns = [
-                    f"*{company_id}*",
+                    f"*{tenant_id}*",
                     f"*{platform}*",
-                    f"{company_id}-*",
+                    f"{tenant_id}-*",
                     f"{platform}-*",
-                    f"*-{company_id}-*",
+                    f"*-{tenant_id}-*",
                     f"*-{platform}-*"
                 ]
             elif action == "reset_company":
                 patterns = [
-                    f"*{company_id}*",
-                    f"{company_id}-*",
-                    f"*-{company_id}-*"
+                    f"*{tenant_id}*",
+                    f"{tenant_id}-*",
+                    f"*-{tenant_id}-*"
                 ]
             elif action == "delete_platform":
                 patterns = [
@@ -108,7 +108,7 @@ async def delete_aws_secrets(
             # 패턴 매칭
             for pattern in patterns:
                 pattern_match = _match_secret_pattern(
-                    secret_name, pattern, company_id, platform
+                    secret_name, pattern, tenant_id, platform
                 )
                 if pattern_match:
                     secrets_to_delete.append({
@@ -156,7 +156,7 @@ async def delete_aws_secrets(
             if backup_data:
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                 backup_filename = (
-                    f"secrets_backup_{company_id}_{platform}_{timestamp}.json"
+                    f"secrets_backup_{tenant_id}_{platform}_{timestamp}.json"
                 )
                 backup_path = f"backups/{backup_filename}"
                 
@@ -222,7 +222,7 @@ async def delete_aws_secrets(
 
 
 def _match_secret_pattern(
-    secret_name: str, pattern: str, company_id: str, platform: str
+    secret_name: str, pattern: str, tenant_id: str, platform: str
 ) -> bool:
     """
     시크릿 이름이 패턴에 매치되는지 확인합니다.
@@ -230,7 +230,7 @@ def _match_secret_pattern(
     Args:
         secret_name: 시크릿 이름
         pattern: 매칭 패턴 (* 와일드카드 지원)
-        company_id: 회사 ID
+        tenant_id: 테넌트 ID
         platform: 플랫폼 ID
         
     Returns:
@@ -242,9 +242,9 @@ def _match_secret_pattern(
     if fnmatch.fnmatch(secret_name.lower(), pattern.lower()):
         return True
     
-    # 추가 보안: company_id와 platform이 정확히 포함된 경우만 매칭
+    # 추가 보안: tenant_id와 platform이 정확히 포함된 경우만 매칭
     name_lower = secret_name.lower()
-    company_lower = company_id.lower()
+    company_lower = tenant_id.lower()
     platform_lower = platform.lower()
     
     # 정확한 매칭 패턴들
@@ -267,7 +267,7 @@ def _match_secret_pattern(
 @router.post("/", response_model=IngestResponse)
 async def trigger_data_ingestion(
     request: IngestRequest,
-    company_id: str = Depends(get_company_id),
+    tenant_id: str = Depends(get_tenant_id),
     platform: str = Depends(get_platform),
     api_key: Optional[str] = Depends(get_api_key),
     domain: Optional[str] = Depends(get_domain)
@@ -284,7 +284,7 @@ async def trigger_data_ingestion(
     - **대량 데이터나 제어가 필요한 경우**: `/ingest/jobs` 사용 권장
     
     **새로운 표준 헤더 (권장):**
-    - X-Company-ID: 회사 식별자 (또는 X-Domain에서 자동 추출)
+    - X-Tenant-ID: 회사 식별자 (또는 X-Domain에서 자동 추출)
     - X-Platform: 플랫폼 식별자 (freshdesk만 지원)
     - X-Domain: 플랫폼 도메인 (예: company-domain)
     - X-API-Key: 플랫폼 API 키
@@ -294,7 +294,7 @@ async def trigger_data_ingestion(
     
     Args:
         request: 데이터 수집 옵션
-        company_id: 회사 ID (헤더에서 자동 추출)
+        tenant_id: 테넌트 ID (헤더에서 자동 추출)
         platform: 플랫폼 식별자 (헤더에서 자동 추출)
         api_key: 플랫폼 API 키 (헤더에서 추출 또는 환경변수)
         domain: 플랫폼 도메인 (헤더에서 추출 또는 환경변수)
@@ -304,7 +304,7 @@ async def trigger_data_ingestion(
     """
     start_time = datetime.now()
     logger.info(
-        f"🚀 즉시 데이터 수집 시작 - Company: {company_id}, "
+        f"🚀 즉시 데이터 수집 시작 - Company: {tenant_id}, "
         f"Platform: {platform}, Domain: {domain}"
     )
     
@@ -376,13 +376,13 @@ async def trigger_data_ingestion(
         def progress_callback(message: str, percentage: float):
             try:
                 from core.database.database import get_database
-                db = get_database(company_id, platform)
+                db = get_database(tenant_id, platform)
                 # 임시 job_id 생성
                 timestamp = int(start_time.timestamp())
-                temp_job_id = f"immediate-{company_id}-{timestamp}"
+                temp_job_id = f"immediate-{tenant_id}-{timestamp}"
                 db.log_progress(
                     job_id=temp_job_id,
-                    company_id=company_id,
+                    tenant_id=tenant_id,
                     message=message,
                     percentage=percentage,
                     step=int(percentage),
@@ -396,7 +396,7 @@ async def trigger_data_ingestion(
         
         # 멀티플랫폼 데이터 수집 실행
         result = await ingest(
-            company_id=company_id,
+            tenant_id=tenant_id,
             platform=platform,
             incremental=request.incremental,
             purge=request.purge,
@@ -426,7 +426,7 @@ async def trigger_data_ingestion(
             # 요약 생성 단계 추가
             from core.ingest.processor import generate_and_store_summaries
             summary_result = await generate_and_store_summaries(
-                company_id=company_id,
+                tenant_id=tenant_id,
                 platform=platform,
                 force_update=False
             )
@@ -469,7 +469,7 @@ async def trigger_data_ingestion(
                 # sync_summaries 기능 직접 호출
                 from core.ingest.processor import sync_summaries_to_vector_db
                 sync_result = await sync_summaries_to_vector_db(
-                    company_id=company_id,
+                    tenant_id=tenant_id,
                     platform=platform,
                     batch_size=25,
                     force_update=False
@@ -516,7 +516,7 @@ async def trigger_data_ingestion(
             logger.warning(f"⚠️ 데이터 수집 부분 완료 (일부 실패)")
         
         logger.info(f"📈 수집 결과 요약:")
-        logger.info(f"   ├─ 회사: {company_id}")
+        logger.info(f"   ├─ 회사: {tenant_id}")
         logger.info(f"   ├─ 플랫폼: {platform}")
         logger.info(f"   ├─ 소요시간: {duration:.2f}초 ({duration/60:.1f}분)")
         logger.info(f"   ├─ 시작시간: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -557,7 +557,7 @@ async def trigger_data_ingestion(
         end_time = datetime.now()
         duration = (end_time - start_time).total_seconds()
         
-        logger.error(f"데이터 수집 중 오류 발생 - Company: {company_id}, Platform: {platform}: {e}", exc_info=True)
+        logger.error(f"데이터 수집 중 오류 발생 - Company: {tenant_id}, Platform: {platform}: {e}", exc_info=True)
         
         return IngestResponse(
             success=False,
@@ -570,7 +570,7 @@ async def trigger_data_ingestion(
 
 @router.post("/sync-summaries", response_model=IngestResponse)
 async def sync_summaries_to_vector_db(
-    company_id: str = Depends(get_company_id),
+    tenant_id: str = Depends(get_tenant_id),
     platform: str = Depends(get_platform),
     api_key: Optional[str] = Depends(get_api_key),
     domain: Optional[str] = Depends(get_domain),
@@ -583,10 +583,10 @@ async def sync_summaries_to_vector_db(
     이 엔드포인트는 ingest 프로세스에서 누락된 파이프라인 단계를 실행합니다:
     1. SQLite에서 tickets, kb_articles, conversations의 요약 데이터 조회
     2. 요약 텍스트를 임베딩으로 변환
-    3. 3-tuple 보안(company_id, platform, original_id)을 유지하면서 Qdrant에 저장
+    3. 3-tuple 보안(tenant_id, platform, original_id)을 유지하면서 Qdrant에 저장
     
     **새로운 표준 헤더 (권장):**
-    - X-Company-ID: 회사 식별자 (멀티테넌트 보안)
+    - X-Tenant-ID: 회사 식별자 (멀티테넌트 보안)
     - X-Platform: 플랫폼 식별자 (멀티플랫폼 보안)
     - X-Domain: 플랫폼 도메인 (선택사항)
     - X-API-Key: 플랫폼 API 키 (선택사항, 추가 검증용)
@@ -595,7 +595,7 @@ async def sync_summaries_to_vector_db(
     - X-Platform-Domain, X-Platform-API-Key 등
     
     Args:
-        company_id: 회사 ID (X-Company-ID 헤더에서 자동 추출)
+        tenant_id: 테넌트 ID (X-Tenant-ID 헤더에서 자동 추출)
         platform: 플랫폼 식별자 (X-Platform 헤더에서 자동 추출)
         api_key: 플랫폼 API 키 (X-API-Key 헤더, 선택사항)
         domain: 플랫폼 도메인 (X-Domain 헤더, 선택사항)
@@ -608,11 +608,11 @@ async def sync_summaries_to_vector_db(
     from core.ingest.processor import sync_summaries_to_vector_db as sync_func
     
     start_time = datetime.now()
-    logger.info(f"요약 데이터 벡터 DB 동기화 시작 - Company: {company_id}, Platform: {platform}")
+    logger.info(f"요약 데이터 벡터 DB 동기화 시작 - Company: {tenant_id}, Platform: {platform}")
     
     # 보안 헤더 검증
-    if not company_id:
-        raise HTTPException(status_code=400, detail="X-Company-ID 헤더가 필요합니다 (멀티테넌트 보안)")
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="X-Tenant-ID 헤더가 필요합니다 (멀티테넌트 보안)")
     
     if not platform:
         raise HTTPException(status_code=400, detail="X-Platform 헤더가 필요합니다 (멀티플랫폼 보안)")
@@ -626,7 +626,7 @@ async def sync_summaries_to_vector_db(
     try:
         # 요약 데이터 동기화 실행
         result = await sync_func(
-            company_id=company_id,
+            tenant_id=tenant_id,
             platform=platform,
             batch_size=batch_size,
             force_update=force_update
@@ -653,7 +653,7 @@ async def sync_summaries_to_vector_db(
             duration_seconds=duration,
             metadata={
                 "sync_result": result,
-                "company_id": company_id,
+                "tenant_id": tenant_id,
                 "platform": platform,
                 "batch_size": batch_size,
                 "force_update": force_update,
@@ -680,7 +680,7 @@ async def sync_summaries_to_vector_db(
 @router.post("/security/purge-data")
 async def purge_company_data(
     request: DataSecurityRequest,
-    company_id: str = Depends(get_company_id),
+    tenant_id: str = Depends(get_tenant_id),
     platform: str = Depends(get_platform),
     api_key: Optional[str] = Depends(get_api_key),
     domain: Optional[str] = Depends(get_domain)
@@ -719,7 +719,7 @@ async def purge_company_data(
     
     Args:
         request: 데이터 삭제 요청 (확인 토큰 포함)
-        company_id: 대상 회사 ID
+        tenant_id: 대상 테넌트 ID
         platform: 대상 플랫폼
         api_key: API 키 (추가 보안 검증)
         domain: 도메인 (추가 보안 검증)
@@ -728,11 +728,11 @@ async def purge_company_data(
         IngestResponse: 삭제 결과 및 백업 정보
     """
     start_time = datetime.now()
-    logger.warning(f"🚨 데이터 완전 삭제 요청 - Company: {company_id}, Platform: {platform}")
+    logger.warning(f"🚨 데이터 완전 삭제 요청 - Company: {tenant_id}, Platform: {platform}")
     logger.warning(f"🔐 요청 세부사항: {request.action}, 사유: {request.reason}")
     
     # 1단계: 보안 토큰 검증
-    expected_token = f"DELETE_{company_id}_{platform}_{datetime.now().strftime('%Y%m%d')}"
+    expected_token = f"DELETE_{tenant_id}_{platform}_{datetime.now().strftime('%Y%m%d')}"
     if request.confirmation_token != expected_token:
         logger.error(f"❌ 보안 토큰 검증 실패: {request.confirmation_token}")
         raise HTTPException(
@@ -766,10 +766,10 @@ async def purge_company_data(
             logger.info("📦 삭제 전 백업 생성 중...")
             try:
                 backup_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                backup_name = f"backup_{company_id}_{platform}_{backup_timestamp}"
+                backup_name = f"backup_{tenant_id}_{platform}_{backup_timestamp}"
                 
                 # SQLite 백업
-                db = get_database(company_id, platform)
+                db = get_database(tenant_id, platform)
                 sqlite_backup_path = f"backups/sqlite_{backup_name}.db"
                 
                 # 벡터 DB 백업 (스냅샷)
@@ -777,7 +777,7 @@ async def purge_company_data(
                 if request.include_vectors:
                     vector_backup_info = vector_db.create_backup(
                         backup_name=f"vector_{backup_name}",
-                        company_id=company_id,
+                        tenant_id=tenant_id,
                         platform=platform
                     )
                 
@@ -786,7 +786,7 @@ async def purge_company_data(
                 if request.include_secrets:
                     secrets_backup_info = {
                         "backup_name": f"secrets_{backup_name}",
-                        "backup_path": f"backups/secrets_backup_{company_id}_{platform}_{backup_timestamp}.json",
+                        "backup_path": f"backups/secrets_backup_{tenant_id}_{platform}_{backup_timestamp}.json",
                         "note": "AWS Secrets 백업은 삭제 단계에서 생성됩니다"
                     }
                 
@@ -818,14 +818,14 @@ async def purge_company_data(
         
         # SQLite 데이터 삭제
         logger.warning("🗑️ SQLite 데이터 삭제 시작...")
-        db = get_database(company_id, platform)
+        db = get_database(tenant_id, platform)
         
         if request.action == "purge_all":
             # 전체 데이터 삭제
-            deleted_counts["sqlite_records"] = db.clear_all_data(company_id, platform)
+            deleted_counts["sqlite_records"] = db.clear_all_data(tenant_id, platform)
         elif request.action == "reset_company":
             # 특정 회사 데이터만 삭제
-            deleted_counts["sqlite_records"] = db.clear_all_data(company_id=company_id)
+            deleted_counts["sqlite_records"] = db.clear_all_data(tenant_id=tenant_id)
         elif request.action == "delete_platform":
             # 특정 플랫폼 데이터만 삭제
             deleted_counts["sqlite_records"] = db.clear_all_data(platform=platform)
@@ -842,8 +842,8 @@ async def purge_company_data(
                 else:
                     # 특정 회사/플랫폼 데이터만 삭제
                     filter_conditions = {}
-                    if company_id:
-                        filter_conditions["company_id"] = company_id
+                    if tenant_id:
+                        filter_conditions["tenant_id"] = tenant_id
                     if platform:
                         filter_conditions["platform"] = platform
                     
@@ -870,7 +870,7 @@ async def purge_company_data(
             logger.warning("🔐 AWS Secrets Manager 비밀키 삭제 시작...")
             try:
                 secrets_deleted = await delete_aws_secrets(
-                    company_id=company_id,
+                    tenant_id=tenant_id,
                     platform=platform,
                     action=request.action,
                     aws_region=request.aws_region,
@@ -894,7 +894,7 @@ async def purge_company_data(
         # 감사 로그 기록
         audit_log = {
             "action": "data_purge",
-            "company_id": company_id,
+            "tenant_id": tenant_id,
             "platform": platform,
             "request_details": request.dict(),
             "deleted_counts": deleted_counts,
@@ -959,7 +959,7 @@ async def purge_company_data(
 
 @router.post("/security/generate-token")
 async def generate_security_token(
-    company_id: str = Depends(get_company_id),
+    tenant_id: str = Depends(get_tenant_id),
     platform: str = Depends(get_platform)
 ):
     """
@@ -972,7 +972,7 @@ async def generate_security_token(
         보안 토큰 및 사용법 안내
     """
     today = datetime.now().strftime('%Y%m%d')
-    security_token = f"DELETE_{company_id}_{platform}_{today}"
+    security_token = f"DELETE_{tenant_id}_{platform}_{today}"
     
     return {
         "security_token": security_token,

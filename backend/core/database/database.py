@@ -29,37 +29,37 @@ _database_instances = {}
 class SQLiteDatabase:
     """SQLite 데이터베이스 연결 및 관리 클래스 (멀티테넌트 지원)"""
     
-    def __init__(self, company_id: str, platform: str = "freshdesk"):
+    def __init__(self, tenant_id: str, platform: str = "freshdesk"):
         """
         SQLite 데이터베이스 초기화 (Freshdesk 전용 멀티테넌트)
         
         Args:
-            company_id: 회사 ID (필수, 예: "wedosoft", "acme")
+            tenant_id: 테넌트 ID (필수, 예: "wedosoft", "acme")
             platform: 플랫폼 이름 (기본값: "freshdesk", 현재는 Freshdesk만 지원)
-                     {company_id}_data.db 형식으로 회사별 데이터베이스 파일이 생성됩니다.
+                     {tenant_id}_data.db 형식으로 회사별 데이터베이스 파일이 생성됩니다.
         """
-        if not company_id:
-            raise ValueError("company_id는 필수 매개변수입니다")
+        if not tenant_id:
+            raise ValueError("tenant_id는 필수 매개변수입니다")
         
         # Freshdesk 전용 플랫폼으로 고정 (점진적 단순화)
         if platform and platform != "freshdesk":
             logger.warning(f"현재는 Freshdesk만 지원됩니다. platform='{platform}' 무시하고 'freshdesk'로 설정")
         
         # 멀티테넌트: 회사별 데이터베이스 파일 분리 (Freshdesk 전용)
-        db_name = f"{company_id}_data.db"
-        self.company_id = company_id
+        db_name = f"{tenant_id}_data.db"
+        self.tenant_id = tenant_id
         self.platform = "freshdesk"  # 항상 고정
         self.db_path = Path(__file__).parent.parent / "data" / db_name
         self.db_path.parent.mkdir(exist_ok=True)
         
         self.connection = None
         self._tables_created = False  # 테이블 생성 여부 추적
-        logger.info(f"SQLite 데이터베이스 초기화: {self.db_path} (회사: {company_id}, 플랫폼: Freshdesk 전용)")
+        logger.info(f"SQLite 데이터베이스 초기화: {self.db_path} (회사: {tenant_id}, 플랫폼: Freshdesk 전용)")
     
     @property
     def tenant_id(self) -> str:
-        """호환성을 위한 tenant_id property (company_id와 동일)"""
-        return self.company_id
+        """호환성을 위한 tenant_id property (tenant_id와 동일)"""
+        return self.tenant_id
     
     def connect(self):
         """데이터베이스 연결"""
@@ -142,7 +142,7 @@ class SQLiteDatabase:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS agents (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                company_id INTEGER NOT NULL,
+                tenant_id INTEGER NOT NULL,
                 email TEXT NOT NULL,
                 name TEXT NOT NULL,
                 freshdesk_agent_id INTEGER,
@@ -159,10 +159,10 @@ class SQLiteDatabase:
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 is_active BOOLEAN DEFAULT 1,
-                FOREIGN KEY (company_id) REFERENCES companies(id),
+                FOREIGN KEY (tenant_id) REFERENCES companies(id),
                 FOREIGN KEY (assigned_by) REFERENCES agents(id),
-                UNIQUE(company_id, email),
-                UNIQUE(company_id, freshdesk_agent_id)
+                UNIQUE(tenant_id, email),
+                UNIQUE(tenant_id, freshdesk_agent_id)
             )
         """)
         
@@ -170,7 +170,7 @@ class SQLiteDatabase:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS usage_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                company_id INTEGER NOT NULL,
+                tenant_id INTEGER NOT NULL,
                 agent_id INTEGER,
                 usage_type TEXT NOT NULL,
                 usage_count INTEGER DEFAULT 1,
@@ -178,7 +178,7 @@ class SQLiteDatabase:
                 metadata TEXT, -- JSON 문자열
                 usage_date TEXT NOT NULL,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (company_id) REFERENCES companies(id),
+                FOREIGN KEY (tenant_id) REFERENCES companies(id),
                 FOREIGN KEY (agent_id) REFERENCES agents(id)
             )
         """)
@@ -187,7 +187,7 @@ class SQLiteDatabase:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS billing_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                company_id INTEGER NOT NULL,
+                tenant_id INTEGER NOT NULL,
                 billing_period_start TEXT NOT NULL,
                 billing_period_end TEXT NOT NULL,
                 base_amount REAL NOT NULL,
@@ -200,7 +200,7 @@ class SQLiteDatabase:
                 plan_name TEXT NOT NULL,
                 plan_features TEXT, -- JSON 문자열
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (company_id) REFERENCES companies(id)
+                FOREIGN KEY (tenant_id) REFERENCES companies(id)
             )
         """)
         
@@ -221,15 +221,15 @@ class SQLiteDatabase:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS company_settings (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                company_id INTEGER NOT NULL,
+                tenant_id INTEGER NOT NULL,
                 setting_key TEXT NOT NULL,
                 setting_value TEXT,
                 is_encrypted BOOLEAN DEFAULT 0,
                 description TEXT,  -- 설정 설명 컬럼 추가
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (company_id) REFERENCES companies(id),
-                UNIQUE(company_id, setting_key)
+                FOREIGN KEY (tenant_id) REFERENCES companies(id),
+                UNIQUE(tenant_id, setting_key)
             )
         """)
         
@@ -243,13 +243,13 @@ class SQLiteDatabase:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_companies_plan_id ON companies(subscription_plan_id)")
         
         # 상담원 관련 인덱스
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_agents_company_id ON agents(company_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_agents_tenant_id ON agents(tenant_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_agents_email ON agents(email)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_agents_seat_assigned ON agents(seat_assigned)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_agents_license_status ON agents(license_status)")
         
         # 사용량 관련 인덱스
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_usage_logs_company_id ON usage_logs(company_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_usage_logs_tenant_id ON usage_logs(tenant_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_usage_logs_agent_id ON usage_logs(agent_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_usage_logs_usage_date ON usage_logs(usage_date)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_usage_logs_usage_type ON usage_logs(usage_type)")
@@ -297,7 +297,7 @@ class SQLiteDatabase:
             CREATE TABLE IF NOT EXISTS integrated_objects (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 original_id TEXT NOT NULL,
-                company_id TEXT NOT NULL,
+                tenant_id TEXT NOT NULL,
                 platform TEXT NOT NULL,
                 object_type TEXT NOT NULL, -- 'ticket', 'conversation', 'article', 'attachment'
                 original_data TEXT NOT NULL, -- 원본 데이터 JSON
@@ -306,7 +306,7 @@ class SQLiteDatabase:
                 metadata TEXT, -- 메타데이터 JSON (parent_id, status, dates 등)
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(company_id, platform, object_type, original_id)
+                UNIQUE(tenant_id, platform, object_type, original_id)
             )
         """)
         
@@ -315,13 +315,13 @@ class SQLiteDatabase:
             CREATE TABLE IF NOT EXISTS progress_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 job_id TEXT NOT NULL,
-                company_id TEXT NOT NULL,
+                tenant_id TEXT NOT NULL,
                 message TEXT NOT NULL,
                 percentage REAL NOT NULL,
                 step INTEGER NOT NULL,
                 total_steps INTEGER NOT NULL,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(job_id, company_id, step)
+                UNIQUE(job_id, tenant_id, step)
             )
         """)
         
@@ -330,18 +330,18 @@ class SQLiteDatabase:
         # =====================================================
         
         # Integrated objects 테이블 인덱스 (모든 도메인 데이터용)
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_integrated_company_id ON integrated_objects(company_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_integrated_tenant_id ON integrated_objects(tenant_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_integrated_object_type ON integrated_objects(object_type)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_integrated_original_id ON integrated_objects(original_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_integrated_company_platform ON integrated_objects(company_id, platform)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_integrated_company_type ON integrated_objects(company_id, object_type)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_integrated_company_platform ON integrated_objects(tenant_id, platform)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_integrated_company_type ON integrated_objects(tenant_id, object_type)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_integrated_content_search ON integrated_objects(integrated_content)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_integrated_created_at ON integrated_objects(created_at)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_integrated_updated_at ON integrated_objects(updated_at)")
         
         # Progress logs 테이블 인덱스
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_progress_job_id ON progress_logs(job_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_progress_company_id ON progress_logs(company_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_progress_tenant_id ON progress_logs(tenant_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_progress_created_at ON progress_logs(created_at)")
         
         self.connection.commit()
@@ -353,7 +353,7 @@ class SQLiteDatabase:
         # 티켓 데이터를 통합 형태로 변환
         integrated_data = {
             'original_id': str(ticket_data.get('id')),
-            'company_id': ticket_data.get('company_id'),
+            'tenant_id': ticket_data.get('tenant_id'),
             'platform': ticket_data.get('platform'),
             'object_type': 'ticket',
             'original_data': ticket_data,
@@ -376,7 +376,7 @@ class SQLiteDatabase:
                 'is_escalated': ticket_data.get('is_escalated')
             }
         }
-        logger.info(f"DB insert_ticket 호출됨: ticket_id={ticket_data.get('id')}, company_id={ticket_data.get('company_id')}")
+        logger.info(f"DB insert_ticket 호출됨: ticket_id={ticket_data.get('id')}, tenant_id={ticket_data.get('tenant_id')}")
         result = self.insert_integrated_object(integrated_data)
         logger.info(f"DB insert_ticket 완료: lastrowid={result}")
         return result
@@ -386,7 +386,7 @@ class SQLiteDatabase:
         # 대화 데이터를 통합 형태로 변환
         integrated_data = {
             'original_id': str(conversation_data.get('id')),
-            'company_id': conversation_data.get('company_id'),
+            'tenant_id': conversation_data.get('tenant_id'),
             'platform': conversation_data.get('platform'),
             'object_type': 'conversation',
             'original_data': conversation_data,
@@ -410,7 +410,7 @@ class SQLiteDatabase:
         # 문서 데이터를 통합 형태로 변환
         integrated_data = {
             'original_id': str(article_data.get('id')),
-            'company_id': article_data.get('company_id'),
+            'tenant_id': article_data.get('tenant_id'),
             'platform': article_data.get('platform'),
             'object_type': 'article',
             'original_data': article_data,
@@ -446,19 +446,19 @@ class SQLiteDatabase:
         cursor = self.connection.cursor()
         
         # 필수 필드 검증
-        if not integrated_data.get('company_id'):
-            raise ValueError("company_id는 필수입니다")
+        if not integrated_data.get('tenant_id'):
+            raise ValueError("tenant_id는 필수입니다")
         if not integrated_data.get('platform'):
             raise ValueError("platform은 필수입니다")
         
         cursor.execute("""
             INSERT OR REPLACE INTO integrated_objects (
-                original_id, company_id, platform, object_type,
+                original_id, tenant_id, platform, object_type,
                 original_data, integrated_content, summary, metadata
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             str(integrated_data.get('original_id')),  # original_id (문자열로 변환)
-            integrated_data.get('company_id'),
+            integrated_data.get('tenant_id'),
             integrated_data.get('platform'),
             integrated_data.get('object_type'),
             json.dumps(integrated_data.get('original_data', {})),
@@ -476,7 +476,7 @@ class SQLiteDatabase:
         Args:
             attachment_data: 첨부파일 데이터 딕셔너리
                 - original_id: 첨부파일 원본 ID
-                - company_id: 회사 ID
+                - tenant_id: 테넌트 ID
                 - platform: 플랫폼
                 - parent_type: 부모 타입 ('ticket', 'conversation', 'article')
                 - parent_original_id: 부모 객체 원본 ID
@@ -494,7 +494,7 @@ class SQLiteDatabase:
         # 첨부파일 데이터를 통합 형태로 변환
         integrated_data = {
             'original_id': str(attachment_data.get('original_id')),
-            'company_id': attachment_data.get('company_id'),
+            'tenant_id': attachment_data.get('tenant_id'),
             'platform': attachment_data.get('platform'),
             'object_type': 'attachment',
             'original_data': attachment_data,
@@ -533,7 +533,7 @@ class SQLiteDatabase:
         return 0
 
     def log_progress(self, job_id: str, step: int, total_steps: int, message: str = "", 
-                    company_id: str = None, percentage: float = None) -> int:
+                    tenant_id: str = None, percentage: float = None) -> int:
         """진행상황 로그 저장
         
         Args:
@@ -541,7 +541,7 @@ class SQLiteDatabase:
             step: 현재 단계
             total_steps: 전체 단계 수
             message: 메시지
-            company_id: 회사 ID
+            tenant_id: 테넌트 ID
             percentage: 진행률 (0-100)
             
         Returns:
@@ -561,11 +561,11 @@ class SQLiteDatabase:
         
         cursor.execute("""
             INSERT OR REPLACE INTO progress_logs (
-                job_id, company_id, message, percentage, step, total_steps
+                job_id, tenant_id, message, percentage, step, total_steps
             ) VALUES (?, ?, ?, ?, ?, ?)
         """, (
             job_id,
-            company_id or getattr(self, 'company_id', None),
+            tenant_id or getattr(self, 'tenant_id', None),
             message,
             percentage,
             step,
@@ -576,11 +576,11 @@ class SQLiteDatabase:
         logger.info(f"진행상황 로그 저장: job_id={job_id}, step={step}/{total_steps}, message={message}")
         return cursor.lastrowid
 
-    def get_tickets_by_company_and_platform(self, company_id: str, platform: str) -> List[Dict[str, Any]]:
+    def get_tickets_by_company_and_platform(self, tenant_id: str, platform: str) -> List[Dict[str, Any]]:
         """회사 및 플랫폼별 티켓 조회 - integrated_objects 테이블 사용
         
         Args:
-            company_id: 회사 ID
+            tenant_id: 테넌트 ID
             platform: 플랫폼명
             
         Returns:
@@ -594,9 +594,9 @@ class SQLiteDatabase:
         cursor = self.connection.cursor()
         cursor.execute("""
             SELECT * FROM integrated_objects 
-            WHERE company_id = ? AND platform = ? AND object_type = 'ticket'
+            WHERE tenant_id = ? AND platform = ? AND object_type = 'ticket'
             ORDER BY json_extract(metadata, '$.created_at') DESC
-        """, (company_id, platform))
+        """, (tenant_id, platform))
         
         rows = cursor.fetchall()
         
@@ -620,7 +620,7 @@ class SQLiteDatabase:
             ticket = {
                 'id': parsed_id,
                 'original_id': ticket_obj.get('original_id'),
-                'company_id': ticket_obj.get('company_id'),
+                'tenant_id': ticket_obj.get('tenant_id'),
                 'platform': ticket_obj.get('platform'),
                 'subject': ticket_obj.get('summary'),
                 'description': original_data.get('description'),
@@ -645,11 +645,11 @@ class SQLiteDatabase:
         
         return tickets
 
-    def get_articles_by_company_and_platform(self, company_id: str, platform: str) -> List[Dict[str, Any]]:
+    def get_articles_by_company_and_platform(self, tenant_id: str, platform: str) -> List[Dict[str, Any]]:
         """회사 및 플랫폼별 KB 문서 조회 - integrated_objects 테이블 사용
         
         Args:
-            company_id: 회사 ID
+            tenant_id: 테넌트 ID
             platform: 플랫폼명
             
         Returns:
@@ -663,9 +663,9 @@ class SQLiteDatabase:
         cursor = self.connection.cursor()
         cursor.execute("""
             SELECT * FROM integrated_objects 
-            WHERE company_id = ? AND platform = ? AND object_type = 'article'
+            WHERE tenant_id = ? AND platform = ? AND object_type = 'article'
             ORDER BY json_extract(metadata, '$.created_at') DESC
-        """, (company_id, platform))
+        """, (tenant_id, platform))
         
         rows = cursor.fetchall()
         
@@ -689,7 +689,7 @@ class SQLiteDatabase:
             article = {
                 'id': parsed_id,
                 'original_id': article_obj.get('original_id'),
-                'company_id': article_obj.get('company_id'),
+                'tenant_id': article_obj.get('tenant_id'),
                 'platform': article_obj.get('platform'),
                 'title': article_obj.get('summary'),
                 'description': original_data.get('description'),
@@ -731,11 +731,11 @@ class SQLiteDatabase:
         # 먼저 해당 티켓의 대화들을 찾기
         conversation_ids_query = """
             SELECT original_id FROM integrated_objects 
-            WHERE company_id = ? AND platform = ? AND object_type = 'conversation'
+            WHERE tenant_id = ? AND platform = ? AND object_type = 'conversation'
             AND json_extract(metadata, '$.ticket_original_id') = ?
         """
         
-        cursor.execute(conversation_ids_query, (self.company_id, self.platform, ticket_original_id))
+        cursor.execute(conversation_ids_query, (self.tenant_id, self.platform, ticket_original_id))
         conversation_ids = [row[0] for row in cursor.fetchall()]
         
         # 첨부파일 조회 - 티켓 직접 첨부 또는 대화 첨부
@@ -743,7 +743,7 @@ class SQLiteDatabase:
         
         query = f"""
             SELECT * FROM integrated_objects 
-            WHERE company_id = ? AND platform = ? AND object_type = 'attachment'
+            WHERE tenant_id = ? AND platform = ? AND object_type = 'attachment'
             AND (
                 json_extract(metadata, '$.parent_type') = 'ticket' 
                 AND json_extract(metadata, '$.parent_original_id') = ?
@@ -755,7 +755,7 @@ class SQLiteDatabase:
             ORDER BY json_extract(metadata, '$.created_at')
         """
         
-        params = [self.company_id, self.platform, ticket_original_id] + conversation_ids
+        params = [self.tenant_id, self.platform, ticket_original_id] + conversation_ids
         cursor.execute(query, params)
         
         rows = cursor.fetchall()
@@ -782,11 +782,11 @@ class SQLiteDatabase:
         logger.debug(f"티켓 {ticket_original_id}의 첨부파일 조회 완료: {len(attachments)}개")
         return attachments
 
-    def clear_all_data(self, company_id: str = None, platform: str = None):
+    def clear_all_data(self, tenant_id: str = None, platform: str = None):
         """모든 데이터 삭제 (force_rebuild용) - integrated_objects 테이블 사용
         
         Args:
-            company_id: 회사 ID (선택사항, 지정시 해당 회사 데이터만 삭제)
+            tenant_id: 테넌트 ID (선택사항, 지정시 해당 회사 데이터만 삭제)
             platform: 플랫폼명 (선택사항, 지정시 해당 플랫폼 데이터만 삭제)
         """
         if not self.connection:
@@ -797,16 +797,16 @@ class SQLiteDatabase:
         cursor = self.connection.cursor()
         
         # 조건부 삭제 - 이제 integrated_objects와 progress_logs만 삭제
-        if company_id and platform:
+        if tenant_id and platform:
             # 특정 회사 및 플랫폼 데이터만 삭제
-            cursor.execute("DELETE FROM integrated_objects WHERE company_id = ? AND platform = ?", 
-                         (company_id, platform))
-            logger.info(f"데이터 삭제 완료: company_id={company_id}, platform={platform}")
-        elif company_id:
+            cursor.execute("DELETE FROM integrated_objects WHERE tenant_id = ? AND platform = ?", 
+                         (tenant_id, platform))
+            logger.info(f"데이터 삭제 완료: tenant_id={tenant_id}, platform={platform}")
+        elif tenant_id:
             # 특정 회사 데이터만 삭제  
-            cursor.execute("DELETE FROM integrated_objects WHERE company_id = ?", (company_id,))
-            cursor.execute("DELETE FROM progress_logs WHERE company_id = ?", (company_id,))
-            logger.info(f"데이터 삭제 완료: company_id={company_id}")
+            cursor.execute("DELETE FROM integrated_objects WHERE tenant_id = ?", (tenant_id,))
+            cursor.execute("DELETE FROM progress_logs WHERE tenant_id = ?", (tenant_id,))
+            logger.info(f"데이터 삭제 완료: tenant_id={tenant_id}")
         else:
             # 전체 데이터 삭제 - 도메인 데이터만 삭제 (SaaS 테이블은 유지)
             cursor.execute("DELETE FROM integrated_objects")
@@ -854,9 +854,9 @@ class SQLiteDatabase:
         ))
         
         self.connection.commit()
-        company_id = cursor.lastrowid
-        logger.info(f"회사 정보 저장 완료: ID={company_id}, domain={company_data.get('domain')}")
-        return company_id
+        tenant_id = cursor.lastrowid
+        logger.info(f"회사 정보 저장 완료: ID={tenant_id}, domain={company_data.get('domain')}")
+        return tenant_id
     
     def get_company_by_domain(self, domain: str) -> Optional[Dict[str, Any]]:
         """도메인으로 회사 정보 조회"""
@@ -878,13 +878,13 @@ class SQLiteDatabase:
         
         cursor.execute("""
             INSERT OR REPLACE INTO agents (
-                company_id, email, name, freshdesk_agent_id, freshdesk_role,
+                tenant_id, email, name, freshdesk_agent_id, freshdesk_role,
                 license_status, seat_assigned, assigned_by, assigned_at,
                 feature_overrides, last_login_at, last_activity_at,
                 monthly_tickets_processed, monthly_ai_summaries_used, is_active
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            agent_data.get('company_id'),
+            agent_data.get('tenant_id'),
             agent_data.get('email'),
             agent_data.get('name'),
             agent_data.get('freshdesk_agent_id'),
@@ -906,7 +906,7 @@ class SQLiteDatabase:
         logger.info(f"상담원 정보 저장 완료: ID={agent_id}, email={agent_data.get('email')}")
         return agent_id
     
-    def get_agents_by_company(self, company_id: int) -> List[Dict[str, Any]]:
+    def get_agents_by_company(self, tenant_id: int) -> List[Dict[str, Any]]:
         """회사별 상담원 목록 조회"""
         if not self.connection:
             self.connect()
@@ -914,9 +914,9 @@ class SQLiteDatabase:
         cursor = self.connection.cursor()
         cursor.execute("""
             SELECT * FROM agents 
-            WHERE company_id = ? AND is_active = 1
+            WHERE tenant_id = ? AND is_active = 1
             ORDER BY created_at DESC
-        """, (company_id,))
+        """, (tenant_id,))
         
         rows = cursor.fetchall()
         agents = []
@@ -941,11 +941,11 @@ class SQLiteDatabase:
         
         cursor.execute("""
             INSERT INTO usage_logs (
-                company_id, agent_id, usage_type, usage_count,
+                tenant_id, agent_id, usage_type, usage_count,
                 resource_id, metadata, usage_date
             ) VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (
-            usage_data.get('company_id'),
+            usage_data.get('tenant_id'),
             usage_data.get('agent_id'),
             usage_data.get('usage_type'),
             usage_data.get('usage_count', 1),
@@ -959,7 +959,7 @@ class SQLiteDatabase:
         logger.info(f"사용량 로그 기록: ID={usage_id}, type={usage_data.get('usage_type')}")
         return usage_id
     
-    def get_usage_summary(self, company_id: int, usage_type: str = None, days: int = 30) -> List[Dict[str, Any]]:
+    def get_usage_summary(self, tenant_id: int, usage_type: str = None, days: int = 30) -> List[Dict[str, Any]]:
         """사용량 요약 조회"""
         if not self.connection:
             self.connect()
@@ -969,11 +969,11 @@ class SQLiteDatabase:
         query = """
             SELECT usage_type, usage_date, SUM(usage_count) as total_usage
             FROM usage_logs 
-            WHERE company_id = ? 
+            WHERE tenant_id = ? 
             AND usage_date >= date('now', '-{} days')
         """.format(days)
         
-        params = [company_id]
+        params = [tenant_id]
         
         if usage_type:
             query += " AND usage_type = ?"
@@ -986,7 +986,7 @@ class SQLiteDatabase:
         
         return [dict(row) for row in rows]
     
-    def update_seat_usage(self, company_id: int, used_seats: int) -> bool:
+    def update_seat_usage(self, tenant_id: int, used_seats: int) -> bool:
         """시트 사용량 업데이트"""
         if not self.connection:
             self.connect()
@@ -997,15 +997,15 @@ class SQLiteDatabase:
             UPDATE companies 
             SET used_seats = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
-        """, (used_seats, company_id))
+        """, (used_seats, tenant_id))
         
         self.connection.commit()
         
         if cursor.rowcount > 0:
-            logger.info(f"회사 시트 사용량 업데이트: company_id={company_id}, used_seats={used_seats}")
+            logger.info(f"회사 시트 사용량 업데이트: tenant_id={tenant_id}, used_seats={used_seats}")
             return True
         else:
-            logger.warning(f"회사 시트 사용량 업데이트 실패: company_id={company_id}")
+            logger.warning(f"회사 시트 사용량 업데이트 실패: tenant_id={tenant_id}")
             return False
     
     def get_subscription_plan(self, plan_id: int) -> Optional[Dict[str, Any]]:
@@ -1038,13 +1038,13 @@ class SQLiteDatabase:
         
         cursor.execute("""
             INSERT INTO billing_history (
-                company_id, billing_period_start, billing_period_end,
+                tenant_id, billing_period_start, billing_period_end,
                 base_amount, additional_seats_count, additional_seats_amount,
                 total_amount, status, payment_method, transaction_id,
                 plan_name, plan_features
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            billing_data.get('company_id'),
+            billing_data.get('tenant_id'),
             billing_data.get('billing_period_start'),
             billing_data.get('billing_period_end'),
             billing_data.get('base_amount'),
@@ -1060,7 +1060,7 @@ class SQLiteDatabase:
         
         self.connection.commit()
         billing_id = cursor.lastrowid
-        logger.info(f"결제 기록 생성: ID={billing_id}, company_id={billing_data.get('company_id')}")
+        logger.info(f"결제 기록 생성: ID={billing_id}, tenant_id={billing_data.get('tenant_id')}")
         return billing_id
     
     def count_integrated_objects(self) -> int:
@@ -1143,21 +1143,21 @@ class SQLiteDatabase:
     # 호환성을 위한 alias
 DatabaseManager = SQLiteDatabase
 
-def get_database(company_id: str = None, platform: str = "freshdesk") -> SQLiteDatabase:
+def get_database(tenant_id: str = None, platform: str = "freshdesk") -> SQLiteDatabase:
     """
     데이터베이스 인스턴스 반환 (Freshdesk 전용 멀티테넌트)
     
     Args:
-        company_id: 회사 ID (테넌트 ID)
+        tenant_id: 테넌트 ID (테넌트 ID)
         platform: 플랫폼 이름 (현재는 Freshdesk만 지원, 다른 값은 무시됨)
     
     Returns:
         SQLiteDatabase 인스턴스 (항상 Freshdesk 전용)
     """
-    if not company_id:
-        raise ValueError("멀티테넌트 환경에서는 company_id(tenant_id)가 필수입니다")
+    if not tenant_id:
+        raise ValueError("멀티테넌트 환경에서는 tenant_id(tenant_id)가 필수입니다")
     
-    return SQLiteDatabase(company_id, platform)  # platform은 내부적으로 "freshdesk"로 고정됨
+    return SQLiteDatabase(tenant_id, platform)  # platform은 내부적으로 "freshdesk"로 고정됨
 
 
 def validate_multitenant_setup() -> Dict[str, Any]:

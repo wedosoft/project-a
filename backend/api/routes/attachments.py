@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from typing import Optional
 import logging
 
-from ..dependencies import get_company_id, get_platform, get_api_key, get_domain
+from ..dependencies import get_tenant_id, get_platform, get_api_key, get_domain
 from ..attachments import (
     get_freshdesk_attachment_url,
     get_attachment_download_url,
@@ -31,7 +31,7 @@ async def download_attachment(
     ticket_id: Optional[int] = None,
     conversation_id: Optional[int] = None,
     article_id: Optional[int] = None,
-    company_id: str = Depends(get_company_id),
+    tenant_id: str = Depends(get_tenant_id),
     platform: str = Depends(get_platform),
     domain: str = Depends(get_domain),
     api_key: str = Depends(get_api_key)
@@ -42,7 +42,7 @@ async def download_attachment(
     표준 헤더를 사용하여 Freshdesk 첨부파일을 프록시를 통해 다운로드합니다.
     
     Headers:
-        X-Company-ID: 회사 ID
+        X-Tenant-ID: 테넌트 ID
         X-Platform: 플랫폼 식별자 (freshdesk만 지원)
         X-Domain: Freshdesk 도메인
         X-API-Key: Freshdesk API 키
@@ -71,7 +71,7 @@ async def get_attachment_url(
     ticket_id: Optional[int] = None,
     conversation_id: Optional[int] = None,
     article_id: Optional[int] = None,
-    company_id: str = Depends(get_company_id),
+    tenant_id: str = Depends(get_tenant_id),
     platform: str = Depends(get_platform),
     domain: str = Depends(get_domain),
     api_key: str = Depends(get_api_key)
@@ -82,7 +82,7 @@ async def get_attachment_url(
     표준 헤더를 사용하여 첨부파일의 다운로드 URL을 조회합니다.
     
     Headers:
-        X-Company-ID: 회사 ID
+        X-Tenant-ID: 테넌트 ID
         X-Platform: 플랫폼 식별자 (freshdesk만 지원)
         X-Domain: 플랫폼 도메인
         X-API-Key: API 키
@@ -109,7 +109,7 @@ async def get_attachment_url(
 @router.get("/metadata/{attachment_id}")
 async def get_attachment_info(
     attachment_id: int,
-    company_id: str = Depends(get_company_id),
+    tenant_id: str = Depends(get_tenant_id),
     platform: str = Depends(get_platform)
 ):
     """
@@ -118,7 +118,7 @@ async def get_attachment_info(
     첨부파일의 메타데이터 정보를 조회합니다.
     
     Headers:
-        X-Company-ID: 회사 ID
+        X-Tenant-ID: 테넌트 ID
         X-Platform: 플랫폼 식별자 (freshdesk만 지원)
     """
     try:
@@ -131,7 +131,7 @@ async def get_attachment_info(
 @router.get("/bulk-urls")
 async def get_bulk_urls(
     attachment_ids: str,  # 쉼표로 구분된 ID 목록
-    company_id: str = Depends(get_company_id),
+    tenant_id: str = Depends(get_tenant_id),
     platform: str = Depends(get_platform),
     domain: str = Depends(get_domain),
     api_key: str = Depends(get_api_key)
@@ -142,7 +142,7 @@ async def get_bulk_urls(
     여러 첨부파일의 다운로드 URL을 한 번에 조회합니다.
     
     Headers:
-        X-Company-ID: 회사 ID
+        X-Tenant-ID: 테넌트 ID
         X-Platform: 플랫폼 식별자 (freshdesk만 지원)
         X-Domain: 플랫폼 도메인
         X-API-Key: API 키
@@ -165,7 +165,7 @@ async def get_bulk_urls(
 async def get_freshdesk_url(
     attachment_id: int,
     ticket_id: int,
-    company_id: str = Depends(get_company_id),
+    tenant_id: str = Depends(get_tenant_id),
     platform: str = Depends(get_platform),
     domain: str = Depends(get_domain),
     api_key: str = Depends(get_api_key)
@@ -176,7 +176,7 @@ async def get_freshdesk_url(
     표준 헤더를 사용하여 Freshdesk API를 통해 첨부파일 URL을 조회합니다.
     
     Headers:
-        X-Company-ID: 회사 ID
+        X-Tenant-ID: 테넌트 ID
         X-Platform: 플랫폼 식별자 (freshdesk만 지원)
         X-Domain: 플랫폼 도메인
         X-API-Key: API 키

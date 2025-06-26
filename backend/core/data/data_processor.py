@@ -72,7 +72,7 @@ class DataProcessor:
                 'updated_at': ticket.get('updated_at'),
                 'requester_id': ticket.get('requester_id'),
                 'responder_id': ticket.get('responder_id'),
-                'company_id': ticket.get('company_id'),
+                'tenant_id': ticket.get('tenant_id'),
                 'product_id': ticket.get('product_id'),
                 'source': ticket.get('source'),
                 'tags': ','.join(ticket.get('tags', [])),
@@ -221,7 +221,7 @@ Langchain RunnableParallel 체인에서 사용하는 데이터 처리 함수들
 
 async def fetch_similar_tickets(ticket_data: Dict[str, Any], 
                                qdrant_client: Any, 
-                               company_id: str, 
+                               tenant_id: str, 
                                limit: int = 5) -> List[Any]:
     """
     유사 티켓 검색을 수행합니다.
@@ -232,7 +232,7 @@ async def fetch_similar_tickets(ticket_data: Dict[str, Any],
     Args:
         ticket_data: 티켓 데이터 딕셔너리
         qdrant_client: Qdrant 벡터 DB 클라이언트
-        company_id: 회사 식별자
+        tenant_id: 회사 식별자
         limit: 반환할 최대 결과 수
         
     Returns:
@@ -246,7 +246,7 @@ async def fetch_similar_tickets(ticket_data: Dict[str, Any],
         ticket_id = str(ticket_data.get('id', ''))
         
         # API 엔드포인트와 동일한 로직 수행
-        similar_tickets_response = await get_similar_tickets(ticket_id, company_id)
+        similar_tickets_response = await get_similar_tickets(ticket_id, tenant_id)
         
         # 응답 형식 변환: SimilarTicketItem[] -> DocumentInfo[]
         similar_tickets_list = []
@@ -287,7 +287,7 @@ async def fetch_similar_tickets(ticket_data: Dict[str, Any],
 
 async def fetch_kb_documents(ticket_data: Dict[str, Any], 
                             qdrant_client: Any, 
-                            company_id: str, 
+                            tenant_id: str, 
                             limit: int = 3) -> List[Any]:
     """
     지식베이스 문서 검색을 수행합니다.
@@ -298,7 +298,7 @@ async def fetch_kb_documents(ticket_data: Dict[str, Any],
     Args:
         ticket_data: 티켓 데이터 딕셔너리
         qdrant_client: Qdrant 벡터 DB 클라이언트
-        company_id: 회사 식별자
+        tenant_id: 회사 식별자
         limit: 반환할 최대 결과 수
         
     Returns:
@@ -312,7 +312,7 @@ async def fetch_kb_documents(ticket_data: Dict[str, Any],
         ticket_id = str(ticket_data.get('id', ''))
         
         # API 엔드포인트와 동일한 로직 수행
-        related_docs_response = await get_related_documents(ticket_id, company_id)
+        related_docs_response = await get_related_documents(ticket_id, tenant_id)
         
         # 응답 형식 변환: RelatedDocumentItem[] -> DocumentInfo[]
         kb_documents_list = []

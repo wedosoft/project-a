@@ -25,18 +25,18 @@ class FreshdeskAdapter(PlatformAdapter):
         # 기본 설정 값 추출
         self.domain = config.get("domain")
         self.api_key = config.get("api_key")
-        self.company_id = config.get("company_id")
+        self.tenant_id = config.get("tenant_id")
         self.platform = "freshdesk"
         
-        if not all([self.domain, self.api_key, self.company_id]):
-            raise ValueError("Freshdesk 설정에 domain, api_key, company_id가 필요합니다")
+        if not all([self.domain, self.api_key, self.tenant_id]):
+            raise ValueError("Freshdesk 설정에 domain, api_key, tenant_id가 필요합니다")
         
         # Freshdesk 전용 설정
         self.base_url = self._build_base_url()
         self.auth = (self.api_key, "X")
         self.headers = {
             "Content-Type": "application/json",
-            "X-Company-ID": self.company_id,
+            "X-Tenant-ID": self.tenant_id,
             "X-Platform": "freshdesk"
         }
         
@@ -304,7 +304,7 @@ class FreshdeskAdapter(PlatformAdapter):
             "requester_id": str(ticket.get("requester_id", "")),
             "responder_id": str(ticket.get("responder_id", "")),
             "group_id": str(ticket.get("group_id", "")),
-            "company_id": str(ticket.get("company_id", "")),
+            "tenant_id": str(ticket.get("tenant_id", "")),
             "created_at": ticket.get("created_at", ""),
             "updated_at": ticket.get("updated_at", ""),
             "due_by": ticket.get("due_by", ""),
@@ -313,7 +313,7 @@ class FreshdeskAdapter(PlatformAdapter):
             "source": ticket.get("source", ""),
             "tags": ticket.get("tags", []),
             "platform": self.platform,
-            "platform_company_id": self.company_id,
+            "platform_tenant_id": self.tenant_id,
             "doc_type": "ticket",
             "raw_data": ticket
         }
@@ -334,7 +334,7 @@ class FreshdeskAdapter(PlatformAdapter):
             "updated_at": article.get("updated_at", ""),
             "tags": article.get("tags", []),
             "platform": self.platform,
-            "platform_company_id": self.company_id,
+            "platform_tenant_id": self.tenant_id,
             "doc_type": "kb",
             "raw_data": article
         }
@@ -348,7 +348,7 @@ class FreshdeskAdapter(PlatformAdapter):
             "size": attachment.get("size", 0),
             "attachment_url": attachment.get("attachment_url", ""),
             "platform": self.platform,
-            "platform_company_id": self.company_id,
+            "platform_tenant_id": self.tenant_id,
             "raw_data": attachment
         }
     

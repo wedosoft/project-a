@@ -28,7 +28,7 @@ router.include_router(core_router)
 @router.post("", response_model=IngestResponse)
 async def trigger_data_ingestion(
     request: IngestRequest,
-    company_id: str = Depends(get_company_id),
+    tenant_id: str = Depends(get_tenant_id),
     platform: str = Depends(get_platform),
     api_key: Optional[str] = Depends(get_api_key),
     domain: Optional[str] = Depends(get_domain)
@@ -37,7 +37,7 @@ async def trigger_data_ingestion(
     데이터 수집을 트리거하는 엔드포인트 (멀티플랫폼 지원)
     
     **새로운 표준 헤더 (권장):**
-    - X-Company-ID: 회사 식별자 (또는 X-Domain에서 자동 추출)
+    - X-Tenant-ID: 회사 식별자 (또는 X-Domain에서 자동 추출)
     - X-Platform: 플랫폼 식별자 (freshdesk, zendesk 등)
     - X-Domain: 플랫폼 도메인 (예: company-domain)
     - X-API-Key: 플랫폼 API 키
@@ -47,7 +47,7 @@ async def trigger_data_ingestion(
     
     Args:
         request: 데이터 수집 옵션
-        company_id: 회사 ID (헤더에서 자동 추출)
+        tenant_id: 테넌트 ID (헤더에서 자동 추출)
         platform: 플랫폼 식별자 (헤더에서 자동 추출)
         api_key: 플랫폼 API 키 (헤더에서 추출 또는 환경변수)
         domain: 플랫폼 도메인 (헤더에서 추출 또는 환경변수)
@@ -56,7 +56,7 @@ async def trigger_data_ingestion(
         IngestResponse: 수집 결과 정보
     """
     start_time = datetime.now()
-    logger.info(f"즉시 데이터 수집 시작 - Company: {company_id}, Platform: {platform}, Domain: {domain}")
+    logger.info(f"즉시 데이터 수집 시작 - Company: {tenant_id}, Platform: {platform}, Domain: {domain}")
     logger.info(f"[DEBUG] 수신된 파라미터 - max_tickets: {request.max_tickets}, max_articles: {request.max_articles}")
     logger.info(f"[DEBUG] 파라미터 타입 확인 - max_tickets type: {type(request.max_tickets)}, max_articles type: {type(request.max_articles)}")
     logger.info(f"[DEBUG] 수신된 옵션 - include_kb: {request.include_kb}, incremental: {request.incremental}")
@@ -76,12 +76,12 @@ async def trigger_data_ingestion(
         def progress_callback(message: str, percentage: float):
             try:
                 from core.database.database import get_database
-                db = get_database(company_id, platform)
+                db = get_database(tenant_id, platform)
                 # 임시 job_id 생성
-                temp_job_id = f"immediate-{company_id}-{int(start_time.timestamp())}"
+                temp_job_id = f"immediate-{tenant_id}-{int(start_time.timestamp())}"
                 db.log_progress(
                     job_id=temp_job_id,
-                    company_id=company_id,
+                    tenant_id=tenant_id,
                     message=message,
                     percentage=percentage,
                     step=int(percentage),
@@ -95,7 +95,7 @@ async def trigger_data_ingestion(
         
         # 멀티플랫폼 데이터 수집 실행
         result = await ingest(
-            company_id=company_id,
+            tenant_id=tenant_id,
             platform=platform,
             incremental=request.incremental,
             purge=request.purge,
@@ -118,7 +118,7 @@ async def trigger_data_ingestion(
             # 요약 생성 단계 추가
             from core.ingest.processor import generate_and_store_summaries
             summary_result = await generate_and_store_summaries(
-                company_id=company_id,
+                tenant_id=tenant_id,
                 platform=platform,
                 force_update=False
             )
@@ -140,7 +140,7 @@ async def trigger_data_ingestion(
             # sync_summaries 기능 직접 호출
             from core.ingest.processor import sync_summaries_to_vector_db
             sync_result = await sync_summaries_to_vector_db(
-                company_id=company_id,
+                tenant_id=tenant_id,
                 platform=platform,
                 batch_size=25,
                 force_update=False
@@ -163,7 +163,7 @@ async def trigger_data_ingestion(
         end_time = datetime.now()
         duration = (end_time - start_time).total_seconds()
         
-        logger.info(f"데이터 수집 완료 - Company: {company_id}, Platform: {platform}, 소요시간: {duration:.2f}초")
+        logger.info(f"데이터 수집 완료 - Company: {tenant_id}, Platform: {platform}, 소요시간: {duration:.2f}초")
         
         return IngestResponse(
             success=True,
@@ -179,7 +179,7 @@ async def trigger_data_ingestion(
         end_time = datetime.now()
         duration = (end_time - start_time).total_seconds()
         
-        logger.error(f"데이터 수집 중 오류 발생 - Company: {company_id}, Platform: {platform}: {e}", exc_info=True)
+        logger.error(f"데이터 수집 중 오류 발생 - Company: {tenant_id}, Platform: {platform}: {e}", exc_info=True)
         
         return IngestResponse(
             success=False,
@@ -194,7 +194,7 @@ async def trigger_data_ingestion(
 @router.post("/jobs", response_model=JobStatusResponse)
 async def create_ingest_job(
     request: IngestRequest,
-    company_id: str = Depends(get_company_id),
+    tenant_id: str = Depends(get_tenant_id),
     platform: str = Depends(get_platform),
     api_key: Optional[str] = Depends(get_api_key),
     domain: Optional[str] = Depends(get_domain)
@@ -206,14 +206,14 @@ async def create_ingest_job(
     일시정지/재개/취소 등의 제어가 가능합니다.
     
     **새로운 표준 헤더 (권장):**
-    - X-Company-ID, X-Platform, X-Domain, X-API-Key
+    - X-Tenant-ID, X-Platform, X-Domain, X-API-Key
     
     **레거시 헤더 (하위 호환성):**
     - X-Platform-Domain, X-Platform-API-Key 등
     
     Args:
         request: 데이터 수집 옵션
-        company_id: 회사 ID
+        tenant_id: 테넌트 ID
         platform: 플랫폼 식별자
         api_key: 플랫폼 API 키
         domain: 플랫폼 도메인
@@ -221,7 +221,7 @@ async def create_ingest_job(
     Returns:
         JobStatusResponse: 생성된 작업 정보
     """
-    logger.info(f"새 데이터 수집 작업 생성 요청 - Company: {company_id}, Platform: {platform}")
+    logger.info(f"새 데이터 수집 작업 생성 요청 - Company: {tenant_id}, Platform: {platform}")
     
     # 작업 설정 생성
     config = IngestJobConfig(
@@ -235,7 +235,7 @@ async def create_ingest_job(
     )
     
     # 작업 생성
-    job = job_manager.create_job(company_id, config)
+    job = job_manager.create_job(tenant_id, config)
     
     # 즉시 시작
     success = job_manager.start_job(job.job_id)
@@ -259,7 +259,7 @@ async def create_ingest_job(
 
 @router.get("/jobs", response_model=JobListResponse)
 async def list_ingest_jobs(
-    company_id: str = Depends(get_company_id),
+    tenant_id: str = Depends(get_tenant_id),
     status: Optional[JobStatus] = Query(None, description="작업 상태 필터"),
     page: int = Query(1, ge=1, description="페이지 번호"),
     per_page: int = Query(20, ge=1, le=100, description="페이지당 항목 수")
@@ -268,7 +268,7 @@ async def list_ingest_jobs(
     데이터 수집 작업 목록을 조회합니다
     
     Args:
-        company_id: 회사 ID
+        tenant_id: 테넌트 ID
         status: 작업 상태 필터 (선택사항)
         page: 페이지 번호
         per_page: 페이지당 항목 수
@@ -278,14 +278,14 @@ async def list_ingest_jobs(
     """
     offset = (page - 1) * per_page
     jobs = job_manager.list_jobs(
-        company_id=company_id,
+        tenant_id=tenant_id,
         status=status,
         limit=per_page,
         offset=offset
     )
     
     # 전체 개수 계산 (실제로는 DB 쿼리에서 COUNT를 사용해야 함)
-    all_jobs = job_manager.list_jobs(company_id=company_id, status=status, limit=1000)
+    all_jobs = job_manager.list_jobs(tenant_id=tenant_id, status=status, limit=1000)
     total = len(all_jobs)
     
     return JobListResponse(
@@ -299,14 +299,14 @@ async def list_ingest_jobs(
 @router.get("/jobs/{job_id}", response_model=JobStatusResponse)
 async def get_ingest_job_status(
     job_id: str,
-    company_id: str = Depends(get_company_id)
+    tenant_id: str = Depends(get_tenant_id)
 ):
     """
     특정 데이터 수집 작업의 상태를 조회합니다
     
     Args:
         job_id: 작업 ID
-        company_id: 회사 ID
+        tenant_id: 테넌트 ID
         
     Returns:
         JobStatusResponse: 작업 상태 정보
@@ -316,7 +316,7 @@ async def get_ingest_job_status(
     if not job:
         raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다")
     
-    if job.company_id != company_id:
+    if job.tenant_id != tenant_id:
         raise HTTPException(status_code=403, detail="접근 권한이 없습니다")
     
     # 제어 가능 여부 판단
@@ -338,7 +338,7 @@ async def get_ingest_job_status(
 async def control_ingest_job(
     job_id: str,
     request: JobControlRequest,
-    company_id: str = Depends(get_company_id)
+    tenant_id: str = Depends(get_tenant_id)
 ):
     """
     데이터 수집 작업을 제어합니다 (일시정지/재개/취소)
@@ -346,7 +346,7 @@ async def control_ingest_job(
     Args:
         job_id: 작업 ID
         request: 제어 요청 (action: pause, resume, cancel)
-        company_id: 회사 ID
+        tenant_id: 테넌트 ID
         
     Returns:
         작업 제어 결과
@@ -356,7 +356,7 @@ async def control_ingest_job(
     if not job:
         raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다")
     
-    if job.company_id != company_id:
+    if job.tenant_id != tenant_id:
         raise HTTPException(status_code=403, detail="접근 권한이 없습니다")
     
     success = False
@@ -399,23 +399,23 @@ async def control_ingest_job(
 
 @router.get("/metrics", response_model=JobMetrics)
 async def get_ingest_job_metrics(
-    company_id: str = Depends(get_company_id)
+    tenant_id: str = Depends(get_tenant_id)
 ):
     """
     데이터 수집 작업 메트릭스를 조회합니다
     
     Args:
-        company_id: 회사 ID
+        tenant_id: 테넌트 ID
         
     Returns:
         JobMetrics: 작업 메트릭스
     """
-    return job_manager.get_job_metrics(company_id)
+    return job_manager.get_job_metrics(tenant_id)
 
 
 @router.post("/sync-summaries", response_model=IngestResponse)
 async def sync_summaries_to_vector_db(
-    company_id: str = Depends(get_company_id),
+    tenant_id: str = Depends(get_tenant_id),
     platform: str = Depends(get_platform),
     api_key: Optional[str] = Depends(get_api_key),
     domain: Optional[str] = Depends(get_domain),
@@ -428,10 +428,10 @@ async def sync_summaries_to_vector_db(
     이 엔드포인트는 ingest 프로세스에서 누락된 파이프라인 단계를 실행합니다:
     1. SQLite에서 tickets, kb_articles, conversations의 요약 데이터 조회
     2. 요약 텍스트를 임베딩으로 변환
-    3. 3-tuple 보안(company_id, platform, original_id)을 유지하면서 Qdrant에 저장
+    3. 3-tuple 보안(tenant_id, platform, original_id)을 유지하면서 Qdrant에 저장
     
     **새로운 표준 헤더 (권장):**
-    - X-Company-ID: 회사 식별자 (멀티테넌트 보안)
+    - X-Tenant-ID: 회사 식별자 (멀티테넌트 보안)
     - X-Platform: 플랫폼 식별자 (멀티플랫폼 보안)
     - X-Domain: 플랫폼 도메인 (선택사항)
     - X-API-Key: 플랫폼 API 키 (선택사항, 추가 검증용)
@@ -440,7 +440,7 @@ async def sync_summaries_to_vector_db(
     - X-Platform-Domain, X-Platform-API-Key 등
     
     Args:
-        company_id: 회사 ID (X-Company-ID 헤더에서 자동 추출)
+        tenant_id: 테넌트 ID (X-Tenant-ID 헤더에서 자동 추출)
         platform: 플랫폼 식별자 (X-Platform 헤더에서 자동 추출)
         api_key: 플랫폼 API 키 (X-API-Key 헤더, 선택사항)
         domain: 플랫폼 도메인 (X-Domain 헤더, 선택사항)
@@ -453,11 +453,11 @@ async def sync_summaries_to_vector_db(
     from core.ingest.processor import sync_summaries_to_vector_db as sync_func
     
     start_time = datetime.now()
-    logger.info(f"요약 데이터 벡터 DB 동기화 시작 - Company: {company_id}, Platform: {platform}")
+    logger.info(f"요약 데이터 벡터 DB 동기화 시작 - Company: {tenant_id}, Platform: {platform}")
     
     # 보안 헤더 검증
-    if not company_id:
-        raise HTTPException(status_code=400, detail="X-Company-ID 헤더가 필요합니다 (멀티테넌트 보안)")
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="X-Tenant-ID 헤더가 필요합니다 (멀티테넌트 보안)")
     
     if not platform:
         raise HTTPException(status_code=400, detail="X-Platform 헤더가 필요합니다 (멀티플랫폼 보안)")
@@ -471,7 +471,7 @@ async def sync_summaries_to_vector_db(
     try:
         # 요약 데이터 동기화 실행
         result = await sync_func(
-            company_id=company_id,
+            tenant_id=tenant_id,
             platform=platform,
             batch_size=batch_size,
             force_update=force_update
@@ -498,7 +498,7 @@ async def sync_summaries_to_vector_db(
             duration_seconds=duration,
             metadata={
                 "sync_result": result,
-                "company_id": company_id,
+                "tenant_id": tenant_id,
                 "platform": platform,
                 "batch_size": batch_size,
                 "force_update": force_update,

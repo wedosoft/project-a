@@ -22,6 +22,6 @@ class MultiTenantModel(BaseModel):
     """멀티테넌트 지원을 위한 기본 모델"""
     __abstract__ = True
     
-    company_id = Column(String(50), nullable=False, index=True)
+    tenant_id = Column(String(50), nullable=False, index=True)
     platform = Column(String(20), default='freshdesk', nullable=False, index=True)
     tenant_metadata = Column(JSON)  # 테넌트별 메타데이터

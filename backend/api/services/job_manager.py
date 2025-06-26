@@ -62,7 +62,7 @@ class JobManager:
     
     def create_job(
         self,
-        company_id: str,
+        tenant_id: str,
         config: IngestJobConfig,
         job_type: Optional[JobType] = None
     ) -> IngestJob:
@@ -87,14 +87,14 @@ class JobManager:
         )
         
         job = IngestJob(
-            company_id=company_id,
+            tenant_id=tenant_id,
             job_type=job_type,
             config=config,
             progress=progress
         )
         
         self.jobs[job.job_id] = job
-        logger.info(f"새 작업 생성: {job.job_id} (회사: {company_id}, 타입: {job_type})")
+        logger.info(f"새 작업 생성: {job.job_id} (회사: {tenant_id}, 타입: {job_type})")
         
         return job
     
@@ -120,14 +120,14 @@ class JobManager:
         if not job.config.force_rebuild:
             recent_completed_jobs = [
                 j for j in self.jobs.values() 
-                if j.company_id == job.company_id 
+                if j.tenant_id == job.tenant_id 
                 and j.status == JobStatus.COMPLETED 
                 and j.completed_at
                 and (datetime.now() - j.completed_at).total_seconds() < 300  # 5분 이내
             ]
             
             if recent_completed_jobs:
-                logger.warning(f"⚠️  자동 재수집 방지: 회사 {job.company_id}의 최근 완료된 작업이 있습니다.")
+                logger.warning(f"⚠️  자동 재수집 방지: 회사 {job.tenant_id}의 최근 완료된 작업이 있습니다.")
                 logger.warning(f"최근 완료된 작업: {[j.job_id for j in recent_completed_jobs]}")
                 logger.warning("5분 후에 다시 시도하거나 force_rebuild=True를 사용하세요.")
                 return False
@@ -250,7 +250,7 @@ class JobManager:
     
     def list_jobs(
         self,
-        company_id: Optional[str] = None,
+        tenant_id: Optional[str] = None,
         status: Optional[JobStatus] = None,
         limit: int = 50,
         offset: int = 0
@@ -259,8 +259,8 @@ class JobManager:
         jobs = list(self.jobs.values())
         
         # 필터링
-        if company_id:
-            jobs = [j for j in jobs if j.company_id == company_id]
+        if tenant_id:
+            jobs = [j for j in jobs if j.tenant_id == tenant_id]
         
         if status:
             jobs = [j for j in jobs if j.status == status]
@@ -271,12 +271,12 @@ class JobManager:
         # 페이징
         return jobs[offset:offset + limit]
     
-    def get_job_metrics(self, company_id: Optional[str] = None) -> JobMetrics:
+    def get_job_metrics(self, tenant_id: Optional[str] = None) -> JobMetrics:
         """작업 메트릭스 조회"""
         jobs = list(self.jobs.values())
         
-        if company_id:
-            jobs = [j for j in jobs if j.company_id == company_id]
+        if tenant_id:
+            jobs = [j for j in jobs if j.tenant_id == tenant_id]
         
         total_jobs = len(jobs)
         active_jobs = len([j for j in jobs if j.status in [JobStatus.RUNNING, JobStatus.PAUSED]])
@@ -374,7 +374,7 @@ class JobManager:
         try:
             # 기존 ingest 함수 호출 (신호 전달)
             result = await ingest(
-                company_id=job.company_id,
+                tenant_id=job.tenant_id,
                 platform="freshdesk",  # TODO: config에서 가져오기
                 incremental=config.incremental,
                 purge=config.purge,

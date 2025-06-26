@@ -23,7 +23,7 @@ class Ticket(MultiTenantModel):
     # 관계 필드
     agent_id = Column(Integer, ForeignKey('agents.id'), index=True)
     category_id = Column(Integer, ForeignKey('categories.id'), index=True)
-    company_id = Column(Integer, ForeignKey('companies.id'), nullable=False)
+    tenant_id = Column(Integer, ForeignKey('companies.id'), nullable=False)
     
     # 관계 설정
     agent = relationship("Agent", back_populates="tickets", lazy="select")
@@ -39,8 +39,8 @@ class Ticket(MultiTenantModel):
     
     # 인덱스 및 제약조건
     __table_args__ = (
-        Index('idx_ticket_original', 'company_id', 'platform', 'original_id', unique=True),
+        Index('idx_ticket_original', 'tenant_id', 'platform', 'original_id', unique=True),
         Index('idx_ticket_status', 'status'),
         Index('idx_ticket_priority', 'priority'),
-        Index('idx_ticket_tenant', 'company_id', 'platform'),
+        Index('idx_ticket_tenant', 'tenant_id', 'platform'),
     )

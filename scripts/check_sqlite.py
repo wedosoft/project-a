@@ -38,12 +38,12 @@ def check_database(db_path: str):
             total = cursor.fetchone()[0]
             print(f"  총 레코드 수: {total}")
             
-            # company_id별 통계
+            # tenant_id별 통계
             cursor.execute("""
-                SELECT company_id, platform, object_type, COUNT(*) 
+                SELECT tenant_id, platform, object_type, COUNT(*) 
                 FROM integrated_objects 
-                GROUP BY company_id, platform, object_type
-                ORDER BY company_id, platform, object_type;
+                GROUP BY tenant_id, platform, object_type
+                ORDER BY tenant_id, platform, object_type;
             """)
             stats = cursor.fetchall()
             

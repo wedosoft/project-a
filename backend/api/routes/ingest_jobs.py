@@ -24,7 +24,7 @@ from ..models.ingest_job import (
     JobMetrics,
     JobStatus
 )
-from ..dependencies import get_company_id, get_platform, get_api_key, get_domain
+from ..dependencies import get_tenant_id, get_platform, get_api_key, get_domain
 from ..services.job_manager import job_manager
 
 # 라우터 생성 (prefix 제거 - 메인 라우터에서 설정)
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 @router.post("/jobs", response_model=JobStatusResponse)
 async def create_ingest_job(
     request: IngestRequest,
-    company_id: str = Depends(get_company_id),
+    tenant_id: str = Depends(get_tenant_id),
     platform: str = Depends(get_platform),
     api_key: Optional[str] = Depends(get_api_key),
     domain: Optional[str] = Depends(get_domain)
@@ -48,14 +48,14 @@ async def create_ingest_job(
     일시정지/재개/취소 등의 제어가 가능합니다.
     
     **새로운 표준 헤더 (권장):**
-    - X-Company-ID, X-Platform, X-Domain, X-API-Key
+    - X-Tenant-ID, X-Platform, X-Domain, X-API-Key
     
     **레거시 헤더 (하위 호환성):**
     - X-Platform-Domain, X-Platform-API-Key 등
     
     Args:
         request: 데이터 수집 옵션
-        company_id: 회사 ID
+        tenant_id: 테넌트 ID
         platform: 플랫폼 식별자
         api_key: 플랫폼 API 키
         domain: 플랫폼 도메인
@@ -63,7 +63,7 @@ async def create_ingest_job(
     Returns:
         JobStatusResponse: 생성된 작업 정보
     """
-    logger.info(f"새 데이터 수집 작업 생성 요청 - Company: {company_id}, Platform: {platform}")
+    logger.info(f"새 데이터 수집 작업 생성 요청 - Company: {tenant_id}, Platform: {platform}")
     
     # 작업 설정 생성
     config = IngestJobConfig(
@@ -78,7 +78,7 @@ async def create_ingest_job(
     )
     
     # 작업 생성
-    job = job_manager.create_job(company_id, config)
+    job = job_manager.create_job(tenant_id, config)
     
     # 즉시 시작
     success = job_manager.start_job(job.job_id)
@@ -101,7 +101,7 @@ async def create_ingest_job(
 
 @router.get("/jobs", response_model=JobListResponse)
 async def list_ingest_jobs(
-    company_id: str = Depends(get_company_id),
+    tenant_id: str = Depends(get_tenant_id),
     status: Optional[JobStatus] = Query(None, description="작업 상태 필터"),
     page: int = Query(1, ge=1, description="페이지 번호"),
     per_page: int = Query(20, ge=1, le=100, description="페이지당 항목 수")
@@ -110,7 +110,7 @@ async def list_ingest_jobs(
     데이터 수집 작업 목록을 조회합니다
     
     Args:
-        company_id: 회사 ID
+        tenant_id: 테넌트 ID
         status: 작업 상태 필터 (선택사항)
         page: 페이지 번호
         per_page: 페이지당 항목 수
@@ -120,14 +120,14 @@ async def list_ingest_jobs(
     """
     offset = (page - 1) * per_page
     jobs = job_manager.list_jobs(
-        company_id=company_id,
+        tenant_id=tenant_id,
         status=status,
         limit=per_page,
         offset=offset
     )
     
     # 전체 개수 계산 (실제로는 DB 쿼리에서 COUNT를 사용해야 함)
-    all_jobs = job_manager.list_jobs(company_id=company_id, status=status, limit=1000)
+    all_jobs = job_manager.list_jobs(tenant_id=tenant_id, status=status, limit=1000)
     total = len(all_jobs)
     
     return JobListResponse(
@@ -140,14 +140,14 @@ async def list_ingest_jobs(
 @router.get("/jobs/{job_id}", response_model=JobStatusResponse)
 async def get_ingest_job_status(
     job_id: str,
-    company_id: str = Depends(get_company_id)
+    tenant_id: str = Depends(get_tenant_id)
 ):
     """
     특정 데이터 수집 작업의 상태를 조회합니다
     
     Args:
         job_id: 작업 ID
-        company_id: 회사 ID
+        tenant_id: 테넌트 ID
         
     Returns:
         JobStatusResponse: 작업 상태 정보
@@ -157,7 +157,7 @@ async def get_ingest_job_status(
     if not job:
         raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다")
     
-    if job.company_id != company_id:
+    if job.tenant_id != tenant_id:
         raise HTTPException(status_code=403, detail="접근 권한이 없습니다")
     
     # 제어 가능 여부 판단
@@ -178,7 +178,7 @@ async def get_ingest_job_status(
 async def control_ingest_job(
     job_id: str,
     request: JobControlRequest,
-    company_id: str = Depends(get_company_id)
+    tenant_id: str = Depends(get_tenant_id)
 ):
     """
     데이터 수집 작업을 제어합니다 (일시정지/재개/취소)
@@ -186,7 +186,7 @@ async def control_ingest_job(
     Args:
         job_id: 작업 ID
         request: 제어 요청 (action: pause, resume, cancel)
-        company_id: 회사 ID
+        tenant_id: 테넌트 ID
         
     Returns:
         작업 제어 결과
@@ -196,7 +196,7 @@ async def control_ingest_job(
     if not job:
         raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다")
     
-    if job.company_id != company_id:
+    if job.tenant_id != tenant_id:
         raise HTTPException(status_code=403, detail="접근 권한이 없습니다")
     
     success = False
@@ -238,15 +238,15 @@ async def control_ingest_job(
 
 @router.get("/metrics", response_model=JobMetrics)
 async def get_ingest_job_metrics(
-    company_id: str = Depends(get_company_id)
+    tenant_id: str = Depends(get_tenant_id)
 ):
     """
     데이터 수집 작업 메트릭스를 조회합니다
     
     Args:
-        company_id: 회사 ID
+        tenant_id: 테넌트 ID
         
     Returns:
         JobMetrics: 작업 메트릭스
     """
-    return job_manager.get_job_metrics(company_id)
+    return job_manager.get_job_metrics(tenant_id)

@@ -18,9 +18,9 @@ logger = logging.getLogger(__name__)
 class PlatformDataMerger:
     """멀티플랫폼 데이터 병합 클래스"""
     
-    def __init__(self, platform: str, company_id: str):
+    def __init__(self, platform: str, tenant_id: str):
         self.platform = platform
-        self.company_id = company_id
+        self.tenant_id = tenant_id
     
     def merge_ticket_data(
         self,
@@ -73,7 +73,7 @@ class PlatformDataMerger:
             # 기본 식별 정보
             "original_id": str(ticket.get("id", "")),
             "platform": self.platform,
-            "company_id": self.company_id,
+            "tenant_id": self.tenant_id,
             "doc_type": "ticket",
             
             # 콘텐츠 정보
@@ -154,7 +154,7 @@ class PlatformDataMerger:
             # 기본 식별 정보
             "original_id": str(article.get("id", "")),
             "platform": self.platform,
-            "company_id": self.company_id,
+            "tenant_id": self.tenant_id,
             "doc_type": "kb",
             
             # 콘텐츠 정보
@@ -235,7 +235,7 @@ class PlatformDataMerger:
             유효성 여부
         """
         required_fields = [
-            "original_id", "platform", "company_id", "doc_type",
+            "original_id", "platform", "tenant_id", "doc_type",
             "merged_content", "metadata", "data_hash"
         ]
         
@@ -244,13 +244,13 @@ class PlatformDataMerger:
                 logger.error(f"필수 필드 누락: {field}")
                 return False
         
-        # 플랫폼/회사 ID 검증
+        # 플랫폼/테넌트 ID 검증
         if document["platform"] != self.platform:
             logger.error(f"플랫폼 불일치: {document['platform']} != {self.platform}")
             return False
             
-        if document["company_id"] != self.company_id:
-            logger.error(f"회사 ID 불일치: {document['company_id']} != {self.company_id}")
+        if document["tenant_id"] != self.tenant_id:
+            logger.error(f"테넌트 ID 불일치: {document['tenant_id']} != {self.tenant_id}")
             return False
         
         # 문서 타입 검증
@@ -274,7 +274,7 @@ class DataStorage:
     async def save_merged_document(
         self,
         platform: str,
-        company_id: str,
+        tenant_id: str,
         document: Dict[str, Any],
         doc_type: str
     ) -> str:
@@ -283,7 +283,7 @@ class DataStorage:
         
         Args:
             platform: 플랫폼 이름
-            company_id: 회사 ID
+            tenant_id: 테넌트 ID
             document: 저장할 문서
             doc_type: 문서 타입 (ticket/kb)
             
@@ -291,22 +291,22 @@ class DataStorage:
             저장된 문서 ID 또는 경로
         """
         if self.storage_type == "file":
-            return await self._save_to_file(platform, company_id, document, doc_type)
+            return await self._save_to_file(platform, tenant_id, document, doc_type)
         elif self.storage_type == "database":
-            return await self._save_to_database(platform, company_id, document, doc_type)
+            return await self._save_to_database(platform, tenant_id, document, doc_type)
         else:
             raise ValueError(f"지원하지 않는 저장소 타입: {self.storage_type}")
     
     async def _save_to_file(
         self,
         platform: str,
-        company_id: str,
+        tenant_id: str,
         document: Dict[str, Any],
         doc_type: str
     ) -> str:
         """파일 시스템에 저장"""
-        # 디렉토리 구조: data/merged/{platform}/{company_id}/{doc_type}/
-        doc_dir = self.base_path / platform / company_id / doc_type
+        # 디렉토리 구조: data/merged/{platform}/{tenant_id}/{doc_type}/
+        doc_dir = self.base_path / platform / tenant_id / doc_type
         doc_dir.mkdir(parents=True, exist_ok=True)
         
         # 파일명: {original_id}_{timestamp}.json
@@ -324,7 +324,7 @@ class DataStorage:
     async def _save_to_database(
         self,
         platform: str,
-        company_id: str,
+        tenant_id: str,
         document: Dict[str, Any],
         doc_type: str
     ) -> str:
@@ -336,7 +336,7 @@ class DataStorage:
     async def load_merged_documents(
         self,
         platform: str,
-        company_id: str,
+        tenant_id: str,
         doc_type: Optional[str] = None,
         limit: Optional[int] = None
     ) -> List[Dict[str, Any]]:
@@ -345,7 +345,7 @@ class DataStorage:
         
         Args:
             platform: 플랫폼 이름
-            company_id: 회사 ID
+            tenant_id: 테넌트 ID
             doc_type: 문서 타입 필터 (선택사항)
             limit: 최대 로드 개수 (선택사항)
             
@@ -353,16 +353,16 @@ class DataStorage:
             문서 리스트
         """
         if self.storage_type == "file":
-            return await self._load_from_file(platform, company_id, doc_type, limit)
+            return await self._load_from_file(platform, tenant_id, doc_type, limit)
         elif self.storage_type == "database":
-            return await self._load_from_database(platform, company_id, doc_type, limit)
+            return await self._load_from_database(platform, tenant_id, doc_type, limit)
         else:
             raise ValueError(f"지원하지 않는 저장소 타입: {self.storage_type}")
     
     async def _load_from_file(
         self,
         platform: str,
-        company_id: str,
+        tenant_id: str,
         doc_type: Optional[str] = None,
         limit: Optional[int] = None
     ) -> List[Dict[str, Any]]:
@@ -371,10 +371,10 @@ class DataStorage:
         
         if doc_type:
             # 특정 문서 타입만 로드
-            doc_dirs = [self.base_path / platform / company_id / doc_type]
+            doc_dirs = [self.base_path / platform / tenant_id / doc_type]
         else:
             # 모든 문서 타입 로드
-            company_dir = self.base_path / platform / company_id
+            company_dir = self.base_path / platform / tenant_id
             if not company_dir.exists():
                 return documents
             doc_dirs = [d for d in company_dir.iterdir() if d.is_dir()]
@@ -402,7 +402,7 @@ class DataStorage:
     async def _load_from_database(
         self,
         platform: str,
-        company_id: str,
+        tenant_id: str,
         doc_type: Optional[str] = None,
         limit: Optional[int] = None
     ) -> List[Dict[str, Any]]:

@@ -16,25 +16,25 @@ logger = logging.getLogger(__name__)
 class PostgreSQLDatabase:
     """PostgreSQL 스키마 기반 멀티테넌트 데이터베이스 관리"""
     
-    def __init__(self, company_id: str, platform: str = "freshdesk"):
+    def __init__(self, tenant_id: str, platform: str = "freshdesk"):
         """
         PostgreSQL 멀티테넌트 데이터베이스 초기화 (Freshdesk 전용)
         
         Args:
-            company_id: 회사 ID (스키마명으로 사용)
+            tenant_id: 테넌트 ID (스키마명으로 사용)
             platform: 플랫폼명 (현재는 Freshdesk만 지원, 다른 값은 무시됨)
         """
-        if not company_id:
-            raise ValueError("company_id는 필수 매개변수입니다")
+        if not tenant_id:
+            raise ValueError("tenant_id는 필수 매개변수입니다")
         
         # Freshdesk 전용 플랫폼으로 고정 (점진적 단순화)
         if platform and platform != "freshdesk":
             logger.warning(f"현재는 Freshdesk만 지원됩니다. platform='{platform}' 무시하고 'freshdesk'로 설정")
             
         # 스키마명 정규화 (PostgreSQL 네이밍 규칙 준수)
-        self.company_id = self._normalize_schema_name(company_id)
+        self.tenant_id = self._normalize_schema_name(tenant_id)
         self.platform = "freshdesk"  # 항상 고정
-        self.schema_name = f"tenant_{self.company_id}"
+        self.schema_name = f"tenant_{self.tenant_id}"
         
         # 연결 정보
         self.connection = None
@@ -51,11 +51,11 @@ class PostgreSQLDatabase:
         
         logger.info(f"PostgreSQL 멀티테넌트 DB 초기화: schema={self.schema_name}, platform=Freshdesk 전용")
     
-    def _normalize_schema_name(self, company_id: str) -> str:
+    def _normalize_schema_name(self, tenant_id: str) -> str:
         """스키마명 정규화 (PostgreSQL 규칙 준수)"""
         # 소문자 변환, 특수문자 제거, 언더스코어로 대체
         import re
-        normalized = re.sub(r'[^a-zA-Z0-9_]', '_', company_id.lower())
+        normalized = re.sub(r'[^a-zA-Z0-9_]', '_', tenant_id.lower())
         # 숫자로 시작하면 접두사 추가
         if normalized[0].isdigit():
             normalized = f"c_{normalized}"
@@ -121,7 +121,7 @@ class PostgreSQLDatabase:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS public.tenants (
                     id SERIAL PRIMARY KEY,
-                    company_id VARCHAR(100) UNIQUE NOT NULL,
+                    tenant_id VARCHAR(100) UNIQUE NOT NULL,
                     schema_name VARCHAR(100) UNIQUE NOT NULL,
                     company_name VARCHAR(255) NOT NULL,
                     domain VARCHAR(255) UNIQUE NOT NULL,
@@ -236,15 +236,15 @@ class PostgreSQLDatabase:
         with self.connection.cursor() as cursor:
             cursor.execute("""
                 INSERT INTO public.tenants (
-                    company_id, schema_name, company_name, domain, subscription_plan_id
+                    tenant_id, schema_name, company_name, domain, subscription_plan_id
                 ) VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT (company_id) DO UPDATE SET
+                ON CONFLICT (tenant_id) DO UPDATE SET
                     company_name = EXCLUDED.company_name,
                     domain = EXCLUDED.domain,
                     updated_at = CURRENT_TIMESTAMP
                 RETURNING id
             """, (
-                self.company_id,
+                self.tenant_id,
                 self.schema_name,
                 tenant_data.get('company_name'),
                 tenant_data.get('domain'),
@@ -254,7 +254,7 @@ class PostgreSQLDatabase:
             tenant_id = cursor.fetchone()[0]
             self.connection.commit()
             
-            logger.info(f"테넌트 등록 완료: {self.company_id} (ID: {tenant_id})")
+            logger.info(f"테넌트 등록 완료: {self.tenant_id} (ID: {tenant_id})")
             return tenant_id
     
     def insert_integrated_object(self, integrated_data: Dict[str, Any]) -> int:
@@ -412,7 +412,7 @@ class PostgreSQLDatabase:
                     'total_count': total_count,
                     'type_counts': type_counts,
                     'latest_by_type': latest_by_type,
-                    'tenant_id': self.company_id,
+                    'tenant_id': self.tenant_id,
                     'platform': self.platform,
                     'schema_name': self.schema_name
                 }
@@ -423,7 +423,7 @@ class PostgreSQLDatabase:
                 'total_count': 0,
                 'type_counts': {},
                 'latest_by_type': {},
-                'tenant_id': self.company_id,
+                'tenant_id': self.tenant_id,
                 'platform': self.platform,
                 'schema_name': self.schema_name
             }
@@ -431,9 +431,9 @@ class PostgreSQLDatabase:
             self.disconnect()
 
 
-def get_postgresql_database(company_id: str, platform: str = "freshdesk") -> PostgreSQLDatabase:
+def get_postgresql_database(tenant_id: str, platform: str = "freshdesk") -> PostgreSQLDatabase:
     """PostgreSQL 멀티테넌트 데이터베이스 인스턴스 반환 (Freshdesk 전용)"""
-    return PostgreSQLDatabase(company_id, platform)  # platform은 내부적으로 "freshdesk"로 고정됨
+    return PostgreSQLDatabase(tenant_id, platform)  # platform은 내부적으로 "freshdesk"로 고정됨
 
 
 # 테넌트 관리 유틸리티
@@ -441,9 +441,9 @@ class TenantManager:
     """테넌트 관리 유틸리티"""
     
     @staticmethod
-    def create_tenant(company_id: str, tenant_data: Dict[str, Any]) -> PostgreSQLDatabase:
+    def create_tenant(tenant_id: str, tenant_data: Dict[str, Any]) -> PostgreSQLDatabase:
         """새 테넌트 생성"""
-        db = PostgreSQLDatabase(company_id)
+        db = PostgreSQLDatabase(tenant_id)
         db.connect()
         db.register_tenant(tenant_data)
         return db
@@ -465,9 +465,9 @@ class TenantManager:
         return tenants
     
     @staticmethod
-    def delete_tenant(company_id: str):
+    def delete_tenant(tenant_id: str):
         """테넌트 완전 삭제 (스키마 포함)"""
-        db = PostgreSQLDatabase(company_id)
+        db = PostgreSQLDatabase(tenant_id)
         db.connect()
         
         with db.connection.cursor() as cursor:
@@ -475,12 +475,12 @@ class TenantManager:
             cursor.execute(f"DROP SCHEMA IF EXISTS {db.schema_name} CASCADE")
             
             # public.tenants에서 제거
-            cursor.execute("DELETE FROM public.tenants WHERE company_id = %s", (company_id,))
+            cursor.execute("DELETE FROM public.tenants WHERE tenant_id = %s", (tenant_id,))
             
             db.connection.commit()
         
         db.disconnect()
-        logger.info(f"테넌트 완전 삭제 완료: {company_id}")
+        logger.info(f"테넌트 완전 삭제 완료: {tenant_id}")
 
 # 호환성을 위한 alias
 PostgreSQLDatabaseManager = PostgreSQLDatabase

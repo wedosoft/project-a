@@ -101,7 +101,7 @@ class Agent(Base):
     __tablename__ = 'agents'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    company_id = Column(Integer, ForeignKey('companies.id'), nullable=False)
+    tenant_id = Column(Integer, ForeignKey('companies.id'), nullable=False)
     
     # 기본 정보
     email = Column(String(255), nullable=False)
@@ -129,8 +129,8 @@ class Agent(Base):
     
     # 제약 조건
     __table_args__ = (
-        Index('idx_agents_company_email', 'company_id', 'email', unique=True),
-        Index('idx_agents_company_freshdesk', 'company_id', 'freshdesk_agent_id', unique=True),
+        Index('idx_agents_company_email', 'tenant_id', 'email', unique=True),
+        Index('idx_agents_company_freshdesk', 'tenant_id', 'freshdesk_agent_id', unique=True),
     )
 
 
@@ -139,7 +139,7 @@ class UsageLog(Base):
     __tablename__ = 'usage_logs'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    company_id = Column(Integer, ForeignKey('companies.id'), nullable=False)
+    tenant_id = Column(Integer, ForeignKey('companies.id'), nullable=False)
     agent_id = Column(Integer, ForeignKey('agents.id'), nullable=True)
     
     # 사용량 정보
@@ -171,7 +171,7 @@ class IntegratedObject(Base):
     
     # 식별 정보
     original_id = Column(String(255), nullable=False)
-    company_id = Column(String(100), nullable=False)  # String for compatibility
+    tenant_id = Column(String(100), nullable=False)  # String for compatibility
     platform = Column(String(50), nullable=False, default='freshdesk')
     object_type = Column(String(50), nullable=False)
     
@@ -187,16 +187,16 @@ class IntegratedObject(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow)
     
-    # 관계 (company_id가 String이므로 직접 ForeignKey 사용 안함)
+    # 관계 (tenant_id가 String이므로 직접 ForeignKey 사용 안함)
     company = relationship("Company", back_populates="integrated_objects", 
-                          foreign_keys="IntegratedObject.company_id",
-                          primaryjoin="and_(IntegratedObject.company_id == cast(Company.id, String))")
+                          foreign_keys="IntegratedObject.tenant_id",
+                          primaryjoin="and_(IntegratedObject.tenant_id == cast(Company.id, String))")
     ai_processing_logs = relationship("AIProcessingLog", back_populates="integrated_object")
     
     # 제약 조건
     __table_args__ = (
-        Index('idx_integrated_objects_unique', 'company_id', 'platform', 'object_type', 'original_id', unique=True),
-        Index('idx_integrated_objects_company_platform', 'company_id', 'platform'),
+        Index('idx_integrated_objects_unique', 'tenant_id', 'platform', 'object_type', 'original_id', unique=True),
+        Index('idx_integrated_objects_company_platform', 'tenant_id', 'platform'),
         Index('idx_integrated_objects_type', 'object_type'),
         Index('idx_integrated_objects_created_at', 'created_at'),
     )
@@ -251,7 +251,7 @@ class CompanySetting(Base):
     __tablename__ = 'company_settings'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    company_id = Column(Integer, ForeignKey('companies.id'), nullable=False)
+    tenant_id = Column(Integer, ForeignKey('companies.id'), nullable=False)
     setting_key = Column(String(100), nullable=False)
     setting_value = Column(Text, nullable=True)
     is_encrypted = Column(Boolean, default=False)
@@ -260,7 +260,7 @@ class CompanySetting(Base):
     
     # 제약 조건
     __table_args__ = (
-        Index('idx_company_settings_unique', 'company_id', 'setting_key', unique=True),
+        Index('idx_company_settings_unique', 'tenant_id', 'setting_key', unique=True),
     )
 
 
@@ -269,7 +269,7 @@ class CollectionLog(Base):
     __tablename__ = 'collection_logs'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    company_id = Column(Integer, ForeignKey('companies.id'), nullable=False)
+    tenant_id = Column(Integer, ForeignKey('companies.id'), nullable=False)
     platform = Column(String(50), nullable=False, default='freshdesk')
     
     # 수집 정보
@@ -300,7 +300,7 @@ class BillingHistory(Base):
     __tablename__ = 'billing_history'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    company_id = Column(Integer, ForeignKey('companies.id'), nullable=False)
+    tenant_id = Column(Integer, ForeignKey('companies.id'), nullable=False)
     
     # 결제 정보
     billing_period_start = Column(DateTime, nullable=False)

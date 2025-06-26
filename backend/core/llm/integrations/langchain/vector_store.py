@@ -35,7 +35,7 @@ class VectorStoreManager:
     async def search_similar(
         self,
         query_vector: List[float],
-        company_id: str,
+        tenant_id: str,
         limit: int = 5,
         score_threshold: float = 0.7
     ) -> List[Dict[str, Any]]:
@@ -46,7 +46,7 @@ class VectorStoreManager:
         
         Args:
             query_vector: 쿼리 벡터
-            company_id: 회사 ID (멀티테넌트 격리용)
+            tenant_id: 테넌트 ID (멀티테넌트 격리용)
             limit: 결과 수 제한
             score_threshold: 유사도 임계값
             
@@ -60,7 +60,7 @@ class VectorStoreManager:
         try:
             # 기존 Qdrant 검색 로직 재활용 (구체적 구현은 기존 코드 참조)
             # 여기서는 스켈레톤만 제공
-            logger.info(f"벡터 검색 실행: company_id={company_id}, limit={limit}")
+            logger.info(f"벡터 검색 실행: tenant_id={tenant_id}, limit={limit}")
             
             # TODO: 기존 Qdrant 검색 로직 통합
             results = []
@@ -74,7 +74,7 @@ class VectorStoreManager:
     async def add_documents(
         self,
         documents: List[Dict[str, Any]],
-        company_id: str
+        tenant_id: str
     ) -> bool:
         """
         문서 추가
@@ -83,7 +83,7 @@ class VectorStoreManager:
         
         Args:
             documents: 추가할 문서 리스트
-            company_id: 회사 ID
+            tenant_id: 테넌트 ID
             
         Returns:
             성공 여부
@@ -93,7 +93,7 @@ class VectorStoreManager:
             return False
             
         try:
-            logger.info(f"문서 추가: company_id={company_id}, 문서 수={len(documents)}")
+            logger.info(f"문서 추가: tenant_id={tenant_id}, 문서 수={len(documents)}")
             
             # TODO: 기존 문서 추가 로직 통합
             
@@ -120,7 +120,7 @@ async def create_vector_store_manager(qdrant_client=None) -> VectorStoreManager:
 
 async def search_similar_documents(
     query_vector: List[float],
-    company_id: str,
+    tenant_id: str,
     qdrant_client=None,
     **kwargs
 ) -> List[Dict[str, Any]]:
@@ -129,7 +129,7 @@ async def search_similar_documents(
     
     Args:
         query_vector: 쿼리 벡터
-        company_id: 회사 ID
+        tenant_id: 테넌트 ID
         qdrant_client: Qdrant 클라이언트
         **kwargs: 추가 매개변수
         
@@ -139,6 +139,6 @@ async def search_similar_documents(
     vector_store = await create_vector_store_manager(qdrant_client=qdrant_client)
     return await vector_store.search_similar(
         query_vector=query_vector,
-        company_id=company_id,
+        tenant_id=tenant_id,
         **kwargs
     )

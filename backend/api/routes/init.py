@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 from ..dependencies import (
-    get_company_id, 
+    get_tenant_id, 
     get_platform,
     get_vector_db,
     get_fetcher,
@@ -43,7 +43,7 @@ router = APIRouter()
 @router.get("/init/{ticket_id}", response_model=InitResponse)
 async def get_initial_context(
     ticket_id: str, 
-    company_id: str = Depends(get_company_id),
+    tenant_id: str = Depends(get_tenant_id),
     platform: str = Depends(get_platform),
     vector_db = Depends(get_vector_db),
     fetcher = Depends(get_fetcher),
@@ -70,7 +70,7 @@ async def get_initial_context(
     
     Args:
         ticket_id: 분석할 티켓 ID
-        company_id: 회사 ID (헤더에서 추출)
+        tenant_id: 테넌트 ID (헤더에서 추출)
         platform: 플랫폼 타입 (헤더에서 추출)
         include_summary: 티켓 요약 생성 여부
         include_kb_docs: 지식베이스 문서 포함 여부
@@ -87,32 +87,29 @@ async def get_initial_context(
         original_domain = os.getenv("FRESHDESK_DOMAIN")
         original_api_key = os.getenv("FRESHDESK_API_KEY")
         
-        logger.info(f"티켓 ID {ticket_id} 초기화 시작 (company_id: {company_id}, platform: {platform})")
+        logger.info(f"티켓 ID {ticket_id} 초기화 시작 (tenant_id: {tenant_id}, platform: {platform})")
         
         # Freshdesk 전용 처리 (platform은 항상 "freshdesk")
-        search_company_id = company_id
+        search_tenant_id = tenant_id
         
         # Freshdesk API 설정 (헤더 기반)
         domain = x_freshdesk_domain or os.getenv("FRESHDESK_DOMAIN")
         api_key = x_freshdesk_api_key or os.getenv("FRESHDESK_API_KEY")
         
         if not domain or not api_key:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Freshdesk 도메인과 API 키가 필요합니다. 헤더 또는 환경변수로 제공해주세요."
-                )
+            raise HTTPException(
+                status_code=400,
+                detail="Freshdesk 도메인과 API 키가 필요합니다. 헤더 또는 환경변수로 제공해주세요."
+            )
         
-            # Freshdesk API에서 티켓 정보 조회 (동적 설정 사용)
-            ticket_data = await fetcher.fetch_ticket_details(int(ticket_id), domain=domain, api_key=api_key)
-        else:
-            # 다른 플랫폼의 경우 벡터 검색만 사용
-            ticket_data = None
+        # Freshdesk API에서 티켓 정보 조회 (동적 설정 사용)
+        ticket_data = await fetcher.fetch_ticket_details(int(ticket_id), domain=domain, api_key=api_key)
         
         if not ticket_data:
-            # API 조회 실패 시 또는 다른 플랫폼인 경우 벡터 검색 폴백
+            # API 조회 실패 시 벡터 검색 폴백
             ticket_data = vector_db.get_by_id(
                 original_id_value=ticket_id, 
-                company_id=search_company_id, 
+                tenant_id=search_tenant_id, 
                 doc_type="ticket",
                 platform=platform
             )
@@ -208,7 +205,7 @@ async def get_initial_context(
             chain_results = await execute_init_parallel_chain(
                 ticket_data=ticket_info,
                 qdrant_client=vector_db.client,  # QdrantAdapter의 client 속성 사용
-                company_id=search_company_id,
+                tenant_id=search_tenant_id,
                 llm_router=llm_router,  # LLM Router 전달
                 include_summary=include_summary_chain,
                 include_similar_tickets=include_similar_tickets,
@@ -458,7 +455,7 @@ async def get_initial_context(
         # 결과 캐싱
         ticket_context_cache[context_id] = {
             "ticket_id": ticket_id,
-            "company_id": search_company_id,
+            "tenant_id": search_tenant_id,
             "ticket_data": ticket_metadata,
             "similar_tickets": similar_tickets,
             "kb_documents": kb_documents,

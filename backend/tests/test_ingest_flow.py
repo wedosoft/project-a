@@ -39,14 +39,14 @@ async def test_ingest_flow():
         from core.ingest.processor import ingest
         
         # 테스트 파라미터
-        company_id = "wedosoft"
+        tenant_id = "wedosoft"
         platform = "freshdesk"
         
-        logger.info(f"ingest 함수 호출 - company_id: {company_id}, platform: {platform}")
+        logger.info(f"ingest 함수 호출 - tenant_id: {tenant_id}, platform: {platform}")
         
         # ingest 실행
         result = await ingest(
-            company_id=company_id,
+            tenant_id=tenant_id,
             platform=platform,
             incremental=True,
             purge=False,

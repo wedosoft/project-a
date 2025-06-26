@@ -65,7 +65,7 @@ class IngestJobConfig(BaseModel):
 class IngestJob(BaseModel):
     """데이터 수집 작업 모델"""
     job_id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="작업 ID")
-    company_id: str = Field(description="회사 ID")
+    tenant_id: str = Field(description="테넌트 ID")
     job_type: JobType = Field(description="작업 타입")
     status: JobStatus = Field(default=JobStatus.PENDING, description="작업 상태")
     config: IngestJobConfig = Field(description="작업 설정")

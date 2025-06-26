@@ -44,19 +44,19 @@ def create_test_tenant_secrets():
     # 테스트용 테넌트 설정들
     test_tenants = [
         {
-            "company_id": "wedosoft",
+            "tenant_id": "wedosoft",
             "platform": "freshdesk", 
             "domain": "wedosoft.freshdesk.com",
             "api_key": "Ug9H1cKCZZtZ4haamBy"
         },
         {
-            "company_id": "company-a", 
+            "tenant_id": "company-a", 
             "platform": "freshdesk",
             "domain": "companya.freshdesk.com", 
             "api_key": "test-api-key-company-a"
         },
         {
-            "company_id": "demo-corp",
+            "tenant_id": "demo-corp",
             "platform": "freshdesk", 
             "domain": "democorp.freshdesk.com",
             "api_key": "demo-api-key-12345"
@@ -75,17 +75,17 @@ def create_test_tenant_secrets():
     if success_count > 0:
         print("\n📋 생성된 테넌트 목록:")
         for tenant in test_tenants[:success_count]:
-            print(f"  - {tenant['company_id']} ({tenant['platform']}): {tenant['domain']}")
+            print(f"  - {tenant['tenant_id']} ({tenant['platform']}): {tenant['domain']}")
         
         print("\n🧪 테스트 방법:")
         print("1. API 요청 시 다음 헤더 사용:")
-        print("   X-Company-ID: wedosoft")
+        print("   X-Tenant-ID: wedosoft")
         print("   X-Platform: freshdesk") 
         print("   X-Domain: wedosoft.freshdesk.com")
         print("   X-API-Key: (Secrets Manager에서 자동 조회)")
         
         print("\n2. 다른 테넌트 테스트:")
-        print("   X-Company-ID: company-a")
+        print("   X-Tenant-ID: company-a")
         print("   X-Platform: freshdesk")
         print("   등등...")
     
@@ -94,7 +94,7 @@ def create_test_tenant_secrets():
 def create_tenant_secret(client, tenant_config):
     """개별 테넌트 시크릿 생성"""
     
-    secret_name = f"tenant-configs/{tenant_config['company_id']}"
+    secret_name = f"tenant-configs/{tenant_config['tenant_id']}"
     secret_value = {
         "platform": tenant_config["platform"],
         "domain": tenant_config["domain"], 
@@ -119,7 +119,7 @@ def create_tenant_secret(client, tenant_config):
                 client.create_secret(
                     Name=secret_name,
                     SecretString=json.dumps(secret_value),
-                    Description=f"멀티테넌트 설정 - {tenant_config['company_id']} ({tenant_config['platform']})"
+                    Description=f"멀티테넌트 설정 - {tenant_config['tenant_id']} ({tenant_config['platform']})"
                 )
                 print(f"✨ 생성: {secret_name}")
             else:
@@ -164,21 +164,21 @@ def list_tenant_secrets():
         
         for secret in secrets:
             secret_name = secret['Name']
-            company_id = secret_name.replace('tenant-configs/', '')
+            tenant_id = secret_name.replace('tenant-configs/', '')
             
             try:
                 # 시크릿 값 조회
                 secret_response = client.get_secret_value(SecretId=secret_name)
                 secret_data = json.loads(secret_response['SecretString'])
                 
-                print(f"  🏢 {company_id}")
+                print(f"  🏢 {tenant_id}")
                 print(f"     플랫폼: {secret_data.get('platform', 'N/A')}")
                 print(f"     도메인: {secret_data.get('domain', 'N/A')}")
                 print(f"     API 키: {secret_data.get('api_key', 'N/A')[:8]}...")
                 print()
                 
             except Exception as e:
-                print(f"  ❌ {company_id}: 조회 실패 ({e})")
+                print(f"  ❌ {tenant_id}: 조회 실패 ({e})")
         
     except Exception as e:
         print(f"❌ 시크릿 목록 조회 실패: {e}")

@@ -15,8 +15,8 @@ from core.database.vectordb import vector_db
 # 로깅 설정
 logger = logging.getLogger(__name__)
 
-# 현재 인증된 사용자의 회사 ID (임시: 실제 구현에서는 인증 시스템에서 제공받아야 함)
-DEFAULT_COMPANY_ID = "default"
+# 현재 인증된 사용자의 테넌트 ID (임시: 실제 구현에서는 인증 시스템에서 제공받아야 함)
+DEFAULT_TENANT_ID = "default"
 
 
 def get_vector_collection(collection_name: str = "documents") -> Any:
@@ -32,14 +32,14 @@ def get_vector_collection(collection_name: str = "documents") -> Any:
     return vector_db
 
 
-def retrieve_top_k_docs(query_embedding: List[float], top_k: int, company_id: str = None, doc_type: str = None) -> dict:
+def retrieve_top_k_docs(query_embedding: List[float], top_k: int, tenant_id: str = None, doc_type: str = None) -> dict:
     """
     쿼리 임베딩을 이용해 VectorDB에서 top_k 문서를 검색합니다.
 
     Args:
         query_embedding: 검색에 사용할 쿼리 임베딩 벡터
         top_k: 검색할 최대 문서 수
-        company_id: 회사 ID (데이터 격리에 사용, None이면 "default" 사용)
+        tenant_id: 테넌트 ID (데이터 격리에 사용, None이면 "default" 사용)
         doc_type: 문서 타입 필터 (선택사항, "ticket" 또는 "kb")
 
     Returns:
@@ -49,16 +49,16 @@ def retrieve_top_k_docs(query_embedding: List[float], top_k: int, company_id: st
         - ids: 검색된 문서의 ID 목록
         - distances: 검색된 문서의 유사도 점수 목록
     """
-    # company_id가 None이면 "default"로 설정
-    search_company_id = company_id if company_id else "default"
-    logger.info(f"문서 검색 시작 (company_id: {search_company_id}, doc_type: {doc_type})")
+    # tenant_id가 None이면 "default"로 설정
+    search_tenant_id = tenant_id if tenant_id else "default"
+    logger.info(f"문서 검색 시작 (tenant_id: {search_tenant_id}, doc_type: {doc_type})")
     
     try:
         # 벡터 검색 수행
         results = vector_db.search(
             query_embedding=query_embedding,
             top_k=top_k,
-            company_id=search_company_id,  # 수정된 company_id 사용
+            tenant_id=search_tenant_id,  # 수정된 tenant_id 사용
             doc_type=doc_type  # 문서 타입 매개변수 전달
         )
         

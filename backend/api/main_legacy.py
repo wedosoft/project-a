@@ -68,7 +68,7 @@ app.add_middleware(
 app.include_router(attachments_router)
 
 # 인메모리 캐시 설정 (TTL: 10분, 최대 100개 항목)
-# 회사 ID와 요청 매개변수를 기반으로 캐시 키를 생성합니다.
+# 테넌트 ID와 요청 매개변수를 기반으로 캐시 키를 생성합니다.
 cache = TTLCache(maxsize=100, ttl=600)
 
 # 성능 로깅을 위한 설정
@@ -101,7 +101,7 @@ class QueryRequest(BaseModel):
     )
     # 검색 의도 (예: "search", "recommend", "answer")
     intent: Optional[str] = "search"
-    company_id: Optional[str] = None  # 회사 ID (헤더에서 가져오는 경우 선택 사항)
+    tenant_id: Optional[str] = None  # 테넌트 ID (헤더에서 가져오는 경우 선택 사항)
     platform: Optional[str] = None  # 플랫폼 필터링 (헤더에서 가져오는 경우 선택 사항)
     # 검색할 데이터 타입
     search_types: Optional[List[str]] = Field(
@@ -141,19 +141,19 @@ class IngestResponse(BaseModel):
     error: Optional[str] = None
 
 
-# 회사 ID 및 플랫폼 의존성 함수
-async def get_company_id(
-    x_company_id: Optional[str] = Header(None, alias="X-Company-ID")
+# 테넌트 ID 및 플랫폼 의존성 함수
+async def get_tenant_id(
+    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID")
 ) -> str:
     """
-    현재 사용자의 회사 ID를 반환합니다.
-    X-Company-ID 헤더가 제공되지 않으면 "default" 값을 사용합니다.
+    현재 사용자의 테넌트 ID를 반환합니다.
+    X-Tenant-ID 헤더가 제공되지 않으면 "default" 값을 사용합니다.
     실제 환경에서는 인증 토큰에서 추출하는 방식으로 변경해야 합니다.
     """
-    if not x_company_id:
-        # X-Company-ID 헤더가 없으면 기본값 "default" 사용
+    if not x_tenant_id:
+        # X-Tenant-ID 헤더가 없으면 기본값 "default" 사용
         return "default"
-    return x_company_id
+    return x_tenant_id
 
 
 async def get_platform(
@@ -182,12 +182,12 @@ async def get_platform(
 
 # 캐시 키 생성을 위한 헬퍼 함수
 def _query_cache_key(
-    func_name: str, req: QueryRequest, company_id: str, platform: str
+    func_name: str, req: QueryRequest, tenant_id: str, platform: str
 ):
-    # 함수 이름, 회사 ID, 플랫폼, 쿼리 내용, top_k, 답변 지침, 티켓 ID를
+    # 함수 이름, 테넌트 ID, 플랫폼, 쿼리 내용, top_k, 답변 지침, 티켓 ID를
     # 기반으로 해시 키를 생성합니다.
     return hashkey(
-        func_name, company_id, platform, req.query, req.top_k,
+        func_name, tenant_id, platform, req.query, req.top_k,
         req.answer_instructions, req.ticket_id
     )
 
@@ -268,7 +268,7 @@ class TicketInitRequest(BaseModel):
     """티켓 초기화 요청 모델"""
     
     ticket_id: str
-    company_id: str
+    tenant_id: str
     include_summary: bool = True  # 티켓 요약 생성 여부
     include_kb_docs: bool = True  # 관련 지식베이스 문서 포함 여부
     include_similar_tickets: bool = True  # 유사 티켓 포함 여부
@@ -391,7 +391,7 @@ async def health():
             vector_db.search(
                 query_embedding=[0.1] * 384,  # 테스트용 더미 임베딩
                 top_k=1,
-                company_id="health_check"
+                tenant_id="health_check"
             )
             health_status["services"]["vectordb"] = "healthy"
         except Exception as e:
@@ -423,7 +423,7 @@ async def health():
 @cached(cache, key=partial(_query_cache_key, "query_endpoint"))
 async def query_endpoint(
     req: QueryRequest,
-    company_id: str = Depends(get_company_id),
+    tenant_id: str = Depends(get_tenant_id),
     platform: str = Depends(get_platform)
 ):
     """
@@ -431,7 +431,7 @@ async def query_endpoint(
 
     Args:
         req: 쿼리 요청 객체 (QueryRequest)
-        company_id: 회사 ID (의존성 함수를 통해 헤더에서 자동 추출)
+        tenant_id: 테넌트 ID (의존성 함수를 통해 헤더에서 자동 추출)
         platform: 플랫폼 (X-Platform, X-Freshdesk-Domain,
                   X-Zendesk-Domain 헤더에서 자동 추출)
 
@@ -471,7 +471,7 @@ async def query_endpoint(
         # doc_type='ticket'과 platform 필터를 명시적으로 지정하여 멀티플랫폼 지원
         ticket_data = vector_db.get_by_id(
             original_id_value=req.ticket_id,
-            company_id=company_id,
+            tenant_id=tenant_id,
             doc_type="ticket",
             platform=effective_platform
         )
@@ -556,7 +556,7 @@ async def query_endpoint(
         ticket_results = retrieve_top_k_docs(
             query_embedding,
             top_k_per_type,
-            company_id,
+            tenant_id,
             doc_type="ticket"
         )
         logger.info(
@@ -570,7 +570,7 @@ async def query_endpoint(
         kb_results = retrieve_top_k_docs(
             query_embedding,
             top_k_per_type,
-            company_id,
+            tenant_id,
             doc_type="kb"
         )
         logger.info(
@@ -731,7 +731,7 @@ async def query_endpoint(
         f"최종:{context_meta.get('final_optimized_docs_count', 0)}"
     )
     logger.info(
-        f"성능: company_id=\'{company_id}\', query=\'{req.query[:50]}...\', "
+        f"성능: tenant_id=\'{tenant_id}\', query=\'{req.query[:50]}...\', "
         f"검색시간={search_time:.2f}s, 컨텍스트생성시간={context_time:.2f}s, "
         f"LLM호출시간={llm_time:.2f}s, 총시간={total_time:.2f}s, "
         f"최적화정보=({optimization_info})"
@@ -787,7 +787,7 @@ class GenerateReplyRequest(BaseModel):
     instructions: Optional[str] = None  # 추가 응답 생성 지침
     include_greeting: bool = True  # 인사말 포함 여부
     include_signature: bool = True  # 서명 포함 여부
-    company_id: Optional[str] = None  # 회사 ID (선택사항)
+    tenant_id: Optional[str] = None  # 테넌트 ID (선택사항)
 
 # 캐시 설정: 티켓 요약 캐시 (최대 100개, 1시간 TTL)
 ticket_summary_cache = TTLCache(maxsize=100, ttl=3600)
@@ -795,7 +795,7 @@ ticket_summary_cache = TTLCache(maxsize=100, ttl=3600)
 @app.get("/init/{ticket_id}", response_model=InitResponse)
 async def get_initial_context(
     ticket_id: str, 
-    company_id: str = Depends(get_company_id),
+    tenant_id: str = Depends(get_tenant_id),
     platform: str = Depends(get_platform),
     include_summary: bool = True,
     include_kb_docs: bool = True,
@@ -813,7 +813,7 @@ async def get_initial_context(
     
     Args:
         ticket_id: 초기화할 티켓 ID
-        company_id: 회사 ID (자동 추출)
+        tenant_id: 테넌트 ID (자동 추출)
         platform: 플랫폼 (자동 추출, 하위 호환성 지원)
         include_summary: 티켓 요약 포함 여부
         include_kb_docs: 지식베이스 문서 포함 여부
@@ -851,8 +851,8 @@ async def get_initial_context(
                 os.environ["ZENDESK_API_KEY"] = x_zendesk_api_key
                 logger.info("Zendesk API 키를 헤더값으로 임시 설정")
         
-        # 검색용 company_id 처리
-        search_company_id = company_id if company_id != "default" else os.getenv("COMPANY_ID", "example-company")
+        # 검색용 tenant_id 처리
+        search_tenant_id = tenant_id if tenant_id != "default" else os.getenv("TENANT_ID", "example-company")
         
         # 플랫폼별 API 호출을 위한 파라미터 준비
         if platform == "freshdesk":
@@ -875,7 +875,7 @@ async def get_initial_context(
             # API 조회 실패 시 또는 다른 플랫폼인 경우 벡터 검색 폴백
             ticket_data = vector_db.get_by_id(
                 original_id_value=ticket_id, 
-                company_id=search_company_id, 
+                tenant_id=search_tenant_id, 
                 doc_type="ticket",
                 platform=platform
             )
@@ -971,7 +971,7 @@ async def get_initial_context(
             chain_results = await llm_manager.execute_init_parallel_chain(
                 ticket_data=ticket_info,
                 qdrant_client=vector_db.client,  # QdrantAdapter의 client 속성 사용
-                company_id=search_company_id,
+                tenant_id=search_tenant_id,
                 platform=platform,  # 플랫폼 정보 추가
                 include_summary=include_summary_chain,
                 include_similar_tickets=include_similar_tickets,
@@ -1179,7 +1179,7 @@ async def get_initial_context(
         # 결과 캐싱
         ticket_context_cache[context_id] = {
             "ticket_id": ticket_id,
-            "company_id": search_company_id,
+            "tenant_id": search_tenant_id,
             "ticket_data": ticket_metadata,
             "similar_tickets": similar_tickets,
             "kb_documents": kb_documents,
@@ -1238,7 +1238,7 @@ async def reply(request: GenerateReplyRequest):
     # 캐시에서 컨텍스트 검색
     context = ticket_context_cache[context_id]
     ticket_id = context["ticket_id"]
-    company_id = context["company_id"]
+    tenant_id = context["tenant_id"]
     ticket_data = context["ticket_data"]
     similar_tickets = context["similar_tickets"]
     kb_documents = context["kb_documents"]
@@ -1375,7 +1375,7 @@ async def reply(request: GenerateReplyRequest):
     # LLM 호출
     llm_start_time = time.time()
     try:
-        system_prompt = f"당신은 {company_id} 회사의 전문적인 고객 지원 담당자입니다. 정확하고 도움이 되는 응답을 제공하세요."
+        system_prompt = f"당신은 {tenant_id} 회사의 전문적인 고객 지원 담당자입니다. 정확하고 도움이 되는 응답을 제공하세요."
         response = await call_llm(prompt, system_prompt=system_prompt)
         llm_time = time.time() - llm_start_time
         
@@ -1421,7 +1421,7 @@ async def reply(request: GenerateReplyRequest):
 @app.post("/ingest", response_model=IngestResponse)
 async def trigger_data_ingestion(
     request: IngestRequest,
-    company_id: str = Depends(get_company_id),
+    tenant_id: str = Depends(get_tenant_id),
     x_freshdesk_domain: Optional[str] = Header(None, alias="X-Freshdesk-Domain"),
     x_freshdesk_api_key: Optional[str] = Header(None, alias="X-Freshdesk-API-Key")
 ):
@@ -1433,7 +1433,7 @@ async def trigger_data_ingestion(
     
     Args:
         request: 데이터 수집 옵션
-        company_id: 회사 ID (헤더에서 자동 추출)
+        tenant_id: 테넌트 ID (헤더에서 자동 추출)
         x_freshdesk_domain: Freshdesk 도메인 (헤더에서 전달, 선택사항)
         x_freshdesk_api_key: Freshdesk API 키 (헤더에서 전달, 선택사항)
         
@@ -1441,7 +1441,7 @@ async def trigger_data_ingestion(
         IngestResponse: 수집 결과 정보
     """
     start_time = datetime.now()
-    logger.info(f"데이터 수집 시작 - Company: {company_id}, Domain: {x_freshdesk_domain}")
+    logger.info(f"데이터 수집 시작 - Company: {tenant_id}, Domain: {x_freshdesk_domain}")
     
     try:
         # 동적 Freshdesk 구성을 사용하여 데이터 수집 실행
@@ -1459,7 +1459,7 @@ async def trigger_data_ingestion(
         end_time = datetime.now()
         duration = (end_time - start_time).total_seconds()
         
-        logger.info(f"데이터 수집 완료 - Company: {company_id}, 소요시간: {duration:.2f}초")
+        logger.info(f"데이터 수집 완료 - Company: {tenant_id}, 소요시간: {duration:.2f}초")
         
         return IngestResponse(
             success=True,
@@ -1475,7 +1475,7 @@ async def trigger_data_ingestion(
         end_time = datetime.now()
         duration = (end_time - start_time).total_seconds()
         
-        logger.error(f"데이터 수집 중 오류 발생 - Company: {company_id}: {e}", exc_info=True)
+        logger.error(f"데이터 수집 중 오류 발생 - Company: {tenant_id}: {e}", exc_info=True)
         
         return IngestResponse(
             success=False,
@@ -1489,7 +1489,7 @@ async def trigger_data_ingestion(
 @app.post("/query/stream")
 async def query_stream(
     req: QueryRequest, 
-    company_id: str = Depends(get_company_id),
+    tenant_id: str = Depends(get_tenant_id),
     platform: str = Depends(get_platform)
 ):
     """
@@ -1514,7 +1514,7 @@ async def query_stream(
                     query_embedding=query_embedding,
                     top_k=req.top_k_tickets,
                     doc_type="ticket",
-                    company_id=company_id,
+                    tenant_id=tenant_id,
                     platform=platform
                 )
                 
@@ -1536,7 +1536,7 @@ async def query_stream(
                 query_embedding=query_embedding,
                 top_k=req.top_k_kb,
                 doc_type="kb",
-                company_id=company_id,
+                tenant_id=tenant_id,
                 platform=platform
             )
             
@@ -1587,7 +1587,7 @@ async def reply_stream(request: GenerateReplyRequest):
                 query_embedding=query_embedding,
                 top_k=5,
                 doc_type="kb",
-                company_id=request.company_id if hasattr(request, 'company_id') else "default"
+                tenant_id=request.tenant_id if hasattr(request, 'tenant_id') else "default"
             )
             
             yield f"data: {json.dumps({'type': 'status', 'message': 'AI 응답을 생성하고 있습니다...', 'progress': 40})}\n\n"
@@ -1658,7 +1658,7 @@ async def reply_stream(request: GenerateReplyRequest):
 @app.get("/attachments/{attachment_id}")
 async def get_attachment(
     attachment_id: str,
-    company_id: str = Depends(get_company_id),
+    tenant_id: str = Depends(get_tenant_id),
     platform: str = Depends(get_platform),
     x_freshdesk_domain: Optional[str] = Header(None, alias="X-Freshdesk-Domain"),
     x_freshdesk_api_key: Optional[str] = Header(None, alias="X-Freshdesk-API-Key"),
@@ -1670,7 +1670,7 @@ async def get_attachment(
     
     Args:
         attachment_id: 첨부파일 ID
-        company_id: 회사 ID (자동 추출)
+        tenant_id: 테넌트 ID (자동 추출)
         platform: 플랫폼 (자동 추출)
         x_freshdesk_domain: Freshdesk 도메인 (선택사항)
         x_freshdesk_api_key: Freshdesk API 키 (선택사항)
@@ -1679,7 +1679,7 @@ async def get_attachment(
         첨부파일 다운로드 URL 또는 직접 파일 스트림
     """
     try:
-        logger.info(f"첨부파일 요청: {attachment_id}, platform: {platform}, company: {company_id}")
+        logger.info(f"첨부파일 요청: {attachment_id}, platform: {platform}, company: {tenant_id}")
         
         # 플랫폼 어댑터 생성
         config = {}
@@ -1697,7 +1697,7 @@ async def get_attachment(
         adapter = PlatformFactory.create_adapter(platform, config)
         
         # 첨부파일 정보 조회
-        attachment_info = await adapter.get_attachment(attachment_id, company_id)
+        attachment_info = await adapter.get_attachment(attachment_id, tenant_id)
         
         if not attachment_info:
             raise HTTPException(status_code=404, detail=f"첨부파일 {attachment_id}를 찾을 수 없습니다.")
@@ -1709,7 +1709,7 @@ async def get_attachment(
             "download_url": attachment_info.get("download_url"),
             "size": attachment_info.get("size", 0),
             "platform": platform,
-            "company_id": company_id
+            "tenant_id": tenant_id
         }
         
     except HTTPException as e:
@@ -1722,7 +1722,7 @@ async def get_attachment(
 @app.get("/attachments")
 async def list_attachments(
     ticket_id: Optional[str] = Query(None, description="티켓 ID"),
-    company_id: str = Depends(get_company_id),
+    tenant_id: str = Depends(get_tenant_id),
     platform: str = Depends(get_platform),
     limit: int = Query(default=20, ge=1, le=100, description="조회할 첨부파일 수")
 ):
@@ -1731,7 +1731,7 @@ async def list_attachments(
     
     Args:
         ticket_id: 특정 티켓의 첨부파일만 조회 (선택사항)
-        company_id: 회사 ID (자동 추출)
+        tenant_id: 테넌트 ID (자동 추출)
         platform: 플랫폼 (자동 추출)
         limit: 조회할 첨부파일 수
         
@@ -1739,7 +1739,7 @@ async def list_attachments(
         첨부파일 목록
     """
     try:
-        logger.info(f"첨부파일 목록 요청: ticket_id={ticket_id}, platform={platform}, company={company_id}")
+        logger.info(f"첨부파일 목록 요청: ticket_id={ticket_id}, platform={platform}, company={tenant_id}")
         
         # 벡터 DB에서 첨부파일 정보 검색
         # 실제 구현에서는 첨부파일 메타데이터를 별도로 저장하고 조회해야 합니다
@@ -1755,7 +1755,7 @@ async def list_attachments(
             "total": len(attachments),
             "ticket_id": ticket_id,
             "platform": platform,
-            "company_id": company_id
+            "tenant_id": tenant_id
         }
         
     except Exception as e:

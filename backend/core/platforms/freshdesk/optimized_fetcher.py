@@ -26,36 +26,36 @@ from core.logger import get_logger
 logger = get_logger(__name__)
 
 # 새 환경변수 체계 사용 (표준 4개 헤더)
-# 클래스 생성 시 company_id, platform, domain, api_key를 파라미터로 받음
+# 클래스 생성 시 tenant_id, platform, domain, api_key를 파라미터로 받음
 
-def extract_company_id_from_domain(domain: str) -> str:
+def extract_tenant_id_from_domain(domain: str) -> str:
     """
-    DOMAIN에서 company_id를 추출합니다.
+    DOMAIN에서 tenant_id를 추출합니다.
     
     Args:
         domain: Freshdesk 도메인 (예: "your-company.freshdesk.com" 또는 "your-company")
         
     Returns:
-        str: 추출된 company_id
+        str: 추출된 tenant_id
     """
     if not domain:
         raise ValueError("도메인이 비어있습니다.")
     
     # .freshdesk.com이 포함된 경우 제거
     if ".freshdesk.com" in domain:
-        company_id = domain.replace(".freshdesk.com", "")
+        tenant_id = domain.replace(".freshdesk.com", "")
     else:
-        company_id = domain
+        tenant_id = domain
     
     # https:// 또는 http://가 포함된 경우 제거
-    if company_id.startswith(("https://", "http://")):
+    if tenant_id.startswith(("https://", "http://")):
         from urllib.parse import urlparse
-        parsed_url = urlparse(company_id)
-        company_id = parsed_url.netloc.replace(".freshdesk.com", "")
+        parsed_url = urlparse(tenant_id)
+        tenant_id = parsed_url.netloc.replace(".freshdesk.com", "")
     
-    return company_id
+    return tenant_id
 
-# company_id 및 인증 정보는 클래스 생성 시 받도록 변경됨
+# tenant_id 및 인증 정보는 클래스 생성 시 받도록 변경됨
 # 최적화된 설정
 MAX_RETRIES = 5
 RETRY_DELAY = 2
@@ -78,7 +78,7 @@ class OptimizedFreshdeskFetcher:
     """
     
     def __init__(self, 
-                 company_id: str,
+                 tenant_id: str,
                  platform: str,
                  domain: str,
                  api_key: str,
@@ -87,13 +87,13 @@ class OptimizedFreshdeskFetcher:
         표준 4개 헤더 정보를 받아 초기화
         
         Args:
-            company_id: 테넌트/회사 ID (X-Company-ID)
+            tenant_id: 테넌트/테넌트 ID (X-Tenant-ID)
             platform: 플랫폼 타입 (X-Platform)
             domain: Freshdesk 도메인 (X-Domain)
             api_key: API 키 (X-API-Key)
             output_dir: 출력 디렉토리
         """
-        self.company_id = company_id
+        self.tenant_id = tenant_id
         self.platform = platform
         self.domain = domain
         self.api_key = api_key
@@ -105,7 +105,7 @@ class OptimizedFreshdeskFetcher:
         # 표준 4개 헤더를 포함한 기본 헤더 설정
         self.headers = {
             "Content-Type": "application/json",
-            "X-Company-ID": company_id,
+            "X-Tenant-ID": tenant_id,
             "X-Platform": platform,
             "X-Domain": domain,
             "X-API-Key": api_key
@@ -1470,20 +1470,20 @@ def get_headers_from_env():
     """
     환경변수에서 표준 4개 헤더 정보를 가져오는 헬퍼 함수
     """
-    company_id = os.getenv("COMPANY_ID", "test-company")
+    tenant_id = os.getenv("TENANT_ID", "test-company")
     platform = os.getenv("PLATFORM", "freshdesk")
     domain = os.getenv("DOMAIN", "test.freshdesk.com")
     api_key = os.getenv("API_KEY", "test-api-key")
     
-    return company_id, platform, domain, api_key
+    return tenant_id, platform, domain, api_key
 
 
 async def main():
     """전체 데이터 수집 함수 - freshdesk_full_data 디렉토리 사용"""
     output_dir = "freshdesk_full_data"
-    company_id, platform, domain, api_key = get_headers_from_env()
+    tenant_id, platform, domain, api_key = get_headers_from_env()
     
-    async with OptimizedFreshdeskFetcher(company_id, platform, domain, api_key, output_dir) as fetcher:
+    async with OptimizedFreshdeskFetcher(tenant_id, platform, domain, api_key, output_dir) as fetcher:
         stats = await fetcher.collect_all_tickets(
             start_date="2015-01-01",  # 가능한 가장 오래된 날짜부터
             end_date=None,  # 현재까지
@@ -1508,10 +1508,10 @@ async def test_collection_limit():
     # 테스트 디렉토리 생성
     Path(output_dir).mkdir(exist_ok=True)
     
-    company_id, platform, domain, api_key = get_headers_from_env()
+    tenant_id, platform, domain, api_key = get_headers_from_env()
     
     start_time = datetime.now()
-    async with OptimizedFreshdeskFetcher(company_id, platform, domain, api_key, output_dir) as fetcher:
+    async with OptimizedFreshdeskFetcher(tenant_id, platform, domain, api_key, output_dir) as fetcher:
         stats = await fetcher.collect_all_tickets(
             start_date="2015-01-01",
             end_date=None,
@@ -1544,9 +1544,9 @@ async def collect_only_raw_data():
     logging.info("======= RAW 데이터만 수집 모드 =======")
     output_dir = "freshdesk_full_data"
     
-    company_id, platform, domain, api_key = get_headers_from_env()
+    tenant_id, platform, domain, api_key = get_headers_from_env()
     
-    async with OptimizedFreshdeskFetcher(company_id, platform, domain, api_key, output_dir) as fetcher:
+    async with OptimizedFreshdeskFetcher(tenant_id, platform, domain, api_key, output_dir) as fetcher:
         progress = fetcher.load_progress()
         
         # 기존 티켓 청크 파일에서 티켓 ID 추출
@@ -1600,9 +1600,9 @@ async def split_existing_chunks():
     logging.info("======= 기존 청크 파일 분할 시작 =======")
     output_dir = "freshdesk_full_data"
     
-    company_id, platform, domain, api_key = get_headers_from_env()
+    tenant_id, platform, domain, api_key = get_headers_from_env()
     
-    async with OptimizedFreshdeskFetcher(company_id, platform, domain, api_key, output_dir) as fetcher:
+    async with OptimizedFreshdeskFetcher(tenant_id, platform, domain, api_key, output_dir) as fetcher:
         await fetcher.split_large_ticket_chunks()
     
     logging.info("======= 청크 파일 분할 완료 =======")

@@ -243,8 +243,8 @@ async def get_attachment_metadata(attachment_id: int):
         
         # 먼저 티켓 문서에서 검색
         try:
-            # company_id는 환경변수에서 가져오거나 기본값 사용
-            company_id = os.getenv("COMPANY_ID", "default")
+            # tenant_id는 환경변수에서 가져오거나 기본값 사용
+            tenant_id = os.getenv("TENANT_ID", "default")
             
             # scroll API를 사용하여 모든 문서에서 첨부파일 메타데이터 검색
             # 이는 첨부파일이 어느 티켓/문서에 속하는지 모를 때 사용하는 방법입니다
@@ -262,7 +262,7 @@ async def get_attachment_metadata(attachment_id: int):
                     with_vectors=False,
                     filter=Filter(
                         must=[
-                            FieldCondition(key="company_id", match=MatchValue(value=company_id))
+                            FieldCondition(key="tenant_id", match=MatchValue(value=tenant_id))
                         ]
                     )
                 )

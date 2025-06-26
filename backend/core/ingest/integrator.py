@@ -1,7 +1,7 @@
 """
 데이터 통합 모듈 - 티켓/문서 통합 객체 생성 (간소화 버전)
 
-지침서 준수: 멀티테넌트 및 company_id 자동 태깅
+지침서 준수: 멀티테넌트 및 tenant_id 자동 태깅
 순수 텍스트 기반 처리로 성능 최적화
 HTML 처리 제거, 첨부파일 엔드포인트 활용
 """
@@ -16,7 +16,7 @@ def create_integrated_ticket_object(
     ticket: Dict[str, Any], 
     conversations: Optional[List[Dict[str, Any]]] = None, 
     attachments: Optional[List[Dict[str, Any]]] = None,
-    company_id: str = None
+    tenant_id: str = None
 ) -> Dict[str, Any]:
     """
     티켓, 대화내역, 첨부파일을 하나의 통합 객체로 생성합니다.
@@ -26,14 +26,14 @@ def create_integrated_ticket_object(
         ticket: 티켓 데이터 (description_text 필드 사용)
         conversations: 대화내역 리스트 (body_text 필드 사용)
         attachments: 첨부파일 리스트 (엔드포인트 참조)
-        company_id: 회사 ID (멀티테넌트 필수)
+        tenant_id: 테넌트 ID (멀티테넌트 필수)
         
     Returns:
         Dict[str, Any]: 간소화된 통합 티켓 객체
     """
-    # 지침서 준수: company_id 필수 검증
-    if not company_id:
-        raise ValueError("company_id는 멀티테넌트 지원을 위해 필수입니다")
+    # 지침서 준수: tenant_id 필수 검증
+    if not tenant_id:
+        raise ValueError("tenant_id는 멀티테넌트 지원을 위해 필수입니다")
     
     # 대화내역과 첨부파일 처리
     if conversations is None:
@@ -112,21 +112,21 @@ def create_integrated_ticket_object(
         "essential_metadata": essential_metadata,  # 핵심 메타데이터만
         "object_id": ticket.get("id"),  # storage.py에서 필요한 필드 추가
         "original_id": ticket.get("id"),  # 호환성을 위해 유지
-        "company_id": company_id,
+        "tenant_id": tenant_id,
         "platform": "freshdesk",
         "object_type": "integrated_ticket",
         "integration_timestamp": datetime.utcnow().isoformat()
         # 원본 데이터는 제외 (중복 제거로 용량 절약)
     }
     
-    logger.debug(f"간소화된 통합 티켓 객체 생성 완료: ID={ticket.get('id')}, company_id={company_id}")
+    logger.debug(f"간소화된 통합 티켓 객체 생성 완료: ID={ticket.get('id')}, tenant_id={tenant_id}")
     return integrated_object
 
 
 def create_integrated_article_object(
     article: Dict[str, Any], 
     attachments: Optional[List[Dict[str, Any]]] = None,
-    company_id: str = None
+    tenant_id: str = None
 ) -> Dict[str, Any]:
     """
     지식베이스 문서와 첨부파일을 하나의 통합 객체로 생성합니다.
@@ -135,14 +135,14 @@ def create_integrated_article_object(
     Args:
         article: 지식베이스 문서 데이터 (description_text 필드 사용)
         attachments: 첨부파일 리스트 (엔드포인트 참조)
-        company_id: 회사 ID (멀티테넌트 필수)
+        tenant_id: 테넌트 ID (멀티테넌트 필수)
         
     Returns:
         Dict[str, Any]: 간소화된 통합 문서 객체
     """
-    # 지침서 준수: company_id 필수 검증
-    if not company_id:
-        raise ValueError("company_id는 멀티테넌트 지원을 위해 필수입니다")
+    # 지침서 준수: tenant_id 필수 검증
+    if not tenant_id:
+        raise ValueError("tenant_id는 멀티테넌트 지원을 위해 필수입니다")
     
     # 첨부파일 처리
     if attachments is None:
@@ -210,12 +210,12 @@ def create_integrated_article_object(
         "essential_metadata": essential_metadata,  # 핵심 메타데이터만
         "object_id": article.get("id"),  # storage.py에서 필요한 필드 추가
         "original_id": article.get("id"),  # 호환성을 위해 유지
-        "company_id": company_id,
+        "tenant_id": tenant_id,
         "platform": "freshdesk",
         "object_type": "integrated_article",
         "integration_timestamp": datetime.utcnow().isoformat()
         # 원본 데이터는 제외 (중복 제거로 용량 절약)
     }
     
-    logger.debug(f"간소화된 통합 문서 객체 생성 완료: ID={article.get('id')}, company_id={company_id}")
+    logger.debug(f"간소화된 통합 문서 객체 생성 완료: ID={article.get('id')}, tenant_id={tenant_id}")
     return integrated_object

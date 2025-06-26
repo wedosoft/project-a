@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional
 import logging
 
-from ..dependencies import get_company_id
+from ..dependencies import get_tenant_id
 from core.database.database import SQLiteDatabase
 
 # 라우터 생성 (prefix 제거 - 메인 라우터에서 설정)
@@ -25,14 +25,14 @@ logger = logging.getLogger(__name__)
 @router.get("/progress/{job_id}")
 async def get_job_progress(
     job_id: str,
-    company_id: str = Depends(get_company_id)
+    tenant_id: str = Depends(get_tenant_id)
 ):
     """
     특정 작업의 실시간 진행 상황을 조회합니다.
     
     Args:
         job_id: 작업 ID
-        company_id: 회사 ID (헤더에서 자동 추출)
+        tenant_id: 테넌트 ID (헤더에서 자동 추출)
         
     Returns:
         작업 진행 상황 정보
@@ -46,17 +46,17 @@ async def get_job_progress(
         cursor.execute("""
             SELECT 
                 job_id,
-                company_id,
+                tenant_id,
                 message,
                 percentage,
                 step,
                 total_steps,
                 created_at
             FROM progress_logs 
-            WHERE job_id = ? AND company_id = ?
+            WHERE job_id = ? AND tenant_id = ?
             ORDER BY created_at DESC
             LIMIT 1
-        """, (job_id, company_id))
+        """, (job_id, tenant_id))
         
         progress_row = cursor.fetchone()
         
@@ -76,17 +76,17 @@ async def get_job_progress(
                 errors_count,
                 error_message
             FROM collection_logs
-            WHERE job_id = ? AND company_id = ?
+            WHERE job_id = ? AND tenant_id = ?
             ORDER BY created_at DESC
             LIMIT 1
-        """, (job_id, company_id))
+        """, (job_id, tenant_id))
         
         job_row = cursor.fetchone()
         
         # 응답 데이터 구성
         response = {
             "job_id": job_id,
-            "company_id": company_id,
+            "tenant_id": tenant_id,
             "current_step": progress_row[4],  # step
             "total_steps": progress_row[5],   # total_steps
             "progress_percentage": progress_row[3],  # percentage

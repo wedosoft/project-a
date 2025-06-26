@@ -39,7 +39,7 @@ class VectorSearchOptimizer:
     async def unified_vector_search(
         self,
         query_text: str,
-        company_id: str,
+        tenant_id: str,
         ticket_id: str = "",
         top_k_tickets: int = 5,  # 기본값을 5로 변경
         top_k_kb: int = 5        # 기본값을 5로 변경
@@ -49,7 +49,7 @@ class VectorSearchOptimizer:
         
         Args:
             query_text: 검색할 텍스트
-            company_id: 회사 ID
+            tenant_id: 테넌트 ID
             ticket_id: 현재 티켓 ID (제외용)
             top_k_tickets: 티켓 검색 결과 수
             top_k_kb: KB 검색 결과 수
@@ -61,12 +61,12 @@ class VectorSearchOptimizer:
         
         try:
             # LangChain-Qdrant 리트리버를 사용한 통합 검색 (단일 호출)
-            logger.info(f"LangChain-Qdrant 통합 벡터 검색 시작 (company_id: {company_id})")
+            logger.info(f"LangChain-Qdrant 통합 벡터 검색 시작 (tenant_id: {tenant_id})")
             
             # 통합 검색 수행 (KB와 티켓을 병렬로 검색)
             search_result = await self.retriever.unified_search(
                 query=query_text,
-                company_id=company_id,
+                tenant_id=tenant_id,
                 ticket_id=ticket_id,
                 top_k_tickets=top_k_tickets,
                 top_k_kb=top_k_kb,

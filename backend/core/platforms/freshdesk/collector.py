@@ -36,23 +36,23 @@ class FreshdeskCollector:
             config: Freshdesk 설정 딕셔너리
                 - domain: Freshdesk 도메인
                 - api_key: API 키
-                - company_id: 회사 식별자
+                - tenant_id: 회사 식별자
             output_dir: 데이터 저장 디렉토리
         """
         self.config = config
-        self.company_id = config.get("company_id")
+        self.tenant_id = config.get("tenant_id")
         
-        if not self.company_id:
-            raise ValueError("company_id는 필수 설정값입니다")
+        if not self.tenant_id:
+            raise ValueError("tenant_id는 필수 설정값입니다")
         
-        # 회사별 디렉토리 구조: {output_dir}/{company_id}/
+        # 회사별 디렉토리 구조: {output_dir}/{tenant_id}/
         output_path = Path(output_dir)
         if not output_path.is_absolute():
             # backend/ 하위로 강제
             backend_root = Path(__file__).parent.parent.parent.parent
             output_path = backend_root / output_path
         
-        self.output_dir = output_path.resolve() / self.company_id
+        self.output_dir = output_path.resolve() / self.tenant_id
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
         # 하위 디렉토리 생성 (raw 데이터 저장용) - 기존 구조 유지
@@ -76,7 +76,7 @@ class FreshdeskCollector:
         self.adapter: Optional[FreshdeskAdapter] = None
         
         # 데이터 병합기 및 저장소 인스턴스
-        self.data_merger = PlatformDataMerger(platform="freshdesk", company_id=self.company_id)
+        self.data_merger = PlatformDataMerger(platform="freshdesk", tenant_id=self.tenant_id)
         self.data_storage = DataStorage(storage_type="file", base_path=self.merged_data_dir)
         
         # 기존 OptimizedFreshdeskFetcher의 설정값들 재사용
@@ -89,7 +89,7 @@ class FreshdeskCollector:
         self.RAW_DATA_CHUNK_SIZE = config.get("raw_data_chunk_size", 1000)
         self.KB_CHUNK_SIZE = config.get("kb_chunk_size", 500)
         
-        logger.info(f"Freshdesk 수집기 초기화: company_id={self.company_id}")
+        logger.info(f"Freshdesk 수집기 초기화: tenant_id={self.tenant_id}")
     
     async def __aenter__(self):
         """Async context manager 진입"""
@@ -211,7 +211,7 @@ class FreshdeskCollector:
                             # 통합 객체 저장
                             await self.data_storage.save_merged_document(
                                 platform="freshdesk",
-                                company_id=self.company_id,
+                                tenant_id=self.tenant_id,
                                 document=merged_document,
                                 doc_type="ticket"
                             )
@@ -398,7 +398,7 @@ async def main():
     config = {
         "domain": os.getenv("FRESHDESK_DOMAIN"),
         "api_key": os.getenv("FRESHDESK_API_KEY"),
-        "company_id": os.getenv("COMPANY_ID", "default_company"),
+        "tenant_id": os.getenv("TENANT_ID", "default_company"),
         "max_retries": 5,
         "per_page": 100,
         "request_delay": 0.3

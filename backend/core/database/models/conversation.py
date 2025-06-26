@@ -30,6 +30,6 @@ class Conversation(MultiTenantModel):
     
     # 인덱스
     __table_args__ = (
-        Index('idx_conversation_original', 'company_id', 'platform', 'original_id', unique=True),
-        Index('idx_conversation_tenant', 'company_id', 'platform'),
+        Index('idx_conversation_original', 'tenant_id', 'platform', 'original_id', unique=True),
+        Index('idx_conversation_tenant', 'tenant_id', 'platform'),
     )

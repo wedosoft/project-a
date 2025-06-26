@@ -36,5 +36,5 @@ class Assignment(MultiTenantModel):
     __table_args__ = (
         Index('idx_assignment_agent', 'agent_id', 'status'),
         Index('idx_assignment_ticket', 'ticket_id', 'status'),
-        Index('idx_assignment_tenant', 'company_id', 'platform'),
+        Index('idx_assignment_tenant', 'tenant_id', 'platform'),
     )

@@ -2,7 +2,7 @@
 Platform-Neutral 공유 모델 정의
 
 Request와 Response 모델에서 공통으로 사용되는 Platform-Neutral 모델들을 정의합니다.
-모든 모델이 3-Tuple (company_id, platform, original_id) 구조를 지원합니다.
+모든 모델이 3-Tuple (tenant_id, platform, original_id) 구조를 지원합니다.
 """
 
 from typing import Any, Dict, List, Optional
@@ -17,11 +17,11 @@ class DocumentInfo(BaseModel):
     
     # Platform-Neutral 3-Tuple 기반 식별자
     source_id: str = Field(description="플랫폼 원본 문서 ID (original_id)")
-    company_id: Optional[str] = Field(default=None, description="회사 ID (테넌트 격리)")
+    tenant_id: Optional[str] = Field(default=None, description="테넌트 ID (테넌트 격리)")
     platform: Optional[str] = Field(default=None, description="플랫폼 ID (멀티플랫폼 지원)")
     platform_neutral_key: Optional[str] = Field(
         default=None, 
-        description="Platform-Neutral 3-Tuple 키 (company_id:platform:original_id)"
+        description="Platform-Neutral 3-Tuple 키 (tenant_id:platform:original_id)"
     )
     
     source_url: str = ""  # 빈 문자열을 기본값으로 설정
@@ -84,11 +84,11 @@ class SimilarTicketItem(BaseModel):
     id: str = Field(description="플랫폼 원본 티켓 ID (original_id)")
     
     # Platform-Neutral 3-Tuple 정보
-    company_id: Optional[str] = Field(default=None, description="회사 ID")
+    tenant_id: Optional[str] = Field(default=None, description="테넌트 ID")
     platform: Optional[str] = Field(default=None, description="플랫폼 ID") 
     platform_neutral_key: Optional[str] = Field(
         default=None,
-        description="Platform-Neutral 3-Tuple 키 (company_id:platform:original_id)"
+        description="Platform-Neutral 3-Tuple 키 (tenant_id:platform:original_id)"
     )
     
     title: Optional[str] = Field(default=None, description="유사 티켓의 제목")

@@ -14,7 +14,7 @@ class Company(MultiTenantModel):
     
     # BaseModel의 id 필드를 오버라이드
     id = Column(Integer, primary_key=True, autoincrement=True)  # 내부 시스템 ID
-    company_id = Column(String(50), nullable=False, unique=True)  # 회사 고유 식별자
+    tenant_id = Column(String(50), nullable=False, unique=True)  # 회사 고유 식별자
     freshdesk_domain = Column(String(255), unique=True, nullable=False)
     company_name = Column(String(255), nullable=False)
     api_key_hash = Column(String(255))
@@ -30,5 +30,5 @@ class Company(MultiTenantModel):
     # 인덱스 및 제약조건
     __table_args__ = (
         Index('idx_company_domain', 'freshdesk_domain', unique=True),
-        Index('idx_company_platform', 'company_id', 'platform', unique=True),
+        Index('idx_company_platform', 'tenant_id', 'platform', unique=True),
     )

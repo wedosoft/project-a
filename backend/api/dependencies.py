@@ -9,7 +9,7 @@ from fastapi import Header, HTTPException, Depends
 import logging
 from core.config import get_tenant_manager, TenantConfig
 
-from core.utils import extract_company_id
+from core.utils import extract_tenant_id
 
 # 로거 설정
 logger = logging.getLogger(__name__)
@@ -97,20 +97,20 @@ def get_hybrid_search_manager():
     return _hybrid_search_manager
 
 
-async def get_company_id(
-    x_company_id: str = Header(..., alias="X-Company-ID", description="회사 ID (필수)")
+async def get_tenant_id(
+    x_tenant_id: str = Header(..., alias="X-Tenant-ID", description="테넌트 ID (필수)")
 ) -> str:
     """
-    멀티테넌트 보안을 위한 company_id
+    멀티테넌트 보안을 위한 tenant_id
     
     Args:
-        x_company_id: 회사 ID 헤더 (필수)
+        x_tenant_id: 테넌트 ID 헤더 (필수)
         
     Returns:
-        str: 회사 ID
+        str: 테넌트 ID
     """
-    logger.info(f"X-Company-ID 헤더 사용: {x_company_id}")
-    return x_company_id
+    logger.info(f"X-Tenant-ID 헤더 사용: {x_tenant_id}")
+    return x_tenant_id
 
 
 async def get_platform(
@@ -166,7 +166,7 @@ async def get_domain(
 
 
 async def get_tenant_config(
-    company_id: str = Depends(get_company_id),
+    tenant_id: str = Depends(get_tenant_id),
     platform: str = Depends(get_platform), 
     domain: str = Depends(get_domain),
     api_key: str = Depends(get_api_key)
@@ -177,7 +177,7 @@ async def get_tenant_config(
     멀티테넌트 환경에서 각 요청별로 테넌트 설정을 제공하는 핵심 함수입니다.
     
     Args:
-        company_id: X-Company-ID 헤더
+        tenant_id: X-Tenant-ID 헤더
         platform: X-Platform 헤더
         domain: X-Domain 헤더
         api_key: X-API-Key 헤더
@@ -189,13 +189,13 @@ async def get_tenant_config(
     
     # 헤더 기반 설정 생성 (멀티테넌트의 핵심)
     tenant_config = tenant_manager.get_config_from_headers(
-        company_id=company_id,
+        tenant_id=tenant_id,
         platform=platform,
         domain=domain,
         api_key=api_key
     )
     
-    logger.info(f"테넌트 설정 로드 완료: {company_id} ({platform})")
+    logger.info(f"테넌트 설정 로드 완료: {tenant_id} ({platform})")
     return tenant_config
 
 

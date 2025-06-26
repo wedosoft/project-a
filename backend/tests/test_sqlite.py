@@ -29,12 +29,12 @@ def test_sqlite_database():
     db.create_tables()
     
     # 테스트 데이터
-    test_company_id = "wedosoft"
+    test_tenant_id = "wedosoft"
     
     # 1. 티켓 데이터 저장 테스트
     test_ticket = {
         'id': 12345,
-        'company_id': test_company_id,
+        'tenant_id': test_tenant_id,
         'platform': 'freshdesk',
         'subject': '테스트 티켓',
         'description': '이것은 테스트용 티켓입니다.',
@@ -53,7 +53,7 @@ def test_sqlite_database():
     # 2. 지식베이스 문서 저장 테스트
     test_article = {
         'id': 67890,
-        'company_id': test_company_id,
+        'tenant_id': test_tenant_id,
         'platform': 'freshdesk',
         'title': '테스트 KB 문서',
         'description': '이것은 테스트용 지식베이스 문서입니다.',
@@ -71,7 +71,7 @@ def test_sqlite_database():
     # 3. 수집 작업 로그 테스트
     test_job = {
         'job_id': 'test_job_001',
-        'company_id': test_company_id,
+        'tenant_id': test_tenant_id,
         'job_type': 'ingest',
         'status': 'completed',
         'start_time': datetime.now().isoformat(),
@@ -90,7 +90,7 @@ def test_sqlite_database():
     
     # 4. 통계 조회 테스트
     try:
-        stats = db.get_collection_stats(test_company_id)
+        stats = db.get_collection_stats(test_tenant_id)
         print(f"✅ 통계 조회 성공: {stats}")
     except Exception as e:
         print(f"❌ 통계 조회 실패: {e}")

@@ -17,13 +17,13 @@ class IntegratedObjectRepository:
     
     def get_by_company(
         self, 
-        company_id: str, 
+        tenant_id: str, 
         object_type: Optional[str] = None, 
         platform: str = 'freshdesk'
     ) -> List[IntegratedObject]:
         """회사별 통합 객체 조회"""
         query = self.session.query(IntegratedObject).filter_by(
-            company_id=company_id,
+            tenant_id=tenant_id,
             platform=platform
         )
         
@@ -34,14 +34,14 @@ class IntegratedObjectRepository:
     
     def get_by_original_id(
         self, 
-        company_id: str, 
+        tenant_id: str, 
         original_id: str,
         object_type: str = 'integrated_ticket',
         platform: str = 'freshdesk'
     ) -> Optional[IntegratedObject]:
         """원본 ID로 통합 객체 조회"""
         return self.session.query(IntegratedObject).filter_by(
-            company_id=company_id,
+            tenant_id=tenant_id,
             platform=platform,
             object_type=object_type,
             original_id=original_id
@@ -72,14 +72,14 @@ class IntegratedObjectRepository:
     
     def get_unsummarized(
         self,
-        company_id: str,
+        tenant_id: str,
         object_type: str = 'integrated_ticket',
         platform: str = 'freshdesk',
         limit: int = 100
     ) -> List[IntegratedObject]:
         """요약되지 않은 객체들 조회"""
         return self.session.query(IntegratedObject).filter_by(
-            company_id=company_id,
+            tenant_id=tenant_id,
             platform=platform,
             object_type=object_type
         ).filter(
@@ -88,13 +88,13 @@ class IntegratedObjectRepository:
     
     def delete_by_original_id(
         self,
-        company_id: str,
+        tenant_id: str,
         original_id: str,
         object_type: str = 'integrated_ticket',
         platform: str = 'freshdesk'
     ) -> bool:
         """원본 ID로 객체 삭제"""
-        obj = self.get_by_original_id(company_id, original_id, object_type, platform)
+        obj = self.get_by_original_id(tenant_id, original_id, object_type, platform)
         if obj:
             self.session.delete(obj)
             self.session.commit()

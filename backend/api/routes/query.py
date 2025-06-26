@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from ..dependencies import (
-    get_company_id,
+    get_tenant_id,
     get_platform,
     get_vector_db,
     get_fetcher,
@@ -35,7 +35,7 @@ router = APIRouter()
 # @cached(cache, key=partial(_query_cache_key, "query_endpoint"))  # 캐시는 나중에 추가
 async def query_endpoint(
     req: QueryRequest,
-    company_id: str = Depends(get_company_id),
+    tenant_id: str = Depends(get_tenant_id),
     platform: str = Depends(get_platform),
     vector_db = Depends(get_vector_db),
     fetcher = Depends(get_fetcher),
@@ -47,7 +47,7 @@ async def query_endpoint(
 
     Args:
         req: 쿼리 요청 객체 (QueryRequest)
-        company_id: 회사 ID (의존성 함수를 통해 헤더에서 자동 추출)
+        tenant_id: 테넌트 ID (의존성 함수를 통해 헤더에서 자동 추출)
         platform: 플랫폼 (X-Platform, X-Freshdesk-Domain,
                   X-Zendesk-Domain 헤더에서 자동 추출)
 
@@ -87,7 +87,7 @@ async def query_endpoint(
         # doc_type='ticket'과 platform 필터를 명시적으로 지정하여 멀티플랫폼 지원
         ticket_data = vector_db.get_by_id(
             original_id_value=req.ticket_id,
-            company_id=company_id,
+            tenant_id=tenant_id,
             doc_type="ticket",
             platform=effective_platform
         )
@@ -165,7 +165,7 @@ async def query_endpoint(
         # 하이브리드 검색 실행
         hybrid_results = await hybrid_search_manager.hybrid_search(
             query=req.query,
-            company_id=company_id,
+            tenant_id=tenant_id,
             platform=effective_platform,
             top_k=req.top_k,
             doc_types=req.search_types or ["ticket", "kb"],
@@ -215,7 +215,7 @@ async def query_endpoint(
             ticket_results = vector_db.retrieve_top_k_docs(
                 query_embedding,
                 top_k_per_type,
-                company_id,
+                tenant_id,
                 doc_type="ticket",
                 platform=effective_platform
             )
@@ -232,7 +232,7 @@ async def query_endpoint(
             kb_results = vector_db.retrieve_top_k_docs(
                 query_embedding,
                 top_k_per_type,
-                company_id,
+                tenant_id,
                 doc_type="kb",
                 platform=effective_platform
             )
@@ -481,7 +481,7 @@ async def query_endpoint(
         f"최종:{context_meta.get('final_optimized_docs_count', 0)}"
     )
     logger.info(
-        f"성능: company_id='{company_id}', query='{req.query[:50]}...', "
+        f"성능: tenant_id='{tenant_id}', query='{req.query[:50]}...', "
         f"검색시간={search_time:.2f}s, 컨텍스트생성시간={context_time:.2f}s, "
         f"LLM호출시간={llm_time:.2f}s, 총시간={total_time:.2f}s, "
         f"최적화정보=({optimization_info})"
@@ -519,7 +519,7 @@ async def query_endpoint(
 @router.post("/query/stream")
 async def query_stream(
     req: QueryRequest, 
-    company_id: str = Depends(get_company_id),
+    tenant_id: str = Depends(get_tenant_id),
     platform: str = Depends(get_platform),
     vector_db = Depends(get_vector_db),
     llm_router = Depends(get_llm_router)
@@ -546,7 +546,7 @@ async def query_stream(
                     query_embedding=query_embedding,
                     top_k=req.top_k_tickets,
                     doc_type="ticket",
-                    company_id=company_id,
+                    tenant_id=tenant_id,
                     platform=platform
                 )
                 
@@ -568,7 +568,7 @@ async def query_stream(
                 query_embedding=query_embedding,
                 top_k=req.top_k_kb,
                 doc_type="kb",
-                company_id=company_id,
+                tenant_id=tenant_id,
                 platform=platform
             )
             
@@ -605,7 +605,7 @@ async def query_stream(
 @router.post("/query/hybrid", response_model=QueryResponse)
 async def hybrid_query_endpoint(
     req: QueryRequest,
-    company_id: str = Depends(get_company_id),
+    tenant_id: str = Depends(get_tenant_id),
     platform: str = Depends(get_platform),
     hybrid_search_manager = Depends(get_hybrid_search_manager)
 ):
@@ -617,7 +617,7 @@ async def hybrid_query_endpoint(
     
     Args:
         req: 쿼리 요청 객체 (QueryRequest)
-        company_id: 회사 ID
+        tenant_id: 테넌트 ID
         platform: 플랫폼
         
     Returns:
@@ -636,7 +636,7 @@ async def hybrid_query_endpoint(
         # 하이브리드 검색 실행
         hybrid_results = await hybrid_search_manager.hybrid_search(
             query=req.query,
-            company_id=company_id,
+            tenant_id=tenant_id,
             platform=effective_platform,
             top_k=req.top_k,
             doc_types=req.search_types or ["ticket", "kb"],

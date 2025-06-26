@@ -12,7 +12,7 @@ class Category(MultiTenantModel):
     __tablename__ = 'categories'
     
     external_id = Column(String(100))  # 외부 플랫폼의 카테고리 ID
-    company_id = Column(Integer, ForeignKey('companies.id'), nullable=False)
+    tenant_id = Column(Integer, ForeignKey('companies.id'), nullable=False)
     name = Column(String, nullable=False)
     description = Column(Text)
     parent_id = Column(Integer, ForeignKey('categories.id'))
@@ -29,7 +29,7 @@ class Category(MultiTenantModel):
     
     # 인덱스 및 제약조건
     __table_args__ = (
-        Index('idx_category_external', 'company_id', 'platform', 'external_id', unique=True),
+        Index('idx_category_external', 'tenant_id', 'platform', 'external_id', unique=True),
         Index('idx_category_parent', 'parent_id'),
-        Index('idx_category_tenant', 'company_id', 'platform'),
+        Index('idx_category_tenant', 'tenant_id', 'platform'),
     )

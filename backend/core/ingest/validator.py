@@ -199,16 +199,16 @@ def validate_metadata(metadata: Dict[str, Any]) -> bool:
     """
     try:
         # 필수 메타데이터 필드 검증
-        required_fields = ["id", "company_id", "platform", "type"]
+        required_fields = ["id", "tenant_id", "platform", "type"]
         
         for field in required_fields:
             if field not in metadata:
                 logger.warning(f"메타데이터 필수 필드 누락: {field}")
                 return False
         
-        # company_id 검증
-        if not metadata.get("company_id") or metadata["company_id"] == "":
-            logger.warning("company_id가 비어있습니다.")
+        # tenant_id 검증
+        if not metadata.get("tenant_id") or metadata["tenant_id"] == "":
+            logger.warning("tenant_id가 비어있습니다.")
             return False
         
         # 플랫폼 검증

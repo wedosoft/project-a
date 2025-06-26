@@ -26,32 +26,32 @@ logger = logging.getLogger(__name__)
 DEFAULT_DOMAIN = os.getenv("DOMAIN") or os.getenv("FRESHDESK_DOMAIN")
 DEFAULT_API_KEY = os.getenv("API_KEY") or os.getenv("FRESHDESK_API_KEY")
 
-def extract_company_id_from_domain(domain: str) -> str:
+def extract_tenant_id_from_domain(domain: str) -> str:
     """
-    도메인에서 company_id를 추출합니다.
+    도메인에서 tenant_id를 추출합니다.
     
     Args:
         domain: 플랫폼 도메인 (예: "your-company.freshdesk.com" 또는 "your-company")
         
     Returns:
-        str: 추출된 company_id
+        str: 추출된 tenant_id
     """
     if not domain:
         raise ValueError("도메인이 비어있습니다.")
     
     # .freshdesk.com이 포함된 경우 제거
     if ".freshdesk.com" in domain:
-        company_id = domain.replace(".freshdesk.com", "")
+        tenant_id = domain.replace(".freshdesk.com", "")
     else:
-        company_id = domain
+        tenant_id = domain
     
     # https:// 또는 http://가 포함된 경우 제거
-    if company_id.startswith(("https://", "http://")):
+    if tenant_id.startswith(("https://", "http://")):
         from urllib.parse import urlparse
-        parsed_url = urlparse(company_id)
-        company_id = parsed_url.netloc.replace(".freshdesk.com", "")
+        parsed_url = urlparse(tenant_id)
+        tenant_id = parsed_url.netloc.replace(".freshdesk.com", "")
     
-    return company_id
+    return tenant_id
 
 def get_platform_config(domain: Optional[str] = None, api_key: Optional[str] = None) -> Tuple[str, str, str, Dict[str, str], Tuple[str, str]]:
     """
@@ -62,7 +62,7 @@ def get_platform_config(domain: Optional[str] = None, api_key: Optional[str] = N
         api_key: 플랫폼 API 키 (파라미터로 전달된 경우 우선 사용)
         
     Returns:
-        tuple: (company_id, base_url, api_key, headers, auth)
+        tuple: (tenant_id, base_url, api_key, headers, auth)
     """
     # 파라미터가 제공되지 않은 경우 환경변수에서 가져오기
     final_domain = domain or DEFAULT_DOMAIN
@@ -71,8 +71,8 @@ def get_platform_config(domain: Optional[str] = None, api_key: Optional[str] = N
     if not final_domain or not final_api_key:
         raise ValueError("도메인과 API 키가 필요합니다.")
     
-    # company_id 추출
-    company_id = extract_company_id_from_domain(final_domain)
+    # tenant_id 추출
+    tenant_id = extract_tenant_id_from_domain(final_domain)
     
     # base_url 생성
     base_url = f"https://{final_domain}" if ".freshdesk.com" in final_domain else f"https://{final_domain}.freshdesk.com"
@@ -81,13 +81,13 @@ def get_platform_config(domain: Optional[str] = None, api_key: Optional[str] = N
     # 헤더 및 인증 정보 생성
     headers = {
         "Content-Type": "application/json",
-        "X-Company-ID": company_id
+        "X-Tenant-ID": tenant_id
     }
     auth = (final_api_key, "X")
     
-    logger.debug(f"플랫폼 설정 - 도메인: {final_domain}, company_id: {company_id}")
+    logger.debug(f"플랫폼 설정 - 도메인: {final_domain}, tenant_id: {tenant_id}")
     
-    return company_id, base_url, final_api_key, headers, auth
+    return tenant_id, base_url, final_api_key, headers, auth
 
 # 이전 함수명과의 호환성을 위한 별칭
 get_freshdesk_config = get_platform_config
@@ -299,7 +299,7 @@ async def fetch_article_attachments(client: httpx.AsyncClient, article_id: int, 
         logger.error(f"지식베이스 문서 {article_id}의 첨부파일 가져오기 오류: {e}")
         return []
 
-async def fetch_tickets(domain: Optional[str] = None, api_key: Optional[str] = None, per_page: int = 50, max_tickets: Optional[int] = None, company_id: Optional[str] = None, platform: str = "freshdesk", store_immediately: bool = True, start_date: Optional[str] = None) -> List[Dict[str, Any]]:
+async def fetch_tickets(domain: Optional[str] = None, api_key: Optional[str] = None, per_page: int = 50, max_tickets: Optional[int] = None, tenant_id: Optional[str] = None, platform: str = "freshdesk", store_immediately: bool = True, start_date: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     티켓 목록을 비동기로 가져옵니다.
     페이지네이션을 처리하여 모든 티켓을 가져옵니다.
@@ -311,7 +311,7 @@ async def fetch_tickets(domain: Optional[str] = None, api_key: Optional[str] = N
         api_key: API 키 (파라미터로 전달되지 않으면 환경변수 사용)
         per_page: 페이지당 가져올 티켓 수 (기본값: 50)
         max_tickets: 최대 가져올 티켓 수 (None이면 무제한, 기본값: None)
-        company_id: 회사 ID (멀티테넌트용)
+        tenant_id: 테넌트 ID (멀티테넌트용)
         platform: 플랫폼명
         store_immediately: 즉시 저장 여부 (기본값: True)
         start_date: 수집 시작 날짜 (YYYY-MM-DD 형식, None이면 현재부터 10년 전)
@@ -328,10 +328,10 @@ async def fetch_tickets(domain: Optional[str] = None, api_key: Optional[str] = N
         logger.info(f"지정된 시작 날짜 사용: {start_date}")
     
     # 설정 가져오기
-    extracted_company_id, base_url, final_api_key, headers, auth = get_platform_config(domain, api_key)
+    extracted_tenant_id, base_url, final_api_key, headers, auth = get_platform_config(domain, api_key)
     
-    # company_id가 별도로 제공되지 않으면 domain에서 추출한 값 사용
-    final_company_id = company_id or extracted_company_id
+    # tenant_id가 별도로 제공되지 않으면 domain에서 추출한 값 사용
+    final_tenant_id = tenant_id or extracted_tenant_id
     
     # max_tickets 처리: None이면 무제한, 그렇지 않으면 지정된 값 사용
     if max_tickets is None:
@@ -345,7 +345,7 @@ async def fetch_tickets(domain: Optional[str] = None, api_key: Optional[str] = N
     db = None
     if store_immediately:
         from core.database.database import get_database
-        db = get_database(final_company_id, platform)
+        db = get_database(final_tenant_id, platform)
         logger.info(f"즉시 저장 모드: DB 연결 완료 - {db.db_path}")
     
     all_tickets = []
@@ -460,12 +460,12 @@ async def fetch_tickets(domain: Optional[str] = None, api_key: Optional[str] = N
                                 
                                 # 통합 객체 생성
                                 from core.ingest.integrator import create_integrated_ticket_object
-                                integrated_ticket = create_integrated_ticket_object(ticket, company_id=final_company_id)
+                                integrated_ticket = create_integrated_ticket_object(ticket, tenant_id=final_tenant_id)
                                 logger.info(f"[STORE] 통합 티켓 객체 생성 완료: ID={integrated_ticket.get('id')}")
                                 
                                 # DB에 저장
                                 from core.ingest.storage import store_integrated_object_to_sqlite
-                                store_result = store_integrated_object_to_sqlite(db, integrated_ticket, final_company_id, platform)
+                                store_result = store_integrated_object_to_sqlite(db, integrated_ticket, final_tenant_id, platform)
                                 
                                 if store_result:
                                     logger.info(f"[STORE] ✅ 티켓 {ticket_id} 저장 성공")
@@ -553,7 +553,7 @@ async def fetch_kb_articles(
     domain: Optional[str] = None, 
     api_key: Optional[str] = None, 
     max_articles: Optional[int] = None,
-    company_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
     platform: str = "freshdesk",
     store_immediately: bool = True
 ) -> List[Dict[str, Any]]:
@@ -567,7 +567,7 @@ async def fetch_kb_articles(
         domain: 도메인 (파라미터로 전달되지 않으면 환경변수 사용)
         api_key: API 키 (파라미터로 전달되지 않으면 환경변수 사용)
         max_articles: 최대 수집할 문서 수 (None이면 무제한)
-        company_id: 회사 ID (멀티테넌트용)
+        tenant_id: 테넌트 ID (멀티테넌트용)
         platform: 플랫폼명
         store_immediately: 즉시 저장 여부 (기본값: True)
         
@@ -575,16 +575,16 @@ async def fetch_kb_articles(
         List[Dict[str, Any]]: 지식베이스 문서 목록
     """
     # 설정 가져오기
-    extracted_company_id, base_url, final_api_key, headers, auth = get_platform_config(domain, api_key)
+    extracted_tenant_id, base_url, final_api_key, headers, auth = get_platform_config(domain, api_key)
     
-    # company_id가 별도로 제공되지 않으면 domain에서 추출한 값 사용
-    final_company_id = company_id or extracted_company_id
+    # tenant_id가 별도로 제공되지 않으면 domain에서 추출한 값 사용
+    final_tenant_id = tenant_id or extracted_tenant_id
     
     # 즉시 저장 모드인 경우 DB 연결 초기화
     db = None
     if store_immediately:
         from core.database.database import get_database
-        db = get_database(final_company_id, platform)
+        db = get_database(final_tenant_id, platform)
         logger.info(f"[KB] 즉시 저장 모드: DB 연결 완료 - {db.db_path}")
     
     articles: List[Dict[str, Any]] = []
@@ -703,12 +703,12 @@ async def fetch_kb_articles(
                                     
                                     # 통합 객체 생성
                                     from core.ingest.integrator import create_integrated_article_object
-                                    integrated_article = create_integrated_article_object(article, company_id=final_company_id)
+                                    integrated_article = create_integrated_article_object(article, tenant_id=final_tenant_id)
                                     logger.info(f"[KB STORE] 통합 KB 문서 객체 생성 완료: ID={integrated_article.get('id')}")
                                     
                                     # DB에 저장
                                     from core.ingest.storage import store_integrated_object_to_sqlite
-                                    store_result = store_integrated_object_to_sqlite(db, integrated_article, final_company_id, platform)
+                                    store_result = store_integrated_object_to_sqlite(db, integrated_article, final_tenant_id, platform)
                                     
                                     if store_result:
                                         logger.info(f"[KB STORE] ✅ KB 문서 {article_id} 저장 성공")
@@ -764,7 +764,7 @@ async def fetch_ticket_details(ticket_id: int, domain: Optional[str] = None, api
         Optional[Dict[str, Any]]: 티켓 상세 정보 (대화내역, 첨부파일 포함) 또는 None (티켓이 없는 경우)
     """
     # 플랫폼 설정 가져오기
-    company_id, base_url, final_api_key, headers, auth = get_platform_config(domain, api_key)
+    tenant_id, base_url, final_api_key, headers, auth = get_platform_config(domain, api_key)
     
     logger.info(f"티켓 {ticket_id} 상세 정보 가져오기 시작 - 도메인: {domain or DEFAULT_DOMAIN}")
     

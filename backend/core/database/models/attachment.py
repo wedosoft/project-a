@@ -33,6 +33,6 @@ class Attachment(MultiTenantModel):
     
     # 인덱스
     __table_args__ = (
-        Index('idx_attachment_original', 'company_id', 'platform', 'original_id', unique=True),
-        Index('idx_attachment_tenant', 'company_id', 'platform'),
+        Index('idx_attachment_original', 'tenant_id', 'platform', 'original_id', unique=True),
+        Index('idx_attachment_tenant', 'tenant_id', 'platform'),
     )

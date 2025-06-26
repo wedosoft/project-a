@@ -41,8 +41,8 @@ class Settings(BaseSettings):
     
     멀티테넌트 환경 설계:
     - 환경변수: 전역 설정(DB 연결, API 키 등)만 관리
-    - 헤더: 요청별 테넌트 정보(X-Company-ID, X-Platform, X-Domain, X-API-Key)
-    - COMPANY_ID 환경변수는 개발/테스트용 기본값, 운영에서는 헤더 우선 사용
+    - 헤더: 요청별 테넌트 정보(X-Tenant-ID, X-Platform, X-Domain, X-API-Key)
+    - TENANT_ID 환경변수는 개발/테스트용 기본값, 운영에서는 헤더 우선 사용
     
     모든 설정은 환경변수 또는 .env 파일에서 로드되며, 
     타입 힌트와 기본값을 통해 안전한 설정 관리를 제공합니다.
@@ -64,11 +64,11 @@ class Settings(BaseSettings):
     DB_SCHEMA_PREFIX: str = Field("tenant_", description="테넌트 스키마 접두사")
     
     # 멀티테넌트 환경 설정 방식
-    # 운영환경: 헤더(X-Company-ID, X-Platform, X-Domain, X-API-Key)로 요청별 테넌트 정보 전달
+    # 운영환경: 헤더(X-Tenant-ID, X-Platform, X-Domain, X-API-Key)로 요청별 테넌트 정보 전달
     # 개발환경: 아래 환경변수를 기본값으로 사용 (단일 테넌트 테스트용)
-    API_KEY: Optional[str] = Field(None, description="개발용 기본 API 키 (운영환경에서는 헤더 사용)")
-    DOMAIN: Optional[str] = Field(None, description="개발용 기본 도메인 (운영환경에서는 헤더 사용)")
-    PLATFORM: Optional[str] = Field(None, description="개발용 기본 플랫폼")
+    API_KEY: Optional[str] = Field(None, alias="FRESHDESK_API_KEY", description="개발용 기본 API 키 (운영환경에서는 헤더 사용)")
+    DOMAIN: Optional[str] = Field(None, alias="FRESHDESK_DOMAIN", description="개발용 기본 도메인 (운영환경에서는 헤더 사용)")
+    PLATFORM: Optional[str] = Field("freshdesk", description="개발용 기본 플랫폼")
     
     # Qdrant Cloud 설정
     QDRANT_URL: str = Field(..., description="Qdrant Cloud URL")
@@ -83,7 +83,7 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: Optional[str] = Field(None, description="OpenRouter API 키 (개발용, 운영환경에서는 Secrets Manager)")
     
     # 애플리케이션 설정 (멀티테넌트 환경 고려)
-    COMPANY_ID: Optional[str] = Field(None, description="기본 회사 ID (개발/테스트용, 운영환경에서는 헤더 사용)")
+    TENANT_ID: Optional[str] = Field(None, description="기본 테넌트 ID (개발/테스트용, 운영환경에서는 헤더 사용)")
     PROCESS_ATTACHMENTS: bool = Field(True, description="첨부 파일 처리 여부")
     EMBEDDING_MODEL: str = Field("text-embedding-3-small", description="임베딩 모델 이름")
     LOG_LEVEL: str = Field("INFO", description="로깅 레벨")
@@ -111,6 +111,8 @@ class Settings(BaseSettings):
     @field_validator("DOMAIN")
     def validate_domain(cls, v):
         """도메인에 'https://' 또는 'http://'가 포함되어 있으면 제거합니다."""
+        if v is None:
+            return v
         if v.startswith(("http://", "https://")):
             # URL에서 도메인 부분만 추출
             parsed_url = urlparse(v)
@@ -118,49 +120,49 @@ class Settings(BaseSettings):
         return v
 
     @property
-    def extracted_company_id(self) -> str:
+    def extracted_tenant_id(self) -> str:
         """
-        DOMAIN에서 company_id를 자동으로 추출합니다.
+        DOMAIN에서 tenant_id를 자동으로 추출합니다.
         
         Returns:
-            str: 추출된 company_id
+            str: 추출된 tenant_id
         """
         domain = self.DOMAIN
         
         # 플랫폼별 도메인 확장자 제거
         if ".freshdesk.com" in domain:
-            company_id = domain.replace(".freshdesk.com", "")
+            tenant_id = domain.replace(".freshdesk.com", "")
         elif ".zendesk.com" in domain:
-            company_id = domain.replace(".zendesk.com", "")
+            tenant_id = domain.replace(".zendesk.com", "")
         else:
-            company_id = domain
+            tenant_id = domain
         
         # https:// 또는 http://가 포함된 경우 제거 (validator에서 이미 처리되지만 안전장치)
-        if company_id.startswith(("https://", "http://")):
-            parsed_url = urlparse(company_id)
+        if tenant_id.startswith(("https://", "http://")):
+            parsed_url = urlparse(tenant_id)
             # 플랫폼별 도메인 제거
             netloc = parsed_url.netloc
             if ".freshdesk.com" in netloc:
-                company_id = netloc.replace(".freshdesk.com", "")
+                tenant_id = netloc.replace(".freshdesk.com", "")
             elif ".zendesk.com" in netloc:
-                company_id = netloc.replace(".zendesk.com", "")
+                tenant_id = netloc.replace(".zendesk.com", "")
             else:
-                company_id = netloc
+                tenant_id = netloc
         
-        return company_id
+        return tenant_id
 
     @property
     def api_headers(self) -> Dict[str, str]:
         """
         API 호출에 사용할 헤더를 반환합니다.
-        X-Company-ID가 자동으로 포함됩니다.
+        X-Tenant-ID가 자동으로 포함됩니다.
         
         Returns:
             Dict[str, str]: API 호출용 헤더
         """
         return {
             "Content-Type": "application/json",
-            "X-Company-ID": self.extracted_company_id
+            "X-Tenant-ID": self.extracted_tenant_id
         }
 
     # Pydantic V2에서는 model_config를 사용하며, Config 클래스는 더 이상 사용하지 않습니다.
@@ -170,15 +172,15 @@ class TenantConfig:
     """
     개별 테넌트(회사)의 설정을 관리하는 클래스
     """
-    def __init__(self, company_id: str, platform: str, domain: str, api_key: str):
-        self.company_id = company_id
+    def __init__(self, tenant_id: str, platform: str, domain: str, api_key: str):
+        self.tenant_id = tenant_id
         self.platform = platform
         self.domain = domain
         self.api_key = api_key
     
     def to_dict(self) -> Dict[str, str]:
         return {
-            "company_id": self.company_id,
+            "tenant_id": self.tenant_id,
             "platform": self.platform,
             "domain": self.domain,
             "api_key": self.api_key
@@ -193,7 +195,7 @@ class MultiTenantConfigManager:
     1. 개발환경: 환경변수에서 기본값 로드
     2. 운영환경: AWS Secrets Manager에서 테넌트별 설정 로드  
     3. DB: PostgreSQL 단일 인스턴스 + 테넌트별 스키마
-    4. 벡터DB: Qdrant 단일 인스턴스 + company_id 필터링
+    4. 벡터DB: Qdrant 단일 인스턴스 + tenant_id 필터링
     """
     
     def __init__(self, settings: Settings):
@@ -235,7 +237,7 @@ class MultiTenantConfigManager:
         with sqlite3.connect(str(db_path)) as conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS tenant_configs (
-                    company_id TEXT PRIMARY KEY,
+                    tenant_id TEXT PRIMARY KEY,
                     platform TEXT NOT NULL,
                     domain TEXT NOT NULL,
                     api_key TEXT NOT NULL,
@@ -251,7 +253,7 @@ class MultiTenantConfigManager:
         # psycopg2 또는 asyncpg 사용
         pass
     
-    def get_tenant_config(self, company_id: str) -> Optional[TenantConfig]:
+    def get_tenant_config(self, tenant_id: str) -> Optional[TenantConfig]:
         """
         테넌트 설정 조회 우선순위:
         1. 캐시 
@@ -260,53 +262,53 @@ class MultiTenantConfigManager:
         4. 환경변수 (개발환경)
         
         Args:
-            company_id: 회사 ID
+            tenant_id: 테넌트 ID
             
         Returns:
             TenantConfig: 테넌트 설정 또는 None
         """
         # 1. 캐시에서 조회
-        if company_id in self.tenant_cache:
-            return self.tenant_cache[company_id]
+        if tenant_id in self.tenant_cache:
+            return self.tenant_cache[tenant_id]
         
         # 2. AWS Secrets Manager에서 조회 (운영환경)
-        secrets_config = self._load_from_secrets_manager(company_id)
+        secrets_config = self._load_from_secrets_manager(tenant_id)
         if secrets_config:
-            self.tenant_cache[company_id] = secrets_config
+            self.tenant_cache[tenant_id] = secrets_config
             return secrets_config
         
         # 3. DB에서 조회 (백업용)
-        db_config = self._load_from_db(company_id)
+        db_config = self._load_from_db(tenant_id)
         if db_config:
-            self.tenant_cache[company_id] = db_config
+            self.tenant_cache[tenant_id] = db_config
             return db_config
         
         # 4. 개발환경: 환경변수 기본값 사용
         if self.settings.API_KEY and self.settings.DOMAIN:
             default_config = TenantConfig(
-                company_id=company_id,
+                tenant_id=tenant_id,
                 platform=self.settings.PLATFORM,
                 domain=self.settings.DOMAIN,
                 api_key=self.settings.API_KEY
             )
-            self.tenant_cache[company_id] = default_config
+            self.tenant_cache[tenant_id] = default_config
             return default_config
         
         return None
     
-    def _load_from_secrets_manager(self, company_id: str) -> Optional[TenantConfig]:
+    def _load_from_secrets_manager(self, tenant_id: str) -> Optional[TenantConfig]:
         """AWS Secrets Manager에서 테넌트 설정 로드"""
         if not self.secrets_client:
             return None
         
-        secret_name = f"tenant-configs/{company_id}"
+        secret_name = f"tenant-configs/{tenant_id}"
         
         try:
             response = self.secrets_client.get_secret_value(SecretId=secret_name)
             secret_data = json.loads(response['SecretString'])
             
             return TenantConfig(
-                company_id=company_id,
+                tenant_id=tenant_id,
                 platform=secret_data['platform'],
                 domain=secret_data['domain'], 
                 api_key=secret_data['api_key']
@@ -315,9 +317,9 @@ class MultiTenantConfigManager:
             if e.response['Error']['Code'] == 'ResourceNotFoundException':
                 print(f"시크릿을 찾을 수 없음: {secret_name}")
             else:
-                print(f"AWS Secrets Manager 오류 ({company_id}): {e}")
+                print(f"AWS Secrets Manager 오류 ({tenant_id}): {e}")
         except Exception as e:
-            print(f"시크릿 파싱 오류 ({company_id}): {e}")
+            print(f"시크릿 파싱 오류 ({tenant_id}): {e}")
         
         return None
     
@@ -334,7 +336,7 @@ class MultiTenantConfigManager:
         if not self.secrets_client:
             return False
         
-        secret_name = f"tenant-configs/{config.company_id}"
+        secret_name = f"tenant-configs/{config.tenant_id}"
         secret_value = {
             "platform": config.platform,
             "domain": config.domain,
@@ -354,36 +356,36 @@ class MultiTenantConfigManager:
                     self.secrets_client.create_secret(
                         Name=secret_name,
                         SecretString=json.dumps(secret_value),
-                        Description=f"테넌트 설정: {config.company_id}"
+                        Description=f"테넌트 설정: {config.tenant_id}"
                     )
                 else:
                     raise
             
             # 캐시 업데이트
-            self.tenant_cache[config.company_id] = config
+            self.tenant_cache[config.tenant_id] = config
             return True
             
         except Exception as e:
-            print(f"AWS Secrets Manager 저장 실패 ({config.company_id}): {e}")
+            print(f"AWS Secrets Manager 저장 실패 ({config.tenant_id}): {e}")
             return False
     
-    def _load_from_db(self, company_id: str) -> Optional[TenantConfig]:
+    def _load_from_db(self, tenant_id: str) -> Optional[TenantConfig]:
         """DB에서 테넌트 설정 로드"""
         db_path = Path(__file__).parent.parent / "tenant_configs.db"
         
         try:
             with sqlite3.connect(str(db_path)) as conn:
                 cursor = conn.execute(
-                    "SELECT platform, domain, api_key FROM tenant_configs WHERE company_id = ?",
-                    (company_id,)
+                    "SELECT platform, domain, api_key FROM tenant_configs WHERE tenant_id = ?",
+                    (tenant_id,)
                 )
                 row = cursor.fetchone()
                 
                 if row:
                     platform, domain, api_key = row
-                    return TenantConfig(company_id, platform, domain, api_key)
+                    return TenantConfig(tenant_id, platform, domain, api_key)
         except Exception as e:
-            print(f"DB에서 테넌트 설정 로드 실패 ({company_id}): {e}")
+            print(f"DB에서 테넌트 설정 로드 실패 ({tenant_id}): {e}")
         
         return None
     
@@ -403,21 +405,21 @@ class MultiTenantConfigManager:
             with sqlite3.connect(str(db_path)) as conn:
                 conn.execute("""
                     INSERT OR REPLACE INTO tenant_configs 
-                    (company_id, platform, domain, api_key, updated_at)
+                    (tenant_id, platform, domain, api_key, updated_at)
                     VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-                """, (config.company_id, config.platform, config.domain, config.api_key))
+                """, (config.tenant_id, config.platform, config.domain, config.api_key))
                 conn.commit()
                 
                 # 캐시 업데이트
-                self.tenant_cache[config.company_id] = config
+                self.tenant_cache[config.tenant_id] = config
                 return True
         except Exception as e:
-            print(f"테넌트 설정 저장 실패 ({config.company_id}): {e}")
+            print(f"테넌트 설정 저장 실패 ({config.tenant_id}): {e}")
             return False
     
     def get_config_from_headers(
         self, 
-        company_id: str, 
+        tenant_id: str, 
         platform: str, 
         domain: str, 
         api_key: str
@@ -427,7 +429,7 @@ class MultiTenantConfigManager:
         헤더 정보가 우선순위를 가짐 (멀티테넌트의 핵심)
         
         Args:
-            company_id: X-Company-ID 헤더값
+            tenant_id: X-Tenant-ID 헤더값
             platform: X-Platform 헤더값  
             domain: X-Domain 헤더값
             api_key: X-API-Key 헤더값
@@ -435,7 +437,7 @@ class MultiTenantConfigManager:
         Returns:
             TenantConfig: 헤더 기반 테넌트 설정
         """
-        return TenantConfig(company_id, platform, domain, api_key)
+        return TenantConfig(tenant_id, platform, domain, api_key)
 
 
 class MultiTenantDatabaseManager:
@@ -453,42 +455,42 @@ class MultiTenantDatabaseManager:
         self.settings = settings
         self.schema_prefix = settings.DB_SCHEMA_PREFIX
     
-    def get_tenant_schema_name(self, company_id: str, platform: str) -> str:
+    def get_tenant_schema_name(self, tenant_id: str, platform: str) -> str:
         """
         테넌트별 스키마명 생성
         
         Args:
-            company_id: 회사 ID
+            tenant_id: 테넌트 ID
             platform: 플랫폼 (freshdesk, zendesk 등)
             
         Returns:
             str: 스키마명 (예: tenant_company_a_freshdesk)
         """
         # 안전한 스키마명 생성 (특수문자 제거)
-        safe_company_id = "".join(c if c.isalnum() else "_" for c in company_id.lower())
-        return f"{self.schema_prefix}{safe_company_id}_{platform}"
+        safe_tenant_id = "".join(c if c.isalnum() else "_" for c in tenant_id.lower())
+        return f"{self.schema_prefix}{safe_tenant_id}_{platform}"
     
-    def get_tenant_sqlite_path(self, company_id: str, platform: str) -> str:
+    def get_tenant_sqlite_path(self, tenant_id: str, platform: str) -> str:
         """
         개발환경: 테넌트별 SQLite 파일 경로
         
         Args:
-            company_id: 회사 ID  
+            tenant_id: 테넌트 ID  
             platform: 플랫폼
             
         Returns:
             str: SQLite 파일 경로
         """
         backend_dir = Path(__file__).parent.parent
-        safe_company_id = "".join(c if c.isalnum() else "_" for c in company_id.lower())
-        return str(backend_dir / f"data_{safe_company_id}_{platform}.db")
+        safe_tenant_id = "".join(c if c.isalnum() else "_" for c in tenant_id.lower())
+        return str(backend_dir / f"data_{safe_tenant_id}_{platform}.db")
     
-    def create_tenant_schema(self, company_id: str, platform: str) -> bool:
+    def create_tenant_schema(self, tenant_id: str, platform: str) -> bool:
         """
         테넌트용 스키마 생성 (PostgreSQL)
         
         Args:
-            company_id: 회사 ID
+            tenant_id: 테넌트 ID
             platform: 플랫폼
             
         Returns:
@@ -498,7 +500,7 @@ class MultiTenantDatabaseManager:
             # 개발환경에서는 SQLite 사용 (자동 생성)
             return True
         
-        schema_name = self.get_tenant_schema_name(company_id, platform)
+        schema_name = self.get_tenant_schema_name(tenant_id, platform)
         
         try:
             # TODO: PostgreSQL 연결 및 스키마 생성
@@ -533,7 +535,7 @@ class MultiTenantDatabaseManager:
                     updated_at TIMESTAMP,
                     created_at_platform TIMESTAMP,
                     updated_at_platform TIMESTAMP,
-                    company_id VARCHAR(50) NOT NULL,
+                    tenant_id VARCHAR(50) NOT NULL,
                     platform VARCHAR(20) NOT NULL
                 )
             """,
@@ -547,7 +549,7 @@ class MultiTenantDatabaseManager:
                     to_emails TEXT,
                     created_at TIMESTAMP,
                     updated_at TIMESTAMP,
-                    company_id VARCHAR(50) NOT NULL,
+                    tenant_id VARCHAR(50) NOT NULL,
                     platform VARCHAR(20) NOT NULL
                 )
             """,
@@ -560,7 +562,7 @@ class MultiTenantDatabaseManager:
                     folder_id VARCHAR(50),
                     created_at TIMESTAMP,
                     updated_at TIMESTAMP,
-                    company_id VARCHAR(50) NOT NULL,
+                    tenant_id VARCHAR(50) NOT NULL,
                     platform VARCHAR(20) NOT NULL
                 )
             """,
@@ -573,7 +575,7 @@ class MultiTenantDatabaseManager:
                     download_url TEXT,
                     parent_type VARCHAR(20),
                     parent_original_id VARCHAR(50),
-                    company_id VARCHAR(50) NOT NULL,
+                    tenant_id VARCHAR(50) NOT NULL,
                     platform VARCHAR(20) NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -581,7 +583,7 @@ class MultiTenantDatabaseManager:
             f"""                CREATE TABLE IF NOT EXISTS {schema_name}.collection_jobs (
                     id SERIAL PRIMARY KEY,
                     job_id VARCHAR(50) UNIQUE NOT NULL,
-                    company_id VARCHAR(50) NOT NULL,
+                    tenant_id VARCHAR(50) NOT NULL,
                     platform VARCHAR(20) NOT NULL,
                     status VARCHAR(20) NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -590,7 +592,7 @@ class MultiTenantDatabaseManager:
             """,
             f"""                CREATE TABLE IF NOT EXISTS {schema_name}.settings (
                     id SERIAL PRIMARY KEY,
-                    company_id VARCHAR(50) NOT NULL,
+                    tenant_id VARCHAR(50) NOT NULL,
                     platform VARCHAR(20) NOT NULL,
                     key VARCHAR(255) NOT NULL,
                     value TEXT,
@@ -605,7 +607,7 @@ class MultiTenantDatabaseManager:
     
     # 멀티테넌트 데이터베이스 접근 예시
 
-    def get_database_connection(company_id: str, platform: str):
+    def get_database_connection(tenant_id: str, platform: str):
         """
         테넌트별 데이터베이스 연결 정보 반환
         """
@@ -613,7 +615,7 @@ class MultiTenantDatabaseManager:
         
         if settings.DATABASE_URL:
             # 운영환경: PostgreSQL + 스키마별 격리
-            schema_name = db_manager.get_tenant_schema_name(company_id, platform)
+            schema_name = db_manager.get_tenant_schema_name(tenant_id, platform)
             # schema_name = "tenant_company_a_freshdesk"
             
             return {
@@ -623,7 +625,7 @@ class MultiTenantDatabaseManager:
             }
         else:
             # 개발환경: SQLite + 파일별 격리  
-            sqlite_path = db_manager.get_tenant_sqlite_path(company_id, platform)
+            sqlite_path = db_manager.get_tenant_sqlite_path(tenant_id, platform)
             # sqlite_path = "/backend/data_company_a_freshdesk.db"
             
             return {
@@ -633,11 +635,11 @@ class MultiTenantDatabaseManager:
             }
 
 
-    def insert_ticket(company_id: str, platform: str, ticket_data: dict):
+    def insert_ticket(tenant_id: str, platform: str, ticket_data: dict):
         """
         테넌트별 티켓 삽입 예시
         """
-        db_info = get_database_connection(company_id, platform)
+        db_info = get_database_connection(tenant_id, platform)
         
         if settings.DATABASE_URL:
             # PostgreSQL: 스키마 지정
@@ -662,11 +664,11 @@ class MultiTenantDatabaseManager:
                 conn.commit()
 
 
-    def get_company_tickets(company_id: str, platform: str):
+    def get_company_tickets(tenant_id: str, platform: str):
         """
         특정 회사의 티켓 조회
         """
-        db_info = get_database_connection(company_id, platform)
+        db_info = get_database_connection(tenant_id, platform)
         
         if settings.DATABASE_URL:
             # PostgreSQL: 해당 회사 스키마의 tickets 테이블만 조회

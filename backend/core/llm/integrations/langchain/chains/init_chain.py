@@ -45,7 +45,7 @@ class InitParallelChain:
         self,
         ticket_data: Dict[str, Any],
         qdrant_client: Any,
-        company_id: str,
+        tenant_id: str,
         include_summary: bool = True,
         include_similar_tickets: bool = True,
         include_kb_docs: bool = True,
@@ -60,7 +60,7 @@ class InitParallelChain:
         Args:
             ticket_data: Freshdesk 티켓 데이터
             qdrant_client: Qdrant 벡터 DB 클라이언트
-            company_id: 회사 식별자
+            tenant_id: 회사 식별자
             include_summary: 요약 생성 여부
             include_similar_tickets: 유사 티켓 검색 여부
             include_kb_docs: KB 문서 검색 여부
@@ -78,7 +78,7 @@ class InitParallelChain:
             parallel_chain = self.create_init_parallel_chain(
                 ticket_data,
                 qdrant_client,
-                company_id,
+                tenant_id,
                 include_summary=include_summary,
                 include_similar_tickets=include_similar_tickets,
                 include_kb_docs=include_kb_docs,
@@ -90,7 +90,7 @@ class InitParallelChain:
             chain_inputs = {
                 "ticket_data": ticket_data,
                 "qdrant_client": qdrant_client,
-                "company_id": company_id,
+                "tenant_id": tenant_id,
                 "platform": "freshdesk",  # 기본값
                 "top_k_tickets": top_k_tickets,
                 "top_k_kb": top_k_kb
@@ -159,7 +159,7 @@ class InitParallelChain:
         self,
         ticket_data: Dict[str, Any],
         qdrant_client: Any,
-        company_id: str,
+        tenant_id: str,
         include_summary: bool = True,
         include_similar_tickets: bool = True,
         include_kb_docs: bool = True,
@@ -183,7 +183,7 @@ class InitParallelChain:
         Args:
             ticket_data: Freshdesk 티켓 데이터
             qdrant_client: Qdrant 벡터 DB 클라이언트
-            company_id: 회사 식별자
+            tenant_id: 회사 식별자
             include_summary: 요약 생성 여부
             include_similar_tickets: 유사 티켓 검색 여부
             include_kb_docs: KB 문서 검색 여부
@@ -307,7 +307,7 @@ async def create_init_chain(llm_router=None) -> InitParallelChain:
 async def execute_init_parallel_processing(
     ticket_data: Dict[str, Any],
     qdrant_client: Any,
-    company_id: str,
+    tenant_id: str,
     llm_router=None,
     **kwargs
 ) -> Dict[str, Any]:
@@ -317,7 +317,7 @@ async def execute_init_parallel_processing(
     Args:
         ticket_data: 티켓 데이터
         qdrant_client: Qdrant 클라이언트
-        company_id: 회사 ID
+        tenant_id: 테넌트 ID
         llm_router: LLM Router 인스턴스
         **kwargs: 추가 매개변수
         
@@ -328,6 +328,6 @@ async def execute_init_parallel_processing(
     return await init_chain.execute_init_parallel_chain(
         ticket_data=ticket_data,
         qdrant_client=qdrant_client,
-        company_id=company_id,
+        tenant_id=tenant_id,
         **kwargs
     )

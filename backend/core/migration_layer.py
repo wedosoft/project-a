@@ -28,26 +28,26 @@ class MigrationLayer:
     def store_integrated_object(
         self, 
         integrated_object: Dict[str, Any], 
-        company_id: str, 
+        tenant_id: str, 
         platform: str = "freshdesk"
     ) -> bool:
         """통합 객체 저장 (ORM/SQLite 선택적 사용)"""
         
         if self.use_orm:
-            return self._store_integrated_object_orm(integrated_object, company_id, platform)
+            return self._store_integrated_object_orm(integrated_object, tenant_id, platform)
         else:
-            return self._store_integrated_object_sqlite(integrated_object, company_id, platform)
+            return self._store_integrated_object_sqlite(integrated_object, tenant_id, platform)
     
     def _store_integrated_object_orm(
         self, 
         integrated_object: Dict[str, Any], 
-        company_id: str, 
+        tenant_id: str, 
         platform: str = "freshdesk"
     ) -> bool:
         """ORM 기반 통합 객체 저장"""
         
         try:
-            db_manager = get_db_manager(company_id)
+            db_manager = get_db_manager(tenant_id)
             logger.info(f"🔗 DB 매니저 생성: {db_manager.database_url}")
             
             with db_manager.get_session() as session:
@@ -57,10 +57,10 @@ class MigrationLayer:
                 original_id = str(integrated_object.get('id'))
                 object_type = integrated_object.get('object_type', 'integrated_ticket')
                 
-                logger.info(f"🔍 마이그레이션 저장 정보: original_id={original_id}, object_type={object_type}, company_id={company_id}, platform={platform}")
+                logger.info(f"🔍 마이그레이션 저장 정보: original_id={original_id}, object_type={object_type}, tenant_id={tenant_id}, platform={platform}")
                 
                 existing = repo.get_by_original_id(
-                    company_id=company_id,
+                    tenant_id=tenant_id,
                     original_id=original_id,
                     object_type=object_type,
                     platform=platform
@@ -69,7 +69,7 @@ class MigrationLayer:
                 # 데이터 준비
                 data = {
                     'original_id': original_id,
-                    'company_id': company_id,
+                    'tenant_id': tenant_id,
                     'platform': platform,
                     'object_type': object_type,
                     'original_data': integrated_object,
@@ -78,7 +78,7 @@ class MigrationLayer:
                     'tenant_metadata': self._create_tenant_metadata(integrated_object)
                 }
                 
-                logger.info(f"📋 저장할 데이터: original_id={data['original_id']}, company_id={data['company_id']}")
+                logger.info(f"📋 저장할 데이터: original_id={data['original_id']}, tenant_id={data['tenant_id']}")
                 
                 if existing:
                     # 업데이트
@@ -93,7 +93,7 @@ class MigrationLayer:
                     session.flush()  # 세션 플러시 (ID 할당 보장)
                     result_obj = created_obj
                     logger.info(f"✅ ORM 통합 객체 생성: {original_id}, DB ID: {created_obj.id}")
-                    logger.info(f"🔍 생성된 객체 정보: company_id={created_obj.company_id}, platform={created_obj.platform}")
+                    logger.info(f"🔍 생성된 객체 정보: tenant_id={created_obj.tenant_id}, platform={created_obj.platform}")
                 
                 # 명시적 커밋
                 session.commit()
@@ -102,7 +102,7 @@ class MigrationLayer:
                 # 저장 직후 검증
                 logger.info("🔍 저장 직후 검증...")
                 verification = repo.get_by_original_id(
-                    company_id=company_id,
+                    tenant_id=tenant_id,
                     original_id=original_id,
                     object_type=object_type,
                     platform=platform
@@ -123,7 +123,7 @@ class MigrationLayer:
     def _store_integrated_object_sqlite(
         self, 
         integrated_object: Dict[str, Any], 
-        company_id: str, 
+        tenant_id: str, 
         platform: str = "freshdesk"
     ) -> bool:
         """기존 SQLite 기반 저장 (호환성 유지)"""
@@ -133,8 +133,8 @@ class MigrationLayer:
             from .ingest.storage import store_integrated_object_to_sqlite
             from .database.database import get_database
             
-            db = get_database(company_id, platform)
-            return store_integrated_object_to_sqlite(db, integrated_object, company_id, platform)
+            db = get_database(tenant_id, platform)
+            return store_integrated_object_to_sqlite(db, integrated_object, tenant_id, platform)
             
         except Exception as e:
             logger.error(f"❌ SQLite 저장 실패: {e}")
@@ -202,9 +202,9 @@ def get_migration_layer() -> MigrationLayer:
 
 def store_integrated_object_with_migration(
     integrated_object: Dict[str, Any], 
-    company_id: str, 
+    tenant_id: str, 
     platform: str = "freshdesk"
 ) -> bool:
     """마이그레이션 레이어를 통한 통합 객체 저장"""
     migration_layer = get_migration_layer()
-    return migration_layer.store_integrated_object(integrated_object, company_id, platform)
+    return migration_layer.store_integrated_object(integrated_object, tenant_id, platform)

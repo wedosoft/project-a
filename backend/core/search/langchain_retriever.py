@@ -79,12 +79,12 @@ class OptimizedVectorRetriever:
         
         logger.info(f"OptimizedVectorRetriever 초기화 완료 (collection: {collection_name})")
     
-    def _create_filter(self, company_id: str, doc_type: Optional[str] = None, status: Optional[int] = None, platform: Optional[str] = None) -> Filter:
+    def _create_filter(self, tenant_id: str, doc_type: Optional[str] = None, status: Optional[int] = None, platform: Optional[str] = None) -> Filter:
         """
         Qdrant 필터 생성 (기존 데이터 호환)
         
         Args:
-            company_id: 회사 ID
+            tenant_id: 테넌트 ID
             doc_type: 문서 타입 ("ticket" 또는 "kb")
             status: KB 문서 상태 (2: published)
             platform: 플랫폼 ("freshdesk" 등, 선택적)
@@ -94,10 +94,10 @@ class OptimizedVectorRetriever:
         """
         conditions = []
         
-        # company_id 필터 (기존 데이터 호환을 위해 조건부 추가)
-        if company_id != "default":
+        # tenant_id 필터 (기존 데이터 호환을 위해 조건부 추가)
+        if tenant_id != "default":
             conditions.append(
-                FieldCondition(key="company_id", match=MatchValue(value=company_id))
+                FieldCondition(key="tenant_id", match=MatchValue(value=tenant_id))
             )
         
         if doc_type:
@@ -123,10 +123,10 @@ class OptimizedVectorRetriever:
         
         return Filter(must=conditions)
     
-    async def _get_cache_key(self, query: str, company_id: str, doc_type: Optional[str], top_k: int) -> str:
+    async def _get_cache_key(self, query: str, tenant_id: str, doc_type: Optional[str], top_k: int) -> str:
         """캐시 키 생성"""
         import hashlib
-        cache_data = f"{query}:{company_id}:{doc_type}:{top_k}"
+        cache_data = f"{query}:{tenant_id}:{doc_type}:{top_k}"
         return f"vector_search:{hashlib.md5(cache_data.encode()).hexdigest()}"
     
     async def _get_cached_result(self, cache_key: str) -> Optional[List[Document]]:
@@ -167,7 +167,7 @@ class OptimizedVectorRetriever:
     async def similarity_search_with_filter(
         self,
         query: str,
-        company_id: str,
+        tenant_id: str,
         doc_type: Optional[str] = None,
         top_k: int = 5,  # 기본값을 5로 변경
         use_cache: bool = True
@@ -177,7 +177,7 @@ class OptimizedVectorRetriever:
         
         Args:
             query: 검색 쿼리
-            company_id: 회사 ID
+            tenant_id: 테넌트 ID
             doc_type: 문서 타입 ("ticket" 또는 "kb")
             top_k: 반환할 결과 수
             use_cache: 캐시 사용 여부
@@ -188,18 +188,18 @@ class OptimizedVectorRetriever:
         start_time = time.time()
         
         # 캐시 확인
-        cache_key = await self._get_cache_key(query, company_id, doc_type, top_k)
+        cache_key = await self._get_cache_key(query, tenant_id, doc_type, top_k)
         if use_cache:
             cached_result = await self._get_cached_result(cache_key)
             if cached_result:
-                logger.info(f"캐시된 검색 결과 반환 (company_id: {company_id}, doc_type: {doc_type})")
+                logger.info(f"캐시된 검색 결과 반환 (tenant_id: {tenant_id}, doc_type: {doc_type})")
                 return cached_result
         
         # 필터 생성
-        filter_condition = self._create_filter(company_id, doc_type)
+        filter_condition = self._create_filter(tenant_id, doc_type)
         
         try:
-            logger.info(f"벡터 검색 시작 (company_id: {company_id}, doc_type: {doc_type}, top_k: {top_k})")
+            logger.info(f"벡터 검색 시작 (tenant_id: {tenant_id}, doc_type: {doc_type}, top_k: {top_k})")
             
             # LangChain-Qdrant 통합 검색 수행 (비동기)
             documents = await asyncio.to_thread(
@@ -212,7 +212,7 @@ class OptimizedVectorRetriever:
             search_time = time.time() - start_time
             logger.info(
                 f"벡터 검색 완료 - {len(documents)}개 결과, "
-                f"실행시간: {search_time:.2f}초 (company_id: {company_id}, doc_type: {doc_type})"
+                f"실행시간: {search_time:.2f}초 (tenant_id: {tenant_id}, doc_type: {doc_type})"
             )
             
             # 캐시에 저장
@@ -229,7 +229,7 @@ class OptimizedVectorRetriever:
     async def unified_search(
         self,
         query: str,
-        company_id: str,
+        tenant_id: str,
         ticket_id: str = "",
         top_k_tickets: int = 5,
         top_k_kb: int = 5,
@@ -240,7 +240,7 @@ class OptimizedVectorRetriever:
         
         Args:
             query: 검색 쿼리
-            company_id: 회사 ID
+            tenant_id: 테넌트 ID
             ticket_id: 현재 티켓 ID (제외용)
             top_k_tickets: 티켓 검색 결과 수
             top_k_kb: KB 검색 결과 수
@@ -251,10 +251,10 @@ class OptimizedVectorRetriever:
         """
         start_time = time.time()
         
-        logger.info(f"최적화된 통합 벡터 검색 시작 (company_id: {company_id}) - 티켓/KB 개별 필터링")
+        logger.info(f"최적화된 통합 벡터 검색 시작 (tenant_id: {tenant_id}) - 티켓/KB 개별 필터링")
         
         # 캐시 키 생성 (통합 검색용)
-        cache_key = f"unified_search_v2:{hashlib.md5(f'{query}_{company_id}_{top_k_tickets}_{top_k_kb}'.encode()).hexdigest()}"
+        cache_key = f"unified_search_v2:{hashlib.md5(f'{query}_{tenant_id}_{top_k_tickets}_{top_k_kb}'.encode()).hexdigest()}"
         
         # 캐시 확인
         if use_cache and self.redis_client:
@@ -269,8 +269,8 @@ class OptimizedVectorRetriever:
                 logger.warning(f"캐시 조회 실패: {e}")
         
         try:
-            # 1. 티켓 검색 (company_id + doc_type=ticket + 현재 티켓 제외)
-            ticket_filter = self._create_filter(company_id=company_id, doc_type="ticket")
+            # 1. 티켓 검색 (tenant_id + doc_type=ticket + 현재 티켓 제외)
+            ticket_filter = self._create_filter(tenant_id=tenant_id, doc_type="ticket")
             
             # 현재 티켓 ID 제외 필터 추가 (original_id 필드 사용)
             if ticket_id:
@@ -298,7 +298,7 @@ class OptimizedVectorRetriever:
             logger.info(f"병렬 검색 시작 - 티켓: {top_k_tickets}, KB: {top_k_kb}")
             
             # KB 필터 생성
-            kb_filter = self._create_filter(company_id=company_id, doc_type="kb", status=2)
+            kb_filter = self._create_filter(tenant_id=tenant_id, doc_type="kb", status=2)
             
             # 병렬 실행
             ticket_task = asyncio.to_thread(

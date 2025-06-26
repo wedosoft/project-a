@@ -13,7 +13,7 @@ from fastapi.responses import StreamingResponse
 from ..models.requests import GenerateReplyRequest
 from ..models.responses import GenerateReplyResponse
 from ..models.shared import DocumentInfo
-from ..dependencies import get_company_id, get_platform, get_vector_db, get_llm_router
+from ..dependencies import get_tenant_id, get_platform, get_vector_db, get_llm_router
 
 # 로거 설정
 logger = logging.getLogger(__name__)
@@ -31,7 +31,7 @@ async def get_context_cache():
 @router.post("/reply", response_model=GenerateReplyResponse)
 async def reply(
     request: GenerateReplyRequest,
-    company_id: str = Depends(get_company_id),
+    tenant_id: str = Depends(get_tenant_id),
     platform: str = Depends(get_platform),
     vector_db = Depends(get_vector_db),
     llm_router = Depends(get_llm_router),
@@ -45,7 +45,7 @@ async def reply(
     
     Args:
         request: 응답 생성 요청
-        company_id: 회사 ID (의존성 주입)
+        tenant_id: 테넌트 ID (의존성 주입)
         platform: 플랫폼 (의존성 주입)
         vector_db: 벡터 데이터베이스 (의존성 주입)
         llm_router: LLM 라우터 (의존성 주입)
@@ -209,7 +209,7 @@ async def reply(
     # LLM 호출
     llm_start_time = time.time()
     try:
-        system_prompt = f"당신은 {company_id} 회사의 전문적인 고객 지원 담당자입니다. 정확하고 도움이 되는 응답을 제공하세요."
+        system_prompt = f"당신은 {tenant_id} 회사의 전문적인 고객 지원 담당자입니다. 정확하고 도움이 되는 응답을 제공하세요."
         # 실시간 상담원 쿼리용으로 용도 지정하여 호출
         response = await llm_router.generate(
             prompt=prompt, 
@@ -258,7 +258,7 @@ async def reply(
 @router.post("/reply/stream")
 async def reply_stream(
     request: GenerateReplyRequest,
-    company_id: str = Depends(get_company_id),
+    tenant_id: str = Depends(get_tenant_id),
     platform: str = Depends(get_platform),
     vector_db = Depends(get_vector_db),
     llm_router = Depends(get_llm_router),
@@ -270,7 +270,7 @@ async def reply_stream(
     
     Args:
         request: 응답 생성 요청
-        company_id: 회사 ID (의존성 주입)
+        tenant_id: 테넌트 ID (의존성 주입)
         platform: 플랫폼 (의존성 주입)
         vector_db: 벡터 데이터베이스 (의존성 주입)
         llm_router: LLM 라우터 (의존성 주입)
@@ -428,7 +428,7 @@ async def reply_stream(
 """
             
             # 스트리밍 LLM 호출
-            system_prompt = f"당신은 {company_id} 회사의 전문적인 고객 지원 담당자입니다. 정확하고 도움이 되는 응답을 제공하세요."
+            system_prompt = f"당신은 {tenant_id} 회사의 전문적인 고객 지원 담당자입니다. 정확하고 도움이 되는 응답을 제공하세요."
             
             # 응답 텍스트 누적용
             full_response = ""

@@ -50,10 +50,10 @@ class SpecificTicketIngester:
     """특정 티켓들을 Freshdesk API에서 가져와서 LLM 요약 후 SQL DB에만 저장하는 클래스"""
     
     def __init__(self, domain: Optional[str] = None, api_key: Optional[str] = None, 
-                 company_id: Optional[str] = None, platform: str = "freshdesk"):
+                 tenant_id: Optional[str] = None, platform: str = "freshdesk"):
         self.domain = domain
         self.api_key = api_key
-        self.company_id = company_id or "default"
+        self.tenant_id = tenant_id or "default"
         self.platform = platform
         self.db = None
         
@@ -71,7 +71,7 @@ class SpecificTicketIngester:
         logger.info(f"📋 티켓 ID 목록: {ticket_ids}")
         
         # DB 연결
-        self.db = get_database(self.company_id, self.platform)
+        self.db = get_database(self.tenant_id, self.platform)
         logger.info(f"💾 SQL DB 연결 완료: {self.db.db_path}")
         
         results = {
@@ -113,7 +113,7 @@ class SpecificTicketIngester:
                 logger.info(f"🤖 티켓 {ticket_id} 통합 객체 생성 중...")
                 integrated_ticket = create_integrated_ticket_object(
                     ticket_data, 
-                    company_id=self.company_id
+                    tenant_id=self.tenant_id
                 )
                 logger.info(f"🔧 통합 티켓 객체 생성 완료: ID={integrated_ticket.get('id')}")
                 
@@ -172,7 +172,7 @@ class SpecificTicketIngester:
                 store_result = store_integrated_object_to_sqlite(
                     self.db, 
                     integrated_ticket, 
-                    self.company_id, 
+                    self.tenant_id, 
                     self.platform
                 )
                 
@@ -264,7 +264,7 @@ async def main():
     # 선택적 파라미터
     parser.add_argument("--domain", help="Freshdesk 도메인 (환경변수 사용하지 않을 경우)")
     parser.add_argument("--api-key", help="Freshdesk API 키 (환경변수 사용하지 않을 경우)")
-    parser.add_argument("--company-id", default="default", help="회사 ID (기본값: default)")
+    parser.add_argument("--company-id", default="default", help="테넌트 ID (기본값: default)")
     parser.add_argument("--platform", default="freshdesk", help="플랫폼 (기본값: freshdesk)")
     parser.add_argument("--dry-run", action="store_true", help="실제 저장하지 않고 테스트만 실행")
     
@@ -294,7 +294,7 @@ async def main():
     ingester = SpecificTicketIngester(
         domain=args.domain,
         api_key=args.api_key,
-        company_id=args.company_id,
+        tenant_id=args.tenant_id,
         platform=args.platform
     )
     

@@ -24,10 +24,10 @@ except ImportError:
 class TenantConfigManager:
     """테넌트별 설정 관리 클래스"""
     
-    def __init__(self, company_id: str = None, platform: str = "freshdesk", db_instance=None):
+    def __init__(self, tenant_id: str = None, platform: str = "freshdesk", db_instance=None):
         """
         Args:
-            company_id: 회사 ID (db_instance가 없을 때 사용)
+            tenant_id: 테넌트 ID (db_instance가 없을 때 사용)
             platform: 플랫폼명 (db_instance가 없을 때 사용)
             db_instance: 데이터베이스 인스턴스 (SQLite 또는 PostgreSQL)
         """
@@ -35,9 +35,9 @@ class TenantConfigManager:
             self.db = db_instance
         else:
             from .database import get_database
-            self.db = get_database(company_id, platform)
+            self.db = get_database(tenant_id, platform)
         
-        self.company_id = company_id
+        self.tenant_id = tenant_id
         self.platform = platform
         self._encryption_key = self._get_or_create_encryption_key()
     
@@ -92,12 +92,12 @@ class TenantConfigManager:
     # 테넌트별 설정 관리
     # =====================================================
     
-    def set_tenant_setting(self, company_id: int, key: str, value: Any, 
+    def set_tenant_setting(self, tenant_id: int, key: str, value: Any, 
                           encrypted: bool = False, description: str = None) -> bool:
         """테넌트 설정 저장
         
         Args:
-            company_id: 회사 ID
+            tenant_id: 테넌트 ID
             key: 설정 키
             value: 설정 값
             encrypted: 암호화 여부
@@ -121,24 +121,24 @@ class TenantConfigManager:
         try:
             cursor.execute("""
                 INSERT OR REPLACE INTO company_settings (
-                    company_id, setting_key, setting_value, is_encrypted,
+                    tenant_id, setting_key, setting_value, is_encrypted,
                     description, updated_at
                 ) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            """, (company_id, key, value_str, encrypted, description))
+            """, (tenant_id, key, value_str, encrypted, description))
             
             self.db.connection.commit()
-            logger.info(f"테넌트 설정 저장: company_id={company_id}, key={key}")
+            logger.info(f"테넌트 설정 저장: tenant_id={tenant_id}, key={key}")
             return True
             
         except Exception as e:
             logger.error(f"테넌트 설정 저장 실패: {e}")
             return False
     
-    def get_tenant_setting(self, company_id: int, key: str, default: Any = None) -> Any:
+    def get_tenant_setting(self, tenant_id: int, key: str, default: Any = None) -> Any:
         """테넌트 설정 조회
         
         Args:
-            company_id: 회사 ID
+            tenant_id: 테넌트 ID
             key: 설정 키
             default: 기본값
         """
@@ -150,8 +150,8 @@ class TenantConfigManager:
         try:
             cursor.execute("""
                 SELECT setting_value, is_encrypted FROM company_settings 
-                WHERE company_id = ? AND setting_key = ?
-            """, (company_id, key))
+                WHERE tenant_id = ? AND setting_key = ?
+            """, (tenant_id, key))
             
             row = cursor.fetchone()
             if not row:
@@ -173,7 +173,7 @@ class TenantConfigManager:
             logger.error(f"테넌트 설정 조회 실패: {e}")
             return default
     
-    def get_all_tenant_settings(self, company_id: int) -> Dict[str, Any]:
+    def get_all_tenant_settings(self, tenant_id: int) -> Dict[str, Any]:
         """테넌트의 모든 설정 조회"""
         if not self.db.connection:
             self.db.connect()
@@ -183,8 +183,8 @@ class TenantConfigManager:
         try:
             cursor.execute("""
                 SELECT setting_key, setting_value, is_encrypted, description 
-                FROM company_settings WHERE company_id = ?
-            """, (company_id,))
+                FROM company_settings WHERE tenant_id = ?
+            """, (tenant_id,))
             
             settings = {}
             for row in cursor.fetchall():
@@ -216,7 +216,7 @@ class TenantConfigManager:
             logger.error(f"테넌트 설정 전체 조회 실패: {e}")
             return {}
     
-    def delete_tenant_setting(self, company_id: int, key: str) -> bool:
+    def delete_tenant_setting(self, tenant_id: int, key: str) -> bool:
         """테넌트 설정 삭제"""
         if not self.db.connection:
             self.db.connect()
@@ -226,14 +226,14 @@ class TenantConfigManager:
         try:
             cursor.execute("""
                 DELETE FROM company_settings 
-                WHERE company_id = ? AND setting_key = ?
-            """, (company_id, key))
+                WHERE tenant_id = ? AND setting_key = ?
+            """, (tenant_id, key))
             
             self.db.connection.commit()
             deleted = cursor.rowcount > 0
             
             if deleted:
-                logger.info(f"테넌트 설정 삭제: company_id={company_id}, key={key}")
+                logger.info(f"테넌트 설정 삭제: tenant_id={tenant_id}, key={key}")
             
             return deleted
             
@@ -315,31 +315,31 @@ class TenantConfigManager:
     # 플랫폼별 설정 관리 (고급 기능)
     # =====================================================
     
-    def set_platform_config(self, company_id: int, platform: str, config: Dict[str, Any]) -> bool:
+    def set_platform_config(self, tenant_id: int, platform: str, config: Dict[str, Any]) -> bool:
         """플랫폼별 설정 저장
         
         Args:
-            company_id: 회사 ID
+            tenant_id: 테넌트 ID
             platform: 플랫폼명 (freshdesk, zendesk 등)
             config: 플랫폼 설정 딕셔너리
         """
         key = f"platform_config_{platform}"
         return self.set_tenant_setting(
-            company_id, 
+            tenant_id, 
             key, 
             config, 
             encrypted=True,  # 플랫폼 설정은 보안상 암호화
             description=f"{platform} 플랫폼 연동 설정"
         )
     
-    def get_platform_config(self, company_id: int, platform: str) -> Dict[str, Any]:
+    def get_platform_config(self, tenant_id: int, platform: str) -> Dict[str, Any]:
         """플랫폼별 설정 조회"""
         key = f"platform_config_{platform}"
-        return self.get_tenant_setting(company_id, key, {})
+        return self.get_tenant_setting(tenant_id, key, {})
     
-    def get_freshdesk_config(self, company_id: int) -> Dict[str, Any]:
+    def get_freshdesk_config(self, tenant_id: int) -> Dict[str, Any]:
         """Freshdesk 설정 조회 (편의 메서드)"""
-        config = self.get_platform_config(company_id, 'freshdesk')
+        config = self.get_platform_config(tenant_id, 'freshdesk')
         
         # 기본값 설정
         defaults = {
@@ -354,7 +354,7 @@ class TenantConfigManager:
         
         return {**defaults, **config}
     
-    def set_freshdesk_config(self, company_id: int, domain: str, api_key: str, 
+    def set_freshdesk_config(self, tenant_id: int, domain: str, api_key: str, 
                            **kwargs) -> bool:
         """Freshdesk 설정 저장 (편의 메서드)"""
         config = {
@@ -362,17 +362,17 @@ class TenantConfigManager:
             'api_key': api_key,
             **kwargs
         }
-        return self.set_platform_config(company_id, 'freshdesk', config)
+        return self.set_platform_config(tenant_id, 'freshdesk', config)
     
     # =====================================================
     # 설정 템플릿 및 유틸리티
     # =====================================================
     
-    def create_tenant_from_template(self, template_company_id: int, 
-                                   new_company_id: int) -> bool:
+    def create_tenant_from_template(self, template_tenant_id: int, 
+                                   new_tenant_id: int) -> bool:
         """템플릿을 사용하여 새 테넌트 설정 생성"""
         try:
-            template_settings = self.get_all_tenant_settings(template_company_id)
+            template_settings = self.get_all_tenant_settings(template_tenant_id)
             
             for key, setting_info in template_settings.items():
                 # 민감한 정보는 복사하지 않음
@@ -380,24 +380,24 @@ class TenantConfigManager:
                     continue
                 
                 self.set_tenant_setting(
-                    new_company_id,
+                    new_tenant_id,
                     key,
                     setting_info['value'],
                     setting_info['encrypted'],
                     setting_info['description']
                 )
             
-            logger.info(f"템플릿 기반 테넌트 생성: {template_company_id} -> {new_company_id}")
+            logger.info(f"템플릿 기반 테넌트 생성: {template_tenant_id} -> {new_tenant_id}")
             return True
             
         except Exception as e:
             logger.error(f"템플릿 기반 테넌트 생성 실패: {e}")
             return False
     
-    def validate_tenant_config(self, company_id: int, platform: str) -> Dict[str, Any]:
+    def validate_tenant_config(self, tenant_id: int, platform: str) -> Dict[str, Any]:
         """테넌트 설정 유효성 검증"""
         validation = {
-            'company_id': company_id,
+            'tenant_id': tenant_id,
             'platform': platform,
             'is_valid': True,
             'missing_settings': [],
@@ -407,7 +407,7 @@ class TenantConfigManager:
         
         # 플랫폼별 필수 설정 확인
         if platform == 'freshdesk':
-            config = self.get_freshdesk_config(company_id)
+            config = self.get_freshdesk_config(tenant_id)
             
             if not config.get('domain'):
                 validation['missing_settings'].append('freshdesk.domain')
@@ -428,14 +428,14 @@ class TenantConfigManager:
 # 편의 함수들
 # =====================================================
 
-def get_tenant_config_manager(company_id: str, platform: str = "freshdesk"):
+def get_tenant_config_manager(tenant_id: str, platform: str = "freshdesk"):
     """테넌트 설정 관리자 인스턴스 반환"""
     from .database import get_database
     
-    db = get_database(company_id, platform)
+    db = get_database(tenant_id, platform)
     return TenantConfigManager(db)
 
-def setup_new_tenant(company_id: int, company_name: str, platform: str,
+def setup_new_tenant(tenant_id: int, company_name: str, platform: str,
                     platform_config: Dict[str, Any]) -> bool:
     """새 테넌트 설정 초기화"""
     try:
@@ -446,14 +446,14 @@ def setup_new_tenant(company_id: int, company_name: str, platform: str,
         config_manager = TenantConfigManager(db)
         
         # 기본 설정 저장
-        config_manager.set_tenant_setting(company_id, 'company_name', company_name)
-        config_manager.set_tenant_setting(company_id, 'primary_platform', platform)
-        config_manager.set_tenant_setting(company_id, 'created_at', datetime.now().isoformat())
+        config_manager.set_tenant_setting(tenant_id, 'company_name', company_name)
+        config_manager.set_tenant_setting(tenant_id, 'primary_platform', platform)
+        config_manager.set_tenant_setting(tenant_id, 'created_at', datetime.now().isoformat())
         
         # 플랫폼 설정 저장
-        config_manager.set_platform_config(company_id, platform, platform_config)
+        config_manager.set_platform_config(tenant_id, platform, platform_config)
         
-        logger.info(f"새 테넌트 설정 완료: company_id={company_id}, platform={platform}")
+        logger.info(f"새 테넌트 설정 완료: tenant_id={tenant_id}, platform={platform}")
         return True
         
     except Exception as e:

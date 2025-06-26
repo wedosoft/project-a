@@ -54,8 +54,8 @@ class ProjectSettings:
     # 환경 설정
     environment: Environment = Environment.DEVELOPMENT
     
-    # 기본 company_id
-    default_company_id: str = SystemConfig.DEFAULT_COMPANY_ID
+    # 기본 tenant_id
+    default_tenant_id: str = SystemConfig.DEFAULT_TENANT_ID
     
     # Doc ID 정책
     doc_id_policy: DocIdPolicy = field(default_factory=DocIdPolicy)
@@ -128,7 +128,7 @@ class SettingsManager:
         # 전체 설정 구성
         settings = ProjectSettings(
             environment=environment,
-            default_company_id=os.getenv('COMPANY_ID', SystemConfig.DEFAULT_COMPANY_ID),
+            default_tenant_id=os.getenv('TENANT_ID', SystemConfig.DEFAULT_TENANT_ID),
             doc_id_policy=doc_id_policy,
             enable_data_validation=os.getenv('ENABLE_DATA_VALIDATION', 'true').lower() == 'true',
             validation_on_ingest=os.getenv('VALIDATION_ON_INGEST', 'true').lower() == 'true',
@@ -209,7 +209,7 @@ class SettingsManager:
         """설정을 딕셔너리로 내보내기"""
         config = {
             'environment': self._settings.environment.value,
-            'default_company_id': self._settings.default_company_id,
+            'default_tenant_id': self._settings.default_tenant_id,
             'doc_id_policy': {
                 'require_prefix': self._settings.doc_id_policy.require_prefix,
                 'strict_validation': self._settings.doc_id_policy.strict_validation,

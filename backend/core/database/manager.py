@@ -130,20 +130,20 @@ class DatabaseConfig:
     def __init__(self):
         self.environment = os.getenv('ENVIRONMENT', 'development')
     
-    def get_database_url(self, company_id: Optional[str] = None) -> str:
+    def get_database_url(self, tenant_id: Optional[str] = None) -> str:
         """
         환경에 따른 데이터베이스 URL 반환
         
         Args:
-            company_id: 회사 ID (개발 환경에서 SQLite DB 파일명에 사용)
+            tenant_id: 테넌트 ID (개발 환경에서 SQLite DB 파일명에 사용)
             
         Returns:
             str: 데이터베이스 연결 URL
         """
         if self.environment == 'development':
             # SQLite 사용 (개발 환경)
-            if company_id:
-                db_path = f"./data/{company_id}_freshdesk_data.db"
+            if tenant_id:
+                db_path = f"./data/{tenant_id}_freshdesk_data.db"
                 os.makedirs(os.path.dirname(db_path), exist_ok=True)
                 return f"sqlite:///{db_path}"
             return "sqlite:///./data/main.db"
@@ -160,7 +160,7 @@ class DatabaseConfig:
     
     def get_manager(
         self, 
-        company_id: Optional[str] = None,
+        tenant_id: Optional[str] = None,
         is_async: bool = False,
         echo: bool = False
     ) -> DatabaseManager:
@@ -168,14 +168,14 @@ class DatabaseConfig:
         DatabaseManager 인스턴스 생성
         
         Args:
-            company_id: 회사 ID
+            tenant_id: 테넌트 ID
             is_async: 비동기 모드 사용 여부
             echo: SQL 로깅 활성화 여부
             
         Returns:
             DatabaseManager: 데이터베이스 매니저 인스턴스
         """
-        database_url = self.get_database_url(company_id)
+        database_url = self.get_database_url(tenant_id)
         return DatabaseManager(database_url, is_async=is_async, echo=echo)
 
 
@@ -184,7 +184,7 @@ db_config = DatabaseConfig()
 
 
 def get_db_manager(
-    company_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
     is_async: bool = False,
     echo: bool = False
 ) -> DatabaseManager:
@@ -192,11 +192,11 @@ def get_db_manager(
     데이터베이스 매니저 팩토리 함수
     
     Args:
-        company_id: 회사 ID
+        tenant_id: 테넌트 ID
         is_async: 비동기 모드 사용 여부
         echo: SQL 로깅 활성화 여부
         
     Returns:
         DatabaseManager: 데이터베이스 매니저 인스턴스
     """
-    return db_config.get_manager(company_id, is_async, echo)
+    return db_config.get_manager(tenant_id, is_async, echo)

@@ -3,7 +3,7 @@ Freshdesk 첨부파일 API 엔드포인트 (Freshdesk 전용)
 멀티테넌트 구조 지원
 
 S3 pre-signed URL 만료 문제를 해결하기 위한 실시간 URL 발급 및 상담사 검색 지원
-표준 3개 헤더(X-Company-ID, X-Domain, X-API-Key) 사용 - Freshdesk 전용
+표준 3개 헤더(X-Tenant-ID, X-Domain, X-API-Key) 사용 - Freshdesk 전용
 """
 
 import asyncio
@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from qdrant_client.http.models import FieldCondition, Filter, MatchValue
 
 # 표준 헤더 의존성 import (절대경로) - Freshdesk 전용
-from api.dependencies import get_company_id, get_api_key, get_domain
+from api.dependencies import get_tenant_id, get_api_key, get_domain
 
 # .env 파일 로드
 load_dotenv()
@@ -42,7 +42,7 @@ class AttachmentResponse(BaseModel):
     ticket_id: Optional[str] = None
     conversation_id: Optional[str] = None
     platform: str = "freshdesk"  # 항상 고정
-    company_id: str
+    tenant_id: str
 
 
 class AttachmentMetadata(BaseModel):
@@ -54,10 +54,10 @@ class AttachmentMetadata(BaseModel):
     ticket_id: Optional[str] = None
     conversation_id: Optional[str] = None
     platform: str = "freshdesk"  # 항상 고정
-    company_id: str
+    tenant_id: str
 
 
-def get_freshdesk_adapter(company_id: str, domain: str, api_key: str):
+def get_freshdesk_adapter(tenant_id: str, domain: str, api_key: str):
     """
     Freshdesk 어댑터 생성 - 표준 헤더 기반 (Freshdesk 전용)
     """
@@ -66,7 +66,7 @@ def get_freshdesk_adapter(company_id: str, domain: str, api_key: str):
     
     config = {
         "platform": "freshdesk",  # 항상 고정
-        "company_id": company_id,
+        "tenant_id": tenant_id,
         "domain": domain,
         "api_key": api_key
     }
@@ -75,7 +75,7 @@ def get_freshdesk_adapter(company_id: str, domain: str, api_key: str):
 
 async def get_attachment_download_url_freshdesk(
     attachment_id: str,
-    company_id: str,
+    tenant_id: str,
     domain: str,
     api_key: str,
     ticket_id: Optional[str] = None,
@@ -86,7 +86,7 @@ async def get_attachment_download_url_freshdesk(
     
     Args:
         attachment_id: 첨부파일 ID
-        company_id: 테넌트 식별자
+        tenant_id: 테넌트 식별자
         domain: Freshdesk 도메인
         api_key: Freshdesk API 키
         ticket_id: 티켓 ID (선택사항)
@@ -100,7 +100,7 @@ async def get_attachment_download_url_freshdesk(
     """
     try:
         # Freshdesk 어댑터 생성
-        adapter = get_freshdesk_adapter(company_id, domain, api_key)
+        adapter = get_freshdesk_adapter(tenant_id, domain, api_key)
         
         async with adapter:
             # 어댑터를 통해 첨부파일 URL 발급
@@ -110,18 +110,18 @@ async def get_attachment_download_url_freshdesk(
                 conversation_id=conversation_id
             )
             
-            logger.info(f"첨부파일 {attachment_id} URL 발급 완료 (Freshdesk, company_id={company_id}): {attachment_data.get('name', 'Unknown')}")
+            logger.info(f"첨부파일 {attachment_id} URL 발급 완료 (Freshdesk, tenant_id={tenant_id}): {attachment_data.get('name', 'Unknown')}")
             return attachment_data
             
     except Exception as e:
-        logger.error(f"첨부파일 URL 발급 중 오류 (Freshdesk, company_id={company_id}): {e}")
+        logger.error(f"첨부파일 URL 발급 중 오류 (Freshdesk, tenant_id={tenant_id}): {e}")
         raise HTTPException(status_code=500, detail=f"첨부파일 URL 발급 실패: {str(e)}")
 
 
 @router.get("/{attachment_id}/download-url", response_model=AttachmentResponse)
 async def get_attachment_download_url(
     attachment_id: str,
-    company_id: str = Depends(get_company_id),
+    tenant_id: str = Depends(get_tenant_id),
     domain: str = Depends(get_domain),
     api_key: str = Depends(get_api_key),
     ticket_id: Optional[str] = None,
@@ -133,12 +133,12 @@ async def get_attachment_download_url(
     이 엔드포인트는 Freshdesk pre-signed URL 만료 문제를 해결하기 위해
     매번 새로운 URL을 동적으로 발급받습니다.
     
-    표준 3개 헤더(X-Company-ID, X-Domain, X-API-Key)를 통해
+    표준 3개 헤더(X-Tenant-ID, X-Domain, X-API-Key)를 통해
     Freshdesk 정보를 받습니다.
     
     Args:
         attachment_id: 첨부파일 고유 ID
-        company_id: 회사 ID (헤더)
+        tenant_id: 테넌트 ID (헤더)
         domain: Freshdesk 도메인 (헤더)
         api_key: Freshdesk API 키 (헤더)
         ticket_id: 첨부파일이 속한 티켓 ID (선택사항)
@@ -147,13 +147,13 @@ async def get_attachment_download_url(
     Returns:
         AttachmentResponse: 첨부파일 정보와 유효한 다운로드 URL
     """
-    logger.info(f"첨부파일 {attachment_id} 다운로드 URL 요청 (Freshdesk 전용, company_id={company_id}, ticket_id={ticket_id}, conversation_id={conversation_id})")
+    logger.info(f"첨부파일 {attachment_id} 다운로드 URL 요청 (Freshdesk 전용, tenant_id={tenant_id}, ticket_id={ticket_id}, conversation_id={conversation_id})")
     
     try:
         # Freshdesk URL 발급
         attachment_data = await get_attachment_download_url_freshdesk(
             attachment_id=attachment_id,
-            company_id=company_id,
+            tenant_id=tenant_id,
             domain=domain,
             api_key=api_key,
             ticket_id=ticket_id,
@@ -171,7 +171,7 @@ async def get_attachment_download_url(
             ticket_id=attachment_data.get("ticket_id"),
             conversation_id=attachment_data.get("conversation_id"),
             platform="freshdesk",  # 항상 고정
-            company_id=company_id
+            tenant_id=tenant_id
         )
         
         logger.info(f"첨부파일 {attachment_id} URL 발급 완료: {attachment_data['name']}")
@@ -187,7 +187,7 @@ async def get_attachment_download_url(
 @router.get("/{attachment_id}/metadata", response_model=AttachmentMetadata)
 async def get_attachment_metadata(
     attachment_id: str,
-    company_id: str = Depends(get_company_id)
+    tenant_id: str = Depends(get_tenant_id)
 ):
     """
     벡터 DB에서 첨부파일 메타데이터를 조회합니다 (Freshdesk 전용).
@@ -199,14 +199,14 @@ async def get_attachment_metadata(
     
     Args:
         attachment_id: 첨부파일 고유 ID
-        company_id: 회사 ID (헤더, 필수)
+        tenant_id: 테넌트 ID (헤더, 필수)
         platform: 플랫폼 이름 (헤더, 필수)
         
     Returns:
         AttachmentMetadata: 첨부파일의 메타데이터
     """
     try:
-        logger.info(f"첨부파일 {attachment_id} 메타데이터 조회 중 (platform={platform}, company_id={company_id})...")
+        logger.info(f"첨부파일 {attachment_id} 메타데이터 조회 중 (platform={platform}, tenant_id={tenant_id})...")
         
         # 벡터 DB에서 첨부파일 메타데이터 검색
         attachment_data = None
@@ -214,9 +214,9 @@ async def get_attachment_metadata(
         # 벡터 DB 검색 필터 구성 - 멀티테넌트 보안 적용
         search_filters = []
         
-        # 필수 헤더로 전달된 platform과 company_id 필터 추가
+        # 필수 헤더로 전달된 platform과 tenant_id 필터 추가
         search_filters.append(FieldCondition(key="platform", match=MatchValue(value=platform)))
-        search_filters.append(FieldCondition(key="company_id", match=MatchValue(value=company_id)))
+        search_filters.append(FieldCondition(key="tenant_id", match=MatchValue(value=tenant_id)))
         
         # scroll API를 사용하여 문서에서 첨부파일 메타데이터 검색
         offset = 0
@@ -254,9 +254,9 @@ async def get_attachment_metadata(
                                 "size": att.get("size", 0),
                                 "ticket_id": str(payload.get("original_id", "")) if payload.get("doc_type") == "ticket" else None,
                                 "platform": payload.get("platform", "unknown"),
-                                "company_id": payload.get("company_id", "unknown")
+                                "tenant_id": payload.get("tenant_id", "unknown")
                             }
-                            logger.info(f"첨부파일 {attachment_id} 메타데이터 발견: {attachment_data['name']} (platform={attachment_data['platform']}, company_id={attachment_data['company_id']})")
+                            logger.info(f"첨부파일 {attachment_id} 메타데이터 발견: {attachment_data['name']} (platform={attachment_data['platform']}, tenant_id={attachment_data['tenant_id']})")
                             break
             
             if attachment_data:
@@ -272,7 +272,7 @@ async def get_attachment_metadata(
             return AttachmentMetadata(**attachment_data)
             
         # 벡터 DB에서 찾지 못한 경우, 404 오류 반환
-        logger.warning(f"첨부파일 {attachment_id} 메타데이터를 찾을 수 없습니다 (platform={platform}, company_id={company_id})")
+        logger.warning(f"첨부파일 {attachment_id} 메타데이터를 찾을 수 없습니다 (platform={platform}, tenant_id={tenant_id})")
         raise HTTPException(
             status_code=404,
             detail=f"첨부파일 {attachment_id}의 메타데이터를 찾을 수 없습니다. 플랫폼과 테넌트 정보를 확인하거나 티켓 ID와 함께 다시 시도해보세요."
@@ -288,7 +288,7 @@ async def get_attachment_metadata(
 @router.get("/bulk-urls")
 async def get_bulk_attachment_urls(
     attachment_ids: str,
-    company_id: str = Depends(get_company_id),
+    tenant_id: str = Depends(get_tenant_id),
     platform: str = Depends(get_platform),
     domain: str = Depends(get_domain),
     api_key: str = Depends(get_api_key),
@@ -300,12 +300,12 @@ async def get_bulk_attachment_urls(
     대화창에서 여러 이미지를 동시에 표시해야 할 때 유용합니다.
     성능 최적화를 위해 동시 요청으로 처리됩니다.
     
-    표준 4개 헤더(X-Company-ID, X-Platform, X-Domain, X-API-Key)를 통해
+    표준 4개 헤더(X-Tenant-ID, X-Platform, X-Domain, X-API-Key)를 통해
     플랫폼 정보를 받습니다.
     
     Args:
         attachment_ids: 쉼표로 구분된 첨부파일 ID 목록 (예: "123,456,789")
-        company_id: 회사 ID (헤더)
+        tenant_id: 테넌트 ID (헤더)
         platform: 플랫폼 이름 (헤더)
         domain: 플랫폼 도메인 (헤더)
         api_key: API 키 (헤더)
@@ -317,7 +317,7 @@ async def get_bulk_attachment_urls(
     try:
         # 첨부파일 ID 목록 파싱
         id_list = [id.strip() for id in attachment_ids.split(",")]
-        logger.info(f"다중 첨부파일 URL 발급 요청: {len(id_list)}개 (platform={platform}, company_id={company_id})")
+        logger.info(f"다중 첨부파일 URL 발급 요청: {len(id_list)}개 (platform={platform}, tenant_id={tenant_id})")
         
         # 동시 요청으로 성능 최적화
         tasks = []
@@ -325,7 +325,7 @@ async def get_bulk_attachment_urls(
             task = get_attachment_download_url_multi_platform(
                 attachment_id=attachment_id,
                 platform=platform,
-                company_id=company_id,
+                tenant_id=tenant_id,
                 domain=domain,
                 api_key=api_key,
                 ticket_id=ticket_id
@@ -364,7 +364,7 @@ async def get_bulk_attachment_urls(
 async def download_attachment_proxy(
     attachment_id: str,
     platform: str = Query(..., description="플랫폼 이름 (freshdesk, zendesk 등)"),
-    company_id: str = Query(..., description="테넌트 식별자"),
+    tenant_id: str = Query(..., description="테넌트 식별자"),
     ticket_id: Optional[str] = Query(None),
     conversation_id: Optional[str] = Query(None)
 ):
@@ -383,7 +383,7 @@ async def download_attachment_proxy(
         attachment_data = await get_attachment_download_url_multi_platform(
             attachment_id=attachment_id,
             platform=platform,
-            company_id=company_id,
+            tenant_id=tenant_id,
             ticket_id=ticket_id,
             conversation_id=conversation_id
         )
@@ -413,7 +413,7 @@ async def download_attachment_proxy(
 async def get_attachment_download_url_legacy(
     attachment_id: str,
     x_platform: str = Header(..., alias="X-Platform", description="플랫폼 이름"),
-    x_company_id: str = Header(..., alias="X-Company-ID", description="테넌트 식별자"),
+    x_tenant_id: str = Header(..., alias="X-Tenant-ID", description="테넌트 식별자"),
     ticket_id: Optional[str] = Query(None, description="첨부파일이 속한 티켓 ID"),
     conversation_id: Optional[str] = Query(None, description="첨부파일이 속한 대화 ID")
 ):
@@ -425,7 +425,7 @@ async def get_attachment_download_url_legacy(
     return await get_attachment_download_url(
         attachment_id=attachment_id,
         platform=x_platform,
-        company_id=x_company_id,
+        tenant_id=x_tenant_id,
         ticket_id=ticket_id,
         conversation_id=conversation_id
     )

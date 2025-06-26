@@ -65,13 +65,13 @@ class ErrorResponse(BaseModel):
     metadata: ResponseMetadata = Field(default_factory=ResponseMetadata)
 
 
-# 회사 ID 관련 모델
+# 테넌트 ID 관련 모델
 class CompanyIdentifier(BaseModel):
     """
     회사 식별 정보를 포함하는 기본 모델입니다.
     대부분의 요청 모델에서 상속받아 사용합니다.
     """
-    company_id: str = Field(..., description="회사 식별자")
+    tenant_id: str = Field(..., description="회사 식별자")
 
 
 # 블록 타입 열거형

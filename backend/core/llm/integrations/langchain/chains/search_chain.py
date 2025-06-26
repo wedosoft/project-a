@@ -65,7 +65,7 @@ class SearchChain:
         Args:
             input_data: {
                 "ticket_data": Dict[str, Any],
-                "company_id": str,
+                "tenant_id": str,
                 "top_k": int (optional, default=10)
             }
             
@@ -73,14 +73,14 @@ class SearchChain:
             List[Dict[str, Any]]: 유사 티켓 목록
         """
         ticket_data = input_data["ticket_data"]
-        company_id = input_data["company_id"]
+        tenant_id = input_data["tenant_id"]
         top_k = input_data.get("top_k", 10)
         
         try:
             # 기존 검색 쿼리 생성 로직 그대로 재활용
             search_query = self._build_search_query(ticket_data)
             
-            logger.info(f"유사 티켓 검색 시작 (ticket_id: {ticket_data.get('id')}, company_id: {company_id})")
+            logger.info(f"유사 티켓 검색 시작 (ticket_id: {ticket_data.get('id')}, tenant_id: {tenant_id})")
             
             # 기존 임베딩 생성 로직 그대로 재활용 (search_optimizer 활용)
             query_embedding = await self._generate_embedding(search_query)
@@ -90,7 +90,7 @@ class SearchChain:
                 query_embedding=query_embedding,
                 top_k=top_k,
                 doc_type="ticket",
-                company_id=company_id
+                tenant_id=tenant_id
             )
             
             # 기존 결과 처리 로직 그대로 재활용
@@ -206,14 +206,14 @@ class SearchChain:
 
     async def run(self, 
                   ticket_data: Dict[str, Any], 
-                  company_id: str, 
+                  tenant_id: str, 
                   top_k: int = 10) -> List[Dict[str, Any]]:
         """
         검색 체인 실행 (공개 API)
         
         Args:
             ticket_data: 티켓 데이터
-            company_id: 회사 ID
+            tenant_id: 테넌트 ID
             top_k: 반환할 최대 유사 티켓 수
             
         Returns:
@@ -221,7 +221,7 @@ class SearchChain:
         """
         input_data = {
             "ticket_data": ticket_data,
-            "company_id": company_id,
+            "tenant_id": tenant_id,
             "top_k": top_k
         }
         
@@ -229,14 +229,14 @@ class SearchChain:
 
     async def batch_search(self, 
                           tickets: List[Dict[str, Any]], 
-                          company_id: str, 
+                          tenant_id: str, 
                           top_k: int = 10) -> List[List[Dict[str, Any]]]:
         """
         배치 검색 처리 (기존 배치 로직 재활용)
         
         Args:
             tickets: 티켓 데이터 리스트
-            company_id: 회사 ID
+            tenant_id: 테넌트 ID
             top_k: 반환할 최대 유사 티켓 수
             
         Returns:
@@ -246,7 +246,7 @@ class SearchChain:
         for ticket in tickets:
             input_data = {
                 "ticket_data": ticket,
-                "company_id": company_id,
+                "tenant_id": tenant_id,
                 "top_k": top_k
             }
             tasks.append(self._chain.ainvoke(input_data))

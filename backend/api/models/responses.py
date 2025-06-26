@@ -98,9 +98,9 @@ class InitResponse(BaseModel):
 
     # Platform-Neutral 티켓 식별자
     ticket_id: str = Field(description="플랫폼 원본 티켓 ID")
-    company_id: str = Field(description="회사 ID (테넌트 격리)")
+    tenant_id: str = Field(description="테넌트 ID (테넌트 격리)")
     platform: str = Field(description="플랫폼 ID (멀티플랫폼 지원)")
-    platform_neutral_key: str = Field(description="Platform-Neutral 3-Tuple 키 (company_id:platform:original_id)")
+    platform_neutral_key: str = Field(description="Platform-Neutral 3-Tuple 키 (tenant_id:platform:original_id)")
     
     # 티켓 원본 데이터
     ticket_data: Dict[str, Any] = Field(

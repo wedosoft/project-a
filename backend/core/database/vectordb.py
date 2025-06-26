@@ -54,7 +54,7 @@ class VectorDBInterface(ABC):
         pass
 
     @abstractmethod
-    def delete_documents(self, ids: List[str], company_id: Optional[str] = None) -> bool:
+    def delete_documents(self, ids: List[str], tenant_id: Optional[str] = None) -> bool:
         """문서 삭제"""
         pass
 
@@ -63,19 +63,19 @@ class VectorDBInterface(ABC):
         self, 
         query_embedding: List[float], 
         top_k: int, 
-        company_id: str,
+        tenant_id: str,
         platform: Optional[str] = None
     ) -> Dict[str, Any]:
         """벡터 검색 (멀티플랫폼/멀티테넌트 지원)"""
         pass
 
     @abstractmethod
-    def count(self, company_id: Optional[str] = None, platform: Optional[str] = None) -> int:
+    def count(self, tenant_id: Optional[str] = None, platform: Optional[str] = None) -> int:
         """문서 수 반환 (멀티플랫폼/멀티테넌트 지원)"""
         pass
     
     @abstractmethod
-    def get_by_id(self, original_id_value: str, doc_type: Optional[str] = None, company_id: Optional[str] = None, platform: Optional[str] = None) -> Dict[str, Any]:
+    def get_by_id(self, original_id_value: str, doc_type: Optional[str] = None, tenant_id: Optional[str] = None, platform: Optional[str] = None) -> Dict[str, Any]:
         """원본 ID로 단일 문서 조회 (멀티플랫폼/멀티테넌트 지원)"""
         pass
 
@@ -125,8 +125,8 @@ class QdrantAdapter(VectorDBInterface):
             # 필수 인덱스 생성 (성능 및 필터링 향상)
             try:
                 logger.info(f"필수 필드에 대한 인덱스 생성 중...")
-                # 회사 ID 인덱스 생성 (멀티테넌트 지원)
-                self.client.create_payload_index(collection_name=self.collection_name, field_name="company_id", field_schema="keyword")
+                # 테넌트 ID 인덱스 생성 (멀티테넌트 지원)
+                self.client.create_payload_index(collection_name=self.collection_name, field_name="tenant_id", field_schema="keyword")
                 # 플랫폼 인덱스 생성 (멀티플랫폼 지원)
                 self.client.create_payload_index(collection_name=self.collection_name, field_name="platform", field_schema="keyword")
                 # 원본 ID 인덱스 생성
@@ -176,7 +176,7 @@ class QdrantAdapter(VectorDBInterface):
         Args:
             texts: 문서 텍스트 목록
             embeddings: 문서 임베딩 목록
-            metadatas: 문서 메타데이터 목록 (company_id, doc_type, id 필수)
+            metadatas: 문서 메타데이터 목록 (tenant_id, doc_type, id 필수)
             ids: 문서 ID 목록 (원본 숫자 ID, 문자열)
             
         Returns:
@@ -187,12 +187,12 @@ class QdrantAdapter(VectorDBInterface):
         # Platform-Neutral 3-Tuple ID 시스템 유효성 검사 및 정규화
         for i, (metadata, id) in enumerate(zip(metadatas, ids)):
             # Platform-Neutral 3-Tuple 필수 필드 확인
-            if "company_id" not in metadata:
-                raise ValueError(f"메타데이터 #{i}에 company_id가 없습니다")
+            if "tenant_id" not in metadata:
+                raise ValueError(f"메타데이터 #{i}에 tenant_id가 없습니다")
             if "platform" not in metadata:
                 raise ValueError(f"메타데이터 #{i}에 platform이 없습니다")
             if "doc_type" not in metadata or not metadata["doc_type"]:
-                raise ValueError(f"메타데이터 #{i}에 doc_type이 없습니다. Platform-Neutral 3-Tuple: (company_id={metadata.get('company_id')}, platform={metadata.get('platform')}, original_id={id})")
+                raise ValueError(f"메타데이터 #{i}에 doc_type이 없습니다. Platform-Neutral 3-Tuple: (tenant_id={metadata.get('tenant_id')}, platform={metadata.get('platform')}, original_id={id})")
             
             # original_id 정규화: 접두어 제거하여 플랫폼 원본 ID만 사용
             if "original_id" not in metadata:
@@ -233,13 +233,13 @@ class QdrantAdapter(VectorDBInterface):
                 }
                 
                 # Platform-Neutral 3-Tuple 기반 유니크 Qdrant 포인트 ID 생성
-                # (company_id, platform, original_id) 조합으로 결정론적 UUID 생성
-                company_id = metadata["company_id"]
+                # (tenant_id, platform, original_id) 조합으로 결정론적 UUID 생성
+                tenant_id = metadata["tenant_id"]
                 platform = metadata["platform"] 
                 original_id = metadata["original_id"]
                 
                 # 3-tuple 기반 유니크 키 생성
-                unique_key = f"{company_id}:{platform}:{original_id}"
+                unique_key = f"{tenant_id}:{platform}:{original_id}"
                 
                 # 결정론적 UUID 생성 (동일한 3-tuple은 항상 동일한 UUID)
                 from hashlib import md5
@@ -310,20 +310,20 @@ class QdrantAdapter(VectorDBInterface):
             logger.error(f"문서 추가 실패: {e}")
             return False
 
-    def delete_documents(self, ids: List[str], company_id: Optional[str] = None, platform: Optional[str] = None) -> bool:
+    def delete_documents(self, ids: List[str], tenant_id: Optional[str] = None, platform: Optional[str] = None) -> bool:
         """
         Platform-Neutral 3-Tuple 기반 문서 삭제
         
         Args:
             ids: 삭제할 문서의 original_id 목록 (플랫폼 원본 ID)
-            company_id: 회사 ID (필수, 테넌트 격리)
+            tenant_id: 테넌트 ID (필수, 테넌트 격리)
             platform: 플랫폼 ID (필수, 멀티플랫폼 지원)
             
         Returns:
             성공 여부
         """
-        if not company_id:
-            raise ValueError("company_id는 필수입니다 (테넌트 격리)")
+        if not tenant_id:
+            raise ValueError("tenant_id는 필수입니다 (테넌트 격리)")
         if not platform:
             raise ValueError("platform은 필수입니다 (멀티플랫폼 지원)")
             
@@ -342,7 +342,7 @@ class QdrantAdapter(VectorDBInterface):
                     clean_id = clean_id[3:]
                 
                 # 3-tuple 기반 유니크 키 생성
-                unique_key = f"{company_id}:{platform}:{clean_id}"
+                unique_key = f"{tenant_id}:{platform}:{clean_id}"
                 uuid_id = uuid.UUID(md5(unique_key.encode()).hexdigest())
                 uuid_ids.append(str(uuid_id))
             
@@ -350,8 +350,8 @@ class QdrantAdapter(VectorDBInterface):
             filter_condition = Filter(
                 must=[
                     FieldCondition(
-                        key="company_id",
-                        match=MatchValue(value=company_id)
+                        key="tenant_id",
+                        match=MatchValue(value=tenant_id)
                     ),
                     FieldCondition(
                         key="platform", 
@@ -360,7 +360,7 @@ class QdrantAdapter(VectorDBInterface):
                 ]
             )
             
-            # 회사 ID 필터와 문서 ID 목록을 함께 사용하여 삭제 시도
+            # 테넌트 ID 필터와 문서 ID 목록을 함께 사용하여 삭제 시도
             try:
                 self.client.delete(
                     collection_name=self.collection_name,
@@ -371,7 +371,7 @@ class QdrantAdapter(VectorDBInterface):
             except Exception as filter_error:
                 logger.warning(f"필터를 사용한 삭제 실패: {filter_error}, 대체 방법 시도 중...")
                 
-                # 대체 방법: 먼저 해당 문서들을 조회하여 회사 ID 확인 후 삭제
+                # 대체 방법: 먼저 해당 문서들을 조회하여 테넌트 ID 확인 후 삭제
                 for uuid_id in uuid_ids:
                     try:
                         # 문서 조회
@@ -381,8 +381,8 @@ class QdrantAdapter(VectorDBInterface):
                             with_payload=True
                         )
                         
-                        # 문서가 존재하고 회사 ID가 일치하면 삭제
-                        if point and len(point) > 0 and point[0].payload.get("company_id") == company_id:
+                        # 문서가 존재하고 테넌트 ID가 일치하면 삭제
+                        if point and len(point) > 0 and point[0].payload.get("tenant_id") == tenant_id:
                             self.client.delete(
                                 collection_name=self.collection_name,
                                 points_selector=[uuid_id],
@@ -390,7 +390,7 @@ class QdrantAdapter(VectorDBInterface):
                             )
                             logger.info(f"문서 {uuid_id} 삭제 완료")
                         elif point and len(point) > 0:
-                            logger.warning(f"문서 {uuid_id}의 회사 ID가 일치하지 않아 삭제하지 않습니다.")
+                            logger.warning(f"문서 {uuid_id}의 테넌트 ID가 일치하지 않아 삭제하지 않습니다.")
                     except Exception as e:
                         logger.error(f"문서 {uuid_id} 삭제 중 오류 발생: {e}")
             else:
@@ -410,7 +410,7 @@ class QdrantAdapter(VectorDBInterface):
         self, 
         query_embedding: List[float], 
         top_k: int, 
-        company_id: str,
+        tenant_id: str,
         platform: Optional[str] = None,  # 플랫폼 필터링 (freshdesk, zendesk 등)
         doc_type: str = None  # 문서 타입 필터링 (ticket, kb)
     ) -> Dict[str, Any]:
@@ -420,19 +420,19 @@ class QdrantAdapter(VectorDBInterface):
         Args:
             query_embedding: 쿼리 임베딩
             top_k: 반환할 최대 문서 수
-            company_id: 회사 ID (필수)
+            tenant_id: 테넌트 ID (필수)
             platform: 플랫폼 필터 (선택사항, "freshdesk", "zendesk" 등)
             doc_type: 문서 타입 필터 (선택사항, "ticket" 또는 "kb")
             
         Returns:
             검색 결과 딕셔너리
         """
-        if not company_id:
-            raise ValueError("company_id는 필수 매개변수입니다.")
+        if not tenant_id:
+            raise ValueError("tenant_id는 필수 매개변수입니다.")
             
-        # 필터 조건 구성 - company_id는 필수
+        # 필터 조건 구성 - tenant_id는 필수
         filter_conditions = [
-            FieldCondition(key="company_id", match=MatchValue(value=company_id))
+            FieldCondition(key="tenant_id", match=MatchValue(value=tenant_id))
         ]
         
         # 플랫폼 필터 추가 (멀티플랫폼 지원)
@@ -443,16 +443,16 @@ class QdrantAdapter(VectorDBInterface):
         
         # doc_type 필드의 인덱스 문제를 해결하기 위해 메모리에서 필터링 수행
         use_doc_type_filter = doc_type is not None
-        logger.info(f"검색 요청: company_id={company_id}, platform={platform}, doc_type={doc_type}, top_k={top_k}")
+        logger.info(f"검색 요청: tenant_id={tenant_id}, platform={platform}, doc_type={doc_type}, top_k={top_k}")
         
-        # 기본 검색은 company_id와 platform 필터로 수행
+        # 기본 검색은 tenant_id와 platform 필터로 수행
         search_filter = Filter(must=filter_conditions)
         
         try:
             # doc_type 필터링이 필요한 경우 더 많은 결과를 요청하여 메모리 내 필터링 수행
             # 더 많은 결과를 가져와 필터링하기 위해 배수를 10으로 설정
             fetch_limit = top_k * 10 if use_doc_type_filter else top_k
-            logger.info(f"Qdrant 검색 시도 (company_id={company_id}, platform={platform}, 검색 크기={fetch_limit})")
+            logger.info(f"Qdrant 검색 시도 (tenant_id={tenant_id}, platform={platform}, 검색 크기={fetch_limit})")
             
             search_results = self.client.search(
                 collection_name=self.collection_name,
@@ -628,12 +628,12 @@ class QdrantAdapter(VectorDBInterface):
             "skipped_count": skipped_count if use_doc_type_filter else 0
         }
 
-    def count(self, company_id: Optional[str] = None, platform: Optional[str] = None) -> int:
+    def count(self, tenant_id: Optional[str] = None, platform: Optional[str] = None) -> int:
         """
         문서 수 반환 (멀티플랫폼/멀티테넌트 지원)
         
         Args:
-            company_id: 특정 회사의 문서만 카운트할 경우 회사 ID
+            tenant_id: 특정 회사의 문서만 카운트할 경우 테넌트 ID
             platform: 특정 플랫폼의 문서만 카운트할 경우 플랫폼 이름
             
         Returns:
@@ -642,9 +642,9 @@ class QdrantAdapter(VectorDBInterface):
         try:
             # 필터 조건 구성
             filter_conditions = []
-            if company_id:
+            if tenant_id:
                 filter_conditions.append(
-                    FieldCondition(key="company_id", match=MatchValue(value=company_id))
+                    FieldCondition(key="tenant_id", match=MatchValue(value=tenant_id))
                 )
             if platform:
                 filter_conditions.append(
@@ -705,8 +705,8 @@ class QdrantAdapter(VectorDBInterface):
                             payload = point.payload
                             matches = True
                             
-                            # company_id 필터링
-                            if company_id and payload.get("company_id") != company_id:
+                            # tenant_id 필터링
+                            if tenant_id and payload.get("tenant_id") != tenant_id:
                                 matches = False
                             
                             # platform 필터링
@@ -724,8 +724,8 @@ class QdrantAdapter(VectorDBInterface):
                             break
                     
                     filter_desc = []
-                    if company_id:
-                        filter_desc.append(f"company_id='{company_id}'")
+                    if tenant_id:
+                        filter_desc.append(f"tenant_id='{tenant_id}'")
                     if platform:
                         filter_desc.append(f"platform='{platform}'")
                     
@@ -739,14 +739,14 @@ class QdrantAdapter(VectorDBInterface):
             logger.error(f"문서 수 카운트 실패: {e}")
             return 0
 
-    def get_by_id(self, original_id_value: str, doc_type: Optional[str] = None, company_id: Optional[str] = None, platform: Optional[str] = None) -> Dict[str, Any]:
+    def get_by_id(self, original_id_value: str, doc_type: Optional[str] = None, tenant_id: Optional[str] = None, platform: Optional[str] = None) -> Dict[str, Any]:
         """
         원본 ID로 단일 문서 조회 (멀티플랫폼/멀티테넌트 지원)
 
         Args:
             original_id_value: 조회할 문서의 원본 ID (Freshdesk 원본 숫자 ID의 문자열 형태, 예: "12345")
             doc_type: 문서 타입 필터 ("ticket" 또는 "kb", None이거나 빈 문자열이면 예외 발생)
-            company_id: 회사 ID 필터 (선택 사항, None이면 "default" 사용)
+            tenant_id: 테넌트 ID 필터 (선택 사항, None이면 "default" 사용)
             platform: 플랫폼 필터 (선택 사항, "freshdesk", "zendesk" 등)
 
         Returns:
@@ -760,15 +760,15 @@ class QdrantAdapter(VectorDBInterface):
             logger.error("get_by_id 호출 시 doc_type이 반드시 명시되어야 합니다. (ticket 또는 kb)")
             raise ValueError("get_by_id 호출 시 doc_type 파라미터는 필수입니다. (예: doc_type='ticket' 또는 doc_type='kb')")
         try:
-            # company_id가 None이면 "default"로 설정
-            search_company_id = company_id if company_id else "default"
-            logger.info(f"문서 조회 시작 (original_id: {original_id_value}, doc_type: {doc_type}, company_id: {search_company_id}, platform: {platform})")
+            # tenant_id가 None이면 "default"로 설정
+            search_tenant_id = tenant_id if tenant_id else "default"
+            logger.info(f"문서 조회 시작 (original_id: {original_id_value}, doc_type: {doc_type}, tenant_id: {search_tenant_id}, platform: {platform})")
             
-            # 필터 조건: company_id, original_id, doc_type 필수, platform 선택사항
+            # 필터 조건: tenant_id, original_id, doc_type 필수, platform 선택사항
             filter_conditions = [
                 FieldCondition(
-                    key="company_id",
-                    match=MatchValue(value=search_company_id)
+                    key="tenant_id",
+                    match=MatchValue(value=search_tenant_id)
                 ),
                 FieldCondition(
                     key="original_id",
@@ -803,7 +803,7 @@ class QdrantAdapter(VectorDBInterface):
             if scroll_result and scroll_result[0]:
                 point = scroll_result[0][0]
                 payload = point.payload if hasattr(point, 'payload') else {}
-                logger.info(f"검색 결과 - ID: {point.id}, original_id='{payload.get('original_id')}', doc_type='{payload.get('doc_type')}', type='{payload.get('type')}', company_id='{payload.get('company_id')}'")
+                logger.info(f"검색 결과 - ID: {point.id}, original_id='{payload.get('original_id')}', doc_type='{payload.get('doc_type')}', type='{payload.get('type')}', tenant_id='{payload.get('tenant_id')}'")
                 document_type = payload.get("doc_type", "") or payload.get("type", "")
                 return {
                     "id": payload.get("original_id", ""),
@@ -812,7 +812,7 @@ class QdrantAdapter(VectorDBInterface):
                     "embedding": point.vector if hasattr(point, 'vector') else None
                 }
             else:
-                logger.warning(f"원본 ID '{original_id_value}', 타입 '{doc_type}', company_id '{search_company_id}'으로 문서를 찾을 수 없습니다.")
+                logger.warning(f"원본 ID '{original_id_value}', 타입 '{doc_type}', tenant_id '{search_tenant_id}'으로 문서를 찾을 수 없습니다.")
                 logger.warning(f"적용된 필터 조건 (문자열): {filter_log_str}")
                 return {}
         except Exception as e:

@@ -27,7 +27,7 @@ from core.ingest.storage import sanitize_metadata
 from core.migration_layer import store_integrated_object_with_migration
 from core.ingest.validator import load_status_mappings, save_status_mappings
 from core.platforms.freshdesk.fetcher import (
-    extract_company_id_from_domain,
+    extract_tenant_id_from_domain,
     fetch_kb_articles,
     fetch_tickets,
 )
@@ -51,7 +51,7 @@ PROCESS_ATTACHMENTS = True  # 첨부파일 처리 여부 설정
 
 def validate_runtime_customer_credentials(domain: str, api_key: str, platform: str = "freshdesk") -> str:
     """
-    런타임 고객 인증 정보를 검증하고 company_id를 반환합니다.
+    런타임 고객 인증 정보를 검증하고 tenant_id를 반환합니다.
     
     Args:
         domain: 고객 도메인 (예: "example.freshdesk.com")
@@ -59,7 +59,7 @@ def validate_runtime_customer_credentials(domain: str, api_key: str, platform: s
         platform: 플랫폼 식별자 (기본값: "freshdesk")
         
     Returns:
-        str: 추출된 company_id
+        str: 추출된 tenant_id
         
     Raises:
         ValueError: 인증 정보가 유효하지 않은 경우
@@ -67,17 +67,17 @@ def validate_runtime_customer_credentials(domain: str, api_key: str, platform: s
     if not domain or not api_key:
         raise ValueError("도메인과 API 키는 필수입니다.")
     
-    # 도메인에서 company_id 추출
-    company_id = extract_company_id_from_domain(domain)
-    if not company_id:
+    # 도메인에서 tenant_id 추출
+    tenant_id = extract_tenant_id_from_domain(domain)
+    if not tenant_id:
         raise ValueError(f"유효한 {platform} 도메인이 아닙니다: {domain}")
     
     # API 키 형식 검증 (기본적인 검증)
     if len(api_key) < 10:
         raise ValueError("API 키가 너무 짧습니다.")
     
-    logger.info(f"런타임 고객 인증 검증 완료: {company_id} ({platform})")
-    return company_id
+    logger.info(f"런타임 고객 인증 검증 완료: {tenant_id} ({platform})")
+    return tenant_id
 
 def create_runtime_customer_context(domain: str, api_key: str, platform: str = "freshdesk") -> Dict[str, str]:
     """
@@ -91,10 +91,10 @@ def create_runtime_customer_context(domain: str, api_key: str, platform: str = "
     Returns:
         Dict[str, str]: 고객 컨텍스트 정보
     """
-    company_id = validate_runtime_customer_credentials(domain, api_key, platform)
+    tenant_id = validate_runtime_customer_credentials(domain, api_key, platform)
     
     return {
-        "company_id": company_id,
+        "tenant_id": tenant_id,
         "domain": domain,
         "api_key": api_key,
         "platform": platform,
@@ -167,7 +167,7 @@ def clear_checkpoints(data_dir: str) -> None:
 # 메인 수집 함수
 
 async def ingest(
-    company_id: str,
+    tenant_id: str,
     platform: str = "freshdesk",
     incremental: bool = True,
     purge: bool = False,
@@ -179,7 +179,7 @@ async def ingest(
     데이터 수집 및 처리를 수행합니다.
     
     Args:
-        company_id: 회사 식별자
+        tenant_id: 회사 식별자
         platform: 플랫폼 식별자
         incremental: 증분 수집 여부
         purge: 기존 데이터 삭제 여부
@@ -190,11 +190,11 @@ async def ingest(
     Returns:
         Dict[str, Any]: 처리 결과
     """
-    logger.info(f"데이터 수집 시작: {company_id} ({platform})")
+    logger.info(f"데이터 수집 시작: {tenant_id} ({platform})")
     start_time = time.time()
     
     result = {
-        "company_id": company_id,
+        "tenant_id": tenant_id,
         "platform": platform,
         "start_time": get_kst_time(),
         "tickets_processed": 0,
@@ -207,14 +207,14 @@ async def ingest(
     try:
         # 멀티테넌트 데이터베이스 연결
         from core.database.database import get_database
-        db = get_database(company_id, platform)
+        db = get_database(tenant_id, platform)
         
         if purge:
             # 기존 데이터 삭제
             logger.info("기존 데이터 삭제 중...")
             cursor = db.connection.cursor()
-            cursor.execute("DELETE FROM integrated_objects WHERE company_id = ? AND platform = ?", 
-                         (company_id, platform))
+            cursor.execute("DELETE FROM integrated_objects WHERE tenant_id = ? AND platform = ?", 
+                         (tenant_id, platform))
             db.connection.commit()
             logger.info("기존 데이터 삭제 완료")
         
@@ -223,7 +223,7 @@ async def ingest(
             progress_callback({"stage": "tickets", "progress": 0})
         
         logger.info("티켓 수집 시작...")
-        tickets = await fetch_tickets(company_id, platform=platform)
+        tickets = await fetch_tickets(tenant_id, platform=platform)
         logger.info(f"수집된 티켓 수: {len(tickets)}")
         
         for i, ticket in enumerate(tickets):
@@ -231,12 +231,12 @@ async def ingest(
                 # 통합 티켓 객체 생성 및 저장
                 integrated_ticket = create_integrated_ticket_object(
                     ticket=ticket,
-                    company_id=company_id
+                    tenant_id=tenant_id
                 )
                 
                 store_integrated_object_with_migration(
                     integrated_object=integrated_ticket, 
-                    company_id=company_id, 
+                    tenant_id=tenant_id, 
                     platform=platform
                 )
                 
@@ -255,7 +255,7 @@ async def ingest(
             progress_callback({"stage": "articles", "progress": 0})
         
         logger.info("KB 문서 수집 시작...")
-        articles = await fetch_kb_articles(company_id, platform=platform)
+        articles = await fetch_kb_articles(tenant_id, platform=platform)
         logger.info(f"수집된 KB 문서 수: {len(articles)}")
         
         for i, article in enumerate(articles):
@@ -263,12 +263,12 @@ async def ingest(
                 # 통합 문서 객체 생성 및 저장
                 integrated_article = create_integrated_article_object(
                     article=article,
-                    company_id=company_id
+                    tenant_id=tenant_id
                 )
                 
                 store_integrated_object_with_migration(
                     integrated_object=integrated_article, 
-                    company_id=company_id, 
+                    tenant_id=tenant_id, 
                     platform=platform
                 )
                 
@@ -289,7 +289,7 @@ async def ingest(
             
             logger.info("요약 생성 시작...")
             summary_result = await generate_and_store_summaries(
-                company_id=company_id,
+                tenant_id=tenant_id,
                 platform=platform,
                 force_update=purge
             )
@@ -305,7 +305,7 @@ async def ingest(
             
             logger.info("임베딩 생성 시작...")
             embedding_result = await sync_summaries_to_vector_db(
-                company_id=company_id,
+                tenant_id=tenant_id,
                 platform=platform
             )
             result["embeddings_created"] = embedding_result.get("processed_count", 0)
@@ -339,7 +339,7 @@ async def ingest(
 # 요약 생성 함수
 
 async def generate_and_store_summaries(
-    company_id: str,
+    tenant_id: str,
     platform: str = "freshdesk",
     force_update: bool = False
 ) -> Dict[str, Any]:
@@ -347,14 +347,14 @@ async def generate_and_store_summaries(
     통합 객체에서 직접 요약을 생성하고 저장합니다.
     
     Args:
-        company_id: 회사 식별자
+        tenant_id: 회사 식별자
         platform: 플랫폼 식별자
         force_update: 기존 요약 강제 업데이트 여부
         
     Returns:
         Dict[str, Any]: 처리 결과
     """
-    logger.info(f"LLM 요약 생성 시작 (company_id: {company_id}, platform: {platform})")
+    logger.info(f"LLM 요약 생성 시작 (tenant_id: {tenant_id}, platform: {platform})")
     start_time = time.time()
     
     result = {
@@ -368,7 +368,7 @@ async def generate_and_store_summaries(
     
     # 멀티테넌트 데이터베이스 연결
     from core.database.database import get_database
-    db = get_database(company_id, platform)
+    db = get_database(tenant_id, platform)
     
     try:
         cursor = db.connection.cursor()
@@ -379,20 +379,20 @@ async def generate_and_store_summaries(
             cursor.execute("""
                 SELECT original_id, object_type, original_data, integrated_content, tenant_metadata 
                 FROM integrated_objects 
-                WHERE company_id = ? AND platform = ? 
+                WHERE tenant_id = ? AND platform = ? 
                 AND object_type IN ('integrated_ticket', 'integrated_article')
                 AND integrated_content IS NOT NULL AND integrated_content != ''
-            """, (company_id, platform))
+            """, (tenant_id, platform))
         else:
             # 일반 모드: 요약이 없는 것만
             cursor.execute("""
                 SELECT original_id, object_type, original_data, integrated_content, tenant_metadata 
                 FROM integrated_objects 
-                WHERE company_id = ? AND platform = ? 
+                WHERE tenant_id = ? AND platform = ? 
                 AND object_type IN ('integrated_ticket', 'integrated_article')
                 AND (summary IS NULL OR summary = '')
                 AND integrated_content IS NOT NULL AND integrated_content != ''
-            """, (company_id, platform))
+            """, (tenant_id, platform))
         
         rows = cursor.fetchall()
         logger.info(f"처리할 통합 객체 수: {len(rows)}개")
@@ -481,8 +481,8 @@ async def generate_and_store_summaries(
                 cursor.execute("""
                     UPDATE integrated_objects 
                     SET summary = ? 
-                    WHERE company_id = ? AND platform = ? AND object_type = ? AND original_id = ?
-                """, (summary, company_id, platform, object_type, original_id))
+                    WHERE tenant_id = ? AND platform = ? AND object_type = ? AND original_id = ?
+                """, (summary, tenant_id, platform, object_type, original_id))
                 db.connection.commit()
                 
                 result["success_count"] += 1
@@ -516,7 +516,7 @@ async def generate_and_store_summaries(
 # 벡터 DB 동기화 함수
 
 async def sync_summaries_to_vector_db(
-    company_id: str, 
+    tenant_id: str, 
     platform: str = "freshdesk",
     collection_name: str = COLLECTION_NAME
 ) -> Dict[str, Any]:
@@ -524,14 +524,14 @@ async def sync_summaries_to_vector_db(
     통합 객체의 요약을 벡터 데이터베이스에 동기화합니다.
     
     Args:
-        company_id: 회사 식별자
+        tenant_id: 회사 식별자
         platform: 플랫폼 식별자
         collection_name: 벡터 DB 컬렉션 이름
         
     Returns:
         Dict[str, Any]: 처리 결과
     """
-    logger.info(f"벡터 DB 동기화 시작 (company_id: {company_id}, platform: {platform})")
+    logger.info(f"벡터 DB 동기화 시작 (tenant_id: {tenant_id}, platform: {platform})")
     start_time = time.time()
     
     result = {
@@ -543,7 +543,7 @@ async def sync_summaries_to_vector_db(
     
     # 멀티테넌트 데이터베이스 연결
     from core.database.database import get_database
-    db = get_database(company_id, platform)
+    db = get_database(tenant_id, platform)
     
     try:
         cursor = db.connection.cursor()
@@ -552,11 +552,11 @@ async def sync_summaries_to_vector_db(
         cursor.execute("""
             SELECT original_id, object_type, original_data, integrated_content, summary, tenant_metadata
             FROM integrated_objects 
-            WHERE company_id = ? AND platform = ? 
+            WHERE tenant_id = ? AND platform = ? 
             AND object_type IN ('integrated_ticket', 'integrated_article')
             AND summary IS NOT NULL AND summary != ''
             AND integrated_content IS NOT NULL AND integrated_content != ''
-        """, (company_id, platform))
+        """, (tenant_id, platform))
         
         rows = cursor.fetchall()
         logger.info(f"벡터화할 객체 수: {len(rows)}개")
@@ -578,7 +578,7 @@ async def sync_summaries_to_vector_db(
                 
                 # 벡터화용 문서 생성
                 doc_metadata = sanitize_metadata({
-                    "company_id": company_id,
+                    "tenant_id": tenant_id,
                     "platform": platform,
                     "object_type": object_type,
                     "original_id": original_id,
@@ -589,7 +589,7 @@ async def sync_summaries_to_vector_db(
                 document = {
                     "content": summary,
                     "metadata": doc_metadata,
-                    "id": f"{company_id}_{platform}_{object_type}_{original_id}"
+                    "id": f"{tenant_id}_{platform}_{object_type}_{original_id}"
                 }
                 
                 documents_to_embed.append(document)

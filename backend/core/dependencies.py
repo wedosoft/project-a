@@ -18,27 +18,27 @@ from core.utils import setup_logger
 logger = setup_logger(__name__)
 
 
-async def get_company_id(
-    x_company_id: Optional[str] = Header(None, alias="X-Company-ID")
+async def get_tenant_id(
+    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID")
 ) -> str:
     """
-    요청 헤더에서 회사 ID를 추출합니다.
+    요청 헤더에서 테넌트 ID를 추출합니다.
     
     Args:
-        x_company_id: X-Company-ID 헤더 값
+        x_tenant_id: X-Tenant-ID 헤더 값
         
     Returns:
-        str: 회사 ID
+        str: 테넌트 ID
         
     Raises:
-        HTTPException: 회사 ID가 누락된 경우 400 오류 발생
+        HTTPException: 테넌트 ID가 누락된 경우 400 오류 발생
     """
-    if not x_company_id:
+    if not x_tenant_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="X-Company-ID 헤더가 필요합니다."
+            detail="X-Tenant-ID 헤더가 필요합니다."
         )
-    return x_company_id
+    return x_tenant_id
 
 
 async def get_api_key(
@@ -67,28 +67,28 @@ async def get_api_key(
     return x_api_key
 
 
-async def validate_company_access(
-    company_id: str = Depends(get_company_id),
+async def validate_tenant_access(
+    tenant_id: str = Depends(get_tenant_id),
     api_key: str = Depends(get_api_key)
 ) -> Dict[str, str]:
     """
-    API 키가 특정 회사에 접근할 권한이 있는지 확인합니다.
+    API 키가 특정 테넌트에 접근할 권한이 있는지 확인합니다.
     
     Args:
-        company_id: 회사 ID
+        tenant_id: 테넌트 ID
         api_key: API 키
         
     Returns:
-        Dict[str, str]: 회사 ID와 API 키를 포함한 딕셔너리
+        Dict[str, str]: 테넌트 ID와 API 키를 포함한 딕셔너리
         
     Raises:
         HTTPException: 접근 권한이 없는 경우 403 오류 발생
     """
-    # TODO: API 키와 회사 ID의 매핑 확인 로직 구현
+    # TODO: API 키와 테넌트 ID의 매핑 확인 로직 구현
     
     # 현재는 간단한 검증만 수행 (실제로는 데이터베이스나 캐시에서 확인해야 함)
     auth_info = {
-        "company_id": company_id,
+        "tenant_id": tenant_id,
         "api_key": api_key
     }
     
@@ -161,7 +161,7 @@ async def get_pagination_params(
 
 
 async def get_ticket_permissions(
-    auth_info: Dict[str, str] = Depends(validate_company_access),
+    auth_info: Dict[str, str] = Depends(validate_tenant_access),
     ticket_id: Optional[int] = None
 ) -> Dict[str, Any]:
     """
@@ -186,3 +186,41 @@ async def get_ticket_permissions(
     # 실제 환경에서는 역할 기반 접근 제어 구현
     
     return permissions
+
+
+# =================================================================
+# 호환성 함수들 (레거시 코드 지원)
+# =================================================================
+
+async def get_company_id(
+    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID"),
+    x_company_id: Optional[str] = Header(None, alias="X-Company-ID")  # 레거시 호환
+) -> str:
+    """
+    레거시 호환성을 위한 company_id 함수
+    내부적으로 get_tenant_id를 호출합니다.
+    """
+    # 새 헤더를 우선하고, 없으면 레거시 헤더 확인
+    tenant_id = x_tenant_id or x_company_id
+    
+    if not tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="X-Tenant-ID 또는 X-Company-ID 헤더가 필요합니다."
+        )
+    return tenant_id
+
+async def validate_company_access(
+    tenant_id: str = Depends(get_company_id),  # 내부적으로 새 로직 사용
+    api_key: str = Depends(get_api_key)
+) -> Dict[str, str]:
+    """
+    레거시 호환성을 위한 company 접근 검증 함수
+    내부적으로 validate_tenant_access를 호출합니다.
+    """
+    # validate_tenant_access는 이미 async 함수이므로 직접 호출
+    auth_info = {
+        "tenant_id": tenant_id,
+        "api_key": api_key
+    }
+    return auth_info

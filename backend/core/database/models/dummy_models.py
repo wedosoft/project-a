@@ -11,7 +11,7 @@ class Ticket(BaseModel):
     """티켓 정보 (더미)"""
     __tablename__ = 'tickets'
     
-    company_id = Column(Integer, ForeignKey('companies.id'), nullable=False)
+    tenant_id = Column(Integer, ForeignKey('companies.id'), nullable=False)
     freshdesk_id = Column(Integer, nullable=False)
     subject = Column(String, nullable=False)
     description = Column(Text)
@@ -26,7 +26,7 @@ class Ticket(BaseModel):
     summaries = relationship("Summary", back_populates="ticket")
     
     __table_args__ = (
-        Index('idx_tickets_company_freshdesk', 'company_id', 'freshdesk_id', unique=True),
+        Index('idx_tickets_company_freshdesk', 'tenant_id', 'freshdesk_id', unique=True),
     )
 
 

@@ -28,8 +28,8 @@ class IntegratedObject(MultiTenantModel):
     
     # 인덱스
     __table_args__ = (
-        Index('idx_integrated_unique', 'company_id', 'platform', 'object_type', 'original_id', unique=True),
+        Index('idx_integrated_unique', 'tenant_id', 'platform', 'object_type', 'original_id', unique=True),
         Index('idx_integrated_type_created', 'object_type', 'created_at'),
         Index('idx_integrated_summary_status', 'summary_generated_at'),
-        Index('idx_integrated_tenant', 'company_id', 'platform'),
+        Index('idx_integrated_tenant', 'tenant_id', 'platform'),
     )

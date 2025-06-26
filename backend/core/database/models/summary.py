@@ -35,6 +35,6 @@ class Summary(MultiTenantModel):
     
     # 인덱스 및 제약조건
     __table_args__ = (
-        Index('idx_summary_original', 'company_id', 'platform', 'object_type', 'original_object_id'),
-        Index('idx_summary_tenant', 'company_id', 'platform'),
+        Index('idx_summary_original', 'tenant_id', 'platform', 'object_type', 'original_object_id'),
+        Index('idx_summary_tenant', 'tenant_id', 'platform'),
     )

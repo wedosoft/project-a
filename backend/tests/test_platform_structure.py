@@ -39,7 +39,7 @@ async def test_platform_factory():
         config = {
             "domain": os.getenv("FRESHDESK_DOMAIN", "test.freshdesk.com"),
             "api_key": os.getenv("FRESHDESK_API_KEY", "test_key"),
-            "company_id": os.getenv("COMPANY_ID", "test_company")
+            "tenant_id": os.getenv("TENANT_ID", "test_company")
         }
         
         freshdesk_adapter = PlatformFactory.create_adapter("freshdesk", config)
@@ -68,11 +68,11 @@ async def test_freshdesk_collector():
         config = {
             "domain": os.getenv("FRESHDESK_DOMAIN", "test.freshdesk.com"),
             "api_key": os.getenv("FRESHDESK_API_KEY", "test_key"),
-            "company_id": os.getenv("COMPANY_ID", "test_company")
+            "tenant_id": os.getenv("TENANT_ID", "test_company")
         }
         
         collector = FreshdeskCollector(config, "test_output")
-        logger.info(f"Freshdesk 수집기 생성 성공: {collector.company_id}")
+        logger.info(f"Freshdesk 수집기 생성 성공: {collector.tenant_id}")
         
         # async context manager 테스트 (실제 API 호출은 하지 않음)
         # async with collector as c:

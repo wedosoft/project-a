@@ -23,7 +23,7 @@ InitChain = InitParallelChain
 async def execute_init_parallel_chain(
     ticket_data: dict,
     qdrant_client,
-    company_id: str,
+    tenant_id: str,
     llm_router=None,
     **kwargs
 ):
@@ -36,7 +36,7 @@ async def execute_init_parallel_chain(
     return await chain.execute_init_parallel_chain(
         ticket_data=ticket_data,
         qdrant_client=qdrant_client,
-        company_id=company_id,
+        tenant_id=tenant_id,
         **kwargs
     )
 

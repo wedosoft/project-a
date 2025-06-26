@@ -13,7 +13,7 @@
 Features:
 - 기존 retriever.py 로직 완전 재활용
 - Step 2 GPU 임베딩 통합 활용
-- 멀티테넌트 company_id 자동 적용
+- 멀티테넌트 tenant_id 자동 적용
 - 성능 최적화 및 캐싱
 """
 import logging
@@ -55,7 +55,7 @@ class HybridSearchManager:
         
     async def hybrid_search(self,
                            query: str,
-                           company_id: str,
+                           tenant_id: str,
                            platform: str = "freshdesk",
                            top_k: int = 10,
                            doc_types: Optional[List[str]] = None,
@@ -71,7 +71,7 @@ class HybridSearchManager:
         
         Args:
             query: 검색 쿼리 (자연어)
-            company_id: 회사 ID (멀티테넌트)
+            tenant_id: 테넌트 ID (멀티테넌트)
             platform: 플랫폼 ("freshdesk", "zendesk" 등)
             top_k: 반환할 최대 문서 수
             doc_types: 검색할 문서 타입 ["ticket", "kb"]
@@ -89,7 +89,7 @@ class HybridSearchManager:
         try:
             logger.info(
                 f"하이브리드 검색 시작: query='{query[:50]}...', "
-                f"company_id={company_id}, platform={platform}"
+                f"tenant_id={tenant_id}, platform={platform}"
             )
             
             # 1. 쿼리 분석 및 필터 자동 추출 (의도 분석 포함)
@@ -111,7 +111,7 @@ class HybridSearchManager:
             # 4. 하이브리드 검색 실행
             search_results = await self._execute_hybrid_search(
                 query_embedding=query_embedding,
-                company_id=company_id,
+                tenant_id=tenant_id,
                 platform=platform,
                 doc_types=doc_types or ["ticket", "kb"],
                 unified_filters=unified_filters,
@@ -354,7 +354,7 @@ class HybridSearchManager:
     
     async def _execute_hybrid_search(self,
                                    query_embedding: List[float],
-                                   company_id: str,
+                                   tenant_id: str,
                                    platform: str,
                                    doc_types: List[str],
                                    unified_filters: Dict[str, Any],
@@ -363,7 +363,7 @@ class HybridSearchManager:
         """
         Platform-Neutral 하이브리드 검색 핵심 실행 로직
         
-        Platform-Neutral 3-Tuple (company_id, platform, original_id) 기반으로
+        Platform-Neutral 3-Tuple (tenant_id, platform, original_id) 기반으로
         벡터 검색과 메타데이터 필터링을 결합합니다.
         """
         all_results = {
@@ -376,20 +376,20 @@ class HybridSearchManager:
         try:
             # Platform-Neutral 검색 실행
             for doc_type in doc_types:
-                logger.debug(f"Platform-Neutral 검색 중: doc_type={doc_type}, company_id={company_id}, platform={platform}")
+                logger.debug(f"Platform-Neutral 검색 중: doc_type={doc_type}, tenant_id={tenant_id}, platform={platform}")
                 
                 # Platform-Neutral Vector DB 검색 (90% 기존 코드 재활용)
                 type_results = self.vector_db.search(
                     query_embedding=query_embedding,
                     top_k=top_k * 2,  # 커스텀 필터링을 위해 더 많이 가져옴
-                    company_id=company_id,
+                    tenant_id=tenant_id,
                     platform=platform,
                     doc_type=doc_type
                 )
                 
                 # Platform-Neutral 커스텀 필드 필터링 적용
                 filtered_results = self._apply_platform_neutral_filters(
-                    type_results, unified_filters, min_similarity, company_id, platform
+                    type_results, unified_filters, min_similarity, tenant_id, platform
                 )
                 
                 # Platform-Neutral 결과 통합
@@ -423,19 +423,19 @@ class HybridSearchManager:
                                        search_results: Dict[str, Any],
                                        unified_filters: Dict[str, Any],
                                        min_similarity: float,
-                                       company_id: str,
+                                       tenant_id: str,
                                        platform: str) -> Dict[str, Any]:
         """
         Platform-Neutral 3-Tuple 기반 검색 결과 필터링
         
         기존 커스텀 필드 필터링을 platform-neutral 구조로 개선.
-        모든 필터링이 (company_id, platform, original_id) 기반으로 동작합니다.
+        모든 필터링이 (tenant_id, platform, original_id) 기반으로 동작합니다.
         
         Args:
             search_results: 벡터 검색 결과
             unified_filters: 통합된 필터 조건
             min_similarity: 최소 유사도 임계값
-            company_id: 회사 ID (테넌트 격리)
+            tenant_id: 테넌트 ID (테넌트 격리)
             platform: 플랫폼 ID (멀티플랫폼 지원)
             
         Returns:
@@ -445,7 +445,7 @@ class HybridSearchManager:
             return search_results
         
         # Platform-Neutral 필터링 준비
-        logger.debug(f"Platform-Neutral 필터링 시작 (company_id={company_id}, platform={platform})")
+        logger.debug(f"Platform-Neutral 필터링 시작 (tenant_id={tenant_id}, platform={platform})")
         
         filtered_docs = []
         filtered_metas = []
@@ -462,13 +462,13 @@ class HybridSearchManager:
             documents, metadatas, ids, distances
         )):
             # Platform-Neutral 3-Tuple 검증
-            doc_company_id = meta.get("company_id", "")
+            doc_tenant_id = meta.get("tenant_id", "")
             doc_platform = meta.get("platform", "")
             doc_original_id = meta.get("original_id", "")
             
             # 테넌트 및 플랫폼 격리 확인
-            if doc_company_id != company_id:
-                logger.debug(f"company_id 불일치로 문서 제외: {doc_company_id} != {company_id}")
+            if doc_tenant_id != tenant_id:
+                logger.debug(f"tenant_id 불일치로 문서 제외: {doc_tenant_id} != {tenant_id}")
                 continue
             if doc_platform != platform:
                 logger.debug(f"platform 불일치로 문서 제외: {doc_platform} != {platform}")
@@ -482,7 +482,7 @@ class HybridSearchManager:
             
             # Platform-Neutral 커스텀 필드 매칭 확인
             match_result = self._check_platform_neutral_match(
-                meta, unified_filters, company_id, platform, doc_original_id
+                meta, unified_filters, tenant_id, platform, doc_original_id
             )
             
             if match_result["matches"]:
@@ -495,17 +495,17 @@ class HybridSearchManager:
                 platform_neutral_matches.append({
                     "document_id": doc_id,
                     "original_id": doc_original_id,
-                    "company_id": doc_company_id,
+                    "tenant_id": doc_tenant_id,
                     "platform": doc_platform,
                     "matched_fields": match_result["matched_fields"],
                     "match_score": match_result["match_score"],
                     "similarity_score": similarity,
-                    "platform_neutral_key": f"{doc_company_id}:{doc_platform}:{doc_original_id}"
+                    "platform_neutral_key": f"{doc_tenant_id}:{doc_platform}:{doc_original_id}"
                 })
         
         logger.info(
             f"Platform-Neutral 필터링 완료: {len(documents)} -> {len(filtered_docs)}개 문서 "
-            f"(company_id={company_id}, platform={platform})"
+            f"(tenant_id={tenant_id}, platform={platform})"
         )
         
         return {
@@ -517,7 +517,7 @@ class HybridSearchManager:
             "filtering_summary": {
                 "total_input": len(documents),
                 "total_output": len(filtered_docs),
-                "company_id": company_id,
+                "tenant_id": tenant_id,
                 "platform": platform,
                 "min_similarity": min_similarity
             }
@@ -526,7 +526,7 @@ class HybridSearchManager:
     def _check_platform_neutral_match(self,
                                      metadata: Dict[str, Any],
                                      unified_filters: Dict[str, Any],
-                                     company_id: str,
+                                     tenant_id: str,
                                      platform: str,
                                      original_id: str) -> Dict[str, Any]:
         """
@@ -538,7 +538,7 @@ class HybridSearchManager:
         Args:
             metadata: 문서 메타데이터
             unified_filters: 필터 조건
-            company_id: 회사 ID
+            tenant_id: 테넌트 ID
             platform: 플랫폼 ID
             original_id: 원본 문서 ID
             
@@ -546,7 +546,7 @@ class HybridSearchManager:
             Platform-Neutral 매칭 결과 정보
         """
         # Platform-Neutral 컨텍스트 기반 매칭
-        platform_neutral_key = f"{company_id}:{platform}:{original_id}"
+        platform_neutral_key = f"{tenant_id}:{platform}:{original_id}"
         
         matched_fields = []
         match_score = 0.0
@@ -649,7 +649,7 @@ class HybridSearchManager:
             "match_score": normalized_score,
             "total_fields_checked": total_filters,
             "platform_neutral_context": {
-                "company_id": company_id,
+                "tenant_id": tenant_id,
                 "platform": platform,
                 "original_id": original_id,
                 "platform_neutral_key": platform_neutral_key
@@ -1166,7 +1166,7 @@ class HybridSearchManager:
 # =============================================================================
 
 async def hybrid_search(query: str,
-                       company_id: str,
+                       tenant_id: str,
                        platform: str = "freshdesk",
                        top_k: int = 10,
                        custom_fields: Optional[Dict[str, Any]] = None,
@@ -1177,7 +1177,7 @@ async def hybrid_search(query: str,
     
     Args:
         query: 검색 쿼리
-        company_id: 회사 ID  
+        tenant_id: 테넌트 ID  
         platform: 플랫폼
         top_k: 결과 수
         custom_fields: 커스텀 필드 검색 조건
@@ -1191,7 +1191,7 @@ async def hybrid_search(query: str,
     
     return await manager.hybrid_search(
         query=query,
-        company_id=company_id,
+        tenant_id=tenant_id,
         platform=platform,
         top_k=top_k,
         custom_fields=custom_fields,

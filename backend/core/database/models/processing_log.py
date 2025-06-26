@@ -35,5 +35,5 @@ class ProcessingLog(MultiTenantModel):
     __table_args__ = (
         Index('idx_log_process_type', 'process_type', 'status'),
         Index('idx_log_object', 'object_type', 'original_object_id'),
-        Index('idx_log_tenant', 'company_id', 'platform'),
+        Index('idx_log_tenant', 'tenant_id', 'platform'),
     )

@@ -16,7 +16,7 @@ class QueryRequest(BaseModel):
     answer_instructions: Optional[str] = None  # 사용자가 제공하는 답변 지침
     
     # Platform-Neutral 3-Tuple 필수 필드
-    company_id: str = Field(description="회사 ID (테넌트 격리 필수)")
+    tenant_id: str = Field(description="테넌트 ID (테넌트 격리 필수)")
     platform: str = Field(default="freshdesk", description="플랫폼 ID (멀티플랫폼 지원)")
     
     # 현재 처리 중인 티켓 ID (platform-neutral original_id)
@@ -62,9 +62,9 @@ class IngestRequest(BaseModel):
     """Platform-Neutral 데이터 수집 요청 모델"""
     
     # Platform-Neutral 3-Tuple 필수 필드 (헤더에서 추출되지만 명시적 검증)
-    company_id: Optional[str] = Field(
+    tenant_id: Optional[str] = Field(
         default=None, 
-        description="회사 ID (헤더에서 자동 추출, 테넌트 격리)"
+        description="테넌트 ID (헤더에서 자동 추출, 테넌트 격리)"
     )
     platform: Optional[str] = Field(
         default=None,
@@ -113,7 +113,7 @@ class TicketInitRequest(BaseModel):
     ticket_id: str = Field(description="플랫폼 원본 티켓 ID (예: '12345', 'ticket-' 접두어 제외)")
     
     # Platform-Neutral 3-Tuple 필수 필드
-    company_id: str = Field(description="회사 ID (테넌트 격리 필수)")
+    tenant_id: str = Field(description="테넌트 ID (테넌트 격리 필수)")
     platform: str = Field(default="freshdesk", description="플랫폼 ID (멀티플랫폼 지원)")
     
     include_summary: bool = True  # 티켓 요약 생성 여부
@@ -135,7 +135,7 @@ class GenerateReplyRequest(BaseModel):
     query: str  # 고객 질문/요청 내용
     
     # Platform-Neutral 3-Tuple 필수 필드
-    company_id: str = Field(description="회사 ID (테넌트 격리 필수)")
+    tenant_id: str = Field(description="테넌트 ID (테넌트 격리 필수)")
     platform: str = Field(default="freshdesk", description="플랫폼 ID (멀티플랫폼 지원)")
     
     style: Optional[str] = "professional"  # 응답 스타일 (professional, friendly, technical)
@@ -153,7 +153,7 @@ class DataSecurityRequest(BaseModel):
     reason: Optional[str] = Field(default=None, description="삭제/초기화 사유")
     
     # 범위 지정
-    company_id: Optional[str] = Field(default=None, description="특정 회사 데이터만 삭제 (None=전체)")
+    tenant_id: Optional[str] = Field(default=None, description="특정 회사 데이터만 삭제 (None=전체)")
     platform: Optional[str] = Field(default=None, description="특정 플랫폼 데이터만 삭제 (None=전체)")
     
     # 백업 옵션

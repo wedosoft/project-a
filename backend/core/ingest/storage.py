@@ -33,7 +33,7 @@ from typing import Any, Dict
 def store_integrated_object_to_sqlite(
     db, 
     integrated_object: Dict[str, Any], 
-    company_id: str, 
+    tenant_id: str, 
     platform: str = None
 ) -> bool:
     """
@@ -42,7 +42,7 @@ def store_integrated_object_to_sqlite(
     Args:
         db: SQLite 데이터베이스 인스턴스
         integrated_object: 통합 객체
-        company_id: 회사 ID (멀티테넌트 필수)
+        tenant_id: 테넌트 ID (멀티테넌트 필수)
         platform: 플랫폼명
         
     Returns:
@@ -57,7 +57,7 @@ def store_integrated_object_to_sqlite(
         if use_orm:
             logger.info(f"🔄 ORM 저장 시도: {integrated_object.get('id')}")
             orm_success = store_integrated_object_with_migration(
-                integrated_object, company_id, platform or "freshdesk"
+                integrated_object, tenant_id, platform or "freshdesk"
             )
             
             if orm_success:
@@ -68,9 +68,9 @@ def store_integrated_object_to_sqlite(
     
     # 기존 SQLite 저장 로직 (fallback 또는 기본 동작)
     try:
-        # 지침서 준수: company_id 필수 검증
-        if not company_id:
-            raise ValueError("company_id는 멀티테넌트 지원을 위해 필수입니다")
+        # 지침서 준수: tenant_id 필수 검증
+        if not tenant_id:
+            raise ValueError("tenant_id는 멀티테넌트 지원을 위해 필수입니다")
             
         object_type = integrated_object.get("object_type", "unknown")
         object_id = integrated_object.get("object_id")
@@ -79,7 +79,7 @@ def store_integrated_object_to_sqlite(
             logger.error(f"객체 ID가 없음: object_type={object_type}")
             return False
         
-        logger.info(f"통합 객체 저장 시작: ID={object_id}, type={object_type}, company={company_id}")
+        logger.info(f"통합 객체 저장 시작: ID={object_id}, type={object_type}, company={tenant_id}")
         
         # 🔍 디버깅: 통합객체 구조 확인
         logger.debug(f"🔍 통합객체 키 목록: {list(integrated_object.keys())}")
@@ -173,7 +173,7 @@ def store_integrated_object_to_sqlite(
 
         integrated_data = {
             'original_id': object_id,  # 필드명 수정: object_id → original_id
-            'company_id': company_id,
+            'tenant_id': tenant_id,
             'platform': platform,
             'object_type': object_type,
             'original_data': integrated_object,
@@ -211,7 +211,7 @@ def store_integrated_object_to_sqlite(
             if not db or not hasattr(db, 'connection') or not db.connection:
                 logger.debug("DB 재연결 시도...")
                 from core.database.database import get_database
-                db = get_database(company_id, platform or "freshdesk")
+                db = get_database(tenant_id, platform or "freshdesk")
                 logger.debug("DB 재연결 완료")
             
             result = db.insert_integrated_object(integrated_data)
@@ -227,10 +227,10 @@ def store_integrated_object_to_sqlite(
         
         # 2. 기존 테이블에도 저장 (호환성 유지)
         if object_type == "integrated_ticket":
-            result = _store_ticket_compatibility(db, integrated_object, company_id, platform)
+            result = _store_ticket_compatibility(db, integrated_object, tenant_id, platform)
             return result
         elif object_type == "integrated_article":
-            result = _store_article_compatibility(db, integrated_object, company_id, platform)
+            result = _store_article_compatibility(db, integrated_object, tenant_id, platform)
             return result
         else:
             logger.error(f"알 수 없는 객체 타입: {object_type}")
@@ -241,7 +241,7 @@ def store_integrated_object_to_sqlite(
         return False
 
 
-def _store_ticket_compatibility(db, integrated_object: Dict[str, Any], company_id: str, platform: str) -> bool:
+def _store_ticket_compatibility(db, integrated_object: Dict[str, Any], tenant_id: str, platform: str) -> bool:
     """티켓 호환성 저장"""
     try:
         ticket_id = integrated_object.get("object_id")
@@ -268,7 +268,7 @@ def _store_ticket_compatibility(db, integrated_object: Dict[str, Any], company_i
         # 통합 객체를 ticket_data 형식으로 변환
         ticket_data = integrated_object.copy()
         ticket_data.update({
-            'company_id': company_id,
+            'tenant_id': tenant_id,
             'platform': platform,
             'original_id': str(ticket_original_id)  # 명시적으로 original_id 설정
         })
@@ -291,7 +291,7 @@ def _store_ticket_compatibility(db, integrated_object: Dict[str, Any], company_i
                 conversation_data = conv.copy()
                 conversation_data.update({
                     'ticket_id': ticket_id,
-                    'company_id': company_id,
+                    'tenant_id': tenant_id,
                     'platform': platform
                 })
                 
@@ -319,7 +319,7 @@ def _store_ticket_compatibility(db, integrated_object: Dict[str, Any], company_i
                         'parent_type': 'conversation',
                         'parent_original_id': str(parent_ticket_id),  # 문자열로 변환
                         'conversation_id': conv.get("id"),  # 대화 자체의 ID (추가 정보)
-                        'company_id': company_id,
+                        'tenant_id': tenant_id,
                         'platform': platform
                     })
                     
@@ -359,7 +359,7 @@ def _store_ticket_compatibility(db, integrated_object: Dict[str, Any], company_i
                 'original_id': str(attachment_id),  # 첨부파일 자체의 원본 ID
                 'parent_type': 'ticket',
                 'parent_original_id': str(ticket_original_id),  # 문자열로 변환
-                'company_id': company_id,
+                'tenant_id': tenant_id,
                 'platform': platform
             })
             
@@ -382,7 +382,7 @@ def _store_ticket_compatibility(db, integrated_object: Dict[str, Any], company_i
         return False
 
 
-def _store_article_compatibility(db, integrated_object: Dict[str, Any], company_id: str, platform: str) -> bool:
+def _store_article_compatibility(db, integrated_object: Dict[str, Any], tenant_id: str, platform: str) -> bool:
     """문서 호환성 저장"""
     try:
         article_id = integrated_object.get("object_id")
@@ -393,7 +393,7 @@ def _store_article_compatibility(db, integrated_object: Dict[str, Any], company_
         # 통합 객체를 article_data 형식으로 변환
         article_data = integrated_object.copy()
         article_data.update({
-            'company_id': company_id,
+            'tenant_id': tenant_id,
             'platform': platform
         })
             
@@ -413,7 +413,7 @@ def _store_article_compatibility(db, integrated_object: Dict[str, Any], company_
             attachment_data.update({
                 'parent_type': 'article',
                 'parent_original_id': article_original_id,  # 문서의 플랫폼 원본 ID
-                'company_id': company_id,
+                'tenant_id': tenant_id,
                 'platform': platform
             })
             
@@ -452,7 +452,7 @@ def sanitize_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
 def get_integrated_object_from_sqlite(
     db, 
     object_id: int, 
-    company_id: str, 
+    tenant_id: str, 
     object_type: str = "integrated_ticket", 
     platform: str = None
 ) -> Dict[str, Any]:
@@ -462,7 +462,7 @@ def get_integrated_object_from_sqlite(
     Args:
         db: SQLite 데이터베이스 인스턴스
         object_id: 객체 ID
-        company_id: 회사 ID (멀티테넌트 필수)
+        tenant_id: 테넌트 ID (멀티테넌트 필수)
         object_type: 객체 타입
         platform: 플랫폼명
         
@@ -470,15 +470,15 @@ def get_integrated_object_from_sqlite(
         Dict: 통합 객체 또는 빈 딕셔너리
     """
     try:
-        # 지침서 준수: company_id 필수 검증
-        if not company_id:
-            raise ValueError("company_id는 멀티테넌트 지원을 위해 필수입니다")
+        # 지침서 준수: tenant_id 필수 검증
+        if not tenant_id:
+            raise ValueError("tenant_id는 멀티테넌트 지원을 위해 필수입니다")
         
         cursor = db.connection.cursor()
         cursor.execute("""
             SELECT * FROM integrated_objects 
-            WHERE original_id = ? AND company_id = ? AND object_type = ? AND platform = ?
-        """, (object_id, company_id, object_type, platform))
+            WHERE original_id = ? AND tenant_id = ? AND object_type = ? AND platform = ?
+        """, (object_id, tenant_id, object_type, platform))
         
         row = cursor.fetchone()
         if row:
@@ -500,7 +500,7 @@ def get_integrated_object_from_sqlite(
 
 def search_integrated_objects_from_sqlite(
     db, 
-    company_id: str, 
+    tenant_id: str, 
     object_type: str = None, 
     platform: str = None,
     limit: int = 100
@@ -510,7 +510,7 @@ def search_integrated_objects_from_sqlite(
     
     Args:
         db: SQLite 데이터베이스 인스턴스
-        company_id: 회사 ID (멀티테넌트 필수)
+        tenant_id: 테넌트 ID (멀티테넌트 필수)
         object_type: 객체 타입 (선택사항)
         platform: 플랫폼명
         limit: 결과 제한 수
@@ -519,26 +519,26 @@ def search_integrated_objects_from_sqlite(
         List: 통합 객체 리스트
     """
     try:
-        # 지침서 준수: company_id 필수 검증
-        if not company_id:
-            raise ValueError("company_id는 멀티테넌트 지원을 위해 필수입니다")
+        # 지침서 준수: tenant_id 필수 검증
+        if not tenant_id:
+            raise ValueError("tenant_id는 멀티테넌트 지원을 위해 필수입니다")
         
         cursor = db.connection.cursor()
         
         if object_type:
             cursor.execute("""
                 SELECT * FROM integrated_objects 
-                WHERE company_id = ? AND object_type = ? AND platform = ?
+                WHERE tenant_id = ? AND object_type = ? AND platform = ?
                 ORDER BY created_at DESC
                 LIMIT ?
-            """, (company_id, object_type, platform, limit))
+            """, (tenant_id, object_type, platform, limit))
         else:
             cursor.execute("""
                 SELECT * FROM integrated_objects 
-                WHERE company_id = ? AND platform = ?
+                WHERE tenant_id = ? AND platform = ?
                 ORDER BY created_at DESC
                 LIMIT ?
-            """, (company_id, platform, limit))
+            """, (tenant_id, platform, limit))
         
         rows = cursor.fetchall()
         results = []
