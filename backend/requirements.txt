@@ -36,3 +36,7 @@ langchain-qdrant>=0.1.0,<0.2.0  # Qdrant 벡터스토어 통합
 sentence-transformers>=2.2.0  # GPU 기반 임베딩 모델
 torch>=1.13.0  # PyTorch (CUDA 지원)
 transformers>=4.21.0  # Hugging Face transformers
+
+# 멀티테넌트 보안을 위한 암호화 패키지
+cryptography>=41.0.0  # 테넌트별 설정 암호화
+psycopg2-binary>=2.9.0  # PostgreSQL 지원 (선택적)
