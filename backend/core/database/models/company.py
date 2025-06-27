@@ -22,10 +22,8 @@ class Company(MultiTenantModel):
     timezone = Column(String(50), default='UTC')
     language = Column(String(10), default='ko')
     
-    # 관계 (문자열 참조로 순환 참조 방지)
-    tickets = relationship("Ticket", back_populates="company", lazy="dynamic")
+    # 관계 (Agent와의 관계만 유지)
     agents = relationship("Agent", back_populates="company", lazy="dynamic")
-    categories = relationship("Category", back_populates="company", lazy="dynamic")
 
     # 인덱스 및 제약조건
     __table_args__ = (

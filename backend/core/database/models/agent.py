@@ -31,17 +31,15 @@ class Agent(MultiTenantModel):
     account_locked_until = Column(DateTime)  # 계정 잠금 시간
     
     # 관계 필드
-    tenant_id = Column(Integer, ForeignKey('companies.id'), nullable=False)
+    company_id = Column(Integer, ForeignKey('companies.id'), nullable=False)
     
-    # 관계 설정
+    # 관계 설정 (Company와의 관계만 유지)
     company = relationship("Company", back_populates="agents")
-    tickets = relationship("Ticket", back_populates="agent")
-    assignments = relationship("Assignment", back_populates="agent", foreign_keys="Assignment.agent_id")
     
     # 인덱스 및 제약조건
     __table_args__ = (
-        Index('idx_agent_email_company', 'email', 'tenant_id', unique=True),
-        Index('idx_agent_external_company', 'external_id', 'tenant_id', 'platform', unique=True),
+        Index('idx_agent_email_company', 'email', 'company_id', unique=True),
+        Index('idx_agent_external_company', 'external_id', 'company_id', 'platform', unique=True),
         Index('idx_agent_active_role', 'is_active', 'role'),
         Index('idx_agent_tenant', 'tenant_id', 'platform'),
     )

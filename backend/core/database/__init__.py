@@ -10,10 +10,9 @@ from .vectordb import VectorDBFactory, VectorDBInterface, QdrantAdapter, vector_
 from .factory import DatabaseFactory, TenantDataManager, DatabaseType, get_database
 from .tenant_config import TenantConfigManager
 
-# ORM Models (새로 추가)
+# ORM Models (핵심 모델만)
 from .models import (
-    Base, Ticket, Attachment, Conversation, Summary,
-    Company, Agent, Assignment, Category, IntegratedObject, ProcessingLog
+    Base, Company, Agent, IntegratedObject, ProgressLog
 )
 
 __all__ = [
@@ -35,9 +34,7 @@ __all__ = [
     # Configuration
     'TenantConfigManager',
     
-    # ORM Models (새로 추가)
+    # ORM Models (핵심 모델만)
     'Base',
-    'Ticket', 'Attachment', 'Conversation', 'Summary',
-    'Company', 'Agent', 'Assignment', 
-    'Category', 'IntegratedObject', 'ProcessingLog',
+    'Company', 'Agent', 'IntegratedObject', 'ProgressLog',
 ]
