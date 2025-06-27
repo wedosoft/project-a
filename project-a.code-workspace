@@ -17,16 +17,8 @@
             "path": "frontend"
         },
         {
-            "name": "📋 Tasks",
-            "path": "tasks"
-        },
-        {
             "name": "📚 Documentation",
             "path": "docs"
-        },
-        {
-            "name": "🔧 Scripts",
-            "path": "scripts"
         }
     ],
     "settings": {
