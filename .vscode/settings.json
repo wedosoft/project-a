@@ -73,5 +73,10 @@
     "PYTHONPATH": "${workspaceFolder}/backend"
 },
 // MCP 설정 추가
-"chat.mcp.enabled": true
-}
+"chat.mcp.enabled": true,
+//ruff 추가
+"python.linting.enabled": false,
+"ruff.enable": true,
+"ruff.formatOnSave": true,
+"editor.formatOnSave": true,
+"ruff.lsp.enabled": true

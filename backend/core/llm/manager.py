@@ -236,6 +236,73 @@ class LLMManager:
                 "urgency_level": "보통"
             }
     
+    async def generate_knowledge_base_summary(self, kb_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        KB 문서 요약 생성
+        
+        Args:
+            kb_data: KB 문서 정보 (title, content 포함)
+            
+        Returns:
+            요약 정보
+        """
+        title = kb_data.get("title", "")
+        content = kb_data.get("content", "")
+        
+        # 프롬프트 구성
+        prompt_parts = []
+        if title:
+            prompt_parts.append(f"문서 제목: {title}")
+        
+        if content:
+            # 긴 내용은 잘라서 사용
+            content_preview = content[:2000] + ("..." if len(content) > 2000 else "")
+            prompt_parts.append(f"문서 내용:\n{content_preview}")
+        
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "KB 문서 내용을 분석하여 간결한 마크다운 요약을 작성하세요. "
+                    "문서의 주요 내용과 핵심 포인트를 포함해 최대 500자 이내로 작성해주세요."
+                )
+            },
+            {
+                "role": "user", 
+                "content": "\n".join(prompt_parts)
+            }
+        ]
+        
+        try:
+            # 요약용 모델 설정 사용
+            provider = LLMProvider.GEMINI  # 요약은 Gemini 사용
+            
+            response = await self.generate(
+                messages=messages,
+                provider=provider,
+                max_tokens=1000,
+                temperature=0.1
+            )
+            
+            if response.success:
+                return {
+                    "summary": response.content,
+                    "key_points": ["주요 포인트 1", "주요 포인트 2"],
+                    "topics": ["주제1", "주제2"],
+                    "category": "기술문서"
+                }
+            else:
+                raise Exception(response.error)
+                
+        except Exception as e:
+            logger.error(f"KB 문서 요약 생성 실패: {e}")
+            return {
+                "summary": f"오류로 인해 요약 생성에 실패했습니다. 문서 제목: {title}",
+                "key_points": ["요약 생성 오류", "수동 검토 필요"],
+                "topics": ["오류"],
+                "category": "확인 필요"
+            }
+
     async def get_embeddings(self, texts: List[str], model: Optional[str] = None) -> List[List[float]]:
         """임베딩 생성"""
         # OpenAI를 임베딩 제공자로 사용

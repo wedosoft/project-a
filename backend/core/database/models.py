@@ -92,7 +92,6 @@ class Company(Base):
     # 관계
     subscription_plan = relationship("SubscriptionPlan", back_populates="companies")
     agents = relationship("Agent", back_populates="company")
-    integrated_objects = relationship("IntegratedObject", back_populates="company")
     usage_logs = relationship("UsageLog", back_populates="company")
 
 
@@ -181,16 +180,15 @@ class IntegratedObject(Base):
     summary = Column(Text, nullable=True)
     
     # 메타데이터 (검색 및 필터링용)
-    metadata = Column(get_json_type(), nullable=True)
+    tenant_metadata = Column(get_json_type(), nullable=True)  # 최신 컬럼명
+    processed_at = Column(DateTime, nullable=True)
+    summary_generated_at = Column(DateTime, nullable=True)
     
     # 시간 정보
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow)
     
-    # 관계 (tenant_id가 String이므로 직접 ForeignKey 사용 안함)
-    company = relationship("Company", back_populates="integrated_objects", 
-                          foreign_keys="IntegratedObject.tenant_id",
-                          primaryjoin="and_(IntegratedObject.tenant_id == cast(Company.id, String))")
+    # 관계 (복잡한 관계 제거로 테이블 생성 문제 해결)
     ai_processing_logs = relationship("AIProcessingLog", back_populates="integrated_object")
     
     # 제약 조건

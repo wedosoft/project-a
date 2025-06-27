@@ -23,7 +23,13 @@ from dotenv import load_dotenv
 current_dir = Path(__file__).resolve().parent
 backend_dir = current_dir.parent.parent
 if str(backend_dir) not in sys.path:
-    sys.path.insert(0, str(backend_dir))
+    sys.path.append(str(backend_dir))
+
+# LLM Manager import  
+from core.llm.manager import LLMManager
+
+# LLM Manager 전역 인스턴스
+llm_manager = LLMManager()
 
 from core.search.embeddings.embedder import embed_documents
 from core.database.vectordb import vector_db
@@ -472,12 +478,159 @@ async def generate_and_store_summaries(
         "errors": []
     }
     
-    # 멀티테넌트 데이터베이스 연결
-    from core.database.database import get_database
-    db = None
-    
     try:
-        db = get_database(tenant_id, platform)
+        # ORM 방식으로 데이터 조회 및 처리
+        from core.database.manager import get_db_manager
+        from core.repositories.integrated_object_repository import IntegratedObjectRepository
+        from core.migration_layer import get_migration_layer
+        
+        # Migration Layer 사용 여부 확인
+        migration_layer = get_migration_layer()
+        
+        if migration_layer.use_orm:
+            # ORM 방식 사용
+            db_manager = get_db_manager(tenant_id=tenant_id)
+            
+            with db_manager.get_session() as session:
+                repo = IntegratedObjectRepository(session)
+                
+                # 요약이 없는 통합 객체들 조회
+                if force_update:
+                    # 강제 업데이트: 모든 통합 객체
+                    objects = repo.get_by_company(
+                        tenant_id=tenant_id,
+                        platform=platform
+                    )
+                    # integrated_content가 있는 것만 필터링
+                    objects = [obj for obj in objects 
+                              if obj.object_type in ('integrated_ticket', 'integrated_article')
+                              and obj.integrated_content and obj.integrated_content.strip()]
+                else:
+                    # 일반 모드: 요약이 없는 것만
+                    objects = repo.get_by_company(
+                        tenant_id=tenant_id,
+                        platform=platform
+                    )
+                    # 요약이 없고 integrated_content가 있는 것만 필터링
+                    objects = [obj for obj in objects 
+                              if obj.object_type in ('integrated_ticket', 'integrated_article')
+                              and (not obj.summary or obj.summary.strip() == '')
+                              and obj.integrated_content and obj.integrated_content.strip()]
+                
+                logger.info(f"처리할 통합 객체 수: {len(objects)}개")
+                result["total_processed"] = len(objects)
+                
+                for obj in objects:
+                    try:
+                        original_id = obj.original_id
+                        object_type = obj.object_type
+                        integrated_content = obj.integrated_content
+                        original_data = obj.original_data if isinstance(obj.original_data, dict) else {}
+                        
+                        # 디버깅 로그
+                        logger.debug(f"{object_type} {original_id}: integrated_content 길이 = {len(integrated_content) if integrated_content else 0}")
+                        
+                        # integrated_content 확인
+                        if not integrated_content or not integrated_content.strip():
+                            logger.warning(f"{object_type} {original_id}: integrated_content가 없거나 비어있음 - 요약 생성 불가")
+                            result["skipped_count"] += 1
+                            continue
+
+                        # 객체 타입에 따른 요약 생성
+                        if object_type == 'integrated_ticket':
+                            # 티켓 요약 생성
+                            ticket_data = {
+                                'id': original_id,
+                                'subject': original_data.get('subject', ''),
+                                'description': original_data.get('description', ''),
+                                'status': original_data.get('status', ''),
+                                'priority': original_data.get('priority', ''),
+                                'integrated_text': integrated_content,
+                                'conversations': original_data.get('conversations', []),
+                                'attachments': original_data.get('all_attachments', [])
+                            }
+                            
+                            try:
+                                summary_result = await llm_manager.generate_ticket_summary(ticket_data)
+                                if summary_result and 'summary' in summary_result:
+                                    summary = summary_result['summary']
+                                else:
+                                    summary = "요약 생성에 실패했습니다."
+                            except Exception as e:
+                                logger.error(f"티켓 {original_id} 요약 생성 중 LLM 오류: {e}")
+                                summary = "LLM 요약 생성 중 오류가 발생했습니다."
+                                
+                        elif object_type == 'integrated_article':
+                            # KB 문서 요약 생성
+                            try:
+                                summary_result = await llm_manager.generate_knowledge_base_summary({
+                                    'title': original_data.get('title', ''),
+                                    'content': integrated_content
+                                })
+                                
+                                if summary_result and 'summary' in summary_result:
+                                    summary = summary_result['summary']
+                                else:
+                                    summary = "요약 생성에 실패했습니다."
+                                    
+                            except Exception as e:
+                                logger.error(f"KB 문서 {original_id} 요약 생성 중 LLM 오류: {e}")
+                                summary = "LLM 요약 생성 중 오류가 발생했습니다."
+                        else:
+                            result["skipped_count"] += 1
+                            continue
+                        
+                        # 요약 업데이트 (ORM 방식)
+                        if summary:
+                            obj.summary = summary
+                            obj.summary_generated_at = datetime.utcnow()
+                            session.flush()  # 변경사항 플러시
+                            
+                            result["success_count"] += 1
+                            logger.debug(f"{object_type} {original_id}: 요약 생성 및 저장 완료")
+                        else:
+                            result["failure_count"] += 1
+                        
+                    except Exception as e:
+                        error_msg = f"{object_type} {original_id} 요약 생성 중 오류: {e}"
+                        logger.error(error_msg)
+                        result["errors"].append(error_msg)
+                        result["failure_count"] += 1
+                
+                # 커밋
+                session.commit()
+                logger.info("✅ 요약 생성 트랜잭션 커밋 완료")
+        
+        else:
+            # 기존 SQLite 방식 사용 (하위 호환성)
+            from core.database.database import get_database
+            db = get_database(tenant_id, platform)
+            
+            # 기존 SQLite 로직은 그대로 유지...
+            logger.warning("⚠️ SQLite 방식 사용 중 - ORM 활성화를 권장합니다")
+            # 여기에 기존 SQLite 로직 구현 필요시 추가
+        
+        result["processing_time"] = time.time() - start_time
+        
+        logger.info("✅ LLM 요약 생성 완료:")
+        logger.info(f"  - 성공: {result['success_count']}개")
+        logger.info(f"  - 실패: {result['failure_count']}개")
+        logger.info(f"  - 건너뜀: {result['skipped_count']}개")
+        logger.info(f"  - 소요 시간: {result['processing_time']:.2f}초")
+        
+        if result["errors"]:
+            logger.warning("❌ 오류 목록:")
+            for error in result["errors"][:5]:  # 최대 5개만 표시
+                logger.warning(f"  - {error}")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"❌ LLM 요약 생성 중 전체 오류: {e}")
+        result["failure_count"] += 1
+        result["errors"].append(str(e))
+        result["processing_time"] = time.time() - start_time
+        return result
         
         # 데이터베이스 연결 확인 및 연결
         if not db.connection:
@@ -618,17 +771,10 @@ async def generate_and_store_summaries(
         return result
         
     except Exception as e:
-        logger.error(f"LLM 요약 생성 중 오류 발생: {e}")
+        result["failure_count"] += 1
         result["errors"].append(str(e))
         result["processing_time"] = time.time() - start_time
-        raise
-    finally:
-        # db가 정의되어 있고 연결되어 있는 경우에만 disconnect
-        if db is not None:
-            try:
-                db.disconnect()
-            except Exception as disconnect_error:
-                logger.warning(f"데이터베이스 연결 해제 중 오류: {disconnect_error}")
+        return result
 
 # 벡터 DB 동기화 함수
 

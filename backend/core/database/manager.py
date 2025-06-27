@@ -92,10 +92,32 @@ class DatabaseManager:
             )
     
     def create_database(self):
-        """데이터베이스 생성"""
+        """데이터베이스 생성 및 테이블 생성 보장"""
         if not self.is_async:
-            Base.metadata.create_all(bind=self.engine)
-            logger.info("✅ 데이터베이스 스키마 생성 완료")
+            try:
+                # 모든 테이블 생성
+                Base.metadata.create_all(bind=self.engine)
+                
+                # 테이블 생성 검증
+                from sqlalchemy import inspect
+                inspector = inspect(self.engine)
+                existing_tables = inspector.get_table_names()
+                
+                # IntegratedObject 테이블 확인
+                if 'integrated_objects' in existing_tables:
+                    logger.info("✅ integrated_objects 테이블 생성 확인됨")
+                else:
+                    logger.warning("⚠️ integrated_objects 테이블이 생성되지 않음")
+                    # 강제로 다시 시도
+                    from .models import IntegratedObject
+                    IntegratedObject.__table__.create(bind=self.engine, checkfirst=True)
+                    logger.info("🔧 integrated_objects 테이블 강제 생성 시도")
+                
+                logger.info(f"✅ 데이터베이스 스키마 생성 완료 (테이블 수: {len(existing_tables)})")
+                
+            except Exception as e:
+                logger.error(f"❌ 데이터베이스 생성 실패: {e}")
+                raise
     
     @contextmanager
     def get_session(self) -> Generator[Session, None, None]:

@@ -50,6 +50,30 @@ class MigrationLayer:
             db_manager = get_db_manager(tenant_id)
             logger.info(f"🔗 DB 매니저 생성: {db_manager.database_url}")
             
+            # 테이블 생성 보장
+            try:
+                # 데이터베이스 생성 (테이블 포함)
+                db_manager.create_database()
+                logger.info("✅ ORM 테이블 생성/검증 완료")
+                
+                # IntegratedObject 테이블 존재 확인
+                from sqlalchemy import inspect
+                inspector = inspect(db_manager.engine)
+                existing_tables = inspector.get_table_names()
+                
+                if 'integrated_objects' not in existing_tables:
+                    logger.error("❌ integrated_objects 테이블이 생성되지 않음")
+                    # 강제로 IntegratedObject 테이블만 생성
+                    from .database.models import IntegratedObject
+                    IntegratedObject.__table__.create(bind=db_manager.engine, checkfirst=True)
+                    logger.info("🔧 integrated_objects 테이블 강제 생성 완료")
+                else:
+                    logger.info("✅ integrated_objects 테이블 존재 확인")
+                    
+            except Exception as table_error:
+                logger.error(f"❌ 테이블 생성 실패: {table_error}")
+                return False
+            
             with db_manager.get_session() as session:
                 repo = IntegratedObjectRepository(session)
                 
