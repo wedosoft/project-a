@@ -225,11 +225,24 @@ class QdrantAdapter(VectorDBInterface):
             success = True
             points = []
             for i, (text, embedding, metadata, id) in enumerate(zip(texts, embeddings, metadatas, ids)):
-                # Platform-Neutral 3-Tuple 기반 Payload 구성
-                # 메타데이터는 이미 위에서 정규화됨
+                # Platform-Neutral 3-Tuple 기반 Payload 구성 (최적화된 메타데이터)
+                # 필수 필드만 루트 레벨에 저장하고 나머지는 tenant_metadata로 통합
+                essential_fields = {
+                    "tenant_id": metadata.get("tenant_id"),
+                    "platform": metadata.get("platform"), 
+                    "doc_type": metadata.get("doc_type"),
+                    "original_id": metadata.get("original_id"),
+                    "object_type": metadata.get("object_type", "unknown"),
+                    "summary": text
+                }
+                
+                # 나머지 메타데이터는 tenant_metadata JSON 필드로 통합
+                extended_metadata = {k: v for k, v in metadata.items() 
+                                   if k not in essential_fields and v is not None}
+                
                 payload = {
-                    **metadata,
-                    "summary": text  # 텍스트 필드명을 summary로 변경
+                    **essential_fields,
+                    "tenant_metadata": extended_metadata  # JSON 객체로 저장
                 }
                 
                 # Platform-Neutral 3-Tuple 기반 유니크 Qdrant 포인트 ID 생성

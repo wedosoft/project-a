@@ -30,15 +30,24 @@ load_dotenv(dotenv_path=dotenv_path)
 try:
     import torch
     from sentence_transformers import SentenceTransformer
-    GPU_AVAILABLE = torch.cuda.is_available()
-    DEVICE = 'cuda' if GPU_AVAILABLE else 'cpu'
-    logger = logging.getLogger(__name__)
-    if GPU_AVAILABLE:
-        gpu_name = torch.cuda.get_device_name(0)
-        cuda_version = torch.version.cuda
-        logger.info(f"GPU 감지됨: {gpu_name}, CUDA 버전: {cuda_version}")
+    
+    # 디바이스 우선순위: CUDA > MPS > CPU
+    if torch.cuda.is_available():
+        GPU_AVAILABLE = True
+        DEVICE = 'cuda'
+        gpu_info = f"CUDA GPU: {torch.cuda.get_device_name(0)}"
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        GPU_AVAILABLE = True
+        DEVICE = 'mps'
+        gpu_info = "Apple Silicon MPS"
     else:
-        logger.info("GPU를 사용할 수 없습니다. CPU 모드로 실행됩니다.")
+        GPU_AVAILABLE = False
+        DEVICE = 'cpu'
+        gpu_info = "CPU only"
+    
+    logger = logging.getLogger(__name__)
+    logger.info(f"PyTorch 디바이스: {DEVICE} ({gpu_info})")
+    
 except ImportError as e:
     logger = logging.getLogger(__name__)
     logger.warning(f"GPU 임베딩 라이브러리를 로드할 수 없습니다: {e}. "
@@ -63,32 +72,40 @@ def setup_gpu_embedder(
     force_reload: bool = False
 ) -> Optional[SentenceTransformer]:
     """
-    GPU 기반 임베더를 초기화합니다.
+    GPU/CPU 기반 임베더를 초기화합니다.
+    GPU가 없으면 CPU로 fallback합니다.
     
     Args:
         model_name: 사용할 sentence-transformer 모델명
         force_reload: 기존 모델을 강제로 다시 로드할지 여부
     
     Returns:
-        초기화된 SentenceTransformer 객체 또는 None (GPU 사용 불가시)
+        초기화된 SentenceTransformer 객체 또는 None (라이브러리 사용 불가시)
     """
     global _gpu_embedder
     
-    if not GPU_AVAILABLE or SentenceTransformer is None:
-        logger.warning("GPU 또는 sentence-transformers가 사용 불가합니다.")
+    if SentenceTransformer is None:
+        logger.warning("sentence-transformers 라이브러리가 사용 불가합니다.")
         return None
     
     if _gpu_embedder is not None and not force_reload:
         return _gpu_embedder
     
     try:
-        logger.info(f"GPU 임베더 초기화 중: {model_name} (device: {DEVICE})")
-        _gpu_embedder = SentenceTransformer(model_name, device=DEVICE)
+        device = DEVICE if GPU_AVAILABLE else 'cpu'
+        logger.info(f"sentence-transformers 임베더 초기화 중: {model_name} (device: {device})")
+        
+        _gpu_embedder = SentenceTransformer(model_name, device=device)
         dimension = _gpu_embedder.get_sentence_embedding_dimension()
-        logger.info(f"GPU 임베더 초기화 완료. 벡터 차원: {dimension}")
+        
+        if GPU_AVAILABLE:
+            logger.info(f"GPU 임베더 초기화 완료. 벡터 차원: {dimension}")
+        else:
+            logger.info(f"CPU 임베더 초기화 완료. 벡터 차원: {dimension}")
+        
         return _gpu_embedder
     except Exception as e:
-        logger.error(f"GPU 임베더 초기화 실패: {e}")
+        logger.error(f"sentence-transformers 임베더 초기화 실패: {e}")
         return None
 
 
@@ -209,7 +226,8 @@ def embed_documents_gpu(
     use_cache: bool = True
 ) -> List[List[float]]:
     """
-    GPU를 사용하여 문서들을 임베딩으로 변환합니다.
+    sentence-transformers를 사용하여 문서들을 임베딩으로 변환합니다.
+    GPU가 있으면 GPU로, 없으면 CPU로 처리합니다.
     
     Args:
         docs: 문서 텍스트 리스트
@@ -222,14 +240,19 @@ def embed_documents_gpu(
     if not docs:
         return []
     
+    if SentenceTransformer is None:
+        logger.warning("sentence-transformers 라이브러리가 사용 불가능합니다.")
+        return []
+    
     gpu_embedder = setup_gpu_embedder()
     if gpu_embedder is None:
-        raise RuntimeError("GPU 임베더를 사용할 수 없습니다.")
+        raise RuntimeError("sentence-transformers 임베더를 사용할 수 없습니다.")
     
     if batch_size is None:
         batch_size = calculate_optimal_batch_size()
     
-    logger.info(f"GPU 임베딩 시작: {len(docs)}개 문서, 배치 크기: {batch_size}")
+    device = DEVICE if GPU_AVAILABLE else 'cpu'
+    logger.info(f"sentence-transformers 임베딩 시작: {len(docs)}개 문서, 배치 크기: {batch_size}, device: {device}")
     
     # 캐시 확인
     embeddings = [None] * len(docs)

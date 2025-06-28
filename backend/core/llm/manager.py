@@ -18,6 +18,7 @@ from .utils.config import ConfigManager
 from .utils.routing import ProviderRouter
 from .utils.metrics import MetricsCollector
 from .scalable_key_manager import scalable_key_manager, APIKeyStrategy
+from core.metadata.normalizer import TenantMetadataNormalizer
 from .summarizer.prompt.loader import PromptLoader
 
 logger = logging.getLogger(__name__)
@@ -176,77 +177,71 @@ class LLMManager:
             요약 정보
         """
         try:
-            # YAML 템플릿 로드
-            system_template = self.prompt_loader.load_template("system", "ticket")
-            user_template = self.prompt_loader.load_template("user", "ticket")
+            # 새로운 모듈식 요약 시스템 사용
+            from core.llm.summarizer.core.summarizer import core_summarizer
             
-            # 티켓 데이터 준비
-            subject = ticket_data.get("subject", "")
-            description = ticket_data.get("description", "")
-            conversations = ticket_data.get("conversations", [])
-            integrated_text = ticket_data.get("integrated_text", "")
+            # integrated_text 우선 사용, 없으면 description 사용
+            content = ticket_data.get("integrated_text") or ticket_data.get("description", "")
             
-            # 스마트 대화 필터링
-            if conversations:
-                conversations = self.conversation_filter.filter_conversations_unlimited(conversations)
-            
-            # 메타데이터 포맷팅
-            metadata_parts = []
-            if ticket_data.get("status"):
-                metadata_parts.append(f"상태: {ticket_data['status']}")
-            if ticket_data.get("priority"):
-                metadata_parts.append(f"우선순위: {ticket_data['priority']}")
-            if ticket_data.get("created_at"):
-                metadata_parts.append(f"생성일: {ticket_data['created_at']}")
-            
-            metadata_formatted = ", ".join(metadata_parts) if metadata_parts else ""
-            
-            # 사용자 프롬프트 생성
-            user_template_content = user_template.get("template", "")
-            instruction_text = user_template.get("instructions", {}).get("ko", "")
-            
-            jinja_template = Template(user_template_content)
-            user_prompt = jinja_template.render(
-                subject=subject,
-                metadata_formatted=metadata_formatted,
-                content=integrated_text or description,
-                instruction_text=instruction_text
-            )
-            
-            # 시스템 프롬프트 생성
-            system_prompt = system_template.get("template", "") or system_template.get("instructions", {}).get("ko", "")
-            
-            messages = [
-                {
-                    "role": "system",
-                    "content": system_prompt
-                },
-                {
-                    "role": "user", 
-                    "content": user_prompt
-                }
-            ]
-            
-            # 요약 생성
-            provider = LLMProvider.GEMINI  # 요약은 Gemini 사용
-            
-            response = await self.generate(
-                messages=messages,
-                provider=provider,
-                max_tokens=2000,
-                temperature=0.1
-            )
-            
-            if response.success:
+            if not content.strip():
+                logger.warning("티켓 내용이 비어있음")
                 return {
-                    "summary": response.content,
-                    "key_points": ["YAML 템플릿 기반 요약"],
+                    "summary": "분석할 내용이 없습니다.",
+                    "key_points": ["빈 내용"],
                     "sentiment": "중립적",
-                    "priority_recommendation": "보통",
+                    "priority_recommendation": "확인 필요",
                     "urgency_level": "보통"
                 }
-            else:
-                raise Exception(response.error)
+            
+            # 메타데이터 정규화 (tenant_metadata 활용)
+            raw_tenant_metadata = ticket_data.get("tenant_metadata", {})
+            tenant_metadata = TenantMetadataNormalizer.normalize(raw_tenant_metadata)
+            logger.debug(f"메타데이터 정규화 완료: {len(tenant_metadata)}개 필드")
+            
+            # 첨부파일 정보 통합 (tenant_metadata 우선 사용)
+            attachments = []
+            if tenant_metadata.get('has_attachments') and tenant_metadata.get('attachments'):
+                attachments = tenant_metadata['attachments']
+                logger.info(f"tenant_metadata에서 {len(attachments)}개 첨부파일 로드")
+            elif ticket_data.get("attachments"):
+                attachments = ticket_data.get("attachments", [])
+                logger.info(f"ticket_data에서 {len(attachments)}개 첨부파일 로드")
+            
+            metadata = {
+                "status": ticket_data.get("status"),
+                "priority": ticket_data.get("priority"),
+                "created_at": ticket_data.get("created_at"),
+                "attachments": attachments,
+                "has_attachments": len(attachments) > 0,
+                "attachment_count": len(attachments),
+                "has_conversations": tenant_metadata.get('has_conversations', False),
+                "conversation_count": tenant_metadata.get('conversation_count', 0)
+            }
+            
+            # 새로운 요약 시스템으로 생성 (OpenAI 강제 사용)
+            summary = await core_summarizer.generate_summary(
+                content=content,
+                content_type="ticket",
+                subject=ticket_data.get("subject", ""),
+                metadata=metadata,
+                ui_language="ko"
+            )
+            
+            # AI 처리 정보 업데이트
+            updated_metadata = TenantMetadataNormalizer.update_ai_processing_info(
+                tenant_metadata, 
+                model_used="gpt-4o-mini-2024-07-18",
+                quality_score=4.0  # 기본 품질 점수
+            )
+            
+            return {
+                "summary": summary,
+                "key_points": ["구조화된 요약"],
+                "sentiment": "중립적",
+                "priority_recommendation": "보통",
+                "urgency_level": "보통",
+                "updated_metadata": updated_metadata  # 업데이트된 메타데이터 포함
+            }
                 
         except Exception as e:
             logger.error(f"티켓 요약 생성 실패: {e}")
@@ -260,7 +255,7 @@ class LLMManager:
     
     async def generate_knowledge_base_summary(self, kb_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        KB 문서 요약 생성 (YAML 템플릿 사용)
+        KB 문서 요약 생성 (새로운 모듈식 시스템 사용)
         
         Args:
             kb_data: KB 문서 정보 (title, content 포함)
@@ -269,71 +264,44 @@ class LLMManager:
             요약 정보
         """
         try:
-            # YAML 템플릿 로드
-            system_template = self.prompt_loader.load_template("system", "knowledge_base")
-            user_template = self.prompt_loader.load_template("user", "knowledge_base")
+            # 새로운 모듈식 요약 시스템 사용
+            from core.llm.summarizer.core.summarizer import core_summarizer
             
             # KB 데이터 준비
-            title = kb_data.get("title", "")
             content = kb_data.get("content", "")
-            description = kb_data.get("description", "")
             
-            # 메타데이터 포맷팅
-            metadata_parts = []
-            if kb_data.get("category"):
-                metadata_parts.append(f"카테고리: {kb_data['category']}")
-            if kb_data.get("tags"):
-                metadata_parts.append(f"태그: {', '.join(kb_data['tags'])}")
-            if kb_data.get("created_at"):
-                metadata_parts.append(f"생성일: {kb_data['created_at']}")
-            
-            metadata_formatted = ", ".join(metadata_parts) if metadata_parts else ""
-            
-            # 사용자 프롬프트 생성
-            user_template_content = user_template.get("template", "")
-            instruction_text = user_template.get("instructions", {}).get("ko", "")
-            
-            jinja_template = Template(user_template_content)
-            user_prompt = jinja_template.render(
-                title=title,
-                metadata_formatted=metadata_formatted,
-                content=content or description,
-                instruction_text=instruction_text
-            )
-            
-            # 시스템 프롬프트 생성
-            system_prompt = system_template.get("template", "") or system_template.get("instructions", {}).get("ko", "")
-            
-            messages = [
-                {
-                    "role": "system",
-                    "content": system_prompt
-                },
-                {
-                    "role": "user", 
-                    "content": user_prompt
-                }
-            ]
-            
-            # 요약 생성
-            provider = LLMProvider.GEMINI  # 요약은 Gemini 사용
-            
-            response = await self.generate(
-                messages=messages,
-                provider=provider,
-                max_tokens=2000,
-                temperature=0.1
-            )
-            
-            if response.success:
+            if not content.strip():
+                logger.warning("KB 문서 내용이 비어있음")
                 return {
-                    "summary": response.content,
-                    "key_points": ["YAML 템플릿 기반 KB 요약"],
-                    "topics": ["지식베이스"],
-                    "category": "기술문서"
+                    "summary": "분석할 내용이 없습니다.",
+                    "key_points": ["빈 내용"],
+                    "topics": ["미분류"],
+                    "category": "확인 필요"
                 }
-            else:
-                raise Exception(response.error)
+            
+            # 메타데이터 준비
+            metadata = {
+                "category": kb_data.get("category"),
+                "tags": kb_data.get("tags", []),
+                "created_at": kb_data.get("created_at"),
+                "updated_at": kb_data.get("updated_at")
+            }
+            
+            # 새로운 요약 시스템으로 생성 (knowledge_base 타입)
+            summary = await core_summarizer.generate_summary(
+                content=content,
+                content_type="knowledge_base",
+                subject=kb_data.get("title", ""),
+                metadata=metadata,
+                ui_language="ko"
+            )
+            
+            return {
+                "summary": summary,
+                "key_points": ["구조화된 KB 요약"],
+                "topics": ["지식베이스"],
+                "category": "기술문서"
+            }
                 
         except Exception as e:
             logger.error(f"KB 문서 요약 생성 실패: {e}")

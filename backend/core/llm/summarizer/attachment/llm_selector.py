@@ -12,9 +12,6 @@ import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
-from ...manager import get_llm_manager
-from ...models.base import LLMProvider
-
 logger = logging.getLogger(__name__)
 
 
@@ -22,9 +19,21 @@ class LLMAttachmentSelector:
     """LLM을 활용한 지능형 첨부파일 선별기"""
 
     def __init__(self):
-        self.llm_manager = get_llm_manager()
+        self.llm_manager = None  # 지연 초기화로 순환 import 방지
         self.max_selected = 3
         self.prompt_version = "v1.0"
+
+    def _get_manager(self):
+        """지연 초기화로 순환 import 방지"""
+        if self.llm_manager is None:
+            from ...manager import get_llm_manager
+            self.llm_manager = get_llm_manager()
+        return self.llm_manager
+
+    def _get_llm_provider(self):
+        """지연 import로 순환 import 방지"""
+        from ...models.base import LLMProvider
+        return LLMProvider
 
     async def select_relevant_attachments(
         self,
@@ -99,12 +108,12 @@ class LLMAttachmentSelector:
         user_prompt = self._build_user_prompt(
             attachment_metadata, content, subject)
 
-        response = await self.llm_manager.generate(
+        response = await self._get_manager().generate(
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            provider=LLMProvider.OPENAI,
+            provider=self._get_llm_provider().OPENAI,
             max_tokens=800,
             temperature=0.1,  # 일관성을 위해 낮게 설정
             model_preference=["gpt-4o-mini"]

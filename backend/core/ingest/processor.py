@@ -27,11 +27,12 @@ if str(backend_dir) not in sys.path:
 
 # LLM Manager import  
 from core.llm.manager import LLMManager
+from core.metadata.normalizer import TenantMetadataNormalizer
 
 # LLM Manager 전역 인스턴스
 llm_manager = LLMManager()
 
-from core.search.embeddings.embedder import embed_documents
+from core.search.embeddings import embed_documents, log_embedding_status
 from core.database.vectordb import vector_db
 from core.ingest.integrator import (
     create_integrated_ticket_object, 
@@ -544,6 +545,18 @@ async def generate_and_store_summaries(
 
                         # 객체 타입에 따른 요약 생성
                         if object_type == 'integrated_ticket':
+                            # tenant_metadata에서 첨부파일 정보 우선 사용
+                            tenant_metadata = obj.tenant_metadata if isinstance(obj.tenant_metadata, dict) else {}
+                            
+                            # 첨부파일 정보 통합 (tenant_metadata 우선, 없으면 original_data 사용)
+                            attachments = []
+                            if tenant_metadata.get('has_attachments') and tenant_metadata.get('attachments'):
+                                attachments = tenant_metadata['attachments']
+                                logger.debug(f"티켓 {original_id}: tenant_metadata에서 {len(attachments)}개 첨부파일 로드")
+                            elif original_data.get('all_attachments'):
+                                attachments = original_data.get('all_attachments', [])
+                                logger.debug(f"티켓 {original_id}: original_data에서 {len(attachments)}개 첨부파일 로드")
+                            
                             # 티켓 요약 생성
                             ticket_data = {
                                 'id': original_id,
@@ -553,20 +566,57 @@ async def generate_and_store_summaries(
                                 'priority': original_data.get('priority', ''),
                                 'integrated_text': integrated_content,
                                 'conversations': original_data.get('conversations', []),
-                                'attachments': original_data.get('all_attachments', [])
+                                'attachments': attachments,  # 통합된 첨부파일 정보 사용
+                                'tenant_metadata': tenant_metadata  # 메타데이터 정보도 함께 전달
                             }
                             
                             try:
+                                logger.debug(f"티켓 {original_id}: LLM 요약 생성 시작")
                                 summary_result = await llm_manager.generate_ticket_summary(ticket_data)
+                                
+                                logger.debug(f"티켓 {original_id}: LLM 응답 - {type(summary_result)} {bool(summary_result)}")
+                                
                                 if summary_result and 'summary' in summary_result:
                                     summary = summary_result['summary']
+                                    logger.debug(f"티켓 {original_id}: 요약 길이 = {len(summary) if summary else 0}")
+                                    
+                                    # 업데이트된 메타데이터 처리
+                                    if 'updated_metadata' in summary_result:
+                                        tenant_metadata = summary_result['updated_metadata']
+                                        logger.debug(f"티켓 {original_id}: AI 처리 정보가 메타데이터에 업데이트됨")
+                                    
+                                    # 요약이 실제로 유의미한지 확인
+                                    if not summary or summary.strip() == "":
+                                        logger.warning(f"티켓 {original_id}: 빈 요약 생성됨")
+                                        summary = "요약 내용이 비어있습니다."
+                                    elif summary in ["요약 생성에 실패했습니다.", "LLM 요약 생성 중 오류가 발생했습니다."]:
+                                        logger.warning(f"티켓 {original_id}: 오류 메시지가 요약으로 반환됨")
+                                    else:
+                                        logger.info(f"티켓 {original_id}: 유효한 요약 생성 완료 (길이: {len(summary)})")
                                 else:
+                                    logger.warning(f"티켓 {original_id}: summary_result에 'summary' 키가 없음: {summary_result}")
                                     summary = "요약 생성에 실패했습니다."
                             except Exception as e:
                                 logger.error(f"티켓 {original_id} 요약 생성 중 LLM 오류: {e}")
                                 summary = "LLM 요약 생성 중 오류가 발생했습니다."
                                 
                         elif object_type == 'integrated_article':
+                            # tenant_metadata에서 기본 정보 추출
+                            tenant_metadata = obj.tenant_metadata if isinstance(obj.tenant_metadata, dict) else {}
+                            if isinstance(obj.tenant_metadata, str):
+                                try:
+                                    tenant_metadata = json.loads(obj.tenant_metadata)
+                                except json.JSONDecodeError:
+                                    tenant_metadata = {}
+                            
+                            # KB 문서는 메타데이터가 제한적이므로 기본 구조만 사용
+                            if not tenant_metadata:
+                                tenant_metadata = TenantMetadataNormalizer.extract_from_original_data(original_data)
+                                logger.debug(f"KB 문서 {original_id}: 원본 데이터에서 메타데이터 추출")
+                            else:
+                                tenant_metadata = TenantMetadataNormalizer.normalize(tenant_metadata)
+                                logger.debug(f"KB 문서 {original_id}: 기존 메타데이터 정규화")
+                            
                             # KB 문서 요약 생성
                             kb_data = {
                                 'id': original_id,
@@ -576,15 +626,35 @@ async def generate_and_store_summaries(
                                 'category': original_data.get('category', ''),
                                 'tags': original_data.get('tags', []),
                                 'created_at': original_data.get('created_at', ''),
-                                'updated_at': original_data.get('updated_at', '')
+                                'updated_at': original_data.get('updated_at', ''),
+                                'tenant_metadata': tenant_metadata  # 메타데이터 추가
                             }
                             
                             try:
+                                logger.debug(f"KB 문서 {original_id}: LLM 요약 생성 시작")
                                 summary_result = await llm_manager.generate_knowledge_base_summary(kb_data)
+                                
+                                logger.debug(f"KB 문서 {original_id}: LLM 응답 - {type(summary_result)} {bool(summary_result)}")
                                 
                                 if summary_result and 'summary' in summary_result:
                                     summary = summary_result['summary']
+                                    logger.debug(f"KB 문서 {original_id}: 요약 길이 = {len(summary) if summary else 0}")
+                                    
+                                    # 업데이트된 메타데이터 처리 (KB 문서용)
+                                    if 'updated_metadata' in summary_result:
+                                        tenant_metadata = summary_result['updated_metadata']
+                                        logger.debug(f"KB 문서 {original_id}: AI 처리 정보가 메타데이터에 업데이트됨")
+                                    
+                                    # 요약이 실제로 유의미한지 확인
+                                    if not summary or summary.strip() == "":
+                                        logger.warning(f"KB 문서 {original_id}: 빈 요약 생성됨")
+                                        summary = "요약 내용이 비어있습니다."
+                                    elif summary in ["요약 생성에 실패했습니다.", "LLM 요약 생성 중 오류가 발생했습니다."]:
+                                        logger.warning(f"KB 문서 {original_id}: 오류 메시지가 요약으로 반환됨")
+                                    else:
+                                        logger.info(f"KB 문서 {original_id}: 유효한 요약 생성 완료 (길이: {len(summary)})")
                                 else:
+                                    logger.warning(f"KB 문서 {original_id}: summary_result에 'summary' 키가 없음: {summary_result}")
                                     summary = "요약 생성에 실패했습니다."
                                     
                             except Exception as e:
@@ -595,15 +665,34 @@ async def generate_and_store_summaries(
                             continue
                         
                         # 요약 업데이트 (ORM 방식)
-                        if summary:
+                        if summary and summary.strip():
+                            # 오류 메시지가 아닌 실제 요약인지 확인
+                            error_messages = [
+                                "요약 생성에 실패했습니다.",
+                                "LLM 요약 생성 중 오류가 발생했습니다.",
+                                "요약 내용이 비어있습니다.",
+                                "분석할 내용이 없습니다."
+                            ]
+                            
+                            is_error_message = any(error_msg in summary for error_msg in error_messages)
+                            
                             obj.summary = summary
                             obj.summary_generated_at = datetime.utcnow()
+                            
+                            # 업데이트된 메타데이터 저장 (JSON 직렬화)
+                            obj.tenant_metadata = json.dumps(tenant_metadata, ensure_ascii=False)
+                            
                             session.flush()  # 변경사항 플러시
                             
-                            result["success_count"] += 1
-                            logger.debug(f"{object_type} {original_id}: 요약 생성 및 저장 완료")
+                            if not is_error_message and len(summary.strip()) > 20:  # 최소 20자 이상의 실제 요약
+                                result["success_count"] += 1
+                                logger.debug(f"{object_type} {original_id}: 유효한 요약 생성 및 저장 완료")
+                            else:
+                                result["failure_count"] += 1
+                                logger.debug(f"{object_type} {original_id}: 오류 메시지가 요약으로 저장됨")
                         else:
                             result["failure_count"] += 1
+                            logger.debug(f"{object_type} {original_id}: 빈 요약으로 인한 실패")
                         
                     except Exception as e:
                         error_msg = f"{object_type} {original_id} 요약 생성 중 오류: {e}"
@@ -683,14 +772,26 @@ async def generate_and_store_summaries(
                 # 디버깅 로그
                 logger.debug(f"{object_type} {original_id}: integrated_content 길이 = {len(integrated_content) if integrated_content else 0}")
                 
-                # 데이터 파싱
+                # 데이터 파싱 및 메타데이터 정규화
                 try:
                     original_data = json.loads(original_data_str) if original_data_str else {}
-                    tenant_metadata = json.loads(tenant_metadata_str) if tenant_metadata_str else {}
+                    raw_tenant_metadata = json.loads(tenant_metadata_str) if tenant_metadata_str else {}
+                    
+                    # 메타데이터 정규화 처리
+                    if not raw_tenant_metadata:
+                        # 기존 메타데이터가 없으면 원본 데이터에서 추출
+                        tenant_metadata = TenantMetadataNormalizer.extract_from_original_data(original_data)
+                        logger.debug(f"{object_type} {original_id}: 원본 데이터에서 메타데이터 추출")
+                    else:
+                        # 기존 메타데이터가 있으면 정규화만 수행
+                        tenant_metadata = TenantMetadataNormalizer.normalize(raw_tenant_metadata)
+                        logger.debug(f"{object_type} {original_id}: 기존 메타데이터 정규화")
+                        
                 except json.JSONDecodeError:
                     logger.warning(f"{object_type} {original_id}: 데이터 파싱 실패")
                     original_data = {}
-                    tenant_metadata = {}
+                    # 파싱 실패시에도 기본 메타데이터 구조 제공
+                    tenant_metadata = TenantMetadataNormalizer.normalize({})
                 
                 # integrated_content 확인
                 if not integrated_content or not integrated_content.strip():
@@ -821,181 +922,310 @@ async def generate_and_store_summaries(
 async def sync_summaries_to_vector_db(
     tenant_id: str, 
     platform: str = "freshdesk",
-    collection_name: str = COLLECTION_NAME
+    batch_size: int = 100,
+    force_update: bool = False
 ) -> Dict[str, Any]:
     """
-    통합 객체의 요약을 벡터 데이터베이스에 동기화합니다.
+    통합 객체에서 요약 데이터를 읽어서 벡터 DB에 동기화합니다.
     
     Args:
-        tenant_id: 회사 식별자
-        platform: 플랫폼 식별자
-        collection_name: 벡터 DB 컬렉션 이름
+        tenant_id: 테넌트 ID
+        platform: 플랫폼 (기본값: freshdesk)
+        batch_size: 배치 크기 (기본값: 100)
+        force_update: 강제 업데이트 여부 (기본값: False)
         
     Returns:
-        Dict[str, Any]: 처리 결과
+        Dict[str, Any]: 동기화 결과
     """
-    logger.info(f"벡터 DB 동기화 시작 (tenant_id: {tenant_id}, platform: {platform})")
-    start_time = time.time()
-    
-    result = {
-        "processed_count": 0,
-        "success_count": 0,
-        "failure_count": 0,
-        "errors": []
-    }
-    
-    # ORM 방식으로 데이터베이스 연결
-    from core.database.manager import get_db_manager
-    from core.repositories.integrated_object_repository import IntegratedObjectRepository
+    logger.info(f"벡터 DB 동기화 시작 - {tenant_id}/{platform}")
     
     try:
-        db_manager = get_db_manager(tenant_id=tenant_id)
+        # Migration Layer 사용 여부 확인
+        from core.migration_layer import get_migration_layer
+        migration_layer = get_migration_layer()
         
-        with db_manager.get_session() as session:
-            repo = IntegratedObjectRepository(session)
+        if migration_layer.use_orm:
+            # ORM 방식 사용
+            from core.database.manager import get_db_manager
+            from core.repositories.integrated_object_repository import IntegratedObjectRepository
             
-            # 요약이 있는 통합 객체들 조회
-            objects = repo.get_by_company(
-                tenant_id=tenant_id,
-                platform=platform
-            )
+            db_manager = get_db_manager(tenant_id=tenant_id)
             
-            # 요약이 있고 벡터화할 수 있는 객체들만 필터링
-            valid_objects = []
-            for obj in objects:
-                if (obj.object_type in ('integrated_ticket', 'integrated_article') and
-                    obj.summary and obj.summary.strip() and
-                    obj.integrated_content and obj.integrated_content.strip()):
-                    valid_objects.append(obj)
-            
-            logger.info(f"벡터화할 객체 수: {len(valid_objects)}개")
-            
-            documents_to_embed = []
-            
-            for obj in valid_objects:
-                try:
-                    # tenant_metadata 파싱
-                    tenant_metadata = obj.tenant_metadata or {}
-                    if isinstance(tenant_metadata, str):
-                        try:
-                            tenant_metadata = json.loads(tenant_metadata)
-                        except json.JSONDecodeError:
-                            logger.warning(f"{obj.object_type} {obj.original_id}: 메타데이터 파싱 실패")
-                    
-                    # 벡터화용 문서 생성 
-                    # original_data에서 메타데이터 추출
-                    original_data = obj.original_data or {}
-                    if isinstance(original_data, str):
-                        try:
-                            original_data = json.loads(original_data)
-                        except json.JSONDecodeError:
+            with db_manager.get_session() as session:
+                repo = IntegratedObjectRepository(session)
+                
+                # 요약이 있는 통합 객체들 조회
+                objects = repo.get_by_company(
+                    tenant_id=tenant_id,
+                    platform=platform
+                )
+                
+                # 요약이 있는 객체만 필터링
+                objects_with_summary = [
+                    obj for obj in objects 
+                    if obj.summary and obj.summary.strip()
+                ]
+                
+                if not objects_with_summary:
+                    logger.info("동기화할 요약 데이터가 없습니다")
+                    return {"status": "success", "message": "동기화할 데이터 없음", "processed_count": 0}
+                
+                # 벡터 DB용 문서 준비
+                documents = []
+                for obj in objects_with_summary:
+                    # original_data.metadata에서 실제 데이터 추출
+                    try:
+                        if isinstance(obj.original_data, str):
+                            original_data = json.loads(obj.original_data)
+                        elif isinstance(obj.original_data, dict):
+                            original_data = obj.original_data
+                        else:
                             original_data = {}
+                    except (json.JSONDecodeError, TypeError):
+                        logger.warning(f"객체 {obj.original_id}: original_data 파싱 실패")
+                        original_data = {}
                     
-                    doc_metadata = sanitize_metadata({
+                    # 실제 Freshdesk 메타데이터는 original_data.metadata에 있음
+                    actual_metadata = original_data.get('metadata', {}) if original_data else {}
+                    
+                    # 벡터 DB에 저장할 메타데이터 구성
+                    filtered_metadata = {
                         "tenant_id": tenant_id,
                         "platform": platform,
-                        "doc_type": obj.object_type.replace('integrated_', '') if obj.object_type.startswith('integrated_') else obj.object_type,  # integrated_prefix 제거
-                        "object_type": obj.object_type,  # 호환성을 위해 유지
-                        "original_id": obj.original_id,
-                        "subject": original_data.get('subject', ''),
-                        "status": original_data.get('status', ''),
-                        "priority": original_data.get('priority', ''),
-                        "created_at": original_data.get('created_at', ''),
-                        **tenant_metadata
-                    })
-                    
-                    # 요약을 메인 콘텐츠로 사용
-                    document = {
-                        "content": obj.summary,
-                        "metadata": doc_metadata,
-                        "id": f"{tenant_id}_{platform}_{obj.object_type}_{obj.original_id}"
+                        "original_id": str(obj.original_id),
+                        "doc_type": "article" if obj.object_type == "integrated_article" else "ticket",
+                        "object_type": "article" if obj.object_type == "integrated_article" else "ticket",
                     }
                     
-                    # 문서를 임베딩 목록에 추가
-                    documents_to_embed.append(document)
-                    result["processed_count"] += 1
-                    
-                except Exception as e:
-                    logger.error(f"{obj.object_type} {obj.original_id} 벡터화 준비 중 오류: {e}")
-                    result["failure_count"] += 1
-                    result["errors"].append(f"{obj.object_type} {obj.original_id}: {str(e)}")
-                    
-            # 벡터 임베딩 및 저장
-            if documents_to_embed:
-                logger.info(f"벡터 임베딩 시작... ({len(documents_to_embed)}개)")
-                
-                # 임베딩을 위해 content만 추출
-                content_texts = []
-                for doc in documents_to_embed:
-                    content = doc.get("content", "")
-                    if content and isinstance(content, str) and content.strip():
-                        content_texts.append(content)
-                    else:
-                        logger.warning(f"빈 content 발견: {doc.get('id', 'unknown')}")
-                
-                if not content_texts:
-                    logger.warning("임베딩할 유효한 content가 없음")
-                    result["failure_count"] += len(documents_to_embed)
-                else:
-                    logger.info(f"유효한 content 수: {len(content_texts)}/{len(documents_to_embed)}")
-                    
-                    # 임베딩 전 데이터 검증
-                    logger.debug("임베딩 데이터 검증 중...")
-                    for i, content in enumerate(content_texts[:3]):  # 첫 3개만 로깅
-                        content_type = type(content).__name__
-                        content_preview = str(content)[:100] if content else "None"
-                        logger.debug(f"Content {i}: 타입={content_type}, 미리보기='{content_preview}...'")
-                    
-                    embedded_docs = embed_documents(content_texts)
-                    
-                    # 벡터 DB에 저장하기 위한 데이터 준비
-                    texts = []
-                    embeddings = []
-                    metadatas = []
-                    ids = []
-                    
-                    # 유효한 content만 골라서 저장
-                    valid_doc_index = 0
-                    for document in documents_to_embed:
-                        content = document.get("content", "")
-                        if content and isinstance(content, str) and content.strip():
-                            if valid_doc_index < len(embedded_docs):
-                                texts.append(content)
-                                embeddings.append(embedded_docs[valid_doc_index])
-                                metadatas.append(document["metadata"])
-                                ids.append(document["id"])
-                                valid_doc_index += 1
-                    
-                    if texts:
-                        # 벡터 DB에 저장
-                        vector_db.add_documents(
-                            texts=texts,
-                            embeddings=embeddings,
-                            metadatas=metadatas,
-                            ids=ids
-                        )
+                    # 객체 타입별로 적절한 필드 추가
+                    if obj.object_type == "integrated_article":
+                        # KB 문서 메타데이터 (actual_metadata에서 가져오기)
+                        filtered_metadata.update({
+                            "title": actual_metadata.get('subject', ''),  # KB에서는 subject가 제목
+                            "category": actual_metadata.get('category', ''),
+                            "folder": actual_metadata.get('folder', ''),
+                            "status": actual_metadata.get('status', 2),  # 숫자로 저장
+                            "article_type": actual_metadata.get('article_type', ''),
+                            "agent_name": actual_metadata.get('agent_name', ''),
+                            "tags": actual_metadata.get('tags', []),
+                            "has_attachments": actual_metadata.get('has_attachments', False),
+                            "complexity_level": actual_metadata.get('complexity_level', ''),
+                            "view_count": actual_metadata.get('view_count', 0),
+                            "created_at": actual_metadata.get('created_at', ''),
+                            "updated_at": actual_metadata.get('updated_at', '')
+                        })
                         
-                        result["success_count"] = len(texts)
-                        logger.info(f"벡터 DB 저장 완료: {result['success_count']}개")
-                    else:
-                        logger.warning("저장할 유효한 벡터 데이터가 없음")
+                    elif obj.object_type == "integrated_ticket":
+                        # 티켓 메타데이터 (actual_metadata에서 가져오기)
+                        filtered_metadata.update({
+                            "subject": actual_metadata.get('subject', ''),
+                            "status": actual_metadata.get('status', 2),  # 숫자로 저장
+                            "priority": actual_metadata.get('priority', 1),  # 숫자로 저장
+                            "requester_name": actual_metadata.get('requester_name', ''),
+                            "agent_name": actual_metadata.get('agent_name', ''),
+                            "company_name": actual_metadata.get('company_name', ''),
+                            "ticket_category": actual_metadata.get('ticket_category', ''),
+                            "has_attachments": actual_metadata.get('has_attachments', False),
+                            "complexity_level": actual_metadata.get('complexity_level', ''),
+                            "created_at": actual_metadata.get('created_at', ''),
+                            "updated_at": actual_metadata.get('updated_at', '')
+                        })
+                    
+                    # None 값과 빈 값 제거 (Qdrant 최적화)
+                    filtered_metadata = {k: v for k, v in filtered_metadata.items() 
+                                       if v is not None and v != "" and v != []}
+                    
+                    logger.info(f"문서 {obj.original_id}: 벡터 ID = {tenant_id}_{platform}_{obj.original_id}, 메타데이터 필드 수 = {len(filtered_metadata)}")
+                    
+                    # 벡터 DB용 문서 생성
+                    doc = {
+                        "id": f"{tenant_id}_{platform}_{obj.original_id}",
+                        "content": obj.summary,
+                        "metadata": filtered_metadata
+                    }
+                    documents.append(doc)
+                
+                # 배치 처리로 임베딩 생성 및 벡터 DB 저장
+                if documents:
+                    logger.info(f"총 {len(documents)}개 문서를 배치 크기 {batch_size}로 처리 시작")
+                    total_processed = 0
+                    
+                    # 배치 단위로 처리
+                    for i in range(0, len(documents), batch_size):
+                        batch_documents = documents[i:i + batch_size]
+                        batch_num = (i // batch_size) + 1
+                        total_batches = (len(documents) + batch_size - 1) // batch_size
+                        
+                        logger.info(f"배치 {batch_num}/{total_batches} 처리 중... ({len(batch_documents)}개 문서)")
+                        
+                        # 텍스트와 메타데이터 분리
+                        texts = [doc["content"] for doc in batch_documents]
+                        metadatas = [doc["metadata"] for doc in batch_documents]
+                        ids = [doc["id"] for doc in batch_documents]
+                        
+                        # 임베딩 생성
+                        embeddings = embed_documents(texts)
+                        
+                        if embeddings and len(embeddings) == len(texts):
+                            # 벡터 DB에 저장
+                            vector_db.add_documents(
+                                texts=texts,
+                                embeddings=embeddings,
+                                metadatas=metadatas,
+                                ids=ids
+                            )
+                            total_processed += len(batch_documents)
+                            logger.info(f"배치 {batch_num} 완료: {len(batch_documents)}건 처리")
+                        else:
+                            logger.error(f"배치 {batch_num} 임베딩 생성 실패: {len(embeddings) if embeddings else 0}/{len(texts)}")
+                            return {"status": "error", "message": f"배치 {batch_num} 임베딩 생성 실패", "processed_count": total_processed}
+                    
+                    logger.info(f"모든 배치 처리 완료: 총 {total_processed}건 처리")
+                    
+                    return {
+                        "status": "success",
+                        "message": f"동기화 완료: {total_processed}건 처리",
+                        "processed_count": total_processed,
+                        "total_count": total_processed
+                    }
+                else:
+                    return {"status": "success", "message": "처리할 문서 없음", "processed_count": 0}
         
-        result["processing_time"] = time.time() - start_time
-        
-        logger.info("✅ 벡터 DB 동기화 완료:")
-        logger.info(f"  - 처리: {result['processed_count']}개")
-        logger.info(f"  - 성공: {result['success_count']}개")
-        logger.info(f"  - 실패: {result['failure_count']}개")
-        logger.info(f"  - 소요 시간: {result['processing_time']:.2f}초")
-        
-        return result
+        else:
+            # 기존 SQLite 방식 사용 (하위 호환성)
+            from core.database.database import get_database
+            
+            db = get_database(tenant_id, platform)
+            
+            # 새로운 session 방식 사용
+            with db.get_session() as session:
+                # 요약 데이터 조회 (original_data도 함께 가져오기)
+                result = session.execute("""
+                    SELECT object_id, object_type, summary, original_data
+                    FROM integrated_objects 
+                    WHERE summary IS NOT NULL 
+                    AND summary != ''
+                    ORDER BY created_at DESC
+                """)
+                
+                summaries = result.fetchall()
+                
+                if not summaries:
+                    logger.info("동기화할 요약 데이터가 없습니다")
+                    return {"status": "success", "message": "동기화할 데이터 없음", "processed_count": 0}
+                
+                # 벡터 DB용 문서 준비
+                documents = []
+                for row in summaries:
+                    object_id, object_type, summary, original_data_str = row
+                    
+                    # original_data에서 직접 메타데이터 추출
+                    try:
+                        original_data = json.loads(original_data_str) if original_data_str else {}
+                    except (json.JSONDecodeError, TypeError):
+                        logger.warning(f"객체 {object_id}: original_data 파싱 실패")
+                        original_data = {}
+                    
+                    # 벡터 DB에 저장할 메타데이터 구성
+                    filtered_metadata = {
+                        "tenant_id": tenant_id,
+                        "platform": platform,
+                        "original_id": str(object_id),
+                        "doc_type": "article" if object_type == "integrated_article" else "ticket",
+                        "object_type": "article" if object_type == "integrated_article" else "ticket",
+                    }
+                    
+                    # 객체 타입별로 적절한 필드 추가
+                    if object_type == "integrated_article":
+                        # KB 문서 메타데이터
+                        filtered_metadata.update({
+                            "title": original_data.get('title', ''),
+                            "description": original_data.get('description', ''),
+                            "category": original_data.get('category', {}),
+                            "status": original_data.get('status', 2),  # 숫자로 저장
+                            "folder_id": original_data.get('folder_id'),
+                            "agent_id": original_data.get('agent_id'),
+                            "created_at": original_data.get('created_at', ''),
+                            "updated_at": original_data.get('updated_at', '')
+                        })
+                        
+                    elif object_type == "integrated_ticket":
+                        # 티켓 메타데이터  
+                        filtered_metadata.update({
+                            "subject": original_data.get('subject', ''),
+                            "description": original_data.get('description_text', ''),
+                            "status": original_data.get('status', 2),  # 숫자로 저장
+                            "priority": original_data.get('priority', 1),  # 숫자로 저장
+                            "requester_id": original_data.get('requester_id'),
+                            "responder_id": original_data.get('responder_id'),
+                            "group_id": original_data.get('group_id'),
+                            "company_id": original_data.get('company_id'),
+                            "created_at": original_data.get('created_at', ''),
+                            "updated_at": original_data.get('updated_at', '')
+                        })
+                    
+                    # None 값 제거 (Qdrant에서 None을 처리하지 못할 수 있음)
+                    filtered_metadata = {k: v for k, v in filtered_metadata.items() if v is not None}
+                    
+                    # 벡터 DB용 문서 생성
+                    doc = {
+                        "id": f"{tenant_id}_{platform}_{object_id}",
+                        "content": summary,
+                        "metadata": filtered_metadata
+                    }
+                    documents.append(doc)
+                    
+                    logger.debug(f"문서 {object_id}: 메타데이터 필드 수 = {len(filtered_metadata)}")
+                
+                # 임베딩 생성 및 벡터 DB 저장 (배치 처리)
+                if documents:
+                    logger.info(f"총 {len(documents)}개 문서를 배치 크기 {batch_size}로 처리 시작")
+                    total_processed = 0
+                    
+                    # 배치 단위로 처리
+                    for i in range(0, len(documents), batch_size):
+                        batch_documents = documents[i:i + batch_size]
+                        batch_num = (i // batch_size) + 1
+                        total_batches = (len(documents) + batch_size - 1) // batch_size
+                        
+                        logger.info(f"배치 {batch_num}/{total_batches} 처리 중... ({len(batch_documents)}개 문서)")
+                        
+                        # 텍스트와 메타데이터 분리
+                        texts = [doc["content"] for doc in batch_documents]
+                        metadatas = [doc["metadata"] for doc in batch_documents]
+                        ids = [doc["id"] for doc in batch_documents]
+                        
+                        # 임베딩 생성
+                        embeddings = embed_documents(texts)
+                        
+                        if embeddings and len(embeddings) == len(texts):
+                            # 벡터 DB에 저장
+                            vector_db.add_documents(
+                                texts=texts,
+                                embeddings=embeddings,
+                                metadatas=metadatas,
+                                ids=ids
+                            )
+                            total_processed += len(batch_documents)
+                            logger.info(f"배치 {batch_num} 완료: {len(batch_documents)}건 처리")
+                        else:
+                            logger.error(f"배치 {batch_num} 임베딩 생성 실패: {len(embeddings) if embeddings else 0}/{len(texts)}")
+                            return {"status": "error", "message": f"배치 {batch_num} 임베딩 생성 실패", "processed_count": total_processed}
+                    
+                    logger.info(f"모든 배치 처리 완료: 총 {total_processed}건 처리")
+                    
+                    return {
+                        "status": "success",
+                        "message": f"동기화 완료: {total_processed}건 처리",
+                        "processed_count": total_processed,
+                        "total_count": total_processed
+                    }
+                else:
+                    return {"status": "success", "message": "처리할 문서 없음", "processed_count": 0}
         
     except Exception as e:
-        logger.error(f"벡터 DB 동기화 중 오류 발생: {e}")
-        result["errors"].append(str(e))
-        result["processing_time"] = time.time() - start_time
-        raise
-
+        logger.error(f"벡터 DB 동기화 중 오류: {e}")
+        return {"status": "error", "message": str(e), "processed_count": 0}
 
 # 상태 매핑 업데이트 함수
 

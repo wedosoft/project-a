@@ -1,6 +1,6 @@
 # 티켓 분석용 사용자 프롬프트 템플릿
 version: "2.0"
-last_updated: "2025-06-25"
+last_updated: "2025-06-28"
 content_type: "ticket"
 
 # Jinja2 템플릿 
@@ -55,12 +55,15 @@ instructions:
     - 원문과 동일한 언어로 응답 (한국어 원문은 한국어로, 영어 원문은 영어로)
 
     첨부파일 처리:
-    - METADATA에 relevant_attachments가 제공된 경우, "참고 자료" 섹션에 다음 형식으로 표시:
-      - 📎 파일명1
-      - 📎 파일명2  
-      - 📎 파일명3
+    - METADATA에 관련 첨부파일이 제공된 경우, "📚 **참고 자료**" 섹션에 다음 형식으로 표시:
+      📚 **참고 자료**
+      - 📎 파일명1.pdf (문서)
+      - 📎 파일명2.jpg (이미지)
+      - 📎 파일명3.xlsx (스프레드시트)
     - 최대 3개까지만 포함하며, 주요 문제나 해결책과 직접 관련된 파일만 선택
-    - 관련 첨부파일이 없는 경우, 대화에서 언급된 다른 자료나 문서 기재
+    - 관련 첨부파일이 없는 경우:
+      📚 **참고 자료**
+      - 관련 첨부파일 없음
 
   en: |
     Analyze the content above and create a practical summary that field staff can use immediately.
@@ -95,13 +98,12 @@ instructions:
     - Respond in the same language as the original content
 
     ATTACHMENT HANDLING:
-    - If relevant_attachments are provided in METADATA, display them in the "Reference Materials" section as:
-      - 📎 filename1
-      - 📎 filename2
-      - 📎 filename3
+    - If relevant attachments are provided in METADATA, display them in the "📚 **Reference Materials**" section as:
+      📚 **Reference Materials**
+      - 📎 filename1.pdf (Document)
+      - 📎 filename2.jpg (Image)
+      - 📎 filename3.xlsx (Spreadsheet)
     - Include maximum 3 files, only those directly related to the main issue or solution
-    - If no relevant attachments are provided, mention other resources or documentation referenced in the conversation
-    - Use the clean format: 📎 filename (no technical details in the summary)
-    - The metadata contains attachment IDs, URLs, and ticket IDs for download functionality
-    - Only include attachments directly related to the main issue or solution
-    - If no relevant attachments are provided, mention other resources or documentation referenced in the conversation
+    - If no relevant attachments are provided:
+      📚 **Reference Materials**
+      - No related attachments

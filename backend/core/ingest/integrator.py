@@ -104,12 +104,97 @@ def create_integrated_ticket_object(
         "attachment_count": len(attachments)
     }
     
+    # 핵심 메타데이터 추출 및 보강
+    enhanced_metadata = {
+        # 필수 Platform-Neutral 3-Tuple
+        "tenant_id": tenant_id,
+        "platform": "freshdesk",
+        "doc_type": "integrated_ticket",
+        "original_id": str(ticket.get("id", "")),
+        
+        # 기본 정보
+        "subject": ticket.get("subject", "").strip() or "제목 없음",
+        "status": ticket.get("status_name", ticket.get("status", "unknown")),
+        "priority": ticket.get("priority_name", ticket.get("priority", "normal")),
+        
+        # 날짜 정보
+        "created_at": ticket.get("created_at", ""),
+        "updated_at": ticket.get("updated_at", ""),
+        
+        # 고객사 정보
+        "company_name": "",
+        "company_id": "",
+        
+        # 담당자 정보  
+        "agent_name": "",
+        "agent_email": "",
+        
+        # 고객 정보
+        "customer_email": "",
+        "customer_name": "",
+        
+        # 분류 정보
+        "ticket_category": ticket.get("type", ""),
+        "group_name": "",
+        "product_name": "",
+        
+        # 통계 정보
+        "conversation_count": len(conversations),
+        "attachment_count": len(attachments),
+        
+        # 내용 통계
+        "has_conversations": len(conversations) > 0,
+        "has_attachments": len(attachments) > 0,
+        "large_attachments": len([a for a in attachments if a.get("size", 0) > 1000000])  # 1MB 이상
+    }
+    
+    # 고객사 정보 추출
+    if ticket.get("company"):
+        company = ticket["company"]
+        enhanced_metadata["company_name"] = company.get("name", "")
+        enhanced_metadata["company_id"] = str(company.get("id", ""))
+    
+    # 담당자 정보 추출
+    if ticket.get("responder"):
+        responder = ticket["responder"]
+        enhanced_metadata["agent_name"] = responder.get("name", "")
+        enhanced_metadata["agent_email"] = responder.get("email", "")
+    
+    # 고객 정보 추출  
+    if ticket.get("requester"):
+        requester = ticket["requester"]
+        enhanced_metadata["customer_email"] = requester.get("email", "")
+        enhanced_metadata["customer_name"] = requester.get("name", "")
+    
+    # 그룹 정보 추출
+    if ticket.get("group"):
+        enhanced_metadata["group_name"] = ticket["group"].get("name", "")
+    
+    # 제품 정보 추출
+    if ticket.get("product"):
+        enhanced_metadata["product_name"] = ticket["product"].get("name", "")
+    
+    # 복잡도 자동 계산
+    complexity_score = 0
+    if len(conversations) > 10:
+        complexity_score += 2
+    elif len(conversations) > 5:
+        complexity_score += 1
+    
+    if len(attachments) > 5:
+        complexity_score += 2
+    elif len(attachments) > 0:
+        complexity_score += 1
+        
+    complexity_levels = ["simple", "medium", "complex", "very_complex"]
+    enhanced_metadata["complexity_level"] = complexity_levels[min(complexity_score, 3)]
+    
     # 간소화된 통합 객체 구성 (용량 최적화)
     integrated_object = {
         "id": ticket.get("id"),  # 마이그레이션 레이어 호환성을 위해 추가
         "integrated_text": "\n\n".join(text_parts),  # LLM 처리용 텍스트
         "attachments": attachment_refs,  # 최소 첨부파일 정보
-        "essential_metadata": essential_metadata,  # 핵심 메타데이터만
+        "metadata": enhanced_metadata,  # 보강된 메타데이터 사용
         "object_id": ticket.get("id"),  # storage.py에서 필요한 필드 추가
         "original_id": ticket.get("id"),  # 호환성을 위해 유지
         "tenant_id": tenant_id,
@@ -202,12 +287,84 @@ def create_integrated_article_object(
         "attachment_count": len(attachments)
     }
     
+    # 핵심 메타데이터 추출 및 보강
+    enhanced_metadata = {
+        # 필수 Platform-Neutral 3-Tuple
+        "tenant_id": tenant_id,
+        "platform": "freshdesk",
+        "doc_type": "integrated_article",
+        "original_id": str(article.get("id", "")),
+        
+        # 기본 정보
+        "subject": article.get("title", "").strip() or "제목 없음",
+        "status": article.get("status_name", article.get("status", "published")),
+        "category": "",
+        "folder": "",
+        
+        # 날짜 정보
+        "created_at": article.get("created_at", ""),
+        "updated_at": article.get("updated_at", ""),
+        
+        # 작성자 정보
+        "agent_name": "",
+        "agent_email": "",
+        
+        # 분류 정보
+        "article_type": article.get("type", ""),
+        "tags": article.get("tags", []),
+        
+        # 통계 정보
+        "attachment_count": len(attachments),
+        "view_count": article.get("hits", 0),
+        "thumbs_up": article.get("thumbs_up", 0),
+        "thumbs_down": article.get("thumbs_down", 0),
+        
+        # 내용 통계
+        "has_attachments": len(attachments) > 0,
+        "large_attachments": len([a for a in attachments if a.get("size", 0) > 1000000]),  # 1MB 이상
+        
+        # 컨텐츠 품질 지표
+        "content_length": len(article.get("description_text", "")),
+        "is_detailed": len(article.get("description_text", "")) > 1000
+    }
+    
+    # 카테고리 정보 추출
+    if article.get("category"):
+        enhanced_metadata["category"] = article["category"].get("name", "")
+    
+    # 폴더 정보 추출
+    if article.get("folder"):
+        enhanced_metadata["folder"] = article["folder"].get("name", "")
+    
+    # 작성자 정보 추출
+    if article.get("agent"):
+        agent = article["agent"]
+        enhanced_metadata["agent_name"] = agent.get("name", "")
+        enhanced_metadata["agent_email"] = agent.get("email", "")
+    
+    # 복잡도 자동 계산 (문서용)
+    complexity_score = 0
+    
+    content_length = len(article.get("description_text", ""))
+    if content_length > 5000:
+        complexity_score += 2
+    elif content_length > 1000:
+        complexity_score += 1
+    
+    if len(attachments) > 3:
+        complexity_score += 2
+    elif len(attachments) > 0:
+        complexity_score += 1
+        
+    complexity_levels = ["simple", "medium", "complex", "very_complex"]
+    enhanced_metadata["complexity_level"] = complexity_levels[min(complexity_score, 3)]
+    
     # 간소화된 통합 객체 구성 (용량 최적화)
     integrated_object = {
         "id": article.get("id"),  # 마이그레이션 레이어 호환성을 위해 추가
         "integrated_text": "\n\n".join(text_parts),  # LLM 처리용 텍스트
         "attachments": attachment_refs,  # 최소 첨부파일 정보
-        "essential_metadata": essential_metadata,  # 핵심 메타데이터만
+        "metadata": enhanced_metadata,  # 보강된 메타데이터 사용
         "object_id": article.get("id"),  # storage.py에서 필요한 필드 추가
         "original_id": article.get("id"),  # 호환성을 위해 유지
         "tenant_id": tenant_id,

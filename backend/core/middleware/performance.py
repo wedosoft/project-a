@@ -107,6 +107,21 @@ class PerformanceMiddleware(BaseHTTPMiddleware):
         self.stats = PerformanceStats()
         self.slow_request_threshold = 2.0  # 2초 이상은 느린 요청으로 간주
         
+        # 긴 처리 시간이 예상되는 경로들 (데이터 수집, 요약 생성 등)
+        self.long_running_paths = {
+            '/ingest': 300.0,  # 5분
+            '/ingest/': 300.0,  # 5분
+            '/sync-summaries': 180.0,  # 3분
+            '/summarize': 120.0,  # 2분
+        }
+        
+        # 패턴 매칭을 위한 경로 프리픽스들
+        self.long_running_prefixes = [
+            '/ingest',  # /ingest 로 시작하는 모든 경로
+            '/sync-summaries',
+            '/summarize',
+        ]
+        
         logger.info("🚀 성능 최적화 미들웨어 초기화 완료")
     
     async def dispatch(self, request: Request, call_next):
@@ -141,17 +156,36 @@ class PerformanceMiddleware(BaseHTTPMiddleware):
             if self.enable_detailed_logging:
                 self._log_request(metrics)
             
-            # 느린 요청 경고
-            if metrics.duration > self.slow_request_threshold:
-                logger.warning(
-                    f"🐌 느린 요청 감지: {metrics.method} {metrics.path} - "
-                    f"{metrics.duration:.3f}s (임계값: {self.slow_request_threshold}s)",
-                    extra={
-                        "slow_request": True,
-                        "duration": metrics.duration,
-                        "threshold": self.slow_request_threshold
-                    }
-                )
+            # 느린 요청 경고 (경로별 임계값 적용)
+            current_threshold = self.slow_request_threshold
+            
+            # 정확한 경로 매칭 먼저 시도
+            if metrics.path in self.long_running_paths:
+                current_threshold = self.long_running_paths[metrics.path]
+            else:
+                # 프리픽스 매칭으로 긴 처리 시간 경로 확인
+                for prefix in self.long_running_prefixes:
+                    if metrics.path.startswith(prefix):
+                        current_threshold = 300.0  # 기본 5분
+                        break
+            
+            if metrics.duration > current_threshold:
+                # 데이터 수집 작업의 경우 더 관대한 로깅
+                if any(metrics.path.startswith(prefix) for prefix in self.long_running_prefixes):
+                    logger.info(
+                        f"🐌 긴 작업 완료: {metrics.method} {metrics.path} - "
+                        f"{metrics.duration:.3f}s (데이터 처리 작업)"
+                    )
+                else:
+                    logger.warning(
+                        f"🐌 느린 요청 감지: {metrics.method} {metrics.path} - "
+                        f"{metrics.duration:.3f}s (임계값: {current_threshold}s)",
+                        extra={
+                            "slow_request": True,
+                            "duration": metrics.duration,
+                            "threshold": current_threshold
+                        }
+                    )
             
             # 성능 헤더 추가
             response.headers["X-Response-Time"] = f"{metrics.duration:.3f}s"

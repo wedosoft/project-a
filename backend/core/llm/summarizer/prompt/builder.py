@@ -122,9 +122,10 @@ STRUCTURE YOUR SUMMARY:
 - Technical Specifications: Settings, configurations, technical parameters
 - Service Requirements: Limitations, dependencies, compatibility requirements
 - Process Insights: Best practices, workflows, procedural knowledge
-- Reference Materials: Mentioned documentation, tools, resources, and attachments
-{attachment_format}
 - Future Considerations: Recommendations for similar cases, preventive measures
+
+{sections['references']}
+{attachment_format}
 
 STRICTLY FORBIDDEN:
 {forbidden}
@@ -172,26 +173,46 @@ FORMATTING RULES:
         try:
             template_data = self.prompt_loader.get_user_prompt_template(content_type)
             
-            # 메타데이터 포맷팅
+            # 메타데이터 포맷팅 (확장된 필드 활용)
             metadata_formatted = ""
             if metadata:
                 formatted_metadata = []
                 
-                # 첨부파일 정보 특별 처리 - 관련성이 높은 1-3개만 선택
-                if 'attachments' in metadata or 'all_attachments' in metadata:
-                    attachments = metadata.get('attachments') or metadata.get('all_attachments') or []
-                    if attachments and isinstance(attachments, list):
-                        # 여기서 첨부파일 선별 로직 호출 (나중에 attachment 모듈에서)
-                        from ..attachment.selector import select_relevant_attachments
-                        relevant_attachments = select_relevant_attachments(attachments, content, subject)
-                        if relevant_attachments:
-                            att_names = [att.get('name', 'Unknown') for att in relevant_attachments]
-                            formatted_metadata.append(f"relevant_attachments: {', '.join(att_names)}")
+                # 핵심 비즈니스 정보 우선 표시
+                if metadata.get('company_name'):
+                    formatted_metadata.append(f"고객사: {metadata['company_name']}")
                 
-                # 기타 메타데이터 처리
+                if metadata.get('customer_email'):
+                    formatted_metadata.append(f"고객 연락처: {metadata['customer_email']}")
+                
+                if metadata.get('agent_name'):
+                    formatted_metadata.append(f"담당자: {metadata['agent_name']}")
+                
+                if metadata.get('department'):
+                    formatted_metadata.append(f"부서: {metadata['department']}")
+                
+                if metadata.get('ticket_category'):
+                    formatted_metadata.append(f"카테고리: {metadata['ticket_category']}")
+                
+                if metadata.get('complexity_level'):
+                    formatted_metadata.append(f"복잡도: {metadata['complexity_level']}")
+                
+                if metadata.get('product_version'):
+                    formatted_metadata.append(f"제품 버전: {metadata['product_version']}")
+                
+                # 첨부파일 정보는 메타데이터에서 제외 (참고 자료 섹션에서 처리됨)
+                # if 'attachments' in metadata or 'all_attachments' in metadata:
+                #     ... (첨부파일 처리 로직 제거 - 참고 자료 섹션에서만 처리)
+                
+                
+                # 기타 중요 메타데이터 처리 (첨부파일 관련 필드 제외)
                 for k, v in metadata.items():
-                    if k not in ['attachments', 'all_attachments'] and v:
-                        formatted_metadata.append(f"{k}: {v}")
+                    if k not in ['attachments', 'all_attachments', 'company_name', 'customer_email', 
+                               'agent_name', 'department', 'ticket_category', 'complexity_level', 
+                               'product_version', 'attachment_types', 'has_attachments', 
+                               'has_image_attachments', 'has_document_attachments', 'large_attachments'] and v:
+                        if k in ['priority', 'status', 'created_at', 'escalation_count']:
+                            formatted_metadata.append(f"{k}: {v}")
                 
                 if formatted_metadata:
                     metadata_formatted = "; ".join(formatted_metadata)
@@ -316,6 +337,52 @@ FORMATTING RULES:
         prompt_parts.append("Please analyze the content above and create a comprehensive summary.")
         
         return "\n\n".join(prompt_parts)
+
+    def build_enhanced_system_prompt(
+        self, 
+        content_type: str, 
+        content_language: str = "ko", 
+        ui_language: str = "ko"
+    ) -> str:
+        """
+        품질 향상을 위한 강화된 시스템 프롬프트 구성
+        
+        Args:
+            content_type: 콘텐츠 타입 (ticket, knowledge_base, conversation)
+            content_language: 콘텐츠 언어
+            ui_language: UI 언어
+            
+        Returns:
+            str: 강화된 시스템 프롬프트
+        """
+        try:
+            # 기본 시스템 프롬프트에 품질 강화 요소 추가
+            base_prompt = self.build_system_prompt(content_type, content_language, ui_language)
+            
+            quality_enhancement = """
+
+품질 강화 지침:
+- 원문의 모든 핵심 정보 포함 필수
+- 구체적이고 실행 가능한 내용으로 작성
+- 추상적이거나 모호한 표현 금지
+- 5개 섹션 구조 엄격히 준수
+- 첨부파일 정보 정확히 반영"""
+            
+            if ui_language == "en":
+                quality_enhancement = """
+
+Quality Enhancement Guidelines:
+- Include ALL key information from original text
+- Write specific and actionable content
+- Avoid abstract or vague expressions
+- Strictly follow 5-section structure
+- Accurately reflect attachment information"""
+            
+            return base_prompt + quality_enhancement
+            
+        except Exception as e:
+            logger.warning(f"Enhanced system prompt 생성 실패, 기본 프롬프트 사용: {e}")
+            return self.build_system_prompt(content_type, content_language, ui_language)
 
 
 # 전역 빌더 인스턴스

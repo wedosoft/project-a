@@ -103,6 +103,11 @@ class SQLiteDatabase:
         if self.engine is None:
             self.connect()
         
+        # 이미 테이블이 생성되었다면 스킵
+        if self._tables_created:
+            logger.debug("테이블이 이미 생성되어 있음 - 스킵")
+            return
+        
         try:
             # ORM 모델들을 import
             from .models import Base
@@ -415,6 +420,9 @@ class SQLiteDatabase:
 # 호환성을 위한 alias
 DatabaseManager = SQLiteDatabase
 
+# 데이터베이스 인스턴스 캐시
+_database_cache = {}
+
 def get_database(tenant_id: str = None, platform: str = "freshdesk") -> SQLiteDatabase:
     """
     데이터베이스 인스턴스 반환 (Freshdesk 전용 멀티테넌트)
@@ -429,7 +437,12 @@ def get_database(tenant_id: str = None, platform: str = "freshdesk") -> SQLiteDa
     if not tenant_id:
         raise ValueError("멀티테넌트 환경에서는 tenant_id(tenant_id)가 필수입니다")
     
-    return SQLiteDatabase(tenant_id, platform)  # platform은 내부적으로 "freshdesk"로 고정됨
+    cache_key = f"{tenant_id}:{platform}"
+    
+    if cache_key not in _database_cache:
+        _database_cache[cache_key] = SQLiteDatabase(tenant_id, platform)
+    
+    return _database_cache[cache_key]
 
 
 def validate_multitenant_setup() -> Dict[str, Any]:

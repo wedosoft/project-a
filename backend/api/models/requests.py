@@ -82,6 +82,10 @@ class IngestRequest(BaseModel):
         default=None,
         description="티켓 수집 시작 날짜 (YYYY-MM-DD 형식, None이면 현재부터 10년 전)"
     )
+    force_update: bool = Field(
+        default=False,
+        description="기존 요약이 있어도 강제로 재생성 여부 (기본값: False)"
+    )
 
 
 class IngestJobCreateRequest(BaseModel):

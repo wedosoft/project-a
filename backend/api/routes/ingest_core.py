@@ -448,7 +448,7 @@ async def trigger_data_ingestion(
             summary_result = await generate_and_store_summaries(
                 tenant_id=tenant_id,
                 platform=platform,
-                force_update=False
+                force_update=request.force_update  # API 요청에서 받은 값 사용
             )
             
             # 성공 여부 확인

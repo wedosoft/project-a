@@ -2,19 +2,42 @@
 version: "2.0"
 last_updated: "2025-06-25"
 
-# 기본 4섹션 구조
+# 첨부파일 형식 (독립 섹션으로 통일)
+attachment_format:
+  ko: |
+    📚 **참고 자료** 섹션에 첨부파일을 다음과 같이 표시하세요:
+    
+    첨부파일이 있는 경우:
+    📚 **참고 자료**
+    - 📎 파일명1.pdf (문서)
+    - 📎 파일명2.jpg (이미지)  
+    - 📎 파일명3.xlsx (스프레드시트)
+    
+    첨부파일이 없는 경우:
+    📚 **참고 자료**
+    - 관련 첨부파일 없음
+    
+    파일 유형별 표시:
+    - 📄 문서: PDF, DOC, TXT 등
+    - 🖼️ 이미지: JPG, PNG, GIF 등
+    - 📊 데이터: XLS, CSV, JSON 등
+    - 🔧 코드: JS, PY, SQL 등
+
+# 기본 5섹션 구조 (참고 자료 섹션 추가)
 sections:
   ko:
     problem: "🔍 **문제 상황**"
     cause: "🎯 **근본 원인**"
     solution: "🔧 **해결 과정**"
     insights: "💡 **핵심 포인트**"
+    references: "📚 **참고 자료**"
   
   en:
     problem: "🔍 **Problem Analysis**"
     cause: "🎯 **Root Cause**"
     solution: "🔧 **Solution Process**"
     insights: "💡 **Key Insights**"
+    references: "📚 **Reference Materials**"
 
 # KB 문서용 섹션 (다른 구조)
 kb_sections:
@@ -30,20 +53,46 @@ kb_sections:
     requirements: "⚙️ **Requirements**"
     technical: "🛠️ **Technical Specifications**"
 
-# 첨부파일 형식
+# 첨부파일 형식 (독립 섹션으로 통일)
 attachment_format:
   ko: |
-    첨부파일이 있는 경우 다음과 같이 표시하세요:
-    - **참고 자료**:
-      - 📎 파일명1
-      - 📎 파일명2
-      - 📎 파일명3
-    관련 첨부파일이 없으면 대화에서 언급된 중요한 문서나 자료를 기재하세요.
+    � **참고 자료** 섹션에 첨부파일을 다음과 같이 표시하세요:
+    
+    첨부파일이 있는 경우:
+    � **참고 자료**
+    - 📎 파일명1.pdf (문서)
+    - 📎 파일명2.jpg (이미지)
+    - 📎 파일명3.xlsx (스프레드시트)
+    
+    첨부파일이 없는 경우:
+    � **참고 자료**
+    - 관련 첨부파일 없음
+    
+    파일 유형별 표시:
+    - 📄 문서 파일 (.pdf, .doc, .docx)
+    - 🖼️ 이미지 파일 (.jpg, .png, .gif)
+    - 📊 스프레드시트 (.xlsx, .csv)
+    - 📋 텍스트 파일 (.txt, .log)
+    - 🗂️ 압축 파일 (.zip, .rar)
+    - 📎 기타 파일
   
   en: |
-    If relevant attachments exist, display them as follows:
-    - **Reference Materials**:
-      - 📎 filename1
-      - 📎 filename2
-      - 📎 filename3
-    If no relevant attachments exist, mention key documentation or resources referenced in the conversation.
+    Display attachments in the � **Reference Materials** section as follows:
+    
+    When attachments exist:
+    � **Reference Materials**
+    - 📎 filename1.pdf (Document)
+    - 📎 filename2.jpg (Image)
+    - 📎 filename3.xlsx (Spreadsheet)
+    
+    When no attachments exist:
+    � **Reference Materials**
+    - No related attachments
+    
+    File type indicators:
+    - 📄 Document files (.pdf, .doc, .docx)
+    - 🖼️ Image files (.jpg, .png, .gif)
+    - 📊 Spreadsheet files (.xlsx, .csv)
+    - 📋 Text files (.txt, .log)
+    - 🗂️ Archive files (.zip, .rar)
+    - 📎 Other files

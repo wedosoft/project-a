@@ -22,7 +22,7 @@ class CoreSummarizer:
     Core summarizer class that orchestrates all summarization components
     """
     
-    def __init__(self, use_llm_attachment_selector: bool = False):
+    def __init__(self, use_llm_attachment_selector: bool = True):
         self.prompt_builder = PromptBuilder()
         self.attachment_selector = AttachmentSelector()
         self.quality_validator = QualityValidator()
@@ -30,14 +30,14 @@ class CoreSummarizer:
         self.manager = None  # 지연 초기화로 순환 import 방지
         self.use_llm_attachment_selector = use_llm_attachment_selector
         
-        # LLM 기반 첨부파일 선별기 (옵션)
+        # LLM 기반 첨부파일 선별기 (기본 활성화)
         if use_llm_attachment_selector:
             try:
-                from ..attachment.llm_selector import HybridAttachmentSelector
-                self.llm_attachment_selector = HybridAttachmentSelector(prefer_llm=True)
+                from ..attachment.llm_selector import LLMAttachmentSelector
+                self.llm_attachment_selector = LLMAttachmentSelector()
                 logger.info("LLM 기반 첨부파일 선별기 활성화됨")
-            except ImportError:
-                logger.warning("LLM 첨부파일 선별기 로드 실패, rule-based 사용")
+            except Exception as e:
+                logger.warning(f"LLM 첨부파일 선별기 로드 실패: {e}, rule-based 사용")
                 self.llm_attachment_selector = None
     
     def _get_manager(self):
