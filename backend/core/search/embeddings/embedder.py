@@ -65,10 +65,30 @@ CHUNK_OVERLAP = 200  # 청크 간 중복 토큰 수
 
 def count_tokens(text: str) -> int:
     """텍스트의 토큰 수를 계산합니다."""
+    # 입력값 검증 및 변환
+    if text is None:
+        return 0
+    
+    if not isinstance(text, str):
+        # 문자열이 아닌 경우 문자열로 변환 시도
+        try:
+            text = str(text)
+        except Exception:
+            logger.warning(f"토큰 카운트 실패: 변환할 수 없는 타입 {type(text)}")
+            return 0
+    
+    if not text.strip():
+        return 0
+    
     if tokenizer is None:
         # 대략적인 토큰 수 계산 (1 토큰 ≈ 4 문자)
         return len(text) // 4
-    return len(tokenizer.encode(text))
+    
+    try:
+        return len(tokenizer.encode(text))
+    except Exception as e:
+        logger.warning(f"토큰 카운트 실패: {e}")
+        return len(text) // 4  # 폴백 계산
 
 def split_into_chunks(text: str, max_tokens: int = MAX_TOKENS_PER_CHUNK, overlap: int = CHUNK_OVERLAP) -> List[str]:
     """
@@ -223,9 +243,36 @@ def embed_documents(docs: List[str]) -> List[List[float]]:
     if not docs:
         return []
     
+    # 입력 데이터 검증 및 정리
+    valid_docs = []
+    for i, doc in enumerate(docs):
+        if doc is None:
+            logger.warning(f"문서 {i}: None 값이 전달됨 - 건너뜀")
+            continue
+            
+        if not isinstance(doc, str):
+            logger.warning(f"문서 {i}: 문자열이 아님 ({type(doc)}) - 문자열로 변환 시도")
+            try:
+                doc = str(doc)
+            except Exception as e:
+                logger.error(f"문서 {i}: 문자열 변환 실패 - 건너뜀: {e}")
+                continue
+        
+        if not doc.strip():
+            logger.warning(f"문서 {i}: 빈 문자열 - 건너뜀")
+            continue
+            
+        valid_docs.append(doc)
+    
+    if not valid_docs:
+        logger.warning("유효한 문서가 없음 - 빈 리스트 반환")
+        return []
+    
+    logger.info(f"유효한 문서 수: {len(valid_docs)}/{len(docs)}")
+    
     # 각 문서의 토큰 수를 확인하고 필요시 자르기
     processed_docs = []
-    for i, doc in enumerate(docs):
+    for i, doc in enumerate(valid_docs):
         token_count = count_tokens(doc)
         logger.debug(f"문서 {i} 토큰 수: {token_count}")  # ERROR -> DEBUG로 수정
         

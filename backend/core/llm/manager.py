@@ -8,6 +8,7 @@ import os
 import logging
 from typing import Dict, List, Optional, Any
 from cachetools import TTLCache
+from jinja2 import Template
 
 from .models.base import LLMProvider, LLMRequest, LLMResponse
 from .models.providers import ProviderConfig, ProviderStats
@@ -17,6 +18,7 @@ from .utils.config import ConfigManager
 from .utils.routing import ProviderRouter
 from .utils.metrics import MetricsCollector
 from .scalable_key_manager import scalable_key_manager, APIKeyStrategy
+from .summarizer.prompt.loader import PromptLoader
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +51,9 @@ class LLMManager:
         self.router = ProviderRouter()
         self.metrics = MetricsCollector()
         self.conversation_filter = SmartConversationFilter()
+        
+        # 프롬프트 로더 초기화
+        self.prompt_loader = PromptLoader()
         
         # 확장 가능한 API 키 관리자
         self.key_manager = scalable_key_manager
@@ -162,7 +167,7 @@ class LLMManager:
     
     async def generate_ticket_summary(self, ticket_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        티켓 요약 생성
+        티켓 요약 생성 (YAML 템플릿 사용)
         
         Args:
             ticket_data: 티켓 정보
@@ -170,55 +175,72 @@ class LLMManager:
         Returns:
             요약 정보
         """
-        subject = ticket_data.get("subject", "")
-        description = ticket_data.get("description_text", "")
-        conversations = ticket_data.get("conversations", [])
-        
-        # 스마트 대화 필터링
-        if conversations:
-            conversations = self.conversation_filter.filter_conversations_unlimited(conversations)
-        
-        # 프롬프트 구성
-        prompt_parts = [f"티켓 제목: {subject}"]
-        if description:
-            prompt_parts.append(f"티켓 설명: {description}")
-        
-        if conversations:
-            prompt_parts.append("주요 대화 내용:")
-            for conv in conversations[:10]:  # 최대 10개만 포함
-                sender = "사용자" if conv.get("user_id") else "상담원"
-                body = self._extract_conversation_body(conv)
-                prompt_parts.append(f"- {sender}: {body[:200]}...")
-        
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "티켓 정보를 분석하여 간결한 마크다운 요약을 작성하세요. "
-                    "최대 500자 이내로 작성해주세요."
-                )
-            },
-            {
-                "role": "user", 
-                "content": "\n".join(prompt_parts)
-            }
-        ]
-        
         try:
-            # 요약용 모델 설정 사용
+            # YAML 템플릿 로드
+            system_template = self.prompt_loader.load_template("system", "ticket")
+            user_template = self.prompt_loader.load_template("user", "ticket")
+            
+            # 티켓 데이터 준비
+            subject = ticket_data.get("subject", "")
+            description = ticket_data.get("description", "")
+            conversations = ticket_data.get("conversations", [])
+            integrated_text = ticket_data.get("integrated_text", "")
+            
+            # 스마트 대화 필터링
+            if conversations:
+                conversations = self.conversation_filter.filter_conversations_unlimited(conversations)
+            
+            # 메타데이터 포맷팅
+            metadata_parts = []
+            if ticket_data.get("status"):
+                metadata_parts.append(f"상태: {ticket_data['status']}")
+            if ticket_data.get("priority"):
+                metadata_parts.append(f"우선순위: {ticket_data['priority']}")
+            if ticket_data.get("created_at"):
+                metadata_parts.append(f"생성일: {ticket_data['created_at']}")
+            
+            metadata_formatted = ", ".join(metadata_parts) if metadata_parts else ""
+            
+            # 사용자 프롬프트 생성
+            user_template_content = user_template.get("template", "")
+            instruction_text = user_template.get("instructions", {}).get("ko", "")
+            
+            jinja_template = Template(user_template_content)
+            user_prompt = jinja_template.render(
+                subject=subject,
+                metadata_formatted=metadata_formatted,
+                content=integrated_text or description,
+                instruction_text=instruction_text
+            )
+            
+            # 시스템 프롬프트 생성
+            system_prompt = system_template.get("template", "") or system_template.get("instructions", {}).get("ko", "")
+            
+            messages = [
+                {
+                    "role": "system",
+                    "content": system_prompt
+                },
+                {
+                    "role": "user", 
+                    "content": user_prompt
+                }
+            ]
+            
+            # 요약 생성
             provider = LLMProvider.GEMINI  # 요약은 Gemini 사용
             
             response = await self.generate(
                 messages=messages,
                 provider=provider,
-                max_tokens=1000,
+                max_tokens=2000,
                 temperature=0.1
             )
             
             if response.success:
                 return {
                     "summary": response.content,
-                    "key_points": ["주요 포인트 1", "주요 포인트 2"],
+                    "key_points": ["YAML 템플릿 기반 요약"],
                     "sentiment": "중립적",
                     "priority_recommendation": "보통",
                     "urgency_level": "보통"
@@ -229,7 +251,7 @@ class LLMManager:
         except Exception as e:
             logger.error(f"티켓 요약 생성 실패: {e}")
             return {
-                "summary": f"오류로 인해 요약 생성에 실패했습니다. 티켓 제목: {subject}",
+                "summary": f"오류로 인해 요약 생성에 실패했습니다. 오류: {str(e)}",
                 "key_points": ["요약 생성 오류", "수동 검토 필요"],
                 "sentiment": "중립적",
                 "priority_recommendation": "확인 필요",
@@ -238,7 +260,7 @@ class LLMManager:
     
     async def generate_knowledge_base_summary(self, kb_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        KB 문서 요약 생성
+        KB 문서 요약 생성 (YAML 템플릿 사용)
         
         Args:
             kb_data: KB 문서 정보 (title, content 포함)
@@ -246,49 +268,68 @@ class LLMManager:
         Returns:
             요약 정보
         """
-        title = kb_data.get("title", "")
-        content = kb_data.get("content", "")
-        
-        # 프롬프트 구성
-        prompt_parts = []
-        if title:
-            prompt_parts.append(f"문서 제목: {title}")
-        
-        if content:
-            # 긴 내용은 잘라서 사용
-            content_preview = content[:2000] + ("..." if len(content) > 2000 else "")
-            prompt_parts.append(f"문서 내용:\n{content_preview}")
-        
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "KB 문서 내용을 분석하여 간결한 마크다운 요약을 작성하세요. "
-                    "문서의 주요 내용과 핵심 포인트를 포함해 최대 500자 이내로 작성해주세요."
-                )
-            },
-            {
-                "role": "user", 
-                "content": "\n".join(prompt_parts)
-            }
-        ]
-        
         try:
-            # 요약용 모델 설정 사용
+            # YAML 템플릿 로드
+            system_template = self.prompt_loader.load_template("system", "knowledge_base")
+            user_template = self.prompt_loader.load_template("user", "knowledge_base")
+            
+            # KB 데이터 준비
+            title = kb_data.get("title", "")
+            content = kb_data.get("content", "")
+            description = kb_data.get("description", "")
+            
+            # 메타데이터 포맷팅
+            metadata_parts = []
+            if kb_data.get("category"):
+                metadata_parts.append(f"카테고리: {kb_data['category']}")
+            if kb_data.get("tags"):
+                metadata_parts.append(f"태그: {', '.join(kb_data['tags'])}")
+            if kb_data.get("created_at"):
+                metadata_parts.append(f"생성일: {kb_data['created_at']}")
+            
+            metadata_formatted = ", ".join(metadata_parts) if metadata_parts else ""
+            
+            # 사용자 프롬프트 생성
+            user_template_content = user_template.get("template", "")
+            instruction_text = user_template.get("instructions", {}).get("ko", "")
+            
+            jinja_template = Template(user_template_content)
+            user_prompt = jinja_template.render(
+                title=title,
+                metadata_formatted=metadata_formatted,
+                content=content or description,
+                instruction_text=instruction_text
+            )
+            
+            # 시스템 프롬프트 생성
+            system_prompt = system_template.get("template", "") or system_template.get("instructions", {}).get("ko", "")
+            
+            messages = [
+                {
+                    "role": "system",
+                    "content": system_prompt
+                },
+                {
+                    "role": "user", 
+                    "content": user_prompt
+                }
+            ]
+            
+            # 요약 생성
             provider = LLMProvider.GEMINI  # 요약은 Gemini 사용
             
             response = await self.generate(
                 messages=messages,
                 provider=provider,
-                max_tokens=1000,
+                max_tokens=2000,
                 temperature=0.1
             )
             
             if response.success:
                 return {
                     "summary": response.content,
-                    "key_points": ["주요 포인트 1", "주요 포인트 2"],
-                    "topics": ["주제1", "주제2"],
+                    "key_points": ["YAML 템플릿 기반 KB 요약"],
+                    "topics": ["지식베이스"],
                     "category": "기술문서"
                 }
             else:
@@ -297,7 +338,7 @@ class LLMManager:
         except Exception as e:
             logger.error(f"KB 문서 요약 생성 실패: {e}")
             return {
-                "summary": f"오류로 인해 요약 생성에 실패했습니다. 문서 제목: {title}",
+                "summary": f"오류로 인해 요약 생성에 실패했습니다. 오류: {str(e)}",
                 "key_points": ["요약 생성 오류", "수동 검토 필요"],
                 "topics": ["오류"],
                 "category": "확인 필요"

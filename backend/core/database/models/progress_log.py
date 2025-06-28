@@ -22,11 +22,10 @@ class ProgressLog(BaseModel):
     step = Column(Integer, nullable=False)  # 현재 단계
     total_steps = Column(Integer, nullable=False)  # 전체 단계 수
     
-    # 인덱스 및 제약조건
+    # 인덱스 설정 (UNIQUE 제약조건 제거)
     __table_args__ = (
         Index('idx_progress_job_id', 'job_id'),
         Index('idx_progress_tenant_id', 'tenant_id'),
         Index('idx_progress_created_at', 'created_at'),
-        # 같은 작업의 같은 단계는 중복 방지
-        Index('idx_progress_unique', 'job_id', 'tenant_id', 'step', unique=True),
+        Index('idx_progress_composite', 'job_id', 'tenant_id', 'step'),  # 검색 성능용
     )

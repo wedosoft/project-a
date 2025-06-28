@@ -379,7 +379,18 @@ async def trigger_data_ingestion(
                 if isinstance(progress_data, dict):
                     stage = progress_data.get("stage", "processing")
                     progress = progress_data.get("progress", 0)
-                    message = f"{stage} 처리 중..."
+                    
+                    # stage를 사용자 친화적 메시지로 변환
+                    stage_messages = {
+                        "tickets": "티켓 수집",
+                        "articles": "아티클 수집", 
+                        "embeddings": "벡터 임베딩 생성",
+                        "summaries": "AI 요약 생성",
+                        "processing": "데이터 처리"
+                    }
+                    
+                    user_message = stage_messages.get(stage, stage)
+                    message = f"{user_message} 중... ({progress:.1f}%)"
                     percentage_value = float(progress)
                 # 기존 시그니처 호환성 (직접 호출하는 경우)
                 elif isinstance(progress_data, str) and percentage is not None:

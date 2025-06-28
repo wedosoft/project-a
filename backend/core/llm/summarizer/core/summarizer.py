@@ -7,7 +7,7 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 
 from core.llm.models.base import LLMProvider
-from core.llm.manager import get_llm_manager
+# from core.llm.manager import get_llm_manager  # 순환 import 방지를 위해 제거
 from ..prompt.builder import PromptBuilder
 from ..attachment.selector import AttachmentSelector
 from ..quality.validator import QualityValidator
@@ -27,7 +27,7 @@ class CoreSummarizer:
         self.attachment_selector = AttachmentSelector()
         self.quality_validator = QualityValidator()
         self.context_optimizer = ContextOptimizer()
-        self.manager = get_llm_manager()  # 싱글톤 인스턴스 사용
+        self.manager = None  # 지연 초기화로 순환 import 방지
         self.use_llm_attachment_selector = use_llm_attachment_selector
         
         # LLM 기반 첨부파일 선별기 (옵션)
@@ -39,6 +39,13 @@ class CoreSummarizer:
             except ImportError:
                 logger.warning("LLM 첨부파일 선별기 로드 실패, rule-based 사용")
                 self.llm_attachment_selector = None
+    
+    def _get_manager(self):
+        """지연 초기화로 순환 import 방지"""
+        if self.manager is None:
+            from core.llm.manager import get_llm_manager
+            self.manager = get_llm_manager()
+        return self.manager
         
     async def generate_summary(
         self,
@@ -118,7 +125,7 @@ class CoreSummarizer:
                 {"role": "user", "content": user_prompt}
             ]
             
-            response = await self.manager.generate(
+            response = await self._get_manager().generate(
                 messages=messages,
                 provider=LLMProvider.OPENAI,
                 max_tokens=1200,
@@ -181,7 +188,7 @@ class CoreSummarizer:
                 {"role": "user", "content": user_prompt}
             ]
             
-            response = await self.manager.generate(
+            response = await self._get_manager().generate(
                 messages=messages,
                 provider=LLMProvider.OPENAI,
                 max_tokens=1500,

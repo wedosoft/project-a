@@ -70,8 +70,8 @@ class DatabaseManager:
                 @event.listens_for(self.engine, "connect")
                 def set_sqlite_pragma(dbapi_connection, connection_record):
                     cursor = dbapi_connection.cursor()
-                    # WAL 모드 활성화 (동시성 개선)
-                    cursor.execute("PRAGMA journal_mode=WAL")
+                    # DELETE 모드 사용 (개발 환경, WAL 파일 생성 방지)
+                    cursor.execute("PRAGMA journal_mode=DELETE")
                     # 동기화 모드 설정 (데이터 안전성)
                     cursor.execute("PRAGMA synchronous=NORMAL")
                     # 외래키 제약조건 활성화
@@ -165,10 +165,10 @@ class DatabaseConfig:
         if self.environment == 'development':
             # SQLite 사용 (개발 환경)
             if tenant_id:
-                db_path = f"./data/{tenant_id}_freshdesk_data.db"
+                db_path = f"./core/data/{tenant_id}_data.db"
                 os.makedirs(os.path.dirname(db_path), exist_ok=True)
                 return f"sqlite:///{db_path}"
-            return "sqlite:///./data/main.db"
+            return "sqlite:///./core/data/main.db"
         
         elif self.environment in ['staging', 'production']:
             # PostgreSQL 사용 (스테이징/운영 환경)
