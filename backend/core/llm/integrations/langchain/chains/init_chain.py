@@ -30,14 +30,14 @@ class InitParallelChain:
     - 성능 최적화된 벡터 검색
     """
     
-    def __init__(self, llm_router=None):
+    def __init__(self, llm_manager=None):
         """
         초기화 병렬 체인 생성
         
         Args:
-            llm_router: 기존 LLMRouter 인스턴스 (90%+ 코드 재활용용)
+            llm_manager: LLMManager 인스턴스 (통합 LLM 관리자)
         """
-        self.llm_router = llm_router
+        self.llm_manager = llm_manager
         self._temp_top_k_tickets = 5  # 기본값
         self._temp_top_k_kb = 5  # 기본값
         
@@ -217,19 +217,19 @@ class InitParallelChain:
         """
         티켓 요약 생성 태스크
         
-        기존 LLMRouter._generate_summary_task() 로직을 90%+ 재활용
+        기존 LLMManager._generate_summary_task() 로직을 90%+ 재활용
         """
-        if not self.llm_router:
-            logger.error("LLMRouter 인스턴스가 없어 요약 생성을 건너뜁니다.")
+        if not self.llm_manager:
+            logger.error("LLMManager 인스턴스가 없어 요약 생성을 건너뜁니다.")
             return {
                 "task_type": "summary",
-                "error": "LLMRouter 인스턴스 없음",
+                "error": "LLMManager 인스턴스 없음",
                 "success": False
             }
             
         try:
-            # 기존 LLMRouter의 _generate_summary_task 메서드 재활용
-            return await self.llm_router._generate_summary_task(inputs)
+            # 기존 LLMManager의 _generate_summary_task 메서드 재활용
+            return await self.llm_manager._generate_summary_task(inputs)
         except Exception as e:
             logger.error(f"요약 생성 태스크 실행 실패: {e}")
             return {
@@ -242,26 +242,26 @@ class InitParallelChain:
         """
         통합 벡터 검색 태스크 - KB 문서와 유사 티켓을 한 번에 검색
         
-        기존 LLMRouter._unified_search_task() 로직을 90%+ 재활용
+        기존 LLMManager._unified_search_task() 로직을 90%+ 재활용
         
         최적화 포인트:
         1. 벡터 검색 횟수를 2회에서 1회로 줄임 (임베딩 생성 1회로 단축)
         2. 직접 벡터 검색으로 SearchOptimizer 의존성 제거하여 단순화
         3. LLM 분석 생략으로 응답 속도 대폭 향상 (9초+ -> 1초 목표)
         """
-        if not self.llm_router:
-            logger.error("LLMRouter 인스턴스가 없어 통합 검색을 건너뜁니다.")
+        if not self.llm_manager:
+            logger.error("LLMManager 인스턴스가 없어 통합 검색을 건너뜁니다.")
             return {
                 "task_type": "unified_search",
                 "similar_tickets": [],
                 "kb_documents": [],
-                "error": "LLMRouter 인스턴스 없음",
+                "error": "LLMManager 인스턴스 없음",
                 "success": False
             }
             
         try:
-            # 기존 LLMRouter의 _unified_search_task 메서드 재활용
-            return await self.llm_router._unified_search_task(inputs)
+            # 기존 LLMManager의 _unified_search_task 메서드 재활용
+            return await self.llm_manager._unified_search_task(inputs)
         except Exception as e:
             logger.error(f"통합 검색 태스크 실행 실패: {e}")
             return {
@@ -274,10 +274,10 @@ class InitParallelChain:
 
     def _create_empty_search_result(self, execution_time: float) -> Dict[str, Any]:
         """
-        빈 검색 결과 생성 (기존 LLMRouter 로직 재활용)
+        빈 검색 결과 생성 (기존 LLMManager 로직 재활용)
         """
-        if self.llm_router and hasattr(self.llm_router, '_create_empty_search_result'):
-            return self.llm_router._create_empty_search_result(execution_time)
+        if self.llm_manager and hasattr(self.llm_manager, '_create_empty_search_result'):
+            return self.llm_manager._create_empty_search_result(execution_time)
         
         # fallback 구현
         return {
@@ -291,24 +291,24 @@ class InitParallelChain:
 
 
 # 편의 함수들 (기존 패턴 유지)
-async def create_init_chain(llm_router=None) -> InitParallelChain:
+async def create_init_chain(llm_manager=None) -> InitParallelChain:
     """
     InitParallelChain 인스턴스 생성 편의 함수
     
     Args:
-        llm_router: 기존 LLMRouter 인스턴스
+        llm_manager: LLMManager 인스턴스
         
     Returns:
         InitParallelChain 인스턴스
     """
-    return InitParallelChain(llm_router=llm_router)
+    return InitParallelChain(llm_manager=llm_manager)
 
 
 async def execute_init_parallel_processing(
     ticket_data: Dict[str, Any],
     qdrant_client: Any,
     tenant_id: str,
-    llm_router=None,
+    llm_manager=None,
     **kwargs
 ) -> Dict[str, Any]:
     """
@@ -318,13 +318,13 @@ async def execute_init_parallel_processing(
         ticket_data: 티켓 데이터
         qdrant_client: Qdrant 클라이언트
         tenant_id: 테넌트 ID
-        llm_router: LLM Router 인스턴스
+        llm_manager: LLMManager 인스턴스
         **kwargs: 추가 매개변수
         
     Returns:
         처리 결과
     """
-    init_chain = await create_init_chain(llm_router=llm_router)
+    init_chain = await create_init_chain(llm_manager=llm_manager)
     return await init_chain.execute_init_parallel_chain(
         ticket_data=ticket_data,
         qdrant_client=qdrant_client,

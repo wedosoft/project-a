@@ -30,9 +30,12 @@ async def execute_init_parallel_chain(
     """기존 함수 시그니처와 호환성을 위한 래퍼 함수"""
     if llm_router is None:
         from core.llm.manager import LLMManager
-        llm_router = LLMManager()
+        llm_manager = LLMManager()
+    else:
+        # llm_router가 제공된 경우 llm_manager로 사용 (하위 호환성)
+        llm_manager = llm_router
     
-    chain = InitParallelChain(llm_router=llm_router)
+    chain = InitParallelChain(llm_manager=llm_manager)
     return await chain.execute_init_parallel_chain(
         ticket_data=ticket_data,
         qdrant_client=qdrant_client,

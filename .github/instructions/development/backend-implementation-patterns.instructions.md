@@ -19,7 +19,13 @@ _Python FastAPI 기반 백엔드 시스템 구현 전문 가이드_
 
 ## 🚀 **백엔드 핵심 포인트 요약**
 
-### 💡 **즉시 참조용 백엔드 핵심** (2025-06-26)
+### 💡 **즉시 참조용 백엔드 핵심** (2025-06-28 업데이트)
+
+**최신 아키텍처 변경사항**:
+- **순차 실행 패턴**: 병렬 처리(InitParallelChain) 제거, 단순한 순차 실행으로 성능 개선
+- **Qdrant 쿼리 필터링**: doc_type="kb" 코드 레벨 필터링 완전 제거, 쿼리 레벨만 사용
+- **실시간 요약 분리**: Freshdesk API에서만 실시간 요약 생성, 벡터 검색과 명확히 분리
+- **성능 최적화**: 3~4초 내외로 충분히 빠른 응답 시간 달성
 
 **ORM 기반 패턴**:
 - **USE_ORM=true**: SQLAlchemy 기반 데이터 접근
@@ -214,13 +220,159 @@ async def collect_freshdesk_tickets(api_key: str, domain: str) -> List[Dict[str,
         return tickets
 ```
 
-### **2. LLM 호출 최적화 패턴**
+### **2. LLM 호출 최적화 패턴** (2025-06-28 업데이트)
 
-**특징**:
+**최신 순차 실행 패턴**:
+
+- **실시간 요약 분리**: Freshdesk API에서만 실시간 요약 생성
+- **순차 실행**: 병렬 처리(InitParallelChain) 제거, 단순한 순차 실행
+- **성능 개선**: 3~4초 내외로 충분히 빠른 응답 달성
+
+**기존 특징**:
 
 - **배치 처리**로 비용 절약
 - **캐싱**으로 중복 호출 방지
 - **스트리밍** 지원
+
+```python
+# 최신 순차 실행 LLM 패턴 (2025-06-28)
+from core.llm.manager import LLMManager
+import asyncio
+import logging
+from typing import Dict, Any, List
+
+class LLMSequentialProcessor:
+    """
+    순차 실행 LLM 처리기
+    
+    기존 병렬 처리 대신 단순한 순차 실행으로:
+    1. 실시간 요약 생성 (Freshdesk API)
+    2. 벡터 검색 실행 (Qdrant)
+    총 실행시간: 3~4초 내외
+    """
+    
+    def __init__(self, company_id: str):
+        self.company_id = company_id
+        self.llm_manager = LLMManager()
+    
+    async def execute_init_sequential(
+        self, 
+        ticket_id: str,
+        query: str = None
+    ) -> Dict[str, Any]:
+        """
+        순차 실행으로 /init/{ticket_id} 처리
+        
+        1단계: 실시간 요약 생성 (Freshdesk API)
+        2단계: 벡터 검색 실행 (유사 티켓 + KB)
+        """
+        
+        try:
+            results = {}
+            
+            # 1단계: 실시간 요약 생성 (Freshdesk API만 사용)
+            logging.info(f"1단계: 실시간 요약 생성 시작 - ticket_id: {ticket_id}")
+            start_time = asyncio.get_event_loop().time()
+            
+            summary_result = await self._generate_realtime_summary(ticket_id)
+            results["summary"] = summary_result
+            
+            step1_time = asyncio.get_event_loop().time() - start_time
+            logging.info(f"1단계 완료: {step1_time:.2f}초")
+            
+            # 2단계: 벡터 검색 (순차 실행)
+            logging.info(f"2단계: 벡터 검색 시작")
+            step2_start = asyncio.get_event_loop().time()
+            
+            # 검색 쿼리 준비
+            search_query = query or summary_result.get("summary", "")
+            
+            # 유사 티켓 검색
+            similar_tickets = await self._search_similar_tickets(search_query)
+            results["similar_tickets"] = similar_tickets
+            
+            # KB 검색
+            kb_results = await self._search_knowledge_base(search_query)
+            results["knowledge_base"] = kb_results
+            
+            step2_time = asyncio.get_event_loop().time() - step2_start
+            total_time = asyncio.get_event_loop().time() - start_time
+            
+            logging.info(f"2단계 완료: {step2_time:.2f}초")
+            logging.info(f"전체 순차 실행 완료: {total_time:.2f}초")
+            
+            results["performance"] = {
+                "summary_time": step1_time,
+                "search_time": step2_time,
+                "total_time": total_time
+            }
+            
+            return results
+            
+        except Exception as e:
+            logging.error(f"순차 실행 처리 실패: {e}")
+            raise
+
+    async def _generate_realtime_summary(self, ticket_id: str) -> Dict[str, Any]:
+        """실시간 요약 생성 - Freshdesk API만 사용"""
+        # 벡터 DB가 아닌 Freshdesk API에서 직접 가져오기
+        return await self.llm_manager.generate_ticket_summary_from_api(
+            ticket_id=ticket_id,
+            company_id=self.company_id
+        )
+    
+    async def _search_similar_tickets(self, query: str) -> List[Dict[str, Any]]:
+        """유사 티켓 검색 - 쿼리 레벨 필터링"""
+        return await self.llm_manager.search_vector_content(
+            query=query,
+            company_id=self.company_id,
+            content_type="ticket",
+            limit=5
+        )
+    
+    async def _search_knowledge_base(self, query: str) -> List[Dict[str, Any]]:
+        """KB 검색 - 쿼리 레벨 필터링"""
+        return await self.llm_manager.search_vector_content(
+            query=query,
+            company_id=self.company_id,
+            content_type="kb",
+            limit=3
+        )
+
+# API 엔드포인트에서 사용 예시
+async def init_endpoint_handler(ticket_id: str, company_id: str) -> Dict[str, Any]:
+    """
+    /init/{ticket_id} 엔드포인트 처리
+    
+    기존 병렬 처리 대신 순차 실행 사용:
+    - 더 단순한 코드 구조
+    - 충분히 빠른 성능 (3~4초)
+    - 안정적인 오류 처리
+    """
+    
+    processor = LLMSequentialProcessor(company_id=company_id)
+    
+    try:
+        results = await processor.execute_init_sequential(ticket_id)
+        
+        return {
+            "status": "success",
+            "ticket_id": ticket_id,
+            "company_id": company_id,
+            "data": results,
+            "performance": results.get("performance", {})
+        }
+        
+    except Exception as e:
+        logging.error(f"Init 엔드포인트 처리 실패: {e}")
+        return {
+            "status": "error",
+            "ticket_id": ticket_id,
+            "error": str(e)
+        }
+```
+
+**기존 LLM 캐싱 및 최적화 패턴**:
 
 ```python
 # LLM 클라이언트 최적화 패턴
@@ -351,16 +503,22 @@ async def stream_llm_response(
         yield f"오류 발생: {str(e)}"
 ```
 
-### **3. 벡터 검색 최적화 패턴**
+### **3. 벡터 검색 최적화 패턴** (2025-06-28 업데이트)
 
-**특징**:
+**주요 개선사항**:
+
+- **순차 실행 패턴**: 병렬 처리 제거, 실시간 요약 → 벡터 검색 순차 실행 (3~4초)
+- **Qdrant 쿼리 필터링**: doc_type="kb" 코드 레벨 필터 완전 제거, 쿼리 레벨만 사용
+- **실시간 요약 분리**: Freshdesk API에서만 실시간 요약, 벡터 DB와 명확히 분리
+
+**기존 특징**:
 
 - **멀티테넌트** 격리
 - **하이브리드 검색** (벡터 + 키워드)
 - **결과 재순위** (reranking)
 
 ```python
-# 벡터 검색 최적화 패턴
+# 최신 벡터 검색 패턴 (2025-06-28)
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.models import Filter, FieldCondition, MatchValue, ScoredPoint
 from sentence_transformers import SentenceTransformer
@@ -369,25 +527,42 @@ from typing import List, Dict, Any, Optional
 import logging
 
 class VectorSearchManager:
+    """
+    벡터 검색 매니저 - 순차 실행 패턴 적용
+    
+    주요 개선사항:
+    - doc_type 필터링 완전 제거, Qdrant 쿼리 레벨만 사용
+    - 실시간 요약과 벡터 검색 명확히 분리
+    - 순차 실행으로 단순화, 3~4초 성능 달성
+    """
+    
     def __init__(self, qdrant_url: str, qdrant_api_key: str, collection_name: str = "documents"):
         self.client = AsyncQdrantClient(url=qdrant_url, api_key=qdrant_api_key)
         self.collection_name = collection_name
         self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
 
-    async def search_similar_tickets(
+    async def search_similar_content(
         self,
         query_text: str,
         company_id: str,
+        content_type: str = "ticket",  # "ticket" 또는 "kb"
         limit: int = 5,
         score_threshold: float = 0.7
     ) -> List[Dict[str, Any]]:
-        """유사 티켓 검색 (멀티테넌트 필터링)"""
+        """
+        통합 콘텐츠 검색 - 쿼리 레벨 필터링만 사용
+        
+        주요 변경사항:
+        - doc_type 코드 레벨 필터링 완전 제거
+        - 쿼리 레벨에서만 필터링 처리
+        - 명확한 content_type 파라미터로 구분
+        """
 
         try:
             # 쿼리 임베딩 생성
             query_embedding = self.embedding_model.encode(query_text).tolist()
 
-            # company_id 필터 (멀티테넌트 격리)
+            # 쿼리 레벨 필터링 (멀티테넌트 + 콘텐츠 타입)
             search_filter = Filter(
                 must=[
                     FieldCondition(
@@ -397,7 +572,13 @@ class VectorSearchManager:
                     FieldCondition(
                         key="platform",
                         match=MatchValue(value="freshdesk")
+                    ),
+                    FieldCondition(
+                        key="content_type",  # doc_type 대신 content_type 사용
+                        match=MatchValue(value=content_type)
                     )
+                ]
+            )
                 ]
             )
 

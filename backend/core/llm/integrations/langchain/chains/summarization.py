@@ -1,14 +1,15 @@
 """
-요약 체인 - Langchain 기반 티켓 요약 체인
+실시간 티켓 요약 체인 - Langchain 기반 프리미엄 요약 체인
 
-기존 llm_router.py의 generate_ticket_summary() 메서드를 
-90% 이상 재활용하여 langchain 체인으로 구현했습니다.
+기존 유사티켓/지식베이스 요약과 완전히 독립적인 실시간 요약 전용 체인입니다.
 
-기존 코드 재활용 원칙:
-- 기존 요약 로직 그대로 유지
-- 기존 프롬프트 및 응답 포맷 그대로 유지
-- 기존 캐싱 전략 그대로 유지
-- langchain 구조로 래핑만 추가
+핵심 차별화 요소:
+- 실시간 요약 전용 프롬프트 사용 (core/llm/summarizer/prompt와 분리)
+- 프리미엄 품질 보장 (유사티켓 요약보다 우수한 품질)
+- 5초 내 이해 가능한 구조화된 출력
+- 에스컬레이션 즉시 준비 가능한 정보 제공
+- OpenAI 모델 강제 사용으로 일관된 고품질 보장
+- 첨부파일 처리 제외로 실시간 속도 최적화
 """
 
 import asyncio
@@ -29,13 +30,15 @@ logger = logging.getLogger(__name__)
 
 class SummarizationChain:
     """
-    티켓 요약 체인 - 기존 LLMRouter.generate_ticket_summary() 로직 재활용
+    실시간 티켓 요약 체인 - 유사티켓/지식베이스 요약과 완전히 독립적인 프리미엄 요약
     
-    기존 구현의 모든 로직을 langchain Runnable 구조로 래핑하여 제공합니다.
-    - 기존 프롬프트 템플릿 그대로 유지
-    - 기존 캐싱 시스템 그대로 유지  
-    - 기존 에러 처리 로직 그대로 유지
-    - 기존 응답 포맷 그대로 유지
+    핵심 특징:
+    - 실시간 요약 전용 프롬프트 사용 (기존 core/llm/summarizer/prompt와 분리)
+    - 프리미엄 품질 보장 (유사티켓 요약 대비 우수한 품질)
+    - 5초 내 이해 가능한 구조화된 분석
+    - 에스컬레이션 즉시 준비 가능
+    - OpenAI 모델 강제 사용
+    - 첨부파일 미포함으로 실시간 속도 최적화
     """
     
     def __init__(self, llm_manager: LLMManager):
@@ -57,7 +60,15 @@ class SummarizationChain:
 
     async def _summarize_ticket(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        기존 LLMRouter.generate_ticket_summary() 로직 그대로 재활용
+        실시간 티켓 요약 생성 - 유사티켓/지식베이스 요약과 독립적인 프리미엄 품질
+        
+        핵심 차별화:
+        - 실시간 요약 전용 프롬프트 사용 (기존 유사티켓/지식베이스 프롬프트와 분리)
+        - 프리미엄 품질 보장 (유사티켓보다 우수한 상세도와 정확성)
+        - OpenAI 모델 강제 사용 (일관된 고품질)
+        - 5초 내 이해 가능한 구조화
+        - 에스컬레이션 즉시 준비
+        - 첨부파일 처리 제외 (실시간 속도 최적화)
         
         Args:
             input_data: {
@@ -66,7 +77,7 @@ class SummarizationChain:
             }
             
         Returns:
-            Dict[str, Any]: 생성된 티켓 요약 정보
+            Dict[str, Any]: 생성된 실시간 티켓 요약 정보
         """
         ticket_data = input_data["ticket_data"]
         max_tokens = input_data.get("max_tokens", 1000)
@@ -78,73 +89,138 @@ class SummarizationChain:
             return self.summary_cache[cache_key]
         
         try:
-            # 기존 컨텍스트 빌더 로직 그대로 재활용
-            prompt_context = self._build_ticket_context(ticket_data)
+            # 실시간 티켓 요약 전용 프롬프트 로더 사용 (기존 유사티켓/지식베이스 프롬프트와 분리)
+            from core.llm.summarizer.prompt.realtime_loader import RealtimePromptLoader
+            from core.llm.summarizer.utils.language import detect_content_language
+            from core.llm.summarizer.quality.validator import QualityValidator
+            from core.llm.models.base import LLMProvider
             
-            # 기존 프롬프트 템플릿 그대로 재활용
-            system_prompt = """당신은 고객 지원 티켓을 분석하는 전문가입니다. 티켓 내용을 분석하여 구조화된 요약을 생성해주세요."""
+            realtime_prompt_loader = RealtimePromptLoader()
+            quality_validator = QualityValidator()
             
-            prompt = f"""다음 티켓 정보를 분석하고 요약해주세요:
-
-{prompt_context}
-
-다음 형식으로 마크다운 형태로 응답해주세요:
-
-## 📋 상황 요약
-[티켓의 전반적인 상황을 2-3문장으로 요약]
-
-## 🔍 주요 내용
-- 문제: [고객이 겪고 있는 주요 문제]
-- 요청: [고객의 구체적인 요청사항]  
-- 조치: [상담원이 취한 조치나 제공한 답변]
-
-## 💡 핵심 포인트
-1. [가장 중요한 포인트]
-2. [두 번째 중요한 포인트]
-3. [세 번째 중요한 포인트]
-
-응답은 반드시 한국어로 해주시고, 마크다운 형식을 정확히 지켜주세요."""
-
-            # 티켓 요약 및 임베딩용으로 용도 지정하여 호출
-            response = await self.llm_manager.generate(
-                prompt=prompt,
-                system_prompt=system_prompt,
-                max_tokens=max_tokens,
-                temperature=0.2,
-                use_case="summarization"  # 티켓 요약 및 임베딩용 모델 사용
+            # 1. 티켓 컨텍스트 구성 (기존 로직 유지)
+            ticket_content = self._build_ticket_context(ticket_data)
+            
+            # 2. 언어 감지
+            content_language = detect_content_language(ticket_content)
+            ui_language = "ko"  # 기본 UI 언어
+            
+            # 3. 실시간 요약 전용 프롬프트 생성 (유사티켓/지식베이스와 완전 분리)
+            system_prompt = realtime_prompt_loader.build_system_prompt(
+                content_language=content_language,
+                ui_language=ui_language
             )
             
-            # 기존 응답 처리 로직 그대로 재활용
+            # 메타데이터 구성 (실시간 특화 - 첨부파일 제외)
+            metadata = {
+                'company_name': ticket_data.get('company', ''),
+                'customer_email': ticket_data.get('requester_email', ''),
+                'agent_name': ticket_data.get('agent_name', ''),
+                'department': ticket_data.get('department', ''),
+                'product_version': ticket_data.get('product_version', ''),
+                'priority': ticket_data.get('priority', ''),
+                'status': ticket_data.get('status', ''),
+                'created_at': ticket_data.get('created_at', ''),
+                'escalation_count': ticket_data.get('escalation_count', 0)
+                # 첨부파일 관련 필드는 실시간 요약에서 제외
+            }
+            
+            user_prompt = realtime_prompt_loader.build_user_prompt(
+                content=ticket_content,
+                subject=ticket_data.get("subject", ""),
+                metadata=metadata,
+                content_language=content_language,
+                ui_language=ui_language
+            )
+            
+            # 4. OpenAI 모델 강제 사용 (실시간 요약 프리미엄 품질 보장)
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ]
+            
+            response = await self.llm_manager.generate(
+                messages=messages,
+                provider=LLMProvider.OPENAI,  # 실시간 요약은 OpenAI 강제 사용
+                max_tokens=max_tokens,
+                temperature=0.2
+            )
+            
+            if not response.success:
+                raise Exception(f"실시간 요약 LLM 응답 실패: {response.error}")
+            
+            summary_text = response.content.strip()
+            
+            # 5. 실시간 요약 품질 검증 및 재시도 로직 (유사티켓보다 엄격한 기준)
+            validation_result = quality_validator.validate_summary_quality(
+                summary=summary_text,
+                original_content=ticket_content,
+                content_language=content_language
+            )
+            
+            # 6. 품질 점수 0.75 이상 요구 (유사티켓 0.7보다 높은 기준)
+            if validation_result['quality_score'] < 0.75:
+                logger.warning(f"실시간 요약 품질 점수 낮음 ({validation_result['quality_score']:.2f}), 재시도 실행")
+                
+                # 프리미엄 품질 재생성
+                enhanced_system_prompt = system_prompt + "\n\n**PREMIUM QUALITY REMINDER**: This is REAL-TIME analysis requiring SUPERIOR quality compared to similar ticket summaries. Ensure MAXIMUM detail preservation and IMMEDIATE actionability."
+                
+                messages[0]["content"] = enhanced_system_prompt
+                
+                retry_response = await self.llm_manager.generate(
+                    messages=messages,
+                    provider=LLMProvider.OPENAI,
+                    max_tokens=max_tokens + 300,  # 더 충분한 토큰 (실시간 특화)
+                    temperature=0.1  # 더 낮은 temperature (정확성 우선)
+                )
+                
+                if retry_response.success:
+                    summary_text = retry_response.content.strip()
+                    logger.info(f"실시간 요약 재시도 완료 (ticket_id: {ticket_data.get('id')})")
+                else:
+                    logger.warning(f"실시간 요약 재시도 실패, 원본 요약 사용 (ticket_id: {ticket_data.get('id')})")
+            
+            # 7. 실시간 요약 특화 응답 구성
             summary_result = {
-                "ticket_summary": response.text.strip(),
-                "key_points": self._extract_key_points(response.text),
-                "sentiment": self._analyze_sentiment(response.text),
-                "priority_recommendation": self._recommend_priority(response.text),
-                "category_suggestion": None,  # 기존과 동일
-                "customer_summary": None,     # 기존과 동일
-                "request_summary": None,      # 기존과 동일
-                "urgency_level": self._assess_urgency(response.text)
+                "ticket_summary": summary_text,
+                "key_points": self._extract_key_points_from_markdown(summary_text),
+                "sentiment": self._analyze_sentiment_from_summary(summary_text),
+                "priority_recommendation": self._recommend_priority_from_summary(summary_text),
+                "category_suggestion": None,  # 실시간 요약에서는 제외
+                "customer_summary": None,     # 실시간 요약에서는 제외
+                "request_summary": None,      # 실시간 요약에서는 제외
+                "urgency_level": self._assess_urgency_from_summary(summary_text),
+                "quality_score": validation_result['quality_score'],  # 품질 점수 추가
+                "model_used": "OpenAI (realtime-forced)",  # 실시간 요약 전용 모델
+                "summary_type": "realtime_premium",  # 요약 유형 명시
+                "escalation_ready": True,  # 에스컬레이션 준비 완료
+                "comprehension_target": "5_seconds"  # 이해 목표 시간
             }
             
             # 기존 캐싱 로직 그대로 재활용
             self.summary_cache[cache_key] = summary_result
             
-            logger.info(f"티켓 요약 생성 완료 (ticket_id: {ticket_data.get('id')}, model: {response.model_used})")
+            logger.info(f"실시간 프리미엄 요약 생성 완료 (ticket_id: {ticket_data.get('id')}, quality: {validation_result['quality_score']:.2f}, type: realtime_premium)")
             return summary_result
             
         except Exception as e:
-            logger.error(f"티켓 요약 생성 중 오류 발생 (ticket_id: {ticket_data.get('id')}): {e}")
+            logger.error(f"실시간 요약 생성 중 오류 발생 (ticket_id: {ticket_data.get('id')}): {e}")
             
-            # 기존 오류 처리 로직 그대로 재활용
+            # 실시간 요약 전용 오류 처리
             fallback_result = {
-                "ticket_summary": "요약 생성에 실패했습니다. 원본 티켓 내용을 확인해주세요.",
-                "key_points": ["요약 생성 실패"],
+                "ticket_summary": "실시간 요약 생성에 실패했습니다. 원본 티켓 내용을 확인해주세요.",
+                "key_points": ["실시간 요약 생성 실패"],
                 "sentiment": "중립적",
                 "priority_recommendation": "보통",
                 "category_suggestion": None,
                 "customer_summary": None,
                 "request_summary": None,
-                "urgency_level": "보통"
+                "urgency_level": "보통",
+                "quality_score": 0.0,
+                "model_used": "fallback",
+                "summary_type": "realtime_fallback",
+                "escalation_ready": False,
+                "comprehension_target": "manual_review"
             }
             
             self.summary_cache[cache_key] = fallback_result
@@ -183,26 +259,162 @@ class SummarizationChain:
                 
         return prompt_context
 
-    def _extract_key_points(self, summary_text: str) -> List[str]:
-        """기존 핵심 포인트 추출 로직 그대로 재활용"""
-        # 간단한 키워드 추출 (기존 구현 유지)
-        default_points = ["마크다운 파싱 완료", "상세 정보 확인 가능", "구조화된 요약 제공"]
-        return default_points
+    def _extract_key_points_from_markdown(self, summary_text: str) -> List[str]:
+        """
+        마크다운 요약에서 핵심 포인트 추출 (개선된 파싱)
+        
+        최신 YAML 프롬프트로 생성된 구조화된 요약에서 실제 핵심 정보를 추출
+        """
+        import re
+        
+        key_points = []
+        
+        try:
+            # 💡 핵심 포인트 섹션 찾기
+            if "💡" in summary_text:
+                lines = summary_text.split('\n')
+                in_key_points = False
+                
+                for line in lines:
+                    line = line.strip()
+                    if "💡" in line:
+                        in_key_points = True
+                        continue
+                    elif line.startswith("#") and in_key_points:
+                        break  # 다음 섹션 시작
+                    elif in_key_points and line:
+                        # 리스트 항목 추출 (-, *, 1., 2. 등)
+                        if re.match(r'^[-*\d]+\.?\s+', line):
+                            point = re.sub(r'^[-*\d]+\.?\s+', '', line)
+                            if point and len(point) > 3:
+                                key_points.append(point)
+            
+            # 핵심 포인트가 없으면 주요 내용에서 추출
+            if not key_points and "🔍" in summary_text:
+                lines = summary_text.split('\n')
+                for line in lines:
+                    line = line.strip()
+                    if line.startswith("- ") and len(line) > 10:
+                        point = line[2:].strip()
+                        if ":" in point:
+                            key_points.append(point.split(":", 1)[1].strip())
+            
+            # 여전히 없으면 기본값
+            if not key_points:
+                key_points = ["구조화된 요약 생성 완료", "세부 정보 검토 권장"]
+                
+        except Exception as e:
+            logger.warning(f"핵심 포인트 추출 중 오류: {e}")
+            key_points = ["요약 파싱 오류", "원본 내용 확인 필요"]
+        
+        return key_points[:5]  # 최대 5개
 
-    def _analyze_sentiment(self, summary_text: str) -> str:
-        """기존 감정 분석 로직 그대로 재활용"""
-        # 기존 구현과 동일한 기본값
-        return "중립적"
+    def _analyze_sentiment_from_summary(self, summary_text: str) -> str:
+        """
+        요약 내용에서 감정 분석 (개선된 로직)
+        
+        실제 고객 상황과 문제의 심각성을 기반으로 감정 분석
+        """
+        summary_lower = summary_text.lower()
+        
+        # 부정적 키워드
+        negative_keywords = ["오류", "실패", "문제", "불가능", "중단", "장애", "버그", "에러", "error", "fail", "issue", "problem"]
+        # 긍정적 키워드  
+        positive_keywords = ["해결", "완료", "성공", "정상", "복구", "개선", "success", "solved", "resolved", "completed"]
+        # 중립적 키워드
+        neutral_keywords = ["문의", "요청", "확인", "설정", "정보", "inquiry", "request", "information"]
+        
+        neg_count = sum(1 for word in negative_keywords if word in summary_lower)
+        pos_count = sum(1 for word in positive_keywords if word in summary_lower)
+        neu_count = sum(1 for word in neutral_keywords if word in summary_lower)
+        
+        if neg_count > pos_count and neg_count > neu_count:
+            return "부정적"
+        elif pos_count > neg_count and pos_count > neu_count:
+            return "긍정적"
+        else:
+            return "중립적"
 
-    def _recommend_priority(self, summary_text: str) -> str:
-        """기존 우선순위 추천 로직 그대로 재활용"""
-        # 기존 구현과 동일한 기본값
-        return "보통"
+    def _recommend_priority_from_summary(self, summary_text: str) -> str:
+        """
+        요약 내용에서 우선순위 추천 (개선된 로직)
+        
+        문제의 심각성과 영향 범위를 기반으로 우선순위 결정
+        """
+        summary_lower = summary_text.lower()
+        
+        # 높은 우선순위 키워드
+        high_priority = ["긴급", "중요", "심각", "장애", "중단", "불가능", "urgent", "critical", "severe", "outage"]
+        # 중간 우선순위 키워드
+        medium_priority = ["문제", "오류", "개선", "요청", "issue", "error", "improvement", "request"]
+        
+        high_count = sum(1 for word in high_priority if word in summary_lower)
+        medium_count = sum(1 for word in medium_priority if word in summary_lower)
+        
+        if high_count > 0:
+            return "높음"
+        elif medium_count > 1:
+            return "보통"
+        else:
+            return "낮음"
 
-    def _assess_urgency(self, summary_text: str) -> str:
-        """기존 긴급도 평가 로직 그대로 재활용"""
-        # 기존 구현과 동일한 기본값
-        return "보통"
+    def _assess_urgency_from_summary(self, summary_text: str) -> str:
+        """
+        요약 내용에서 긴급도 평가 (개선된 로직)
+        
+        시간 민감성과 비즈니스 영향도를 기반으로 긴급도 결정
+        """
+        summary_lower = summary_text.lower()
+        
+        # 높은 긴급도 키워드
+        high_urgency = ["즉시", "긴급", "빠른", "시급", "당장", "immediate", "urgent", "asap", "critical"]
+        # 중간 긴급도 키워드
+        medium_urgency = ["빠른 시일", "가능한 한", "조속", "soon", "quickly", "priority"]
+        
+        high_count = sum(1 for word in high_urgency if word in summary_lower)
+        medium_count = sum(1 for word in medium_urgency if word in summary_lower)
+        
+        if high_count > 0:
+            return "높음"
+        elif medium_count > 0:
+            return "보통"
+        else:
+            return "낮음"
+
+    def _determine_urgency(self, ticket_data: Dict[str, Any]) -> str:
+        """
+        티켓 데이터에서 긴급도 판단
+        
+        Args:
+            ticket_data: 티켓 데이터
+            
+        Returns:
+            str: 긴급도 (높음/보통/낮음)
+        """
+        # 기존 우선순위 필드 확인
+        priority = ticket_data.get('priority', '').lower()
+        if priority in ['urgent', 'high', '긴급', '높음']:
+            return '높음'
+        elif priority in ['low', '낮음']:
+            return '낮음'
+        
+        # 제목과 설명에서 긴급 키워드 확인
+        subject = ticket_data.get('subject', '').lower()
+        description = ticket_data.get('description_text', '').lower()
+        content = f"{subject} {description}"
+        
+        urgent_keywords = ['긴급', 'urgent', '즉시', 'immediate', '빠른', 'asap', '당장']
+        medium_keywords = ['빠른 시일', '가능한 한', 'soon', 'quickly']
+        
+        urgent_count = sum(1 for keyword in urgent_keywords if keyword in content)
+        medium_count = sum(1 for keyword in medium_keywords if keyword in content)
+        
+        if urgent_count > 0:
+            return '높음'
+        elif medium_count > 0:
+            return '보통'
+        else:
+            return '보통'  # 기본값
 
     async def run(self, ticket_data: Dict[str, Any], max_tokens: int = 1000) -> Dict[str, Any]:
         """

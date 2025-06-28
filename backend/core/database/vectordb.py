@@ -425,17 +425,17 @@ class QdrantAdapter(VectorDBInterface):
         top_k: int, 
         tenant_id: str,
         platform: Optional[str] = None,  # 플랫폼 필터링 (freshdesk, zendesk 등)
-        doc_type: str = None  # 문서 타입 필터링 (ticket, kb)
+        doc_type: str = None  # 문서 타입 필터링 (ticket, article)
     ) -> Dict[str, Any]:
         """
-        벡터 검색 (멀티플랫폼/멀티테넌트 지원)
+        벡터 검색 (멀티플랫폼/멀티테넌트 지원) - Qdrant 쿼리 레벨에서 모든 필터링 직접 처리
         
         Args:
             query_embedding: 쿼리 임베딩
             top_k: 반환할 최대 문서 수
             tenant_id: 테넌트 ID (필수)
             platform: 플랫폼 필터 (선택사항, "freshdesk", "zendesk" 등)
-            doc_type: 문서 타입 필터 (선택사항, "ticket" 또는 "kb")
+            doc_type: 문서 타입 필터 (선택사항, "ticket" 또는 "article")
             
         Returns:
             검색 결과 딕셔너리
@@ -454,30 +454,48 @@ class QdrantAdapter(VectorDBInterface):
                 FieldCondition(key="platform", match=MatchValue(value=platform))
             )
         
-        # doc_type 필드의 인덱스 문제를 해결하기 위해 메모리에서 필터링 수행
-        use_doc_type_filter = doc_type is not None
+        # doc_type 필터를 Qdrant 쿼리 레벨에서 직접 처리
+        if doc_type:
+            filter_conditions.append(
+                FieldCondition(key="doc_type", match=MatchValue(value=doc_type))
+            )
+        
         logger.info(f"검색 요청: tenant_id={tenant_id}, platform={platform}, doc_type={doc_type}, top_k={top_k}")
         
-        # 기본 검색은 tenant_id와 platform 필터로 수행
+        # 모든 필터를 Qdrant 쿼리에 적용
         search_filter = Filter(must=filter_conditions)
         
         try:
-            # doc_type 필터링이 필요한 경우 더 많은 결과를 요청하여 메모리 내 필터링 수행
-            # 더 많은 결과를 가져와 필터링하기 위해 배수를 10으로 설정
-            fetch_limit = top_k * 10 if use_doc_type_filter else top_k
-            logger.info(f"Qdrant 검색 시도 (tenant_id={tenant_id}, platform={platform}, 검색 크기={fetch_limit})")
+            logger.info(f"Qdrant 검색 시도 (필터: tenant_id={tenant_id}, platform={platform}, doc_type={doc_type})")
             
-            search_results = self.client.search(
-                collection_name=self.collection_name,
-                query_vector=query_embedding,
-                query_filter=search_filter,  # 최신 API: query_filter 사용
-                limit=fetch_limit,  # doc_type 필터링이 필요하면 더 많은 결과 요청
-                with_payload=True,
-                with_vectors=False  # 성능 최적화: 벡터 반환 비활성화
-            )
-            logger.info(f"Qdrant 검색 성공: {len(search_results)}개 결과 (메모리 내 필터링 전)")
+            # 최신 API 사용: query_points (search는 deprecated)
+            try:
+                from qdrant_client.models import PointRequest
+                
+                search_results = self.client.query_points(
+                    collection_name=self.collection_name,
+                    query=query_embedding,
+                    query_filter=search_filter,
+                    limit=top_k,
+                    with_payload=True,
+                    with_vectors=False
+                ).points
+                logger.info(f"Qdrant query_points 검색 성공: {len(search_results)}개 결과")
+            except (ImportError, AttributeError) as api_error:
+                logger.info(f"query_points API 미지원, search API 사용: {api_error}")
+                # 이전 API 방식 (search) 사용
+                search_results = self.client.search(
+                    collection_name=self.collection_name,
+                    query_vector=query_embedding,
+                    query_filter=search_filter,  # 최신 API: query_filter 사용
+                    limit=top_k,  # 정확한 top_k만 요청 (메모리 필터링 불필요)
+                    with_payload=True,
+                    with_vectors=False  # 성능 최적화: 벡터 반환 비활성화
+                )
+                logger.info(f"Qdrant search 검색 성공: {len(search_results)}개 결과")
+                
         except Exception as e:
-            logger.warning(f"query_filter를 사용한 검색 실패: {e}, filter로 재시도...")
+            logger.warning(f"최신 API 검색 실패: {e}, 이전 API로 재시도...")
             
             try:
                 # 이전 API 방식 (filter)으로 재시도
@@ -485,11 +503,11 @@ class QdrantAdapter(VectorDBInterface):
                     collection_name=self.collection_name,
                     query_vector=query_embedding,
                     filter=search_filter,  # 이전 API: filter 사용
-                    limit=fetch_limit,
+                    limit=top_k,
                     with_payload=True,
                     with_vectors=False
                 )
-                logger.info(f"filter 방식으로 검색 성공: {len(search_results)}개 결과 (메모리 내 필터링 전)")
+                logger.info(f"filter 방식으로 검색 성공: {len(search_results)}개 결과")
             except Exception as filter_error:
                 logger.error(f"검색 실패: {filter_error}")
                 # 오류 발생 시 빈 결과 반환
@@ -499,42 +517,10 @@ class QdrantAdapter(VectorDBInterface):
                     "error": str(filter_error)
                 }
         
-        # 메모리에서 doc_type 필터링 수행
+        # Qdrant에서 이미 필터링된 결과 처리 (메모리 필터링 불필요)
         filtered_results = []
-        skipped_count = 0
         
         for hit in search_results:
-            if use_doc_type_filter:
-                # 문서 관련 필드 추출 (다양한 메타데이터 필드 지원)
-                hit_doc_type = hit.payload.get("doc_type")
-                hit_type = hit.payload.get("type")
-                hit_source_type = hit.payload.get("source_type")
-                hit_status = hit.payload.get("status")
-                
-                # 문서 타입 일치 여부
-                match_found = False
-                
-                # 필터링 조건 간소화
-                # 티켓에서 "type"은 문의 유형, 지식베이스에서 "type"은 게시:1, 임시저장:2 의미
-                if doc_type == "kb":
-                    # 지식베이스 문서 확인 - KB 문서 조건을 명확하게 정의
-                    # 1) doc_type="kb"인 경우
-                    # 2) type=1 또는 type="1"인 경우 (게시된 KB 문서)
-                    # 3) status=1 또는 status="1"인 경우 (게시 상태)
-                    if hit_doc_type == "kb" or hit_type in [1, "1"] or hit_status in [1, "1"]:
-                        match_found = True
-                elif doc_type == "ticket":
-                    # 티켓 문서 확인 - 티켓 조건을 명확하게 정의
-                    # 1) doc_type="ticket"인 경우
-                    # 2) source_type="ticket"인 경우
-                    if hit_doc_type == "ticket" or hit_source_type == "ticket":
-                        match_found = True
-                
-                # 일치하지 않으면 건너뛰기
-                if not match_found:
-                    skipped_count += 1
-                    continue
-            
             # 결과 변환
             result = {
                 "id": hit.id,
@@ -542,47 +528,25 @@ class QdrantAdapter(VectorDBInterface):
                 **hit.payload
             }
             filtered_results.append(result)
-            
-            # top_k개 결과를 얻으면 중단
-            if len(filtered_results) >= top_k:
-                break
         
-        # 필터링 결과 로깅
-        if use_doc_type_filter:
-            logger.info(f"메모리 내 필터링 후 결과: {len(filtered_results)}개 유효, {skipped_count}개 제외 (doc_type={doc_type})")
-            if len(filtered_results) == 0:
-                logger.warning("검색 결과가 0개입니다. 필터링 로직을 확인하세요.")
-                if len(search_results) > 0:
-                    # 디버깅을 위해 첫 번째 결과의 메타데이터 출력
-                    sample = search_results[0].payload
-                    logger.info(f"필터링 실패한 샘플 문서: doc_type={sample.get('doc_type')}, type={sample.get('type')}, source_type={sample.get('source_type')}, status={sample.get('status')}")
+        logger.info(f"최종 검색 결과: {len(filtered_results)}개 (Qdrant 쿼리 레벨 필터링 완료)")
         
         # 호환성을 위해 필드 보정 처리
         for result in filtered_results:
             # 1. 문서 타입 일관성 확보
             if "doc_type" not in result:
-                # KB 문서인 경우
-                if result.get("type") == 1 or result.get("type") == "1" or result.get("status") == 1 or result.get("status") == "1":
-                    result["doc_type"] = "kb"
                 # 티켓인 경우
-                elif result.get("type") == "ticket" or result.get("source_type") == "ticket":
+                if result.get("type") == "ticket" or result.get("source_type") == "ticket":
                     result["doc_type"] = "ticket"
                 # 기본값은 원본 type 값 사용
                 elif "type" in result:
                     result["doc_type"] = str(result["type"])
                     
-            # 2. KB 문서의 경우 status와 source_type 일관성 확보
-            if result.get("doc_type") == "kb" or result.get("type") == 1 or result.get("type") == "1":
-                # KB 문서로 확인된 경우 부가 정보 표준화
-                result["doc_type"] = "kb"  # 확실하게 설정
-                
-                # 게시 상태 표준화
-                if "status" not in result:
-                    result["status"] = 1  # 기본적으로 published 상태로 설정
-                    
+            # 2. 아티클 문서의 경우 source_type 일관성 확보
+            if result.get("doc_type") == "article":
                 # source_type 표준화
                 if "source_type" not in result:
-                    result["source_type"] = "kb"
+                    result["source_type"] = "article"
             
             # 3. 티켓의 경우 source_type 일관성 확보
             if result.get("doc_type") == "ticket":
@@ -637,8 +601,8 @@ class QdrantAdapter(VectorDBInterface):
             "ids": ids,                   # 호환성 형식
             "distances": distances,       # 호환성 형식
             "total": len(filtered_results),
-            "filtered_by_doc_type": use_doc_type_filter,
-            "skipped_count": skipped_count if use_doc_type_filter else 0
+            "filtered_by_doc_type": doc_type is not None,  # Qdrant 쿼리 필터링 사용
+            "skipped_count": 0  # Qdrant 쿼리 필터링으로 메모리 스킵 없음
         }
 
     def count(self, tenant_id: Optional[str] = None, platform: Optional[str] = None) -> int:
@@ -758,7 +722,7 @@ class QdrantAdapter(VectorDBInterface):
 
         Args:
             original_id_value: 조회할 문서의 원본 ID (Freshdesk 원본 숫자 ID의 문자열 형태, 예: "12345")
-            doc_type: 문서 타입 필터 ("ticket" 또는 "kb", None이거나 빈 문자열이면 예외 발생)
+            doc_type: 문서 타입 필터 ("ticket" 또는 "article", None이거나 빈 문자열이면 예외 발생)
             tenant_id: 테넌트 ID 필터 (선택 사항, None이면 "default" 사용)
             platform: 플랫폼 필터 (선택 사항, "freshdesk", "zendesk" 등)
 
@@ -770,8 +734,8 @@ class QdrantAdapter(VectorDBInterface):
         """
         # doc_type이 반드시 명시되어야 함을 강제
         if not doc_type or not str(doc_type).strip():
-            logger.error("get_by_id 호출 시 doc_type이 반드시 명시되어야 합니다. (ticket 또는 kb)")
-            raise ValueError("get_by_id 호출 시 doc_type 파라미터는 필수입니다. (예: doc_type='ticket' 또는 doc_type='kb')")
+            logger.error("get_by_id 호출 시 doc_type이 반드시 명시되어야 합니다. (ticket 또는 article)")
+            raise ValueError("get_by_id 호출 시 doc_type 파라미터는 필수입니다. (예: doc_type='ticket' 또는 doc_type='article')")
         try:
             # tenant_id가 None이면 "default"로 설정
             search_tenant_id = tenant_id if tenant_id else "default"
@@ -1141,7 +1105,7 @@ def migrate_type_to_doc_type():
                     doc_type_value = payload["type"]
                     
                     # doc_type 값이 유효한지 확인
-                    if doc_type_value in ["ticket", "kb"]:
+                    if doc_type_value in ["ticket", "article"]:
                         # 원본 페이로드에 'doc_type' 필드 추가
                         updated_payload["doc_type"] = doc_type_value
                         update_needed = True
@@ -1149,9 +1113,9 @@ def migrate_type_to_doc_type():
                 # 2. source_type 일관성 확보
                 current_doc_type = updated_payload.get("doc_type") or payload.get("type")
                 
-                if current_doc_type == "kb" and "source_type" not in updated_payload:
-                    # KB 문서에 source_type 추가
-                    updated_payload["source_type"] = "1"  # KB 문서의 표준 source_type
+                if current_doc_type == "article" and "source_type" not in updated_payload:
+                    # 아티클 문서에 source_type 추가
+                    updated_payload["source_type"] = "article"  # 아티클 문서의 표준 source_type
                     update_needed = True
                     source_type_fixed += 1
                 

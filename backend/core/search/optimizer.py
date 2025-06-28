@@ -7,7 +7,7 @@ LangChain-Qdrant를 사용한 최적화된 검색을 제공합니다.
 
 import logging
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 # LangChain-Qdrant 통합 모듈 import
 from .langchain_retriever import OptimizedVectorRetriever, create_optimized_retriever
@@ -110,6 +110,35 @@ class VectorSearchOptimizer:
                     "search_method": "langchain_qdrant_unified"
                 }
             }
+    
+    def generate_embedding(self, text: str) -> List[float]:
+        """
+        텍스트에 대한 임베딩을 생성합니다. (동기 버전)
+        
+        Args:
+            text: 임베딩을 생성할 텍스트
+            
+        Returns:
+            임베딩 벡터 (List[float])
+        """
+        try:
+            # retriever를 통해 임베딩 생성 (동기 방식)
+            if hasattr(self.retriever, 'generate_embedding_sync'):
+                return self.retriever.generate_embedding_sync(text)
+            elif hasattr(self.retriever, '_embedding_function'):
+                # LangChain retriever의 임베딩 함수 직접 호출
+                embedding_function = self.retriever._embedding_function
+                if hasattr(embedding_function, 'embed_query'):
+                    return embedding_function.embed_query(text)
+            
+            # fallback: OpenAI 임베딩 직접 생성 (동기)
+            from core.embeddings.openai_embeddings import OpenAIEmbeddings
+            embeddings = OpenAIEmbeddings()
+            return embeddings.embed_query(text)
+        except Exception as e:
+            logger.error(f"임베딩 생성 실패: {e}")
+            # 기본 임베딩 반환 (OpenAI 차원)
+            return [0.0] * 1536
 
 
 # 싱글톤 인스턴스

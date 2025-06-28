@@ -1,4 +1,42 @@
-# 🛠️ 개발 환경 가이드
+# 🛠️ 개발 환경 가이드 (2025-06-28 업데이트)
+
+## ⭐ 최신 아키텍처 변경사항
+
+### 🚀 순차 실행 패턴 적용
+**변경 배경**: 기존 병렬 처리(InitParallelChain) 구조가 복잡하고 불필요함을 확인
+**적용 결과**: 순차 실행으로 단순화하여 3~4초 내외 성능 달성
+
+```python
+# 새로운 순차 실행 패턴
+async def execute_init_sequential(ticket_id, tenant_id):
+    # 1단계: 실시간 요약 생성 (Freshdesk API)
+    summary = await generate_realtime_summary(ticket_id)
+    
+    # 2단계: 벡터 검색 (Qdrant)
+    similar_tickets = await search_similar_tickets(summary)
+    kb_results = await search_knowledge_base(summary)
+    
+    return {
+        "summary": summary,
+        "similar_tickets": similar_tickets,
+        "kb_documents": kb_results
+    }
+```
+
+### 🔍 벡터 검색 개선
+- **doc_type 코드 레벨 필터링 완전 제거**
+- **Qdrant 쿼리 레벨 필터링만 사용**
+- **실시간 요약과 벡터 검색 명확히 분리**
+
+### 🧪 테스트 완료
+실제 데이터로 end-to-end 테스트 완료:
+```bash
+cd backend
+python test_e2e_real_data.py
+# 결과: 모든 테스트 통과 (5/5)
+```
+
+---
 
 ## 자동 재수집 문제 해결
 

@@ -387,7 +387,213 @@ class LLMManager:
                 success=False,
                 error=str(e)
             )
+    
+    async def _unified_search_task(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        통합 검색 태스크 - 유사 티켓과 KB 문서를 한 번에 검색
+        
+        Args:
+            inputs: 입력 데이터 딕셔너리
+                - ticket_data: 티켓 데이터
+                - tenant_id: 테넌트 ID
+                - top_k_tickets: 유사 티켓 수 (기본값: 5)
+                - top_k_kb: KB 문서 수 (기본값: 5)
+        
+        Returns:
+            통합 검색 결과
+        """
+        try:
+            from core.search.optimizer import get_search_optimizer
+            
+            ticket_data = inputs.get("ticket_data", {})
+            tenant_id = inputs.get("tenant_id", "")
+            top_k_tickets = inputs.get("top_k_tickets", 5)
+            top_k_kb = inputs.get("top_k_kb", 5)
+            
+            # 검색 쿼리 구성
+            subject = ticket_data.get("subject", "")
+            description = ticket_data.get("description_text", "")
+            search_query = f"{subject} {description}".strip()
+            
+            if len(search_query) > 500:
+                search_query = search_query[:500]
+            
+            # 통합 벡터 검색 실행
+            search_optimizer = get_search_optimizer()
+            search_result = await search_optimizer.unified_vector_search(
+                query_text=search_query,
+                tenant_id=tenant_id,
+                ticket_id=str(ticket_data.get("id", "")),
+                top_k_tickets=top_k_tickets,
+                top_k_kb=top_k_kb
+            )
+            
+            return {
+                "task_type": "unified_search",
+                "similar_tickets": search_result.get("similar_tickets", []),
+                "kb_documents": search_result.get("kb_documents", []),
+                "execution_time": search_result.get("performance_metrics", {}).get("total_time", 0),
+                "cache_used": search_result.get("cache_used", False),
+                "success": True
+            }
+            
+        except Exception as e:
+            logger.error(f"통합 검색 태스크 실행 실패: {e}")
+            return {
+                "task_type": "unified_search",
+                "similar_tickets": [],
+                "kb_documents": [],
+                "error": f"통합 검색 실패: {str(e)}",
+                "success": False
+            }
 
+    async def _generate_summary_task(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        티켓 요약 생성 태스크
+        
+        Args:
+            inputs: 입력 데이터 딕셔너리
+                - ticket_data: 티켓 데이터
+        
+        Returns:
+            요약 생성 결과
+        """
+        try:
+            from core.llm.integrations.langchain.chains.summarization import SummarizationChain
+            
+            # SummarizationChain 인스턴스 생성
+            summarization_chain = SummarizationChain(self)
+            
+            # 요약 체인 실행
+            result = await summarization_chain.run(
+                ticket_data=inputs.get("ticket_data", {})
+            )
+            
+            return {
+                "task_type": "summary",
+                "summary": result,
+                "success": True
+            }
+            
+        except Exception as e:
+            logger.error(f"요약 생성 태스크 실행 실패: {e}")
+            return {
+                "task_type": "summary",
+                "error": f"요약 생성 실패: {str(e)}",
+                "success": False
+            }
+    
+    async def execute_init_sequential(
+        self,
+        ticket_data: Dict[str, Any],
+        qdrant_client: Any,
+        tenant_id: str,
+        include_summary: bool = True,
+        include_similar_tickets: bool = True,
+        include_kb_docs: bool = True,
+        top_k_tickets: int = 3,
+        top_k_kb: int = 3,
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        /init 엔드포인트를 위한 순차 실행 메서드 (병렬 처리 제거)
+        
+        순차적으로 실행:
+        1. 실시간 티켓 요약 생성 (1-2초)
+        2. 벡터 검색 (유사 티켓 + KB 문서) (2초)
+        
+        Args:
+            ticket_data: 티켓 데이터
+            qdrant_client: Qdrant 클라이언트
+            tenant_id: 테넌트 ID
+            include_summary: 요약 생성 여부
+            include_similar_tickets: 유사 티켓 검색 여부
+            include_kb_docs: KB 문서 검색 여부
+            top_k_tickets: 유사 티켓 수
+            top_k_kb: KB 문서 수
+            
+        Returns:
+            실행 결과 딕셔너리
+        """
+        import time
+        start_time = time.time()
+        
+        logger.info(f"순차 실행 시작 (ticket_id: {ticket_data.get('id')})")
+        
+        results = {}
+        
+        try:
+            # 1단계: 실시간 티켓 요약 생성 (1-2초)
+            if include_summary:
+                summary_start = time.time()
+                logger.info("1단계: 실시간 티켓 요약 생성 시작")
+                
+                summary_result = await self._generate_summary_task({
+                    "ticket_data": ticket_data
+                })
+                
+                results["summary"] = summary_result
+                summary_time = time.time() - summary_start
+                logger.info(f"1단계 완료: 요약 생성 ({summary_time:.2f}초)")
+            
+            # 2단계: 벡터 검색 (유사 티켓 + KB 문서) (2초)
+            if include_similar_tickets or include_kb_docs:
+                search_start = time.time()
+                logger.info("2단계: 벡터 검색 시작")
+                
+                search_result = await self._unified_search_task({
+                    "ticket_data": ticket_data,
+                    "tenant_id": tenant_id,
+                    "platform": "freshdesk",
+                    "top_k_tickets": top_k_tickets,
+                    "top_k_kb": top_k_kb
+                })
+                
+                results["unified_search"] = search_result
+                
+                # 하위 호환성을 위한 개별 키
+                if search_result.get("success"):
+                    results["similar_tickets"] = search_result.get("similar_tickets", [])
+                    results["kb_documents"] = search_result.get("kb_documents", [])
+                
+                search_time = time.time() - search_start
+                logger.info(f"2단계 완료: 벡터 검색 ({search_time:.2f}초)")
+            
+            total_time = time.time() - start_time
+            logger.info(f"순차 실행 완료 (ticket_id: {ticket_data.get('id')}, 총 실행시간: {total_time:.2f}초)")
+            
+            return {
+                **results,
+                "total_execution_time": total_time,
+                "execution_type": "sequential",
+                "success": True
+            }
+            
+        except Exception as e:
+            total_time = time.time() - start_time
+            error_msg = f"순차 실행 실패: {str(e)}"
+            logger.error(f"{error_msg} (실행시간: {total_time:.2f}초)")
+            
+            return {
+                "summary": {
+                    "task_type": "summary",
+                    "error": "실행 실패로 인한 요약 생성 불가",
+                    "success": False
+                },
+                "unified_search": {
+                    "task_type": "unified_search",
+                    "similar_tickets": [],
+                    "kb_documents": [],
+                    "error": "실행 실패로 인한 검색 불가",
+                    "success": False
+                },
+                "similar_tickets": [],
+                "kb_documents": [],
+                "total_execution_time": total_time,
+                "execution_type": "sequential",
+                "success": False,
+                "error": error_msg
+            }
 
 # 전역 싱글톤 인스턴스 (편의성 제공)
 _global_llm_manager = None

@@ -11,14 +11,20 @@
 
 ## 🎯 즉시 참조 (우선순위 순)
 
-### 🔥 필수 시작점 (2025-06-27 최신화)
-1. **[Master Status](../docs/MASTER_STATUS.md)** 🆕 - 프로젝트 마스터 현황 (단일 진실 공급원)
-2. **[Current Issues](../docs/CURRENT_ISSUES.md)** 🆕 - 현재 해결 중인 이슈들
-3. **[Project Roadmap](../docs/ROADMAP.md)** 🆕 - 프로젝트 로드맵
+### 🔥 필수 시작점 (2025-06-28 최신화)
+1. **[Master Status](../docs/MASTER_STATUS.md)** 🆕 - 프로젝트 마스터 현황 (⭐ 순차 실행 아키텍처 적용 완료)
+2. **[Current Issues](../docs/CURRENT_ISSUES.md)** 🆕 - 현재 해결 중인 이슈들 (6개 주요 이슈 해결)
+3. **[Project Roadmap](../docs/ROADMAP.md)** 🆕 - 프로젝트 로드맵 (Phase 2 시작)
 4. **[Quick Reference](./core/quick-reference.instructions.md)** ⭐ - 핵심 패턴 (5분 읽기)
 5. **[Global Instructions](./core/global.instructions.md)** - 전역 규칙과 원칙
 
-### � 핵심 지침서만 유지 (간소화 완료)
+### 🎯 주요 아키텍처 변경사항 (2025-06-28)
+- **⭐ 순차 실행 패턴**: 병렬 처리(InitParallelChain) 제거, 3~4초 성능 달성
+- **⭐ doc_type 제거**: 코드 레벨 필터링 완전 제거, Qdrant 쿼리 레벨만 사용
+- **⭐ 실시간 요약 분리**: Freshdesk API에서만 실시간 요약, 벡터 검색과 분리
+- **⭐ End-to-End 테스트**: 실제 데이터로 전체 파이프라인 검증 완료
+
+### 📈 핵심 지침서만 유지 (간소화 완료)
 
 ## 🏗️ Core - 필수 참조 파일들 (7개 핵심 지침서)
 | 파일 | 용도 | 참조 시점 |

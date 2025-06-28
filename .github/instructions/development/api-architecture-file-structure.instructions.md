@@ -9,8 +9,8 @@ _AI 참조 최적화 버전 - API 설계와 백엔드 구조 가이드_
 
 ## 📋 **TL;DR - API 아키텍처 핵심 요약**
 
-### 🚀 **8개 핵심 엔드포인트**
-1. `/init` - 티켓 초기 데이터 (Redis 캐싱)
+### 🚀 **8개 핵심 엔드포인트** (2025-06-28 업데이트)
+1. `/init` - 티켓 초기 데이터 (⭐ 순차 실행 패턴 적용, Redis 캐싱)
 2. `/query` - AI 채팅 (langchain 체인)
 3. `/reply` - 추천 답변 생성
 4. `/ingest` - 관리자용 데이터 수집 (멀티플랫폼)
@@ -23,6 +23,7 @@ _AI 참조 최적화 버전 - API 설계와 백엔드 구조 가이드_
 - **버전 관리 없음**: `/api/routes/` 직접 구조
 - **확장 가능**: 필요시 버전 관리 추가 가능한 구조
 - **단순성**: 복잡도 최소화, 유지보수성 최대화
+- **⭐ 순차 실행**: 병렬 처리 제거, 3~4초 성능으로 단순화
 
 ---
 
@@ -251,4 +252,114 @@ async def get_cached_response(key: str):
 4. **플랫폼별 하드코딩 금지** - 반드시 어댑터 패턴 사용
 
 **2025년 6월 21일 기준 - AI 세션 간 일관성 보장**
+
+---
+
+## 🚀 **핵심 엔드포인트 상세 가이드** (2025-06-28 업데이트)
+
+### ⭐ **1. /init 엔드포인트** - 순차 실행 패턴 적용
+
+**목적**: 티켓 초기 데이터 로딩 (실시간 요약 + 벡터 검색)
+
+**최신 아키텍처**:
+```python
+# api/routes/init.py (순차 실행 패턴)
+@router.get("/init/{ticket_id}")
+async def init_ticket(
+    ticket_id: str,
+    company_id: str = Depends(get_company_id)
+):
+    """
+    순차 실행 패턴:
+    1. 실시간 요약 생성 (Freshdesk API) - 1-2초
+    2. 벡터 검색 (유사 티켓 + KB) - 1-2초
+    총 실행시간: 3-4초
+    """
+    
+    # 기존 병렬 처리 제거
+    # result = await llm_manager.execute_init_parallel_chain(...)
+    
+    # 새로운 순차 실행
+    result = await llm_manager.execute_init_sequential(
+        ticket_data=ticket_data,
+        qdrant_client=qdrant_client,
+        tenant_id=company_id,
+        top_k_tickets=3,
+        top_k_kb=3
+    )
+    
+    return {
+        "ticket_id": ticket_id,
+        "summary": result.get("summary"),
+        "similar_tickets": result.get("similar_tickets"),
+        "kb_documents": result.get("kb_documents"),
+        "performance": result.get("performance", {})
+    }
+```
+
+**주요 개선사항**:
+- **병렬 처리 제거**: InitParallelChain, RunnableParallel 제거
+- **코드 단순화**: 복잡한 의존성 관리 제거
+- **성능 최적화**: 3~4초로 충분히 빠름
+- **유지보수성**: 디버깅 및 수정 용이
+
+**벡터 검색 개선**:
+- **doc_type 코드 레벨 필터링 완전 제거**
+- **Qdrant 쿼리 레벨 필터링만 사용**
+- **실시간 요약과 벡터 검색 명확히 분리**
+
+**응답 구조**:
+```json
+{
+  "ticket_id": "123",
+  "summary": "티켓 요약 내용...",
+  "similar_tickets": [
+    {
+      "id": "456",
+      "title": "유사 티켓 제목",
+      "similarity_score": 0.85,
+      "content": "유사 티켓 내용..."
+    }
+  ],
+  "kb_documents": [
+    {
+      "id": "789",
+      "title": "관련 KB 문서",
+      "similarity_score": 0.78,
+      "content": "KB 문서 내용..."
+    }
+  ],
+  "performance": {
+    "summary_time": 1.5,
+    "search_time": 1.8,
+    "total_time": 3.3
+  }
+}
+```
+
+### 🔍 **2. /query 엔드포인트** - AI 채팅
+
+**목적**: 사용자와 AI 간의 대화형 질의응답
+
+**구조**:
+```python
+@router.post("/query")
+async def query_ai(
+    request: QueryRequest,
+    company_id: str = Depends(get_company_id)
+):
+    # LangChain 체인 사용
+    response = await query_chain.arun(
+        query=request.query,
+        context=request.context,
+        company_id=company_id
+    )
+    return response
+```
+
+### 📝 **3. /reply 엔드포인트** - 추천 답변
+
+**목적**: 티켓에 대한 추천 답변 생성
+
+---
 ````

@@ -114,6 +114,37 @@ class PerformanceCache:
             logger.warning(f"역직렬화 실패: {e}")
             return None
     
+    def __contains__(self, key: Union[str, Dict, Tuple]) -> bool:
+        """'in' 연산자 지원을 위한 메서드"""
+        try:
+            normalized_key = self._generate_key(key)
+            return normalized_key in self._l1_cache
+        except Exception as e:
+            logger.warning(f"캐시 포함 확인 오류: {e}")
+            return False
+    
+    def __getitem__(self, key: Union[str, Dict, Tuple]) -> Any:
+        """딕셔너리 스타일 접근을 위한 메서드 (동기 버전)"""
+        try:
+            normalized_key = self._generate_key(key)
+            if normalized_key in self._l1_cache:
+                serialized_value = self._l1_cache[normalized_key]
+                return self._deserialize_value(serialized_value)
+            raise KeyError(f"Key not found: {key}")
+        except Exception as e:
+            logger.warning(f"캐시 접근 오류: {e}")
+            raise KeyError(f"Key not found: {key}")
+    
+    def __setitem__(self, key: Union[str, Dict, Tuple], value: Any) -> None:
+        """딕셔너리 스타일 설정을 위한 메서드 (동기 버전)"""
+        try:
+            normalized_key = self._generate_key(key)
+            serialized_value = self._serialize_value(value)
+            self._l1_cache[normalized_key] = serialized_value
+            logger.debug(f"💾 캐시 저장 (동기): {normalized_key[:32]}...")
+        except Exception as e:
+            logger.warning(f"캐시 저장 오류 (동기): {e}")
+
     async def get(self, key: Union[str, Dict, Tuple]) -> Optional[Any]:
         """캐시에서 값 조회"""
         start_time = time.time()

@@ -85,7 +85,7 @@ class OptimizedVectorRetriever:
         
         Args:
             tenant_id: 테넌트 ID
-            doc_type: 문서 타입 ("ticket" 또는 "kb")
+            doc_type: 문서 타입 ("ticket" 또는 "article")
             status: KB 문서 상태 (2: published)
             platform: 플랫폼 ("freshdesk" 등, 선택적)
             
@@ -122,6 +122,34 @@ class OptimizedVectorRetriever:
             return None
         
         return Filter(must=conditions)
+    
+    def _create_kb_filter(self, tenant_id: str, platform: str = "freshdesk") -> models.Filter:
+        """
+        KB 문서(아티클)용 필터 생성 (doc_type="article"만 사용)
+        
+        Args:
+            tenant_id: 테넌트 ID
+            platform: 플랫폼 (기본값: freshdesk)
+            
+        Returns:
+            KB 문서 검색용 필터
+        """
+        return models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="tenant_id",
+                    match=models.MatchValue(value=tenant_id)
+                ),
+                models.FieldCondition(
+                    key="platform",
+                    match=models.MatchValue(value=platform)
+                ),
+                models.FieldCondition(
+                    key="doc_type",
+                    match=models.MatchValue(value="article")
+                )
+            ]
+        )
     
     async def _get_cache_key(self, query: str, tenant_id: str, doc_type: Optional[str], top_k: int) -> str:
         """캐시 키 생성"""
@@ -170,7 +198,8 @@ class OptimizedVectorRetriever:
         tenant_id: str,
         doc_type: Optional[str] = None,
         top_k: int = 5,  # 기본값을 5로 변경
-        use_cache: bool = True
+        use_cache: bool = True,
+        platform: str = "freshdesk"  # 기본값으로 freshdesk 설정
     ) -> List[Document]:
         """
         필터링된 유사도 검색 수행
@@ -178,9 +207,10 @@ class OptimizedVectorRetriever:
         Args:
             query: 검색 쿼리
             tenant_id: 테넌트 ID
-            doc_type: 문서 타입 ("ticket" 또는 "kb")
+            doc_type: 문서 타입 ("ticket" 또는 "article")
             top_k: 반환할 결과 수
             use_cache: 캐시 사용 여부
+            platform: 플랫폼 ("freshdesk" 등)
             
         Returns:
             검색된 문서 리스트
@@ -195,11 +225,11 @@ class OptimizedVectorRetriever:
                 logger.info(f"캐시된 검색 결과 반환 (tenant_id: {tenant_id}, doc_type: {doc_type})")
                 return cached_result
         
-        # 필터 생성
-        filter_condition = self._create_filter(tenant_id, doc_type)
+        # 필터 생성 (platform 파라미터 포함)
+        filter_condition = self._create_filter(tenant_id, doc_type, platform=platform)
         
         try:
-            logger.info(f"벡터 검색 시작 (tenant_id: {tenant_id}, doc_type: {doc_type}, top_k: {top_k})")
+            logger.info(f"벡터 검색 시작 (tenant_id: {tenant_id}, doc_type: {doc_type}, platform: {platform}, top_k: {top_k})")
             
             # LangChain-Qdrant 통합 검색 수행 (비동기)
             documents = await asyncio.to_thread(
@@ -212,7 +242,7 @@ class OptimizedVectorRetriever:
             search_time = time.time() - start_time
             logger.info(
                 f"벡터 검색 완료 - {len(documents)}개 결과, "
-                f"실행시간: {search_time:.2f}초 (tenant_id: {tenant_id}, doc_type: {doc_type})"
+                f"실행시간: {search_time:.2f}초 (tenant_id: {tenant_id}, doc_type: {doc_type}, platform: {platform})"
             )
             
             # 캐시에 저장
@@ -269,8 +299,8 @@ class OptimizedVectorRetriever:
                 logger.warning(f"캐시 조회 실패: {e}")
         
         try:
-            # 1. 티켓 검색 (tenant_id + doc_type=ticket + 현재 티켓 제외)
-            ticket_filter = self._create_filter(tenant_id=tenant_id, doc_type="ticket")
+            # 1. 티켓 검색 (tenant_id + platform + doc_type=ticket + 현재 티켓 제외)
+            ticket_filter = self._create_filter(tenant_id=tenant_id, doc_type="ticket", platform="freshdesk")
             
             # 현재 티켓 ID 제외 필터 추가 (original_id 필드 사용)
             if ticket_id:
@@ -297,8 +327,8 @@ class OptimizedVectorRetriever:
             # 병렬 검색 실행 (임베딩 재사용)
             logger.info(f"병렬 검색 시작 - 티켓: {top_k_tickets}, KB: {top_k_kb}")
             
-            # KB 필터 생성
-            kb_filter = self._create_filter(tenant_id=tenant_id, doc_type="kb", status=2)
+            # KB 필터 생성 (최신 스키마 지원: article + platform 필터 포함)
+            kb_filter = self._create_kb_filter(tenant_id=tenant_id, platform="freshdesk")
             
             # 병렬 실행
             ticket_task = asyncio.to_thread(
@@ -406,7 +436,7 @@ class OptimizedVectorRetriever:
                 "source_id": metadata.get("kb_id", ""),
                 "source_url": metadata.get("url", ""),
                 "relevance_score": metadata.get("score", 0.0),
-                "doc_type": "kb",
+                "doc_type": "article",
                 
                 # 기존 호환성을 위한 추가 필드들
                 "id": metadata.get("kb_id", ""),

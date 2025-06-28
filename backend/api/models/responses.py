@@ -94,13 +94,12 @@ class JobControlResponse(BaseModel):
 
 
 class InitResponse(BaseModel):
-    """Platform-Neutral 통합 티켓 초기화 응답 모델"""
+    """Freshdesk 전용 티켓 초기화 응답 모델"""
 
-    # Platform-Neutral 티켓 식별자
-    ticket_id: str = Field(description="플랫폼 원본 티켓 ID")
-    tenant_id: str = Field(description="테넌트 ID (테넌트 격리)")
-    platform: str = Field(description="플랫폼 ID (멀티플랫폼 지원)")
-    platform_neutral_key: str = Field(description="Platform-Neutral 3-Tuple 키 (tenant_id:platform:original_id)")
+    # 티켓 식별자 (Freshdesk 전용)
+    ticket_id: str = Field(description="Freshdesk 티켓 ID")
+    tenant_id: str = Field(description="테넌트 ID (멀티테넌트 지원)")
+    platform: str = Field(default="freshdesk", description="플랫폼 (Freshdesk 고정)")
     
     # 티켓 원본 데이터
     ticket_data: Dict[str, Any] = Field(
@@ -122,12 +121,6 @@ class InitResponse(BaseModel):
     context_id: str = Field(description="컨텍스트 ID")
     metadata: Dict[str, Any] = Field(
         default_factory=dict, description="메타데이터"
-    )
-    
-    # Platform-Neutral 검색 통계
-    platform_neutral_stats: Optional[Dict[str, Any]] = Field(
-        default=None,
-        description="Platform-Neutral 검색 통계 (문서 수, 매칭 점수 등)"
     )
 
 
