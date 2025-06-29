@@ -1,13 +1,18 @@
 # 📚 AI Instructions Directory Index
 
-> **🚨 AI 필수 준수사항**: 모든 작업은 **"제안 > 컨펌 > 단계적 작업"** 3단계 프로세스 준수 필요
+> **🚨 절대 강제 준수**: 모든 AI는 **MANDATORY_PROCESS.md**를 **즉시 읽고 따라야 함**
 
-> **🚀 AI 첫 참조 가이드**: 이 파일 → `../docs/MASTER_STATUS.md` → `core/quick-reference.instructions.md` → 작업별 지침서
+> **⚠️ 최우선 참조**: `MANDATORY_PROCESS.md` → `../docs/MASTER_STATUS.md` → `core/quick-reference.instructions.md`
 
-## 🚨 **AI 작업 프로세스 (절대 준수)**
-1. **📋 제안**: 변경사항 상세 설명 및 영향도 분석
-2. **✅ 컨펌**: 사용자 승인 대기 (필수)
-3. **🔧 실행**: 컨펌 후에만 단계적 작업 진행
+## 🚨 **AI 강제 프로세스 (예외 없음)**
+1. **📋 제안**: 변경사항 상세 설명 및 영향도 분석 (필수)
+2. **✅ 컨펌**: 사용자 승인 대기 (절대 필수)
+3. **🔧 실행**: 컨펌 후에만 단계적 작업 진행 (승인 후에만)
+
+## 🚫 **절대 금지 사항**
+- ❌ 승인 없이 파일 편집 (replace_string_in_file, insert_edit_into_file 사용 금지)
+- ❌ 코드 확인 없이 "없다" 단정
+- ❌ 3단계 프로세스 건너뛰기
 
 ## 🎯 즉시 참조 (우선순위 순)
 
