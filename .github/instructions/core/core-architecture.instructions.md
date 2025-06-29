@@ -32,12 +32,12 @@ _AI 참조 최적화 버전 - 분할된 아키텍처 지침서들의 인덱스_
 **멀티테넌트 전략**:
 - company_id 자동 추출: `domain.split('.')[0]`
 - 모든 컴포넌트에 테넌트 격리 적용
-- X-Company-ID 헤더 기반 API 보안
+- X-Tenant-ID 헤더 기반 API 보안
 
 ### 🚨 **아키텍처 주의사항**
 
 - ⚠️ 기존 모듈 구조 변경 금지 → 점진적 개선만 허용
-- ⚠️ company_id 없는 컴포넌트 절대 금지 → 멀티테넌트 필수
+- ⚠️ tenant_id 없는 컴포넌트 절대 금지 → 멀티테넌트 필수
 - ⚠️ 플랫폼별 하드코딩 금지 → 어댑터 패턴 적용
 
 ---
@@ -89,9 +89,9 @@ backend/
 
 ### 🔐 **멀티테넌트 패턴**
 ```python
-# 모든 데이터 처리에 company_id 필수
-async def process_data(data: dict, company_id: str):
-    data["company_id"] = company_id
+# 모든 데이터 처리에 tenant_id 필수
+async def process_data(data: dict, tenant_id: str):
+    data["tenant_id"] = tenant_id
     # Row-level Security 자동 적용
 ```
 
@@ -140,7 +140,7 @@ async def optimized_operation(data: dict) -> dict:
 
 ### 📋 **AI 아키텍처 작업 시 필수 체크포인트**
 
-1. **company_id 멀티테넌트**: 모든 컴포넌트에 테넌트 격리 필수
+1. **tenant_id 멀티테넌트**: 모든 컴포넌트에 테넌트 격리 필수
 2. **모듈화 구조 유지**: 기존 core/llm, core/ingest 구조 보존
 3. **성능 최적화 점진 도입**: 기존 코드 안정성 우선
 4. **플랫폼 추상화**: Freshdesk 중심이지만 확장 가능하게

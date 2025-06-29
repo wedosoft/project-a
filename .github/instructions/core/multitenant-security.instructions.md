@@ -7,7 +7,7 @@ _AI 참조 최적화 버전 - 핵심 보안 패턴만 집중 정리_
 
 **완벽한 테넌트 간 데이터 격리 및 보안 보장**
 
-- **절대적 격리**: company_id 기반 100% 데이터 분리
+- **절대적 격리**: tenant_id 기반 100% 데이터 분리
 - **자동 태깅**: 모든 데이터에 테넌트 식별자 자동 추가
 - **계층적 보안**: API → 서비스 → 데이터베이스 → 벡터 DB 전 계층 보안
 - **감사 추적**: 모든 테넌트 액세스 로깅 및 모니터링
@@ -24,7 +24,7 @@ _AI 참조 최적화 버전 - 핵심 보안 패턴만 집중 정리_
 async def endpoint(
     headers: StandardHeaders = Depends(get_standard_headers)
 ):
-    # headers.company_id, headers.platform, headers.domain, headers.api_key
+    # headers.tenant_id, headers.platform, headers.domain, headers.api_key
     pass
 
 # ❌ 레거시 환경변수/쿼리 파라미터 사용 금지
@@ -32,7 +32,7 @@ async def endpoint(
 ```
 
 **헤더 우선순위**:
-1. **X-Company-ID** (필수)
+1. **X-Tenant-ID** (필수)
 3. **X-Domain** (필수: API 엔드포인트)
 4. **X-API-Key** (필수: 인증 키)
 
@@ -41,32 +41,32 @@ async def endpoint(
 **개발환경 (SQLite) - 회사별 데이터베이스 파일 분리**:
 ```
 data/
-├── company1_freshdesk_data.db     # 물리적 격리
+├── tenant1_freshdesk_data.db     # 물리적 격리
 ├── acme_freshdesk_data.db         # 완전 독립
 ```
 
 **운영환경 (PostgreSQL) - 테넌트별 스키마**:
 ```sql
 -- 스키마 기반 격리
-CREATE SCHEMA tenant_company1_freshdesk;
+CREATE SCHEMA tenant_tenant1_freshdesk;
 CREATE SCHEMA tenant_acme_freshdesk;
 
 -- Row-level Security 적용
-ALTER TABLE tenant_company1_freshdesk.tickets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_tenant1_freshdesk.tickets ENABLE ROW LEVEL SECURITY;
 ```
 
 **데이터베이스 생성 함수 업데이트**:
 ```python
-def get_database(company_id: str, platform: str = "freshdesk"):
+def get_database(tenant_id: str, platform: str = "freshdesk"):
     """멀티테넌트 데이터베이스 인스턴스 반환"""
     if os.getenv("DATABASE_URL"):
         # PostgreSQL: 스키마 기반 격리
         return PostgreSQLDatabase(
-            schema_name=f"tenant_{company_id}_{platform}"
+            schema_name=f"tenant_{tenant_id}_{platform}"
         )
     else:
         # SQLite: 파일 기반 격리
-        db_path = f"data/{company_id}_{platform}_data.db"
+        db_path = f"data/{tenant_id}_{platform}_data.db"
         return SQLiteDatabase(db_path)
 ```
 
@@ -74,20 +74,20 @@ def get_database(company_id: str, platform: str = "freshdesk"):
 
 **fetch_tickets/fetch_kb_articles 파라미터 표준화**:
 ```python
-# ✅ 수정 후: company_id 파라미터 제거
+# ✅ 수정 후: tenant_id 파라미터 제거
 async def fetch_tickets(
     domain: Optional[str] = None,
     api_key: Optional[str] = None,
     max_tickets: int = 10000
 ) -> List[Dict[str, Any]]:
 
-# ✅ 내부에서 company_id 추출
-company_id = extract_company_id_from_domain(domain)
+# ✅ 내부에서 tenant_id 추출
+tenant_id = extract_tenant_id_from_domain(domain)
 ```
 
 **ingest 프로세서 호출부 수정**:
 ```python
-# ✅ 수정 후: company_id 파라미터 제거
+# ✅ 수정 후: tenant_id 파라미터 제거
 tickets = await fetch_tickets(
     domain=domain, 
     api_key=api_key,
@@ -105,30 +105,30 @@ tickets = await fetch_tickets(
 ```
 도메인 추출: your_company.freshdesk.com → "your_company"
 X-Company-ID 헤더 → API 전체에 필수 적용
-모든 DB 쿼리 → company_id WHERE 조건 필수
+모든 DB 쿼리 → tenant_id WHERE 조건 필수
 ```
 
 **데이터 격리 원칙**:
 - **API 레벨**: X-Company-ID 헤더 검증 필수
-- **서비스 레벨**: 모든 함수에 company_id 매개변수 필수
+- **서비스 레벨**: 모든 함수에 tenant_id 매개변수 필수
 - **DB 레벨**: Row-level Security (RLS) 적용
-- **벡터 DB**: 필터링 기반 격리 (company_id + platform)
+- **벡터 DB**: 필터링 기반 격리 (tenant_id + platform)
 
 **절대 금지 사항**:
-- company_id 없는 데이터 처리 절대 금지
+- tenant_id 없는 데이터 처리 절대 금지
 - 전체 테이블 스캔 (SELECT * FROM table) 금지
 - 테넌트 간 데이터 공유 금지
-- 하드코딩된 company_id 금지
+- 하드코딩된 tenant_id 금지
 
 ### 🚨 **멀티테넌트 보안 주의사항**
 
-- ⚠️ company_id 누락 시 즉시 에러 → 데이터 무결성 보장
+- ⚠️ tenant_id 누락 시 즉시 에러 → 데이터 무결성 보장
 - ⚠️ SQL 인젝션 방지 → 파라미터화 쿼리 필수
 - ⚠️ 테넌트 권한 검증 → 모든 요청에 대한 인증/인가 확인
 
 ---
 
-## 🔑 **1. company_id 자동 추출 및 검증**
+## 🔑 **1. tenant_id 자동 추출 및 검증**
 
 ### 🏗️ **테넌트 식별 핵심 패턴**
 
@@ -137,8 +137,8 @@ import re
 from typing import Optional
 from urllib.parse import urlparse
 
-def extract_company_id(domain_or_url: str) -> Optional[str]:
-    """도메인에서 company_id 자동 추출"""
+def extract_tenant_id(domain_or_url: str) -> Optional[str]:
+    """도메인에서 tenant_id 자동 추출"""
     try:
         # URL인 경우 도메인 추출
         if domain_or_url.startswith(('http://', 'https://')):
@@ -147,7 +147,7 @@ def extract_company_id(domain_or_url: str) -> Optional[str]:
         else:
             domain = domain_or_url
         
-        # company_id 추출: subdomain.freshdesk.com → subdomain
+        # tenant_id 추출: subdomain.freshdesk.com → subdomain
         if '.freshdesk.com' in domain:
             return domain.split('.freshdesk.com')[0]
         
@@ -161,18 +161,18 @@ def extract_company_id(domain_or_url: str) -> Optional[str]:
     except Exception:
         return None
 
-def validate_company_id(company_id: str) -> bool:
-    """company_id 유효성 검증"""
-    if not company_id or len(company_id) < 2:
+def validate_tenant_id(tenant_id: str) -> bool:
+    """tenant_id 유효성 검증"""
+    if not tenant_id or len(tenant_id) < 2:
         return False
     
     # 알파벳, 숫자, 하이픈만 허용
-    return re.match(r'^[a-zA-Z0-9-]+$', company_id) is not None
+    return re.match(r'^[a-zA-Z0-9-]+$', tenant_id) is not None
 
 # 사용 예시
-company_id = extract_company_id("your_company.freshdesk.com")  # "your_company"
-if not validate_company_id(company_id):
-    raise ValueError(f"Invalid company_id: {company_id}")
+tenant_id = extract_tenant_id("your_company.freshdesk.com")  # "your_company"
+if not validate_tenant_id(tenant_id):
+    raise ValueError(f"Invalid tenant_id: {tenant_id}")
 ```
 
 ### 🎯 **테넌트 컨텍스트 클래스**

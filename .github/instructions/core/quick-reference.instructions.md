@@ -112,7 +112,7 @@ curl -X POST "http://localhost:8000/ingest" \
 
 ### **📋 시스템 정의**
 - **목적**: Freshdesk Custom App (RAG 기반 유사 티켓 추천)
-- **아키텍처**: 멀티테넌트 SaaS (company_id 기반 완전 격리)
+- **아키텍처**: 멀티테넌트 SaaS (tenant_id 기반 완전 격리)
 - **스택**: Python FastAPI + FDK (JavaScript) + Qdrant + SQLite/PostgreSQL
 
 ### **🏗️ 데이터 흐름 (최신)**
@@ -121,13 +121,13 @@ curl -X POST "http://localhost:8000/ingest" \
 ```
 
 1. **수집**: fetch_tickets(domain, api_key, max_tickets, store_immediately=True)
-2. **저장**: {company_id}_{platform}.db (예: your_company_freshdesk.db)
-3. **벡터화**: company_id 필터링으로 완전 격리
+2. **저장**: {tenant_id}_{platform}.db (예: your_company_freshdesk.db)
+3. **벡터화**: tenant_id 필터링으로 완전 격리
 4. **검색**: 테넌트별 독립된 결과 반환
 
 ### **🔒 멀티테넌트 보안 (완성)**
 - **DB 격리**: 개발환경 SQLite 파일별, 운영환경 PostgreSQL 스키마별
-- **벡터 격리**: Qdrant company_id 필터링
+- **벡터 격리**: Qdrant tenant_id 필터링
 - **API 격리**: 모든 엔드포인트에서 헤더 기반 테넌트 검증
 - **API 키**: secrets manager 참조만 저장
 
@@ -145,12 +145,12 @@ curl -X POST "http://localhost:8000/ingest" \
 // 디버깅: fdk validate --verbose
 ```
 
-**2. company_id 자동 추출**
+**2. tenant_id 자동 추출**
 
 ```javascript
 // iparams.html에서
 const domain = window.location.hostname; // xxx.freshdesk.com
-const companyId = domain.split(".")[0]; // "xxx"
+const tenantId = domain.split(".")[0]; // "xxx"
 ```
 
 **3. 백엔드 API 호출 (올바른 엔드포인트 사용)**
@@ -162,11 +162,11 @@ const companyId = domain.split(".")[0]; // "xxx"
 
 ### **🎨 FDK 패턴 (표준 헤더 기반)**
 
-**1. company_id 자동 추출**
+**1. tenant_id 자동 추출**
 ```javascript
 // iparams.html에서 자동으로 추출
 const domain = window.location.hostname; // xxx.freshdesk.com
-const companyId = domain.split(".")[0];   // "xxx"
+const tenantId = domain.split(".")[0];   // "xxx"
 ```
 
 **2. 백엔드 API 호출 (표준 4개 헤더)**
@@ -175,7 +175,7 @@ const response = await fetch(`${iparam.backend_url}/search`, {
   method: "POST",
   headers: {
     "Content-Type": "application/json",
-    "X-Company-ID": companyId,
+    "X-Tenant-ID": tenantId,
     "X-Platform": "freshdesk",
     "X-Domain": window.location.hostname,
     "X-API-Key": iparam.api_key
@@ -191,20 +191,20 @@ const response = await fetch(`${iparam.backend_url}/search`, {
 from fastapi import Header
 
 async def get_tenant_info(
-    company_id: str = Header(..., alias="X-Company-ID"),
+    tenant_id: str = Header(..., alias="X-Tenant-ID"),
     platform: str = Header(..., alias="X-Platform"),
     domain: str = Header(..., alias="X-Domain"), 
     api_key: str = Header(..., alias="X-API-Key")
 ):
-    return {"company_id": company_id, "platform": platform, 
+    return {"tenant_id": tenant_id, "platform": platform, 
             "domain": domain, "api_key": api_key}
 ```
 
 **2. 멀티테넌트 DB 접근**
 ```python
 # 회사별 DB 파일 자동 생성
-def get_database(company_id: str, platform: str):
-    db_filename = f"{company_id}_{platform}.db"
+def get_database(tenant_id: str, platform: str):
+    db_filename = f"{tenant_id}_{platform}.db"
     return SQLiteDatabase(db_filename)
 
 # 사용 예시
@@ -219,8 +219,8 @@ async def fetch_tickets(
     max_tickets: int = 100,
     include_description: bool = True
 ) -> List[Dict]:
-    # company_id는 내부에서 domain에서 추출
-    company_id = domain.split('.')[0]
+    # tenant_id는 내부에서 domain에서 추출
+    tenant_id = domain.split('.')[0]
     # 처리 로직...
 ```
 
@@ -228,14 +228,14 @@ async def fetch_tickets(
 
 **1. 테넌트별 검색**
 ```python
-# Qdrant에서 company_id 필터링
+# Qdrant에서 tenant_id 필터링
 search_results = await qdrant_client.search(
     collection_name="tickets",
     query_vector=embedding,
     query_filter=models.Filter(
         must=[models.FieldCondition(
-            key="company_id",
-            match=models.MatchValue(value=company_id)
+            key="tenant_id",
+            match=models.MatchValue(value=tenant_id)
         )]
     ),
     limit=10
@@ -245,8 +245,8 @@ search_results = await qdrant_client.search(
 **2. 하이브리드 검색 (Vector + BM25)**
 ```python
 # 벡터 검색 + 키워드 검색 결합
-vector_results = await vector_search(query, company_id)
-keyword_results = await keyword_search(query, company_id) 
+vector_results = await vector_search(query, tenant_id)
+keyword_results = await keyword_search(query, tenant_id) 
 combined = await merge_results(vector_results, keyword_results)
 ```
 
@@ -260,7 +260,7 @@ from core.langchain.integrated_objects import create_integrated_ticket_object
 integrated_ticket = create_integrated_ticket_object(
     ticket_data=ticket_data,
     conversation_data=conversation_data,
-    company_id=company_id,
+    tenant_id=tenant_id,
     platform="freshdesk"
 )
 ```
@@ -270,18 +270,18 @@ integrated_ticket = create_integrated_ticket_object(
 ```python
 from core.qdrant.qdrant_manager import QdrantManager
 
-async def store_ticket_vector(integrated_ticket, company_id):
+async def store_ticket_vector(integrated_ticket, tenant_id):
     qdrant = QdrantManager()
 
     # 임베딩 생성
     embedding = await generate_embedding(integrated_ticket['content'])
 
-    # Qdrant에 저장 (company_id 필터 포함)
+    # Qdrant에 저장 (tenant_id 필터 포함)
     await qdrant.store_document(
         document_id=integrated_ticket['id'],
         embedding=embedding,
         metadata={
-            "company_id": company_id,
+            "tenant_id": tenant_id,
             "platform": "freshdesk",
             "type": "ticket"
         },
@@ -292,11 +292,11 @@ async def store_ticket_vector(integrated_ticket, company_id):
 **3. 유사 티켓 검색**
 
 ```python
-async def find_similar_tickets(query_text, company_id, limit=5):
+async def find_similar_tickets(query_text, tenant_id, limit=5):
     # 쿼리 임베딩 생성
     query_embedding = await generate_embedding(query_text)
 
-    # company_id 필터로 검색
+    # tenant_id 필터로 검색
     results = await qdrant.search(
         query_vector=query_embedding,
         filter_conditions={"company_id": company_id, "platform": "freshdesk"},
