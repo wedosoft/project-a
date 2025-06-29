@@ -16,8 +16,6 @@ from pydantic import BaseModel
 
 from core.llm.manager import get_llm_manager
 from core.database.vectordb import vector_db
-from core.search.hybrid import HybridSearchManager
-from core.search.adapters import InitHybridAdapter
 from ..dependencies import (
     get_tenant_id,
     get_platform, 
@@ -128,35 +126,21 @@ async def get_initial_context(
             "metadata": ticket_metadata
         }
         
-        # 순차 실행으로 초기화 처리 - 하이브리드 검색 적용
-        # 기존 execute_init_sequential 대신 하이브리드 검색 어댑터 사용
-        hybrid_manager = HybridSearchManager()
-        hybrid_adapter = InitHybridAdapter()
-        
-        result = await hybrid_adapter.execute_hybrid_init(
-            hybrid_manager=hybrid_manager,
-            llm_manager=llm_manager,
+        # 순차 실행으로 초기화 처리
+        result = await llm_manager.execute_init_sequential(
             ticket_data=structured_ticket_data,
+            qdrant_client=qdrant_client,
             tenant_id=tenant_id,
-            platform=platform,
-            include_summary=include_summary,
-            include_similar_tickets=include_similar_tickets,
-            include_kb_docs=include_kb_docs,
-            top_k_tickets=top_k_tickets,
-            top_k_kb=top_k_kb
+            top_k_tickets=top_k_tickets if include_similar_tickets else 0,
+            top_k_kb=top_k_kb if include_kb_docs else 0,
+            include_summary=include_summary
         )
         
         sequential_execution_time = time.time() - sequential_start_time
-        logger.info(f"하이브리드 순차 실행 완료 - ticket_id: {ticket_id}, 총 실행시간: {sequential_execution_time:.2f}초")
-        
-        # 하이브리드 검색 품질 메트릭 로깅
-        if result.get("unified_search", {}).get("search_quality_score"):
-            quality_score = result["unified_search"]["search_quality_score"]
-            search_method = result["unified_search"].get("search_method", "unknown")
-            logger.info(f"검색 품질: {quality_score:.3f} (방법: {search_method})")
+        logger.info(f"순차 실행 완료 - ticket_id: {ticket_id}, 총 실행시간: {sequential_execution_time:.2f}초")
         
         # 결과 구조 디버깅
-        logger.debug(f"하이브리드 검색 실행 결과 구조: {result}")
+        logger.debug(f"LLM Manager 실행 결과 구조: {result}")
         
         # summary 결과 상세 디버깅
         if result.get("summary"):
@@ -177,9 +161,7 @@ async def get_initial_context(
             "performance": {
                 "total_time": sequential_execution_time,
                 "summary_time": result.get("summary_time", 0),
-                "search_time": result.get("search_time", 0),
-                "search_method": "hybrid",
-                "search_quality_score": result.get("unified_search", {}).get("search_quality_score", 0.0)
+                "search_time": result.get("search_time", 0)
             }
         }
         

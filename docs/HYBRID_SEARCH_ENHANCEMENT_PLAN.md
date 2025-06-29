@@ -222,4 +222,4 @@ if include_summary:
 - `.github/instructions/INDEX.md` - 프로젝트 작업 프로세스
 - `docs/SEQUENTIAL_ARCHITECTURE_UPDATE_20250628.md` - 기존 아키텍처 분석
 - `backend/core/search/hybrid.py` - 현재 하이브리드 검색 구현
-- `scripts/check-hybrid-status.sh` - 빠른 상태 확인 스크립트
+- `backend/scripts/check-hybrid-status.sh` - 빠른 상태 확인 스크립트
