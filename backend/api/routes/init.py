@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from core.llm.manager import get_llm_manager
@@ -32,14 +33,22 @@ router = APIRouter()
 
 # 응답 모델
 class InitResponse(BaseModel):
-    """Init 엔드포인트 응답 모델"""
+    """Init 엔드포인트 응답 모델 - 최적화된 구조"""
     success: bool
     ticket_id: str
     tenant_id: str
-    summary: Optional[str] = None
+    platform: str
+    
+    # 핵심 결과
+    summary: Optional[str] = None  # 단순화: 문자열로 직접 반환
     similar_tickets: Optional[List[Dict[str, Any]]] = None
     kb_documents: Optional[List[Dict[str, Any]]] = None
-    performance: Optional[Dict[str, float]] = None
+    
+    # 성능 메트릭 (단순화)
+    execution_time: Optional[float] = None
+    search_quality_score: Optional[float] = None
+    
+    # 오류 정보 (필요시에만)
     error: Optional[str] = None
 
 
@@ -118,15 +127,27 @@ async def get_initial_context(
         ticket_metadata = ticket_data.get("metadata", {}) if isinstance(ticket_data, dict) else ticket_data
         
         # 티켓 정보 구성 (main 브랜치와 동일한 구조)
+        # Freshdesk API 응답에서 description 필드 추출
+        description_text = (
+            ticket_metadata.get("text") or 
+            ticket_metadata.get("description_text") or 
+            ticket_metadata.get("description") or
+            "티켓 본문 정보 없음"
+        )
+        
         structured_ticket_data = {
             "id": ticket_id,
             "subject": ticket_metadata.get("subject", f"티켓 ID {ticket_id}"),
-            "description_text": ticket_metadata.get("text", ticket_metadata.get("description_text", "티켓 본문 정보 없음")),
+            "description_text": description_text,
             "conversations": ticket_data.get("conversations", []) if isinstance(ticket_data, dict) else [],
             "tenant_id": tenant_id,
             "platform": platform,
             "metadata": ticket_metadata
         }
+        
+        # 디버깅 로그 추가
+        logger.info(f"🔍 티켓 메타데이터 구조: {list(ticket_metadata.keys())}")
+        logger.info(f"🔍 추출된 description_text: {description_text[:100]}...")
         
         # 순차 실행으로 초기화 처리 - 하이브리드 검색 적용
         # 기존 execute_init_sequential 대신 하이브리드 검색 어댑터 사용
@@ -160,130 +181,126 @@ async def get_initial_context(
         
         # summary 결과 상세 디버깅
         if result.get("summary"):
-            logger.debug(f"Summary 결과 타입: {type(result['summary'])}")
-            logger.debug(f"Summary 결과 내용: {result['summary']}")
-            # JSON 직렬화 가능한지 확인
-            try:
-                import json
-                logger.debug(f"Summary JSON: {json.dumps(result['summary'], ensure_ascii=False, indent=2)}")
-            except Exception as e:
-                logger.debug(f"Summary JSON 직렬화 실패: {e}")
+            logger.info(f"[SUMMARY DEBUG] 원본 결과 타입: {type(result['summary'])}")
+            logger.info(f"[SUMMARY DEBUG] 원본 결과 길이: {len(str(result['summary']))}")
+            
+            # 구조 상세 분석
+            summary_result = result['summary']
+            if isinstance(summary_result, dict):
+                logger.info(f"[SUMMARY DEBUG] Dict 키들: {list(summary_result.keys())}")
+                
+                # 각 주요 필드 확인
+                for key in ['task_type', 'success', 'result', 'summary', 'content', 'error', 'execution_time']:
+                    if key in summary_result:
+                        value = summary_result[key]
+                        logger.info(f"[SUMMARY DEBUG] {key}: {type(value)} = {str(value)[:200]}...")
+                
+                # task_type이 summary인 경우 전체 구조 로깅
+                if summary_result.get("task_type") == "summary":
+                    logger.info(f"[SUMMARY DEBUG] Task Summary 전체 구조:")
+                    try:
+                        import json
+                        logger.info(f"[SUMMARY DEBUG] {json.dumps(summary_result, ensure_ascii=False, indent=2)}")
+                    except Exception as e:
+                        logger.info(f"[SUMMARY DEBUG] JSON 직렬화 실패, 원본: {summary_result}")
+            else:
+                logger.info(f"[SUMMARY DEBUG] 비-Dict 타입 내용: {str(summary_result)[:500]}...")
+        else:
+            logger.warning(f"[SUMMARY DEBUG] Summary 결과가 없습니다. 전체 결과 키들: {list(result.keys()) if isinstance(result, dict) else 'Not a dict'}")
         
-        # 응답 구성
-        response_data = {
-            "success": result.get("success", True),
-            "ticket_id": ticket_id,
-            "tenant_id": tenant_id,
-            "performance": {
-                "total_time": sequential_execution_time,
-                "summary_time": result.get("summary_time", 0),
-                "search_time": result.get("search_time", 0),
-                "search_method": "hybrid",
-                "search_quality_score": result.get("unified_search", {}).get("search_quality_score", 0.0)
+        # 응답 구성 - 단순화된 처리
+        try:
+            # 기본 응답 데이터
+            response_data = {
+                "success": result.get("success", True),
+                "ticket_id": ticket_id,
+                "tenant_id": tenant_id,
+                "platform": platform,
+                "execution_time": float(sequential_execution_time),
+                "search_quality_score": 0.0
             }
-        }
+            
+            # 검색 품질 점수 추출
+            unified_search = result.get("unified_search", {})
+            if isinstance(unified_search, dict):
+                quality_score = unified_search.get("search_quality_score", 0.0)
+                if isinstance(quality_score, (int, float)):
+                    response_data["search_quality_score"] = float(quality_score)
+            
+        except Exception as e:
+            logger.error(f"응답 데이터 구성 중 오류: {e}")
+            response_data = {
+                "success": False,
+                "ticket_id": ticket_id,
+                "tenant_id": tenant_id,
+                "platform": platform,
+                "execution_time": float(sequential_execution_time),
+                "search_quality_score": 0.0,
+                "error": f"응답 구성 오류: {str(e)}"
+            }
         
-        # 요약 결과 추가 - 실제 구조에 맞게 강화된 처리
+        # 요약 결과 처리 - 단순화
         if include_summary and result.get("summary"):
             summary_result = result["summary"]
             summary_text = None
             
-            # 다양한 형태의 summary 결과 처리
+            # 간단한 요약 추출 로직
             if isinstance(summary_result, dict):
-                # 패턴 1: task_type 기반 처리 (실제 로그에서 확인된 구조)
-                if summary_result.get("task_type") == "summary":
-                    if summary_result.get("success"):
-                        # 성공한 요약 작업에서 실제 요약 텍스트 추출
-                        if "result" in summary_result:
-                            summary_text = summary_result["result"]
-                        elif "summary" in summary_result:
-                            summary_text = summary_result["summary"]
-                        elif "content" in summary_result:
-                            summary_text = summary_result["content"]
+                # 순서대로 필드 확인
+                for field in ["summary", "result", "content", "text", "response"]:
+                    if field in summary_result and summary_result[field]:
+                        # 딕셔너리인 경우 내부 요약 텍스트 추출
+                        if isinstance(summary_result[field], dict):
+                            nested_summary = summary_result[field]
+                            for nested_field in ["ticket_summary", "summary", "content", "text"]:
+                                if nested_field in nested_summary:
+                                    summary_text = nested_summary[nested_field]
+                                    break
                         else:
-                            # task_type이 summary이고 success가 True인 경우, 전체를 요약으로 처리
-                            summary_text = f"요약 생성 완료 (실행시간: {summary_result.get('execution_time', 'N/A')}초)"
-                    else:
-                        summary_text = f"요약 생성 실패: {summary_result.get('error', '알 수 없는 오류')}"
-                
-                # 패턴 2: 기존 성공/실패 구조
-                elif summary_result.get("success") and summary_result.get("summary"):
-                    summary_text = summary_result["summary"]
+                            summary_text = str(summary_result[field])
+                        break
+                        
+                # 마지막 수단
+                if not summary_text and summary_result.get("success"):
+                    summary_text = "요약이 성공적으로 생성되었습니다."
                     
-                # 패턴 3: 직접 텍스트 필드들
-                elif summary_result.get("content"):
-                    summary_text = summary_result["content"]
-                elif summary_result.get("result"):
-                    summary_text = summary_result["result"]
-                elif summary_result.get("text"):
-                    summary_text = summary_result["text"]
-                elif summary_result.get("response"):
-                    summary_text = summary_result["response"]
-                
-                # 마지막 수단: 딕셔너리 전체를 문자열로 변환
-                if not summary_text:
-                    summary_text = str(summary_result)
-                
             elif isinstance(summary_result, str):
                 summary_text = summary_result
-            else:
-                # 기타 타입은 문자열로 변환
-                summary_text = str(summary_result)
             
-            # 최종 검증 및 할당
+            # 최종 할당
             response_data["summary"] = summary_text if summary_text else "요약 생성에 실패했습니다."
-            logger.debug(f"최종 summary 텍스트: {response_data['summary'][:100]}..." if len(str(response_data['summary'])) > 100 else response_data['summary'])
+        else:
+            logger.info(f"[SUMMARY PROCESSING] Summary 생성 비활성화됨")
         
-        # 유사 티켓 결과 추가 - 안전한 처리
-        if include_similar_tickets and result.get("similar_tickets"):
-            try:
-                similar_tickets = result["similar_tickets"]
-                if isinstance(similar_tickets, list):
-                    response_data["similar_tickets"] = similar_tickets[:top_k_tickets]
-                elif isinstance(similar_tickets, dict) and similar_tickets.get("success"):
-                    # unified_search 결과에서 추출
-                    tickets = similar_tickets.get("similar_tickets", [])
-                    response_data["similar_tickets"] = tickets[:top_k_tickets] if isinstance(tickets, list) else []
-                else:
-                    logger.warning(f"유사 티켓 결과가 예상 형식이 아닙니다: {type(similar_tickets)}")
-                    response_data["similar_tickets"] = []
-            except Exception as e:
-                logger.error(f"유사 티켓 처리 중 오류: {e}")
+        # 검색 결과 처리 - 단순화
+        if include_similar_tickets:
+            similar_tickets = result.get("similar_tickets", [])
+            if isinstance(similar_tickets, list):
+                response_data["similar_tickets"] = similar_tickets[:top_k_tickets] if similar_tickets else []
+            else:
                 response_data["similar_tickets"] = []
         
-        # KB 문서 결과 추가 - 안전한 처리
-        if include_kb_docs and result.get("kb_documents"):
-            try:
-                kb_documents = result["kb_documents"]
-                if isinstance(kb_documents, list):
-                    response_data["kb_documents"] = kb_documents[:top_k_kb]
-                elif isinstance(kb_documents, dict) and kb_documents.get("success"):
-                    # unified_search 결과에서 추출
-                    docs = kb_documents.get("kb_documents", [])
-                    response_data["kb_documents"] = docs[:top_k_kb] if isinstance(docs, list) else []
-                else:
-                    logger.warning(f"KB 문서 결과가 예상 형식이 아닙니다: {type(kb_documents)}")
-                    response_data["kb_documents"] = []
-            except Exception as e:
-                logger.error(f"KB 문서 처리 중 오류: {e}")
+        if include_kb_docs:
+            kb_documents = result.get("kb_documents", [])
+            if isinstance(kb_documents, list):
+                response_data["kb_documents"] = kb_documents[:top_k_kb] if kb_documents else []
+            else:
                 response_data["kb_documents"] = []
         
-        logger.info(f"Init 엔드포인트 성공 - ticket_id: {ticket_id}")
         return InitResponse(**response_data)
         
     except Exception as e:
         sequential_execution_time = time.time() - sequential_start_time
         logger.error(f"Init 엔드포인트 실패 - ticket_id: {ticket_id}, 오류: {str(e)}, 실행시간: {sequential_execution_time:.2f}초")
         
-        # 오류 응답
+        # 오류 응답 - 단순화
         return InitResponse(
             success=False,
             ticket_id=ticket_id,
             tenant_id=tenant_id,
+            platform=platform,
             error=str(e),
-            performance={
-                "total_time": sequential_execution_time
-            }
+            execution_time=sequential_execution_time
         )
 
 
@@ -303,3 +320,121 @@ async def init_health_check(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"헬스체크 실패: {str(e)}")
+
+
+@router.get("/init/stream/{ticket_id}")
+async def init_ticket_streaming(
+    ticket_id: str,
+    tenant_id: str = Depends(get_tenant_id),
+    platform: str = Depends(get_platform),
+    domain: str = Depends(get_domain),
+    api_key: str = Depends(get_api_key),
+    include_similar: bool = Query(True, description="유사 티켓 검색 포함"),
+    include_kb: bool = Query(True, description="KB 문서 검색 포함"),
+    retry_reason: Optional[str] = Query(None, description="재시도 이유")
+):
+    """
+    스트리밍 티켓 초기화 - 실시간 요약 생성
+    
+    재시도 이유 옵션:
+    - quality_low: 품질이 낮음
+    - detail_insufficient: 세부사항 부족  
+    - solution_missing: 해결책 제안 부족
+    - priority_wrong: 우선순위 잘못 판단
+    - tone_inappropriate: 톤이 부적절
+    """
+    
+    async def generate_stream():
+        try:
+            start_time = time.time()
+            logger.info(f"스트리밍 초기화 시작 - ticket_id: {ticket_id}, tenant_id: {tenant_id}")
+            
+            # 티켓 데이터 조회 (기존 엔드포인트와 동일한 방식)
+            from core.platforms.freshdesk.fetcher import fetch_ticket_details
+            ticket_data = None
+            try:
+                # Freshdesk API를 통해 티켓 정보 조회
+                ticket_data = await fetch_ticket_details(int(ticket_id), domain=domain, api_key=api_key)
+            except Exception as e:
+                logger.warning(f"Freshdesk API 호출 실패: {e}")
+            
+            if not ticket_data:
+                # API 조회 실패 시 벡터 검색 폴백
+                try:
+                    ticket_data = vector_db.get_by_id(original_id_value=ticket_id, tenant_id=tenant_id, doc_type="ticket")
+                except Exception as e:
+                    logger.warning(f"벡터 DB 조회 실패: {e}")
+            
+            if not ticket_data:
+                yield f"data: {json.dumps({'type': 'error', 'message': '티켓을 찾을 수 없습니다'})}\n\n"
+                return
+            
+            # 메타데이터 추출 및 정규화 (기존 엔드포인트와 완전히 동일)
+            ticket_metadata = ticket_data.get("metadata", {}) if isinstance(ticket_data, dict) else ticket_data
+            
+            # 디버깅: 실제 데이터 구조 확인
+            logger.info(f"🔍 디버깅 - 티켓 데이터 구조: {list(ticket_data.keys()) if isinstance(ticket_data, dict) else 'Not a dict'}")
+            logger.info(f"🔍 디버깅 - 메타데이터 구조: {list(ticket_metadata.keys()) if isinstance(ticket_metadata, dict) else 'Not a dict'}")
+            
+            # description_text 필드 우선 사용
+            description_text = (
+                ticket_metadata.get("description_text") or 
+                ticket_data.get("description_text") or
+                ticket_metadata.get("description") or
+                ticket_data.get("description") or
+                "티켓 본문 정보 없음"
+            )
+            
+            # 티켓 정보 구성 (description_text 필드 우선 사용)
+            structured_ticket_data = {
+                "id": ticket_id,
+                "subject": ticket_metadata.get("subject", f"티켓 ID {ticket_id}"),
+                "description_text": description_text,
+                "conversations": ticket_data.get("conversations", []) if isinstance(ticket_data, dict) else [],
+                "tenant_id": tenant_id,
+                "platform": platform,
+                "metadata": ticket_metadata
+            }
+            
+            # 디버깅: 최종 구조화된 데이터 확인
+            logger.info(f"🔍 디버깅 - description_text: {description_text[:100]}..." if description_text else "None")  
+            logger.info(f"🔍 디버깅 - 구조화된 티켓 제목: {structured_ticket_data['subject']}")
+            logger.info(f"🔍 디버깅 - 구조화된 티켓 본문: {structured_ticket_data['description_text'][:100]}...")
+            
+            # 스트리밍 하이브리드 검색 실행
+            llm_manager = get_llm_manager()
+            hybrid_manager = HybridSearchManager()
+            adapter = InitHybridAdapter()
+            
+            async for chunk in adapter.execute_hybrid_init_streaming(
+                hybrid_manager=hybrid_manager,
+                llm_manager=llm_manager,
+                ticket_data=structured_ticket_data,
+                tenant_id=tenant_id,
+                platform=platform,
+                include_summary=True,
+                include_similar_tickets=include_similar,
+                include_kb_docs=include_kb,
+                top_k_tickets=3,
+                top_k_kb=3,
+                retry_reason=retry_reason
+            ):
+                yield f"data: {json.dumps(chunk)}\n\n"
+            
+            # 완료 로깅
+            streaming_execution_time = time.time() - start_time
+            logger.info(f"스트리밍 초기화 완료 - ticket_id: {ticket_id}, 총 실행시간: {streaming_execution_time:.2f}초")
+                
+        except Exception as e:
+            logger.error(f"스트리밍 초기화 실패: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+    
+    return StreamingResponse(
+        generate_stream(),
+        media_type="text/plain",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Content-Type": "text/event-stream"
+        }
+    )

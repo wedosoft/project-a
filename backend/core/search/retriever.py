@@ -32,7 +32,7 @@ def get_vector_collection(collection_name: str = "documents") -> Any:
     return vector_db
 
 
-def retrieve_top_k_docs(query_embedding: List[float], top_k: int, tenant_id: str = None, doc_type: str = None) -> dict:
+def retrieve_top_k_docs(query_embedding: List[float], top_k: int, tenant_id: str = None, doc_type: str = None, platform: str = None) -> dict:
     """
     쿼리 임베딩을 이용해 VectorDB에서 top_k 문서를 검색합니다.
 
@@ -41,6 +41,7 @@ def retrieve_top_k_docs(query_embedding: List[float], top_k: int, tenant_id: str
         top_k: 검색할 최대 문서 수
         tenant_id: 테넌트 ID (데이터 격리에 사용, None이면 "default" 사용)
         doc_type: 문서 타입 필터 (선택사항, "ticket" 또는 "kb")
+        platform: 플랫폼 필터 (선택사항, "freshdesk", "zendesk" 등)
 
     Returns:
         검색 결과를 포함하는 딕셔너리:
@@ -51,7 +52,7 @@ def retrieve_top_k_docs(query_embedding: List[float], top_k: int, tenant_id: str
     """
     # tenant_id가 None이면 "default"로 설정
     search_tenant_id = tenant_id if tenant_id else "default"
-    logger.info(f"문서 검색 시작 (tenant_id: {search_tenant_id}, doc_type: {doc_type})")
+    logger.info(f"문서 검색 시작 (tenant_id: {search_tenant_id}, doc_type: {doc_type}, platform: {platform})")
     
     try:
         # 벡터 검색 수행
@@ -59,7 +60,8 @@ def retrieve_top_k_docs(query_embedding: List[float], top_k: int, tenant_id: str
             query_embedding=query_embedding,
             top_k=top_k,
             tenant_id=search_tenant_id,  # 수정된 tenant_id 사용
-            doc_type=doc_type  # 문서 타입 매개변수 전달
+            doc_type=doc_type,  # 문서 타입 매개변수 전달
+            platform=platform  # 플랫폼 매개변수 전달
         )
         
         logger.info(f"문서 검색 완료: {len(results.get('documents', []))}개 결과 반환")

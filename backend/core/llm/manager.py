@@ -594,6 +594,185 @@ class LLMManager:
                 "success": False,
                 "error": error_msg
             }
+    
+    async def generate_for_use_case(self, 
+                                   use_case: str,
+                                   messages: List[Dict[str, str]], 
+                                   **kwargs) -> LLMResponse:
+        """
+        Use Case 기반 자동 모델 선택 - LangChain의 진정한 장점!
+        
+        환경변수만 변경하면 즉시 모델이 바뀜:
+        - REALTIME_MODEL_NAME=gpt-4o-mini
+        - BATCH_MODEL_NAME=gemini-1.5-flash
+        - SUMMARIZATION_MODEL_NAME=claude-3-haiku
+        
+        Args:
+            use_case: "realtime", "batch", "summarization" 등
+            messages: 메시지 리스트
+            **kwargs: 추가 파라미터
+            
+        Returns:
+            LLM 응답
+        """
+        # 설정에서 자동으로 provider와 model 선택
+        provider, model = self.config_manager.get_model_for_use_case(use_case)
+        use_case_config = self.config_manager.get_use_case_config(use_case)
+        
+        # Use case별 기본 설정 적용
+        if use_case_config:
+            kwargs.setdefault("max_tokens", use_case_config.get("max_tokens", 1000))
+            kwargs.setdefault("temperature", use_case_config.get("temperature", 0.3))
+        
+        logger.info(f"🎯 Use Case '{use_case}': {provider.value} - {model}")
+        
+        return await self.generate(
+            messages=messages,
+            model=model,
+            provider=provider,
+            **kwargs
+        )
+    
+    async def stream_for_use_case(
+        self,
+        use_case: str,
+        messages: List[Dict[str, str]] = None,
+        system_prompt: str = None,
+        user_prompt: str = None,
+        **kwargs
+    ):
+        """
+        Use case별 모델로 스트리밍 응답 생성
+        
+        Args:
+            use_case: 사용 사례 (realtime, batch, summarization)
+            messages: 메시지 리스트 (우선순위 1)
+            system_prompt: 시스템 프롬프트 (우선순위 2)
+            user_prompt: 사용자 프롬프트 (우선순위 2)
+            **kwargs: 추가 파라미터
+            
+        Yields:
+            str: 스트리밍 텍스트 청크
+        """
+        try:
+            # Use case별 설정 가져오기
+            provider, model_name = self.config_manager.get_model_for_use_case(use_case)
+            config = self.config_manager.get_use_case_config(use_case)
+            
+            logger.info(f"🎯 Use Case '{use_case}' 스트리밍: {provider} - {model_name}")
+            
+            # 기본 파라미터 설정
+            stream_params = {
+                "model": model_name,
+                "temperature": config.get("temperature", 0.2),
+                "max_tokens": config.get("max_tokens", 1000),
+                "stream": True,
+                **kwargs
+            }
+            
+            # 메시지 구성
+            if messages:
+                stream_params["messages"] = messages
+            elif system_prompt and user_prompt:
+                stream_params["messages"] = [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ]
+            else:
+                raise ValueError("messages 또는 system_prompt/user_prompt가 필요합니다")
+            
+            # Provider별 스트리밍 호출
+            if provider not in self.providers:
+                raise ValueError(f"Provider {provider}가 초기화되지 않았습니다")
+            
+            provider_instance = self.providers[provider]
+            
+            # 스트리밍 지원 확인
+            if hasattr(provider_instance, 'stream_chat'):
+                async for chunk in provider_instance.stream_chat(**stream_params):
+                    yield chunk
+            else:
+                # 스트리밍 미지원 시 일반 응답 반환
+                logger.warning(f"Provider {provider}가 스트리밍을 지원하지 않습니다. 일반 응답으로 대체합니다.")
+                response = await self.generate_for_use_case(use_case, **kwargs)
+                if response.success:
+                    yield response.content
+                else:
+                    yield f"Error: {response.error}"
+                    
+        except Exception as e:
+            logger.error(f"Use case '{use_case}' 스트리밍 실패: {e}")
+            yield f"Error: 스트리밍 생성 중 오류가 발생했습니다: {str(e)}"
+    
+    async def stream_generate_for_use_case(
+        self, 
+        use_case: str,
+        messages: List[Dict[str, str]] = None,
+        system_prompt: str = None,
+        user_prompt: str = None,
+        **kwargs
+    ):
+        """
+        Use case에 따라 설정된 모델로 스트리밍 텍스트 생성
+        
+        Args:
+            use_case: realtime, batch, summarization 등
+            messages: 대화 메시지 리스트 (우선순위 높음)
+            system_prompt: 시스템 프롬프트 (messages 없을 때 사용)
+            user_prompt: 사용자 프롬프트 (messages 없을 때 사용)
+            **kwargs: 추가 파라미터
+        """
+        try:
+            # Use case 기반 설정 가져오기
+            provider, model_name = self.config_manager.get_model_for_use_case(use_case)
+            config = self.config_manager.get_use_case_config(use_case)
+            
+            logger.info(f"🎯 Use Case '{use_case}' 스트리밍: {provider.value} - {model_name}")
+            
+            # 메시지 구성
+            if not messages:
+                messages = []
+                if system_prompt:
+                    messages.append({"role": "system", "content": system_prompt})
+                if user_prompt:
+                    messages.append({"role": "user", "content": user_prompt})
+            
+            # 제공자 가져오기
+            if provider not in self.providers:
+                raise ValueError(f"Provider {provider.value} not available")
+            
+            provider_instance = self.providers[provider]
+            
+            # 요청 객체 생성
+            request = LLMRequest(
+                messages=messages,
+                model=model_name,
+                max_tokens=config.get('max_tokens', kwargs.get('max_tokens', 1000)),
+                temperature=config.get('temperature', kwargs.get('temperature', 0.1)),
+                **{k: v for k, v in kwargs.items() if k not in ['max_tokens', 'temperature']}
+            )
+            
+            # 스트리밍 지원 확인 및 실행
+            try:
+                # 스트리밍 생성 시도
+                async for chunk in provider_instance.stream_generate(request):
+                    yield chunk
+            except AttributeError:
+                logger.warning(f"Provider {provider.value}가 스트리밍을 지원하지 않습니다. 일반 응답으로 대체합니다.")
+                # 일반 응답으로 fallback
+                response = await self.generate_for_use_case(
+                    use_case=use_case,
+                    messages=messages,
+                    **kwargs
+                )
+                if response.success:
+                    yield response.content
+                else:
+                    yield f"Error: {response.error}"
+                    
+        except Exception as e:
+            logger.error(f"Use case '{use_case}' 스트리밍 생성 오류: {e}")
+            yield f"Error: {str(e)}"
 
 # 전역 싱글톤 인스턴스 (편의성 제공)
 _global_llm_manager = None

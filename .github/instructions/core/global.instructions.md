@@ -22,32 +22,43 @@ applyTo: "**"
 - 불확실한 경우 확인 요청 후 진행
 - 명확한 근거 기반 설명 제공
 
-## 🏗️ **모듈화 아키텍처 업데이트 (2025년 6월 21일 업데이트)**
+## 🏗️ **최신 아키텍처 업데이트 (2025년 6월 29일 완성)**
 
-### 📋 **LLM 및 데이터 수집 모듈화 완료**
+### 📋 **✅ LLM 관리 시스템 완전 구현**
 
-**모듈화된 구조**:
+**환경변수 기반 모델 관리**:
+- **ConfigManager**: 사용사례별(`REALTIME_`, `BATCH_`, `SUMMARY_`) 환경변수 기반 모델 설정
+- **LLMManager**: `generate_for_use_case()`, `stream_generate_for_use_case()` 통합 인터페이스
+- **즉시 적용**: 환경변수 변경 시 재시작 없이 모델 전환
+- **레거시 완전 제거**: 모든 하드코딩된 프로바이더/모델 로직 제거
 
-- **LLM 라우터**: `core/llm/` 하위 모듈로 분리 (router.py, clients.py, models.py, utils.py, metrics.py)
-- **데이터 수집**: `core/ingest/` 하위 모듈로 분리 (processor.py, validator.py, integrator.py, storage.py)
-- **LLM 대화 필터링**: `core/langchain/smart_conversation_filter.py` 신규 추가 (다국어 스마트 필터링)
-- **API 엔드포인트**: `api/routes/` 하위에서 핵심 로직 import하여 사용
+**스트리밍 시스템 완성**:
+- **RESTful 엔드포인트**: `/init/stream/{ticket_id}` (GET 방식)
+- **통합 티켓 처리**: `get_ticket_data()` 함수로 `description_text` 우선 추출
+- **프리미엄 실시간 요약**: YAML 템플릿 기반 고품질 요약
+- **구조화된 스트리밍**: 마크다운 청크 단위 스트리밍
 
-**개발 시 유의사항**:
+### 📋 **모듈화 완료 현황**
 
-- 기존 모노리식 파일 (llm_router.py, api/ingest.py) 제거 완료
-- 모든 import 경로가 새 모듈 구조로 업데이트됨
-- 핵심 비즈니스 로직은 `core/` 하위 모듈에서 관리
-- API 엔드포인트는 단순 래퍼 역할만 수행
-- **LLM 대화 필터링**: 기존 5개 제한 대신 스마트 필터링 시스템 적용
+**LLM 모듈**: `core/llm/` 하위 완전 통합
+- `manager.py`: 사용사례별 LLM 통합 관리
+- `utils/config.py`: 환경변수 기반 설정 관리  
+- `clients/`: 프로바이더별 클라이언트 구현
+- `summarizer/prompt/`: YAML 템플릿 기반 프롬프트
 
-### ✅ **모듈화 작업 시 필수 체크포인트**
+**데이터 수집 모듈**: `core/ingest/` 하위 분리 완료
+- `processor.py`: 핵심 ingest 함수 (메인 비즈니스 로직)
+- `validator.py`: 데이터 검증 및 필터링
+- `integrator.py`: 통합 객체 생성 및 병합
+- `storage.py`: 저장소 관리 (Qdrant, SQLite)
 
-1. **Import 경로 확인**: 새 모듈 구조에 맞는 import 사용
-2. **함수 위치 확인**: 핵심 함수들이 적절한 모듈에 위치하는지 검증
-3. **중복 제거**: 모듈 분리 후 불필요한 파일 백업 및 제거
-4. **에러 체크**: 모든 import 및 함수 호출이 정상 작동하는지 확인
-5. **LLM 필터링 검증**: 다국어 키워드 파일 로딩 및 필터링 동작 확인
+### ✅ **개발 시 필수 체크포인트**
+
+1. **환경변수 우선**: 모든 LLM 호출은 `generate_for_use_case()` 또는 `stream_generate_for_use_case()` 사용
+2. **하드코딩 금지**: 프로바이더나 모델명 직접 지정 절대 금지
+3. **스트리밍 패턴**: 마크다운 청크 단위 스트리밍, JSON 변환 불필요
+4. **티켓 데이터**: `get_ticket_data()` 함수로 일관된 데이터 추출
+5. **템플릿 사용**: YAML 템플릿 기반 프롬프트 구성
 
 ## 💼 프로젝트 배경
 

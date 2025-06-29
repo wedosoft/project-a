@@ -64,6 +64,8 @@ class PromptBuilder:
             # 템플릿 로드
             if content_type == "ticket":
                 template_data = self.prompt_loader.get_system_prompt_template("ticket")
+            elif content_type == "realtime_ticket":
+                template_data = self.prompt_loader.get_system_prompt_template("realtime_ticket")
                 sections = self.get_section_titles(ui_language)
                 
                 # 언어별 지시사항 선택

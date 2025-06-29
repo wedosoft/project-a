@@ -21,11 +21,25 @@ _Python FastAPI 기반 백엔드 시스템 구현 전문 가이드_
 
 ### 💡 **즉시 참조용 백엔드 핵심** (2025-06-28 업데이트)
 
-**최신 아키텍처 변경사항**:
-- **순차 실행 패턴**: 병렬 처리(InitParallelChain) 제거, 단순한 순차 실행으로 성능 개선
-- **Qdrant 쿼리 필터링**: doc_type="kb" 코드 레벨 필터링 완전 제거, 쿼리 레벨만 사용
-- **실시간 요약 분리**: Freshdesk API에서만 실시간 요약 생성, 벡터 검색과 명확히 분리
-- **성능 최적화**: 3~4초 내외로 충분히 빠른 응답 시간 달성
+### 💡 **즉시 참조용 백엔드 핵심** (2025-06-29 업데이트)
+
+**✅ LLM 관리 시스템 완성**:
+- **환경변수 기반**: 모든 LLM 호출이 환경변수로 모델/프로바이더 결정
+- **ConfigManager**: 사용사례별(`realtime`, `batch`, `summary`) 모델 설정 관리
+- **LLMManager**: 통합된 `generate_for_use_case()`, `stream_generate_for_use_case()` 메서드
+- **레거시 완전 제거**: 하드코딩된 프로바이더/모델 로직 모두 제거
+
+**✅ 스트리밍 시스템 완성**:
+- **RESTful 엔드포인트**: `/init/stream/{ticket_id}` (GET 방식)
+- **통합 티켓 처리**: `get_ticket_data()` 함수로 일관된 데이터 추출
+- **프리미엄 실시간 요약**: YAML 템플릿 기반 고품질 요약
+- **구조화된 스트리밍**: 마크다운 청크 단위 스트리밍
+
+**✅ 아키텍처 패턴**:
+- **환경변수 기반 모델 관리**: `.env` 파일에서 모든 LLM 설정 관리
+- **사용사례 기반 분리**: 실시간/배치/요약별 독립적 모델 설정
+- **즉시 적용**: 환경변수 변경 시 재시작 없이 즉시 모델 전환
+- **견고한 폴백**: 설정 오류 시 기본값으로 안전한 폴백
 
 **ORM 기반 패턴**:
 - **USE_ORM=true**: SQLAlchemy 기반 데이터 접근
@@ -41,9 +55,363 @@ _Python FastAPI 기반 백엔드 시스템 구현 전문 가이드_
 
 ---
 
+## 🤖 **LLM 관리 및 스트리밍 패턴** (2025-06-29 신규)
+
+### **1. 환경변수 기반 LLM 관리 패턴**
+
+**ConfigManager 기반 모델 설정**
+
+```python
+# core/llm/utils/config.py
+class ConfigManager:
+    def get_model_for_use_case(self, use_case: str) -> Tuple[str, str]:
+        """사용사례별 모델/프로바이더 반환"""
+        use_case_upper = use_case.upper()
+        
+        provider = os.getenv(f"{use_case_upper}_LLM_PROVIDER", "openai")
+        model = os.getenv(f"{use_case_upper}_LLM_MODEL", "gpt-3.5-turbo")
+        
+        return provider, model
+
+# .env 파일 설정 예시
+REALTIME_LLM_PROVIDER=openai
+REALTIME_LLM_MODEL=gpt-4-turbo
+BATCH_LLM_PROVIDER=anthropic  
+BATCH_LLM_MODEL=claude-3-haiku-20240307
+SUMMARY_LLM_PROVIDER=openai
+SUMMARY_LLM_MODEL=gpt-3.5-turbo
+```
+
+**LLMManager 통합 인터페이스**
+
+```python
+# core/llm/manager.py
+class LLMManager:
+    async def generate_for_use_case(
+        self, 
+        use_case: str, 
+        messages: List[dict],
+        **kwargs
+    ) -> str:
+        """사용사례별 LLM 생성"""
+        provider, model = self.config.get_model_for_use_case(use_case)
+        client = self.client_factory.get_client(provider)
+        
+        return await client.generate(
+            model=model,
+            messages=messages,
+            **kwargs
+        )
+    
+    async def stream_generate_for_use_case(
+        self,
+        use_case: str,
+        messages: List[dict], 
+        **kwargs
+    ) -> AsyncGenerator[str, None]:
+        """사용사례별 스트리밍 생성"""
+        provider, model = self.config.get_model_for_use_case(use_case)
+        client = self.client_factory.get_client(provider)
+        
+        async for chunk in client.stream_generate(
+            model=model,
+            messages=messages,
+            **kwargs
+        ):
+            yield chunk
+```
+
+### **2. RESTful 스트리밍 엔드포인트 패턴**
+
+**통합 티켓 데이터 추출**
+
+```python
+# api/routes/init.py
+async def get_ticket_data(ticket_id: str, headers: dict) -> dict:
+    """통합된 티켓 데이터 추출 로직"""
+    fetcher = FreshdeskFetcher()
+    ticket = await fetcher.get_ticket(ticket_id, headers)
+    
+    # description_text 우선 사용
+    ticket_body = (
+        ticket.get('description_text') or 
+        ticket.get('description') or 
+        ticket.get('body', '')
+    )
+    
+    return {
+        'ticket_id': ticket_id,
+        'subject': ticket.get('subject', ''),
+        'body': ticket_body,
+        'status': ticket.get('status_name', 'Open'),
+        'priority': ticket.get('priority_name', 'Medium')
+    }
+```
+
+**스트리밍 응답 패턴**
+
+```python
+@router.get("/stream/{ticket_id}")
+async def stream_ticket_summary(
+    ticket_id: str,
+    headers: dict = Depends(get_headers)
+) -> StreamingResponse:
+    """RESTful 스트리밍 엔드포인트"""
+    
+    async def generate_stream():
+        try:
+            # 단계 1: 시작 알림
+            yield f"data: {json.dumps({'type': 'summary_start', 'message': '요약 생성 시작...'})}\n\n"
+            
+            # 단계 2: 티켓 데이터 추출
+            ticket_data = await get_ticket_data(ticket_id, headers)
+            
+            # 단계 3: 실시간 요약 스트리밍 
+            async for chunk in llm_manager.stream_generate_for_use_case(
+                "realtime",
+                messages=[{"role": "user", "content": ticket_data['body']}],
+                max_tokens=1000
+            ):
+                if chunk.strip():
+                    yield f"data: {json.dumps({'type': 'summary_chunk', 'content': chunk})}\n\n"
+            
+            # 단계 4: 완료 알림
+            yield f"data: {json.dumps({'type': 'summary_complete'})}\n\n"
+            
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+    
+    return StreamingResponse(
+        generate_stream(),
+        media_type="text/plain",
+        headers={"Cache-Control": "no-cache"}
+    )
+```
+
+### **3. YAML 템플릿 기반 프롬프트 패턴**
+
+**PromptBuilder 활용**
+
+```python
+# core/llm/summarizer/prompt/builder.py
+class PromptBuilder:
+    def build_realtime_summary_prompt(self, ticket_data: dict) -> str:
+        """실시간 요약용 YAML 템플릿 기반 프롬프트 구성"""
+        template_path = "templates/system/realtime_ticket.yaml"
+        template = self.load_yaml_template(template_path)
+        
+        return template['prompt'].format(
+            ticket_body=ticket_data['body'],
+            ticket_subject=ticket_data['subject']
+        )
+```
+
+**템플릿 구조 예시**
+
+```yaml
+# templates/system/realtime_ticket.yaml
+name: "실시간 티켓 요약"
+version: "1.0"
+use_case: "realtime"
+quality: "premium"
+
+prompt: |
+  다음 고객 지원 티켓을 4개 섹션으로 구조화된 마크다운으로 요약해주세요.
+  
+  ## 🔍 문제 현황
+  ## 💡 원인 분석  
+  ## ⚡ 해결 진행상황
+  ## 🎯 중요 인사이트
+  
+  티켓 내용: {ticket_body}
+  제목: {ticket_subject}
+
+parameters:
+  max_tokens: 1000
+  temperature: 0.3
+  stream: true
+```
+
+---
+
 ## 🏗️ **핵심 구현 패턴**
 
-### **1. SQLAlchemy ORM 패턴** (2025-06-26 핵심)
+### **1. 환경변수 기반 LLM 관리 패턴** (2025-06-29 완성)
+
+**ConfigManager - 사용사례별 모델 설정**
+
+```python
+# core/llm/utils/config.py
+class ConfigManager:
+    def get_model_for_use_case(self, use_case: str) -> Tuple[str, str]:
+        """사용사례별 모델/프로바이더 반환"""
+        use_case_upper = use_case.upper()
+        
+        provider = os.getenv(f"{use_case_upper}_LLM_PROVIDER", "openai")
+        model = os.getenv(f"{use_case_upper}_LLM_MODEL", "gpt-3.5-turbo")
+        
+        return provider, model
+
+# .env 파일 설정 예시
+REALTIME_LLM_PROVIDER=openai
+REALTIME_LLM_MODEL=gpt-4-turbo
+BATCH_LLM_PROVIDER=anthropic  
+BATCH_LLM_MODEL=claude-3-haiku-20240307
+SUMMARY_LLM_PROVIDER=openai
+SUMMARY_LLM_MODEL=gpt-3.5-turbo
+```
+
+**LLMManager - 통합 인터페이스**
+
+```python
+# core/llm/manager.py
+class LLMManager:
+    async def generate_for_use_case(
+        self, 
+        use_case: str, 
+        messages: List[dict],
+        **kwargs
+    ) -> str:
+        """사용사례별 LLM 생성 - 즉시 환경변수 반영"""
+        provider, model = self.config.get_model_for_use_case(use_case)
+        client = self.client_factory.get_client(provider)
+        
+        return await client.generate(
+            model=model,
+            messages=messages,
+            **kwargs
+        )
+    
+    async def stream_generate_for_use_case(
+        self,
+        use_case: str,
+        messages: List[dict], 
+        **kwargs
+    ) -> AsyncGenerator[str, None]:
+        """사용사례별 스트리밍 생성 - 즉시 환경변수 반영"""
+        provider, model = self.config.get_model_for_use_case(use_case)
+        client = self.client_factory.get_client(provider)
+        
+        async for chunk in client.stream_generate(
+            model=model,
+            messages=messages,
+            **kwargs
+        ):
+            yield chunk
+```
+
+### **2. RESTful 스트리밍 엔드포인트 패턴** (2025-06-29 완성)
+
+**통합 티켓 데이터 추출**
+
+```python
+# api/routes/init.py
+async def get_ticket_data(ticket_id: str, headers: dict) -> dict:
+    """통합된 티켓 데이터 추출 로직 - description_text 우선"""
+    fetcher = FreshdeskFetcher()
+    ticket = await fetcher.get_ticket(ticket_id, headers)
+    
+    # description_text 우선 사용 (일관된 로직)
+    ticket_body = (
+        ticket.get('description_text') or 
+        ticket.get('description') or 
+        ticket.get('body', '')
+    )
+    
+    return {
+        'ticket_id': ticket_id,
+        'subject': ticket.get('subject', ''),
+        'body': ticket_body,
+        'status': ticket.get('status_name', 'Open'),
+        'priority': ticket.get('priority_name', 'Medium')
+    }
+```
+
+**스트리밍 응답 패턴**
+
+```python
+@router.get("/stream/{ticket_id}")  # RESTful GET 방식
+async def stream_ticket_summary(
+    ticket_id: str,
+    headers: dict = Depends(get_headers)
+) -> StreamingResponse:
+    """RESTful 스트리밍 엔드포인트"""
+    
+    async def generate_stream():
+        try:
+            # 단계 1: 시작 알림
+            yield f"data: {json.dumps({'type': 'summary_start', 'message': '요약 생성 시작...'})}\n\n"
+            
+            # 단계 2: 티켓 데이터 추출
+            ticket_data = await get_ticket_data(ticket_id, headers)
+            
+            # 단계 3: 실시간 요약 스트리밍 (환경변수 기반)
+            async for chunk in llm_manager.stream_generate_for_use_case(
+                "realtime",  # 환경변수에서 모델 자동 선택
+                messages=[{"role": "user", "content": ticket_data['body']}],
+                max_tokens=1000
+            ):
+                if chunk.strip():
+                    yield f"data: {json.dumps({'type': 'summary_chunk', 'content': chunk})}\n\n"
+            
+            # 단계 4: 완료 알림
+            yield f"data: {json.dumps({'type': 'summary_complete'})}\n\n"
+            
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+    
+    return StreamingResponse(
+        generate_stream(),
+        media_type="text/plain",
+        headers={"Cache-Control": "no-cache"}
+    )
+```
+
+### **3. YAML 템플릿 기반 프롬프트 패턴** (2025-06-29 완성)
+
+**PromptBuilder 활용**
+
+```python
+# core/llm/summarizer/prompt/builder.py
+class PromptBuilder:
+    def build_realtime_summary_prompt(self, ticket_data: dict) -> str:
+        """실시간 요약용 YAML 템플릿 기반 프롬프트 구성"""
+        template_path = "templates/system/realtime_ticket.yaml"
+        template = self.load_yaml_template(template_path)
+        
+        return template['prompt'].format(
+            ticket_body=ticket_data['body'],
+            ticket_subject=ticket_data['subject']
+        )
+```
+
+**프리미엄 YAML 템플릿**
+
+```yaml
+# templates/system/realtime_ticket.yaml
+name: "실시간 티켓 요약"
+version: "1.0"
+use_case: "realtime"
+quality: "premium"
+
+prompt: |
+  다음 고객 지원 티켓을 4개 섹션으로 구조화된 마크다운으로 요약해주세요.
+  
+  ## 🔍 문제 현황
+  ## 💡 원인 분석  
+  ## ⚡ 해결 진행상황
+  ## 🎯 중요 인사이트
+  
+  티켓 내용: {ticket_body}
+  제목: {ticket_subject}
+
+parameters:
+  max_tokens: 1000
+  temperature: 0.3
+  stream: true
+```
+
+### **4. SQLAlchemy ORM 패턴** (2025-06-26 기준)
 
 **Repository 패턴 기반 데이터 접근**
 

@@ -109,10 +109,6 @@ formatting_rules:
     - 서비스 요구사항: 제한사항, 종속성, 호환성 요구사항
     - 프로세스 인사이트: 모범 사례, 워크플로우, 절차적 지식
     - 향후 고려사항: 유사 사례에 대한 권장사항, 예방 조치
-    
-    ## 📋 참고 자료
-    - 첨부파일은 실시간 요약에서 제외됨 (속도 최적화)
-    - 관련 문서나 링크가 언급된 경우 정확한 URL 포함
   en: |
     Follow this exact structure in markdown format:
     
@@ -142,7 +138,3 @@ formatting_rules:
     - Service Requirements: Limitations, dependencies, compatibility requirements
     - Process Insights: Best practices, workflows, procedural knowledge
     - Future Considerations: Recommendations for similar cases, preventive measures
-    
-    ## 📋 References
-    - Attachments excluded from real-time summary (speed optimization)
-    - Include exact URLs if related documents or links are mentioned

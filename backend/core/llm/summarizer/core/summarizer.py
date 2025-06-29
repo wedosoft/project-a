@@ -125,9 +125,9 @@ class CoreSummarizer:
                 {"role": "user", "content": user_prompt}
             ]
             
-            response = await self._get_manager().generate(
+            response = await self._get_manager().generate_for_use_case(
                 messages=messages,
-                provider=LLMProvider.OPENAI,
+                use_case="summarization",
                 max_tokens=1200,
                 temperature=0.3
             )
@@ -188,9 +188,9 @@ class CoreSummarizer:
                 {"role": "user", "content": user_prompt}
             ]
             
-            response = await self._get_manager().generate(
+            response = await self._get_manager().generate_for_use_case(
                 messages=messages,
-                provider=LLMProvider.OPENAI,
+                use_case="summarization",
                 max_tokens=1500,
                 temperature=0.1
             )

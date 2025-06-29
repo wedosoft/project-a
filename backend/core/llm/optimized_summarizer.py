@@ -271,16 +271,15 @@ async def generate_optimized_summary(
             ui_language=ui_language
         )
         
-        # LLM 요청 - OpenAI 모델 강제 사용 (일관성 확보)
-        response = await llm_manager.generate(
+        # LLM 요청 - 설정 기반 자동 모델 선택 (LangChain 장점 활용!)
+        response = await llm_manager.generate_for_use_case(
+            use_case="batch",  # 배치 처리용 모델 자동 선택 
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
             max_tokens=1200,  # 상세한 요약을 위해 토큰 수 증가
-            temperature=0.1,   # 매우 일관성 있는 요약 (더 낮게 조정)
-            model_preference=["gpt-4o-mini"],  # OpenAI 단일 모델 강제 사용
-            provider=LLMProvider.OPENAI  # LLMProvider enum 사용
+            temperature=0.1   # 매우 일관성 있는 요약
         )
         
         if response and response.content:
@@ -293,15 +292,14 @@ async def generate_optimized_summary(
             if quality_score < 0.7:  # 품질이 낮으면 재시도
                 logger.warning("요약 품질이 낮아 재시도합니다.")
                 retry_prompt = f"{user_prompt}\n\nIMPORTANT: The previous summary was inadequate. Please provide a more detailed and accurate summary that strictly follows the original content."
-                retry_response = await llm_manager.generate(
+                retry_response = await llm_manager.generate_for_use_case(
+                    use_case="batch",  # 배치 처리용 모델 자동 선택 (재시도도 동일)
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": retry_prompt}
                     ],
                     max_tokens=1200,
-                    temperature=0.05,  # 재시도 시 더욱 정확한 결과를 위해 낮게 설정
-                    model_preference=["gpt-4o-mini"],  # OpenAI 단일 모델 강제 사용
-                    provider=LLMProvider.OPENAI  # LLMProvider enum 사용
+                    temperature=0.05  # 재시도 시 더욱 정확한 결과를 위해 낮게 설정
                 )
                 if retry_response and retry_response.content:
                     summary = retry_response.content.strip()
@@ -1303,10 +1301,10 @@ class OptimizedSummarizer:
         )
         
         try:
-            response = await self.llm_manager.generate_response(
+            response = await self.llm_manager.generate_for_use_case(
                 system_prompt=enhanced_system_prompt,
                 user_prompt=enhanced_user_prompt,
-                provider=LLMProvider.OPENAI,  # 강제로 OpenAI 사용
+                use_case="summarization",  # Config-driven provider selection
                 max_tokens=1500,  # 더 긴 응답 허용
                 temperature=0.1   # 더 보수적인 생성
             )

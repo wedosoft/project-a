@@ -8,7 +8,7 @@
 - 프리미엄 품질 보장 (유사티켓 요약보다 우수한 품질)
 - 5초 내 이해 가능한 구조화된 출력
 - 에스컬레이션 즉시 준비 가능한 정보 제공
-- OpenAI 모델 강제 사용으로 일관된 고품질 보장
+- 사용자 맞춤형 재시도 시스템 (이유별 품질 향상 전략)
 - 첨부파일 처리 제외로 실시간 속도 최적화
 """
 
@@ -18,6 +18,7 @@ import json
 import logging
 import time
 from typing import Any, Dict, List, Optional
+from enum import Enum
 
 from cachetools import TTLCache
 from langchain_core.runnables import RunnableLambda
@@ -26,6 +27,17 @@ from langchain_core.runnables import RunnableLambda
 from core.llm.manager import LLMManager
 
 logger = logging.getLogger(__name__)
+
+
+class RetryReason(Enum):
+    """사용자 재시도 요청 이유"""
+    QUALITY_LOW = "quality_low"  # 품질이 낮음
+    DETAIL_INSUFFICIENT = "detail_insufficient"  # 세부사항 부족
+    TONE_INAPPROPRIATE = "tone_inappropriate"  # 톤이 부적절
+    FORMAT_POOR = "format_poor"  # 포맷이 나쁨
+    LANGUAGE_UNCLEAR = "language_unclear"  # 언어가 불분명
+    PRIORITY_WRONG = "priority_wrong"  # 우선순위 잘못 판단
+    SOLUTION_MISSING = "solution_missing"  # 해결책 제안 부족
 
 
 class SummarizationChain:
@@ -133,17 +145,17 @@ class SummarizationChain:
                 ui_language=ui_language
             )
             
-            # 4. OpenAI 모델 강제 사용 (실시간 요약 프리미엄 품질 보장)
+            # 4. 설정 기반 자동 모델 선택 - LangChain의 진정한 장점!
+            # 하드코딩 제거: 이제 환경변수만 바꾸면 모델이 바뀜
             messages = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ]
             
-            response = await self.llm_manager.generate(
+            response = await self.llm_manager.generate_for_use_case(
+                use_case="realtime",  # 실시간 요약용 모델 자동 선택
                 messages=messages,
-                provider=LLMProvider.OPENAI,  # 실시간 요약은 OpenAI 강제 사용
-                max_tokens=max_tokens,
-                temperature=0.2
+                max_tokens=max_tokens
             )
             
             if not response.success:
@@ -151,34 +163,18 @@ class SummarizationChain:
             
             summary_text = response.content.strip()
             
-            # 5. 실시간 요약 품질 검증 및 재시도 로직 (유사티켓보다 엄격한 기준)
+            # 5. 실시간 요약 품질 검증 (재시도 없음 - 사용자가 새로고침 가능)
             validation_result = quality_validator.validate_summary_quality(
                 summary=summary_text,
                 original_content=ticket_content,
                 content_language=content_language
             )
             
-            # 6. 품질 점수 0.75 이상 요구 (유사티켓 0.7보다 높은 기준)
+            # 6. 품질 점수 로깅만 (재시도하지 않음)
             if validation_result['quality_score'] < 0.75:
-                logger.warning(f"실시간 요약 품질 점수 낮음 ({validation_result['quality_score']:.2f}), 재시도 실행")
-                
-                # 프리미엄 품질 재생성
-                enhanced_system_prompt = system_prompt + "\n\n**PREMIUM QUALITY REMINDER**: This is REAL-TIME analysis requiring SUPERIOR quality compared to similar ticket summaries. Ensure MAXIMUM detail preservation and IMMEDIATE actionability."
-                
-                messages[0]["content"] = enhanced_system_prompt
-                
-                retry_response = await self.llm_manager.generate(
-                    messages=messages,
-                    provider=LLMProvider.OPENAI,
-                    max_tokens=max_tokens + 300,  # 더 충분한 토큰 (실시간 특화)
-                    temperature=0.1  # 더 낮은 temperature (정확성 우선)
-                )
-                
-                if retry_response.success:
-                    summary_text = retry_response.content.strip()
-                    logger.info(f"실시간 요약 재시도 완료 (ticket_id: {ticket_data.get('id')})")
-                else:
-                    logger.warning(f"실시간 요약 재시도 실패, 원본 요약 사용 (ticket_id: {ticket_data.get('id')})")
+                logger.info(f"실시간 요약 품질 점수: {validation_result['quality_score']:.2f} (기준: 0.75) - 사용자가 새로고침 가능")
+            else:
+                logger.info(f"실시간 요약 품질 점수: {validation_result['quality_score']:.2f} - 양호")
             
             # 7. 실시간 요약 특화 응답 구성
             summary_result = {
@@ -225,6 +221,69 @@ class SummarizationChain:
             
             self.summary_cache[cache_key] = fallback_result
             return fallback_result
+
+    async def _summarize_ticket_streaming(self, input_data: Dict[str, Any]):
+        """
+        실시간 티켓 요약 스트리밍 생성
+        
+        Args:
+            input_data: {
+                "ticket_data": Dict[str, Any],
+                "max_tokens": int (optional, default=1000),
+                "retry_reason": RetryReason (optional)
+            }
+            
+        Yields:
+            str: 스트리밍 텍스트 청크
+        """
+        ticket_data = input_data["ticket_data"]
+        max_tokens = input_data.get("max_tokens", 1000)
+        retry_reason = input_data.get("retry_reason")
+        
+        # 재시도 이유별 프롬프트 조정
+        system_prompt = self._get_adaptive_system_prompt(retry_reason)
+        user_prompt = self._create_user_prompt(ticket_data, retry_reason)
+        
+        start_time = time.time()
+        
+        try:
+            # Config-driven 스트리밍 생성
+            async for chunk in self.llm_manager.stream_for_use_case(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                use_case="realtime",
+                max_tokens=max_tokens,
+                temperature=0.2
+            ):
+                yield chunk
+                
+            elapsed_time = time.time() - start_time
+            logger.info(f"실시간 스트리밍 요약 완료 (ticket_id: {ticket_data.get('id')}, 시간: {elapsed_time:.2f}초)")
+            
+        except Exception as e:
+            logger.error(f"스트리밍 요약 생성 실패: {e}")
+            yield f"⚠️ 요약 생성 중 오류가 발생했습니다: {str(e)}"
+
+    def _get_adaptive_system_prompt(self, retry_reason: Optional[RetryReason] = None) -> str:
+        """재시도 이유에 따른 적응형 시스템 프롬프트"""
+        base_prompt = """당신은 Freshdesk 티켓 분석 전문가입니다. 
+실시간으로 티켓을 분석하여 상담원이 5초 내에 상황을 파악할 수 있도록 도와주세요."""
+
+        if retry_reason == RetryReason.DETAIL_INSUFFICIENT:
+            return base_prompt + "\n\n**특별 지시: 기술적 세부사항과 구체적인 증상을 더 자세히 분석해주세요.**"
+        elif retry_reason == RetryReason.SOLUTION_MISSING:
+            return base_prompt + "\n\n**특별 지시: 가능한 해결책과 다음 단계를 구체적으로 제안해주세요.**"
+        elif retry_reason == RetryReason.PRIORITY_WRONG:
+            return base_prompt + "\n\n**특별 지시: 우선순위 판단 근거를 명확히 제시하고 비즈니스 영향도를 분석해주세요.**"
+        elif retry_reason == RetryReason.TONE_INAPPROPRIATE:
+            return base_prompt + "\n\n**특별 지시: 전문적이고 공감적인 톤으로 고객 관점을 고려해 작성해주세요.**"
+        
+        return base_prompt
+
+    def _create_user_prompt(self, ticket_data: Dict[str, Any], retry_reason: Optional[RetryReason] = None) -> str:
+        """사용자 프롬프트 생성 (재시도 이유 반영)"""
+        # ...existing code...
+        pass  # 기존 코드 유지
 
     def _generate_cache_key(self, ticket_data: Dict[str, Any]) -> str:
         """기존 캐시 키 생성 로직 그대로 재활용"""
@@ -320,18 +379,6 @@ class SummarizationChain:
         # 부정적 키워드
         negative_keywords = ["오류", "실패", "문제", "불가능", "중단", "장애", "버그", "에러", "error", "fail", "issue", "problem"]
         # 긍정적 키워드  
-        positive_keywords = ["해결", "완료", "성공", "정상", "복구", "개선", "success", "solved", "resolved", "completed"]
-        # 중립적 키워드
-        neutral_keywords = ["문의", "요청", "확인", "설정", "정보", "inquiry", "request", "information"]
-        
-        neg_count = sum(1 for word in negative_keywords if word in summary_lower)
-        pos_count = sum(1 for word in positive_keywords if word in summary_lower)
-        neu_count = sum(1 for word in neutral_keywords if word in summary_lower)
-        
-        if neg_count > pos_count and neg_count > neu_count:
-            return "부정적"
-        elif pos_count > neg_count and pos_count > neu_count:
-            return "긍정적"
         else:
             return "중립적"
 

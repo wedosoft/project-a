@@ -42,6 +42,12 @@ class ConfigManager:
                     "model": os.getenv("REALTIME_MODEL_NAME", "gpt-4o-mini"),
                     "max_tokens": int(os.getenv("REALTIME_MAX_TOKENS", "2000")),
                     "temperature": float(os.getenv("REALTIME_TEMPERATURE", "0.2"))
+                },
+                "batch": {
+                    "provider": os.getenv("BATCH_MODEL_PROVIDER", "gemini"),
+                    "model": os.getenv("BATCH_MODEL_NAME", "gemini-1.5-flash"),
+                    "max_tokens": int(os.getenv("BATCH_MAX_TOKENS", "800")),
+                    "temperature": float(os.getenv("BATCH_TEMPERATURE", "0.1"))
                 }
             },
             "conversation_filtering": {
@@ -80,6 +86,34 @@ class ConfigManager:
     def get_use_case_config(self, use_case: str) -> Optional[Dict[str, Any]]:
         """용도별 설정 반환"""
         return self.configs["use_cases"].get(use_case)
+    
+    def get_model_for_use_case(self, use_case: str) -> tuple[LLMProvider, str]:
+        """
+        Use Case에 따른 자동 모델 선택 - LangChain 핵심 장점!
+        
+        Args:
+            use_case: "realtime", "summarization", "batch" 등
+            
+        Returns:
+            (provider, model_name) 튜플
+        """
+        config = self.get_use_case_config(use_case)
+        if not config:
+            # 기본값 반환
+            return LLMProvider.OPENAI, "gpt-3.5-turbo"
+        
+        provider_name = config.get("provider", "openai")
+        model_name = config.get("model", "gpt-3.5-turbo")
+        
+        # 문자열을 LLMProvider enum으로 변환
+        provider_map = {
+            "openai": LLMProvider.OPENAI,
+            "anthropic": LLMProvider.ANTHROPIC,
+            "gemini": LLMProvider.GEMINI
+        }
+        
+        provider = provider_map.get(provider_name.lower(), LLMProvider.OPENAI)
+        return provider, model_name
     
     def get_conversation_filter_config(self) -> Dict[str, Any]:
         """대화 필터링 설정 반환"""
