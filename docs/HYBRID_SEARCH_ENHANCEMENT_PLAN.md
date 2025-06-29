@@ -218,6 +218,8 @@ if include_summary:
 ---
 
 **참고 문서**: 
+- **[⭐ 실시간 프로젝트 상태](./HYBRID_SEARCH_STATUS.md)** - 세션 간 컨텍스트 유지용 마스터 상태 파일
 - `.github/instructions/INDEX.md` - 프로젝트 작업 프로세스
 - `docs/SEQUENTIAL_ARCHITECTURE_UPDATE_20250628.md` - 기존 아키텍처 분석
 - `backend/core/search/hybrid.py` - 현재 하이브리드 검색 구현
+- `scripts/check-hybrid-status.sh` - 빠른 상태 확인 스크립트
