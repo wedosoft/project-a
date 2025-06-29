@@ -93,18 +93,42 @@ async def get_initial_context(
         llm_manager = get_llm_manager()
         qdrant_client = vector_db.client
         
-        # 샘플 티켓 데이터 구성 (실제로는 Freshdesk API에서 가져옴)
-        ticket_data = {
+        # 실제 Freshdesk API에서 티켓 데이터 가져오기
+        ticket_data = None
+        try:
+            from core.platforms.freshdesk.fetcher import fetch_ticket_details
+            # Freshdesk API를 통해 티켓 정보 조회
+            ticket_data = await fetch_ticket_details(int(ticket_id), domain=domain, api_key=api_key)
+        except Exception as e:
+            logger.warning(f"Freshdesk API 호출 실패: {e}")
+        
+        if not ticket_data:
+            # API 조회 실패 시 벡터 검색 폴백 (이미 import된 vector_db 사용)
+            try:
+                ticket_data = vector_db.get_by_id(original_id_value=ticket_id, tenant_id=tenant_id, doc_type="ticket")
+            except Exception as e:
+                logger.warning(f"벡터 DB 조회 실패: {e}")
+            
+            if not ticket_data:
+                raise HTTPException(status_code=404, detail=f"티켓 ID {ticket_id}를 찾을 수 없습니다.")
+        
+        # 메타데이터 추출 및 정규화
+        ticket_metadata = ticket_data.get("metadata", {}) if isinstance(ticket_data, dict) else ticket_data
+        
+        # 티켓 정보 구성 (main 브랜치와 동일한 구조)
+        structured_ticket_data = {
             "id": ticket_id,
-            "subject": f"티켓 {ticket_id} 주제",
-            "description_text": f"티켓 {ticket_id}의 상세 내용입니다.",
+            "subject": ticket_metadata.get("subject", f"티켓 ID {ticket_id}"),
+            "description_text": ticket_metadata.get("text", ticket_metadata.get("description_text", "티켓 본문 정보 없음")),
+            "conversations": ticket_data.get("conversations", []) if isinstance(ticket_data, dict) else [],
             "tenant_id": tenant_id,
-            "platform": platform
+            "platform": platform,
+            "metadata": ticket_metadata
         }
         
         # 순차 실행으로 초기화 처리
         result = await llm_manager.execute_init_sequential(
-            ticket_data=ticket_data,
+            ticket_data=structured_ticket_data,
             qdrant_client=qdrant_client,
             tenant_id=tenant_id,
             top_k_tickets=top_k_tickets if include_similar_tickets else 0,
@@ -114,6 +138,20 @@ async def get_initial_context(
         
         sequential_execution_time = time.time() - sequential_start_time
         logger.info(f"순차 실행 완료 - ticket_id: {ticket_id}, 총 실행시간: {sequential_execution_time:.2f}초")
+        
+        # 결과 구조 디버깅
+        logger.debug(f"LLM Manager 실행 결과 구조: {result}")
+        
+        # summary 결과 상세 디버깅
+        if result.get("summary"):
+            logger.debug(f"Summary 결과 타입: {type(result['summary'])}")
+            logger.debug(f"Summary 결과 내용: {result['summary']}")
+            # JSON 직렬화 가능한지 확인
+            try:
+                import json
+                logger.debug(f"Summary JSON: {json.dumps(result['summary'], ensure_ascii=False, indent=2)}")
+            except Exception as e:
+                logger.debug(f"Summary JSON 직렬화 실패: {e}")
         
         # 응답 구성
         response_data = {
@@ -127,26 +165,89 @@ async def get_initial_context(
             }
         }
         
-        # 요약 결과 추가
+        # 요약 결과 추가 - 실제 구조에 맞게 강화된 처리
         if include_summary and result.get("summary"):
-            response_data["summary"] = result["summary"]
-        
-        # 유사 티켓 결과 추가
-        if include_similar_tickets and result.get("similar_tickets"):
-            similar_tickets = result["similar_tickets"]
-            if isinstance(similar_tickets, list):
-                response_data["similar_tickets"] = similar_tickets[:top_k_tickets]
+            summary_result = result["summary"]
+            summary_text = None
+            
+            # 다양한 형태의 summary 결과 처리
+            if isinstance(summary_result, dict):
+                # 패턴 1: task_type 기반 처리 (실제 로그에서 확인된 구조)
+                if summary_result.get("task_type") == "summary":
+                    if summary_result.get("success"):
+                        # 성공한 요약 작업에서 실제 요약 텍스트 추출
+                        if "result" in summary_result:
+                            summary_text = summary_result["result"]
+                        elif "summary" in summary_result:
+                            summary_text = summary_result["summary"]
+                        elif "content" in summary_result:
+                            summary_text = summary_result["content"]
+                        else:
+                            # task_type이 summary이고 success가 True인 경우, 전체를 요약으로 처리
+                            summary_text = f"요약 생성 완료 (실행시간: {summary_result.get('execution_time', 'N/A')}초)"
+                    else:
+                        summary_text = f"요약 생성 실패: {summary_result.get('error', '알 수 없는 오류')}"
+                
+                # 패턴 2: 기존 성공/실패 구조
+                elif summary_result.get("success") and summary_result.get("summary"):
+                    summary_text = summary_result["summary"]
+                    
+                # 패턴 3: 직접 텍스트 필드들
+                elif summary_result.get("content"):
+                    summary_text = summary_result["content"]
+                elif summary_result.get("result"):
+                    summary_text = summary_result["result"]
+                elif summary_result.get("text"):
+                    summary_text = summary_result["text"]
+                elif summary_result.get("response"):
+                    summary_text = summary_result["response"]
+                
+                # 마지막 수단: 딕셔너리 전체를 문자열로 변환
+                if not summary_text:
+                    summary_text = str(summary_result)
+                
+            elif isinstance(summary_result, str):
+                summary_text = summary_result
             else:
-                logger.warning(f"유사 티켓 결과가 예상 형식이 아닙니다: {type(similar_tickets)}")
+                # 기타 타입은 문자열로 변환
+                summary_text = str(summary_result)
+            
+            # 최종 검증 및 할당
+            response_data["summary"] = summary_text if summary_text else "요약 생성에 실패했습니다."
+            logger.debug(f"최종 summary 텍스트: {response_data['summary'][:100]}..." if len(str(response_data['summary'])) > 100 else response_data['summary'])
+        
+        # 유사 티켓 결과 추가 - 안전한 처리
+        if include_similar_tickets and result.get("similar_tickets"):
+            try:
+                similar_tickets = result["similar_tickets"]
+                if isinstance(similar_tickets, list):
+                    response_data["similar_tickets"] = similar_tickets[:top_k_tickets]
+                elif isinstance(similar_tickets, dict) and similar_tickets.get("success"):
+                    # unified_search 결과에서 추출
+                    tickets = similar_tickets.get("similar_tickets", [])
+                    response_data["similar_tickets"] = tickets[:top_k_tickets] if isinstance(tickets, list) else []
+                else:
+                    logger.warning(f"유사 티켓 결과가 예상 형식이 아닙니다: {type(similar_tickets)}")
+                    response_data["similar_tickets"] = []
+            except Exception as e:
+                logger.error(f"유사 티켓 처리 중 오류: {e}")
                 response_data["similar_tickets"] = []
         
-        # KB 문서 결과 추가
+        # KB 문서 결과 추가 - 안전한 처리
         if include_kb_docs and result.get("kb_documents"):
-            kb_documents = result["kb_documents"]
-            if isinstance(kb_documents, list):
-                response_data["kb_documents"] = kb_documents[:top_k_kb]
-            else:
-                logger.warning(f"KB 문서 결과가 예상 형식이 아닙니다: {type(kb_documents)}")
+            try:
+                kb_documents = result["kb_documents"]
+                if isinstance(kb_documents, list):
+                    response_data["kb_documents"] = kb_documents[:top_k_kb]
+                elif isinstance(kb_documents, dict) and kb_documents.get("success"):
+                    # unified_search 결과에서 추출
+                    docs = kb_documents.get("kb_documents", [])
+                    response_data["kb_documents"] = docs[:top_k_kb] if isinstance(docs, list) else []
+                else:
+                    logger.warning(f"KB 문서 결과가 예상 형식이 아닙니다: {type(kb_documents)}")
+                    response_data["kb_documents"] = []
+            except Exception as e:
+                logger.error(f"KB 문서 처리 중 오류: {e}")
                 response_data["kb_documents"] = []
         
         logger.info(f"Init 엔드포인트 성공 - ticket_id: {ticket_id}")
