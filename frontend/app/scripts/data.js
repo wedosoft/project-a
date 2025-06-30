@@ -722,279 +722,318 @@ window.Data = {
   },
 
   /**
-   * 🎯 FDK 네이티브 데이터 로드 성공 모달 (현재 사용 안함)
-   * 
-   * 자동 모달 표시를 제거하고 토스트 알림으로 대체
-   * 필요시 버튼 클릭으로 수동 호출 가능
+   * 🚀 Vector DB 단독 모드 - 티켓 초기 데이터 로드
+   *
+   * /init 엔드포인트를 호출하여 티켓 요약, 유사 티켓, KB 문서를 한번에 가져옵니다.
+   * 환경변수 ENABLE_FULL_STREAMING_MODE=true 시 Vector DB에서만 데이터를 조회합니다.
+   *
+   * @param {Object} client - Freshdesk client 객체
+   * @param {string} ticketId - 티켓 ID
+   * @returns {Promise<Object>} API 응답 결과
    */
-  /* 
-  async showDataLoadSuccessModal(ticketInfo, data) {
+  async loadInitDataVectorOnly(client, ticketId) {
     try {
-      console.log('🎭 FDK 데이터 로드 성공 모달 호출');
-      
-      await client.interface.trigger("showModal", {
-        title: "데이터 로드 완료",
-        template: "index.html",
-        data: {
-          isDataLoadSuccess: true,
-          ticketInfo: ticketInfo,
-          loadedData: {
-            similarTickets: data.similar_tickets?.length || 0,
-            kbDocuments: data.kb_documents?.length || 0,
-            loadTime: new Date().toLocaleTimeString()
-          },
-          timestamp: new Date().toISOString()
-        },
-        size: {
-          width: "600px",
-          height: "400px"
-        },
-        noBackdrop: false
-      });
-      
-      console.log('✅ FDK 데이터 로드 성공 모달 열림 완료');
-    } catch (error) {
-      console.error('❌ FDK 데이터 로드 성공 모달 오류:', error);
-      
-      // 폴백: 토스트 메시지로 대체
-      UI.showToast('데이터가 성공적으로 로드되었습니다.', 'success');
-    }
-  },
-  */
+      console.log(`🚀 Vector DB 단독 모드로 초기 데이터 로드: ${ticketId}`);
 
-  /**
-   * 메모이제이션된 데이터 처리 함수들
-   */
-  memoizedFunctions: new Map(),
-
-  /**
-   * 메모이제이션 적용 헬퍼
-   */
-  setupMemoization() {
-    // 무거운 연산 함수들에 메모이제이션 적용
-    this.memoizedFunctions.set(
-      'processTicketData',
-      window.PerformanceOptimizer.memoize(
-        this.processTicketDataInternal.bind(this),
-        (ticket) => `${ticket.id}_${ticket.updated_at || ''}`
-      )
-    );
-
-    this.memoizedFunctions.set(
-      'searchTickets',
-      window.PerformanceOptimizer.memoize(
-        this.searchTicketsInternal.bind(this),
-        (query) => `search_${query.toLowerCase()}`
-      )
-    );
-
-    this.memoizedFunctions.set(
-      'filterTicketsByType',
-      window.PerformanceOptimizer.memoize(
-        this.filterTicketsByTypeInternal.bind(this),
-        (tickets, type) => `filter_${type}_${tickets.length}`
-      )
-    );
-  },
-
-  /**
-   * 배치 데이터 처리
-   * 대량 데이터를 청크 단위로 처리하여 UI 블로킹 방지
-   */
-  async processBatchData(items, processor, options = {}) {
-    const { batchSize = 100, delay = 10, onProgress = null, onBatchComplete = null } = options;
-
-    const results = [];
-    const total = items.length;
-
-    console.log(`[데이터] 배치 처리 시작: ${total}개 항목, ${batchSize}개씩 처리`);
-
-    for (let i = 0; i < total; i += batchSize) {
-      const batch = items.slice(i, i + batchSize);
-
-      // 배치 처리
-      const batchResults = await Promise.all(batch.map((item) => processor(item)));
-
-      results.push(...batchResults);
-
-      // 진행률 콜백
-      if (onProgress) {
-        const progress = Math.min(100, ((i + batchSize) / total) * 100);
-        onProgress(progress, i + batchSize, total);
+      // 캐시 확인
+      const globalData = GlobalState.getGlobalTicketData();
+      if (
+        globalData.cached_ticket_id === ticketId &&
+        globalData.summary &&
+        globalData.similar_tickets &&
+        globalData.kb_documents &&
+        GlobalState.isGlobalDataValid()
+      ) {
+        console.log('⚡ 캐시된 Vector DB 데이터 사용');
+        return { ok: true, data: globalData };
       }
 
-      // 배치 완료 콜백
-      if (onBatchComplete) {
-        onBatchComplete(batchResults, i / batchSize + 1);
-      }
+      // /init 엔드포인트 호출 - Vector DB 단독 모드
+      const response = await API.loadInitData(client, ticketId);
 
-      // UI 블로킹 방지를 위한 지연
-      if (i + batchSize < total) {
-        await new Promise((resolve) => setTimeout(resolve, delay));
-      }
-    }
+      if (response && response.ok && response.data) {
+        const data = response.data;
 
-    console.log(`[데이터] 배치 처리 완료: ${results.length}개 결과`);
-    return results;
-  },
+        // Vector DB 단독 모드 데이터 구조 검증
+        console.log('📊 Vector DB 응답 데이터 구조:', {
+          hasSummary: !!data.summary,
+          similarTicketsCount: data.similar_tickets?.length || 0,
+          kbDocumentsCount: data.kb_documents?.length || 0,
+          executionTime: data.execution_time,
+          searchQualityScore: data.search_quality_score
+        });
 
-  /**
-   * 스마트 캐싱 데이터 로더
-   */
-  async loadDataWithSmartCache(loadFunction, cacheKey, options = {}) {
-    const {
-      ttl = 300000, // 5분
-      forceRefresh = false,
-      fallbackData = null,
-    } = options;
+        // 전역 캐시 업데이트
+        GlobalState.updateGlobalTicketData(ticketId, 'cached_ticket_id');
+        GlobalState.updateGlobalTicketData(data.summary, 'summary');
+        GlobalState.updateGlobalTicketData(data.similar_tickets || [], 'similar_tickets');
+        GlobalState.updateGlobalTicketData(data.kb_documents || [], 'kb_documents');
+        GlobalState.updateGlobalTicketData(Date.now(), 'last_updated');
 
-    // 캐시 확인
-    if (!forceRefresh) {
-      const cached = window.PerformanceOptimizer.getCachedApiResult(cacheKey);
-      if (cached) {
-        console.log(`[데이터 캐시] ${cacheKey} - 캐시 적중`);
-        return cached;
-      }
-    }
-
-    try {
-      // 데이터 로드
-      const data = await loadFunction();
-
-      // 캐시 저장
-      window.PerformanceOptimizer.cacheApiResult(cacheKey, data, ttl);
-
-      return data;
-    } catch (error) {
-      console.warn(`[데이터] ${cacheKey} 로드 실패:`, error.message);
-
-      // 폴백 데이터 또는 에러 처리
-      if (fallbackData) {
-        console.log(`[데이터] ${cacheKey} - 폴백 데이터 사용`);
-        return fallbackData;
-      }
-
-      throw error;
-    }
-  },
-
-  /**
-   * 메모이제이션된 티켓 데이터 처리
-   */
-  processTicketData(ticket) {
-    const memoized = this.memoizedFunctions.get('processTicketData');
-    return memoized ? memoized(ticket) : this.processTicketDataInternal(ticket);
-  },
-
-  /**
-   * 실제 티켓 데이터 처리 (내부 함수)
-   */
-  processTicketDataInternal(ticket) {
-    try {
-      // 복잡한 티켓 데이터 처리 로직
-      const processed = {
-        id: ticket.id,
-        subject: ticket.subject || '제목 없음',
-        description: this.sanitizeText(ticket.description_text || ''),
-        status: this.normalizeStatus(ticket.status),
-        priority: this.normalizePriority(ticket.priority),
-        created_at: this.parseDate(ticket.created_at),
-        updated_at: this.parseDate(ticket.updated_at),
-        tags: this.extractTags(ticket.tags || []),
-        category: this.categorizeTicket(ticket),
-        urgency_score: this.calculateUrgencyScore(ticket),
-      };
-
-      return processed;
-    } catch (error) {
-      console.warn('[데이터] 티켓 처리 실패:', ticket.id, error);
-      return this.createFallbackTicket(ticket);
-    }
-  },
-
-  /**
-   * 메모이제이션된 티켓 검색
-   */
-  searchTickets(query) {
-    if (!query || query.length < 2) {
-      return this.getAllProcessedTickets();
-    }
-
-    const memoized = this.memoizedFunctions.get('searchTickets');
-    return memoized ? memoized(query) : this.searchTicketsInternal(query);
-  },
-
-  /**
-   * 실제 티켓 검색 (내부 함수)
-   */
-  searchTicketsInternal(query) {
-    const tickets = this.getAllProcessedTickets();
-    const lowercaseQuery = query.toLowerCase();
-
-    // 다중 필드 검색 (제목, 설명, 태그)
-    return tickets.filter((ticket) => {
-      return (
-        ticket.subject.toLowerCase().includes(lowercaseQuery) ||
-        ticket.description.toLowerCase().includes(lowercaseQuery) ||
-        ticket.tags.some((tag) => tag.toLowerCase().includes(lowercaseQuery))
-      );
-    });
-  },
-
-  /**
-   * 지연 로딩 데이터 관리
-   */
-  createLazyDataLoader(loaderFunction, placeholder = null) {
-    return window.PerformanceOptimizer.createLazyLoader(loaderFunction, placeholder);
-  },
-
-  /**
-   * 실시간 데이터 업데이트 (웹소켓 시뮬레이션)
-   */
-  setupRealTimeUpdates(callback, interval = 30000) {
-    // 30초마다
-    let updateTimer = null;
-
-    const startUpdates = () => {
-      if (updateTimer) return;
-
-      updateTimer = setInterval(async () => {
-        try {
-          // 페이지가 활성화된 경우만 업데이트
-          if (!document.hidden) {
-            const hasUpdates = await this.checkForUpdates();
-            if (hasUpdates && callback) {
-              callback();
-            }
-          }
-        } catch (error) {
-          console.warn('[데이터] 실시간 업데이트 실패:', error);
+        // 성능 메트릭 저장
+        if (data.execution_time) {
+          GlobalState.updateGlobalTicketData(data.execution_time, 'execution_time');
         }
-      }, interval);
+        if (data.search_quality_score) {
+          GlobalState.updateGlobalTicketData(data.search_quality_score, 'search_quality_score');
+        }
 
-      console.log(`[데이터] 실시간 업데이트 시작 (${interval}ms 간격)`);
-    };
-
-    const stopUpdates = () => {
-      if (updateTimer) {
-        clearInterval(updateTimer);
-        updateTimer = null;
-        console.log('[데이터] 실시간 업데이트 중지');
-      }
-    };
-
-    // 페이지 가시성에 따른 자동 제어
-    document.addEventListener('visibilitychange', () => {
-      if (document.hidden) {
-        stopUpdates();
+        console.log('✅ Vector DB 단독 모드 데이터 로드 완료');
+        return response;
       } else {
-        startUpdates();
+        console.error('❌ Vector DB 응답 데이터 없음');
+        return { ok: false, error: 'No data received from Vector DB' };
       }
+    } catch (error) {
+      console.error('❌ Vector DB 단독 모드 데이터 로드 실패:', error);
+      return { ok: false, error: error.message };
+    }
+  },
+
+  /**
+   * 🔄 하이브리드 모드 호환성 유지 (기존 로직)
+   *
+   * ENABLE_FULL_STREAMING_MODE=false 시 기존 하이브리드 로직을 사용합니다.
+   *
+   * @param {Object} client - Freshdesk client 객체
+   * @param {string} ticketId - 티켓 ID
+   * @returns {Promise<Object>} API 응답 결과
+   */
+  async loadInitDataHybrid(client, ticketId) {
+    // 기존 하이브리드 로직 (100% 보존)
+    return await API.loadInitData(client, ticketId);
+  },
+
+  /**
+   * 🎯 통합 초기 데이터 로드 (환경변수 기반 자동 분기)
+   *
+   * 백엔드의 환경변수 설정에 따라 Vector DB 단독 또는 하이브리드 모드로 자동 분기됩니다.
+   *
+   * @param {Object} client - Freshdesk client 객체
+   * @param {string} ticketId - 티켓 ID
+   * @returns {Promise<Object>} API 응답 결과
+   */
+  async preloadTicketData(client, ticketId) {
+    try {
+      console.log(`🎯 통합 초기 데이터 로드 시작: ${ticketId}`);
+
+      // 환경변수는 백엔드에서 자동으로 분기되므로 프론트엔드는 단일 API 호출
+      const response = await this.loadInitDataVectorOnly(client, ticketId);
+
+      if (response && response.ok) {
+        // UI 업데이트 - 모든 데이터가 준비됨
+        if (window.UI && window.UI.updateTicketSummary && response.data.summary) {
+          window.UI.updateTicketSummary(response.data.summary);
+        }
+
+        // 유사 티켓 표시
+        if (response.data.similar_tickets && response.data.similar_tickets.length > 0) {
+          this.displaySimilarTickets(response.data.similar_tickets);
+        }
+
+        // KB 문서 표시
+        if (response.data.kb_documents && response.data.kb_documents.length > 0) {
+          this.displayKBDocuments(response.data.kb_documents);
+        }
+
+        console.log(`✅ 통합 초기 데이터 로드 완료: ${ticketId}`);
+      }
+
+      return response;
+    } catch (error) {
+      console.error('❌ 통합 초기 데이터 로드 실패:', error);
+      return { ok: false, error: error.message };
+    }
+  },
+
+  /**
+   * 🎫 Vector DB 기반 유사 티켓 표시
+   *
+   * Vector DB에서 조회된 유사 티켓 데이터를 UI에 표시합니다.
+   *
+   * @param {Array} similarTickets - Vector DB에서 조회된 유사 티켓 배열
+   */
+  displaySimilarTickets(similarTickets) {
+    const resultsElement = document.getElementById('similar-tickets-list');
+    if (!resultsElement) {
+      console.warn('⚠️ similar-tickets-list 엘리먼트를 찾을 수 없음');
+      return;
+    }
+
+    if (!similarTickets || similarTickets.length === 0) {
+      resultsElement.innerHTML = '<div class="no-results">유사한 티켓이 없습니다.</div>';
+      return;
+    }
+
+    let html = '';
+    similarTickets.forEach((ticket, index) => {
+      // Vector DB 메타데이터 구조에 맞게 표시
+      const metadata = ticket.metadata || ticket;
+      const title = metadata.subject || metadata.title || `티켓 #${metadata.ticket_id}`;
+      const status = metadata.status || 'Unknown';
+      const priority = metadata.priority || 'Normal';
+      const agentName = metadata.agent_name || 'Unassigned';
+      const score = ticket.score || ticket.relevance_score || 0;
+      const createdAt = metadata.created_at || metadata.created_date;
+
+      html += `
+        <div class="ticket-item" data-ticket-id="${metadata.ticket_id || index}">
+          <div class="ticket-header">
+            <h4 class="ticket-title">${title}</h4>
+            <span class="confidence-score">${(score * 100).toFixed(1)}%</span>
+          </div>
+          <div class="ticket-metadata">
+            <span class="status status-${status.toLowerCase()}">${status}</span>
+            <span class="priority priority-${priority.toLowerCase()}">${priority}</span>
+            <span class="agent">${agentName}</span>
+          </div>
+          ${createdAt ? `<div class="ticket-date">${new Date(createdAt).toLocaleDateString('ko-KR')}</div>` : ''}
+          <div class="ticket-preview">
+            ${(metadata.text || metadata.description_text || '').substring(0, 150)}...
+          </div>
+        </div>
+      `;
     });
 
-    startUpdates();
+    resultsElement.innerHTML = html;
+    console.log(`✅ Vector DB 유사 티켓 ${similarTickets.length}개 표시 완료`);
+  },
 
-    return { start: startUpdates, stop: stopUpdates };
+  /**
+   * 📚 Vector DB 기반 KB 문서 표시
+   *
+   * Vector DB에서 조회된 KB 문서 데이터를 UI에 표시합니다.
+   *
+   * @param {Array} kbDocuments - Vector DB에서 조회된 KB 문서 배열
+   */
+  displayKBDocuments(kbDocuments) {
+    const resultsElement = document.getElementById('suggested-solutions-list');
+    if (!resultsElement) {
+      console.warn('⚠️ suggested-solutions-list 엘리먼트를 찾을 수 없음');
+      return;
+    }
+
+    if (!kbDocuments || kbDocuments.length === 0) {
+      resultsElement.innerHTML = '<div class="no-results">관련 지식베이스 문서가 없습니다.</div>';
+      return;
+    }
+
+    let html = '';
+    kbDocuments.forEach((doc, index) => {
+      // Vector DB 메타데이터 구조에 맞게 표시
+      const metadata = doc.metadata || doc;
+      const title = metadata.title || `문서 #${index + 1}`;
+      const category = metadata.category || 'General';
+      const folder = metadata.folder || '';
+      const status = metadata.status || 'published';
+      const score = doc.score || doc.relevance_score || 0;
+      const description = metadata.description || metadata.text || '';
+
+      html += `
+        <div class="kb-item" data-article-id="${metadata.article_id || index}">
+          <div class="kb-header">
+            <h4 class="kb-title">${title}</h4>
+            <span class="confidence-score">${(score * 100).toFixed(1)}%</span>
+          </div>
+          <div class="kb-metadata">
+            <span class="category">${category}</span>
+            ${folder ? `<span class="folder">${folder}</span>` : ''}
+            <span class="status status-${status.toLowerCase()}">${status}</span>
+          </div>
+          <div class="kb-description">
+            ${description.substring(0, 200)}...
+          </div>
+          <div class="kb-actions">
+            <button class="btn-view-kb" data-article-id="${metadata.article_id}">
+              전체 보기
+            </button>
+          </div>
+        </div>
+      `;
+    });
+
+    resultsElement.innerHTML = html;
+
+    // KB 문서 전체 보기 이벤트 리스너 추가
+    resultsElement.querySelectorAll('.btn-view-kb').forEach(button => {
+      button.addEventListener('click', (e) => {
+        const articleId = e.target.getAttribute('data-article-id');
+        this.showKBDocumentModal(articleId, kbDocuments);
+      });
+    });
+
+    console.log(`✅ Vector DB KB 문서 ${kbDocuments.length}개 표시 완료`);
+  },
+
+  /**
+   * 📖 KB 문서 상세 모달 표시
+   *
+   * KB 문서의 전체 내용을 모달로 표시합니다.
+   *
+   * @param {string} articleId - 문서 ID
+   * @param {Array} kbDocuments - KB 문서 배열
+   */
+  showKBDocumentModal(articleId, kbDocuments) {
+    const doc = kbDocuments.find(d => (d.metadata && d.metadata.article_id) === articleId);
+    if (!doc) {
+      console.warn('⚠️ KB 문서를 찾을 수 없음:', articleId);
+      return;
+    }
+
+    const metadata = doc.metadata || doc;
+    const modalHtml = `
+      <div class="kb-modal-overlay" id="kb-modal">
+        <div class="kb-modal-content">
+          <div class="kb-modal-header">
+            <h2>${metadata.title || '제목 없음'}</h2>
+            <button class="kb-modal-close">&times;</button>
+          </div>
+          <div class="kb-modal-metadata">
+            <span class="category">${metadata.category || 'General'}</span>
+            ${metadata.folder ? `<span class="folder">${metadata.folder}</span>` : ''}
+            <span class="status">${metadata.status || 'published'}</span>
+          </div>
+          <div class="kb-modal-body">
+            ${metadata.description || metadata.text || '내용이 없습니다.'}
+          </div>
+        </div>
+      </div>
+    `;
+
+    // 모달 HTML 추가
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+    // 모달 닫기 이벤트
+    const modal = document.getElementById('kb-modal');
+    const closeBtn = modal.querySelector('.kb-modal-close');
+    
+    const closeModal = () => modal.remove();
+    
+    closeBtn.addEventListener('click', closeModal);
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) closeModal();
+    });
+
+    console.log(`📖 KB 문서 모달 표시: ${metadata.title}`);
+  },
+
+  /**
+   * 티켓 페이지에서 벗어날 때 데이터 초기화
+   *
+   * 사용자가 티켓 페이지를 떠날 때 데이터를 초기화하여
+   * 다음 번에 페이지에 들어왔을 때 새로운 데이터로 로드되도록 합니다.
+   *
+   * @example
+   * Data.resetDataOnTicketPageExit();
+   */
+  resetDataOnTicketPageExit() {
+    console.log('🔄 티켓 페이지 이탈 감지 → 데이터 초기화');
+
+    // 전역 상태 리셋
+    GlobalState.resetGlobalTicketCache();
+
+    // 추가적인 클린업 작업 수행 가능
+    // 예: 구독 중인 이벤트 해제, 타이머 정리 등
   },
 
   /**

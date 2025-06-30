@@ -432,91 +432,112 @@ async def trigger_data_ingestion(
             progress_callback=progress_callback
         )
         
-        # 데이터 수집 완료 후 요약 생성
-        logger.info("🔄 데이터 처리 단계 시작...")
-        logger.info("   ├─ 1단계: 원시 데이터 수집 ✅")
-        logger.info("   ├─ 2단계: 데이터 저장 및 정규화 ✅") 
-        logger.info("   └─ 3단계: LLM 요약 생성 🔄")
-        progress_callback("LLM 요약 생성 중...", 85.0)
+        # 환경변수로 요약 생성 여부 결정
+        import os
+        enable_full_streaming = os.getenv("ENABLE_FULL_STREAMING_MODE", "true") == "true"
+        enable_llm_summary = os.getenv("ENABLE_LLM_SUMMARY_GENERATION", "true") == "true"
         
         summary_success = False
         summary_result = {}
         
-        try:
-            # 요약 생성 단계 추가
-            from core.ingest.processor import generate_and_store_summaries
-            summary_result = await generate_and_store_summaries(
-                tenant_id=tenant_id,
-                platform=platform,
-                force_update=request.force_update  # API 요청에서 받은 값 사용
-            )
+        if enable_full_streaming and not enable_llm_summary:
+            # Vector DB 단독 모드에서는 요약 생성 건너뛰기
+            logger.info("🔄 데이터 처리 단계 시작...")
+            logger.info("   ├─ 1단계: 원시 데이터 수집 ✅")
+            logger.info("   ├─ 2단계: 데이터 저장 및 정규화 ✅") 
+            logger.info("   └─ 3단계: LLM 요약 생성 ⏭️ (Vector DB 단독 모드에서는 건너뜀)")
+            progress_callback("Vector DB 단독 모드 - 요약 생성 건너뜀", 85.0)
+            summary_success = True  # 건너뛴 것을 성공으로 처리
+        else:
+            # 데이터 수집 완료 후 요약 생성 (기존 로직)
+            logger.info("🔄 데이터 처리 단계 시작...")
+            logger.info("   ├─ 1단계: 원시 데이터 수집 ✅")
+            logger.info("   ├─ 2단계: 데이터 저장 및 정규화 ✅") 
+            logger.info("   └─ 3단계: LLM 요약 생성 🔄")
+            progress_callback("LLM 요약 생성 중...", 85.0)
             
-            # 성공 여부 확인
-            success_count = summary_result.get('success_count', 0)
-            total_processed = summary_result.get('total_processed', 0)
-            
-            if success_count > 0:
-                summary_success = True
-                logger.info(f"요약 생성 완료 - 성공: {success_count}개, "
-                           f"실패: {summary_result.get('failure_count', 0)}개, "
-                           f"건너뜀: {summary_result.get('skipped_count', 0)}개")
+            try:
+                # 요약 생성 단계 추가
+                from core.ingest.processor import generate_and_store_summaries
+                summary_result = await generate_and_store_summaries(
+                    tenant_id=tenant_id,
+                    platform=platform,
+                    force_update=request.force_update  # API 요청에서 받은 값 사용
+                )
                 
-                # 메타데이터 정보 로깅
-                if 'attachment_metadata' in summary_result:
-                    metadata_count = len(summary_result['attachment_metadata'])
-                    logger.info(f"첨부파일 메타데이터 수집: {metadata_count}개 티켓")
+                # 성공 여부 확인
+                success_count = summary_result.get('success_count', 0)
+                total_processed = summary_result.get('total_processed', 0)
                 
-                progress_callback("요약 생성 완료", 88.0)
-            else:
-                logger.warning(f"요약 생성 결과: 성공한 항목이 없음 (총 {total_processed}개 처리)")
-                progress_callback("요약 생성 완료 (성공 0건)", 88.0)
-            
-        except Exception as e:
-            logger.error(f"요약 생성 실패: {e}")
-            progress_callback("요약 생성 실패", 88.0)
+                if success_count > 0:
+                    summary_success = True
+                    logger.info(f"요약 생성 완료 - 성공: {success_count}개, "
+                               f"실패: {summary_result.get('failure_count', 0)}개, "
+                               f"건너뜀: {summary_result.get('skipped_count', 0)}개")
+                    
+                    # 메타데이터 정보 로깅
+                    if 'attachment_metadata' in summary_result:
+                        metadata_count = len(summary_result['attachment_metadata'])
+                        logger.info(f"첨부파일 메타데이터 수집: {metadata_count}개 티켓")
+                    
+                    progress_callback("요약 생성 완료", 88.0)
+                else:
+                    logger.warning(f"요약 생성 결과: 성공한 항목이 없음 (총 {total_processed}개 처리)")
+                    progress_callback("요약 생성 완료 (성공 0건)", 88.0)
+                
+            except Exception as e:
+                logger.error(f"요약 생성 실패: {e}")
+                progress_callback("요약 생성 실패", 88.0)
         
         # 요약 생성 결과에 따른 로깅
         if summary_success:
-            logger.info("   ├─ 3단계: LLM 요약 생성 ✅")
-            
-            # 요약 생성이 성공한 경우에만 벡터 DB 동기화 진행
-            logger.info("   └─ 4단계: 벡터 DB 동기화 🔄")
-            progress_callback("벡터 DB 동기화 중...", 90.0)
-            
-            sync_success = False
-            
-            try:
-                # sync_summaries 기능 직접 호출
-                from core.ingest.processor import sync_summaries_to_vector_db
-                sync_result = await sync_summaries_to_vector_db(
-                    tenant_id=tenant_id,
-                    platform=platform,
-                    batch_size=25,
-                    force_update=False
-                )
+            if enable_full_streaming and not enable_llm_summary:
+                # Vector DB 단독 모드에서는 벡터 DB 동기화도 건너뜀 (이미 ingest에서 처리됨)
+                logger.info("   ├─ 3단계: LLM 요약 생성 ⏭️ (건너뜀)")
+                logger.info("   └─ 4단계: 벡터 DB 동기화 ⏭️ (이미 완료됨)")
+                progress_callback("Vector DB 단독 모드 - 처리 완료", 100.0)
+                sync_success = True  # 동기화도 성공으로 처리
+            else:
+                logger.info("   ├─ 3단계: LLM 요약 생성 ✅")
                 
-                synced_count = sync_result.get('synced_count', 0)
+                # 요약 생성이 성공한 경우에만 벡터 DB 동기화 진행
+                logger.info("   └─ 4단계: 벡터 DB 동기화 🔄")
+                progress_callback("벡터 DB 동기화 중...", 90.0)
                 
-                if sync_result.get("status") == "success" and synced_count > 0:
-                    sync_success = True
-                    logger.info(f"   └─ 4단계: 벡터 DB 동기화 ✅ ({synced_count:,}개 문서 처리)")
-                    progress_callback("벡터 DB 동기화 완료", 100.0)
-                else:
-                    errors = sync_result.get('errors', [])
-                    error_count = len(errors) if errors else 0
+                sync_success = False
+                
+                try:
+                    # sync_summaries 기능 직접 호출
+                    from core.ingest.processor import sync_summaries_to_vector_db
+                    sync_result = await sync_summaries_to_vector_db(
+                        tenant_id=tenant_id,
+                        platform=platform,
+                        batch_size=25,
+                        force_update=False
+                    )
                     
-                    if errors:
-                        logger.error(f"   └─ 4단계: 벡터 DB 동기화 ❌ (성공: {synced_count}개, 오류: {error_count}개)")
-                        logger.error(f"      └─ 주요 오류: {errors[:3]}")  # 첫 3개 오류만 표시
-                    elif synced_count == 0:
-                        logger.warning(f"   └─ 4단계: 벡터 DB 동기화 ⚠️ (처리할 데이터 없음)")
+                    synced_count = sync_result.get('synced_count', 0)
+                    
+                    if sync_result.get("status") == "success" and synced_count > 0:
+                        sync_success = True
+                        logger.info(f"   └─ 4단계: 벡터 DB 동기화 ✅ ({synced_count:,}개 문서 처리)")
+                        progress_callback("벡터 DB 동기화 완료", 100.0)
                     else:
-                        logger.warning(f"   └─ 4단계: 벡터 DB 동기화 ⚠️ (처리: {synced_count}개, 상태: {sync_result.get('status', 'unknown')})")
-                    
-                    progress_callback("벡터 DB 동기화 완료 (일부 오류)", 95.0)
-            except Exception as e:
-                logger.error(f"   └─ 4단계: 벡터 DB 동기화 ❌ (오류: {str(e)[:100]}...)")
-                progress_callback("벡터 DB 동기화 실패", 95.0)
+                        errors = sync_result.get('errors', [])
+                        error_count = len(errors) if errors else 0
+                        
+                        if errors:
+                            logger.error(f"   └─ 4단계: 벡터 DB 동기화 ❌ (성공: {synced_count}개, 오류: {error_count}개)")
+                            logger.error(f"      └─ 주요 오류: {errors[:3]}")  # 첫 3개 오류만 표시
+                        elif synced_count == 0:
+                            logger.warning(f"   └─ 4단계: 벡터 DB 동기화 ⚠️ (처리할 데이터 없음)")
+                        else:
+                            logger.warning(f"   └─ 4단계: 벡터 DB 동기화 ⚠️ (처리: {synced_count}개, 상태: {sync_result.get('status', 'unknown')})")
+                        
+                        progress_callback("벡터 DB 동기화 완료 (일부 오류)", 95.0)
+                except Exception as e:
+                    logger.error(f"   └─ 4단계: 벡터 DB 동기화 ❌ (오류: {str(e)[:100]}...)")
+                    progress_callback("벡터 DB 동기화 실패", 95.0)
         else:
             logger.error("   ├─ 3단계: LLM 요약 생성 ❌")
             logger.warning("   └─ 4단계: 벡터 DB 동기화 건너뜀 (요약 생성 실패로 인해)")

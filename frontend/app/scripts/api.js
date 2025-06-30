@@ -65,12 +65,13 @@ const IngestJobAPI = {
 
       const headers = {
         'Content-Type': 'application/json',
-        'X-Company-ID': await API.getCompanyId(),
+        'X-Tenant-ID': 'wedosoft', // .env의 TENANT_ID 값
+        'X-Platform': 'freshdesk', // 고정값
       };
 
-      // 동적 Freshdesk 설정 추가
-      if (domain) headers['X-Freshdesk-Domain'] = domain;
-      if (apiKey) headers['X-Freshdesk-API-Key'] = apiKey;
+      // 동적 Freshdesk 설정 추가 (백엔드 dependencies.py 헤더명 사용)
+      if (domain) headers['X-Domain'] = domain;
+      if (apiKey) headers['X-API-Key'] = apiKey;
 
       const response = await fetch(`${API.baseURL}/ingest/jobs`, {
         method: 'POST',
@@ -120,7 +121,8 @@ const IngestJobAPI = {
 
       const response = await fetch(`${API.baseURL}/ingest/jobs?${queryParams}`, {
         headers: {
-          'X-Company-ID': await API.getCompanyId(),
+          'X-Tenant-ID': 'wedosoft',
+          'X-Platform': 'freshdesk',
         },
       });
 
@@ -146,7 +148,8 @@ const IngestJobAPI = {
     try {
       const response = await fetch(`${API.baseURL}/ingest/jobs/${jobId}`, {
         headers: {
-          'X-Company-ID': await API.getCompanyId(),
+          'X-Tenant-ID': 'wedosoft',
+          'X-Platform': 'freshdesk',
         },
       });
 
@@ -178,7 +181,8 @@ const IngestJobAPI = {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Company-ID': await API.getCompanyId(),
+          'X-Tenant-ID': 'wedosoft',
+          'X-Platform': 'freshdesk',
         },
         body: JSON.stringify({
           action,
@@ -208,7 +212,8 @@ const IngestJobAPI = {
     try {
       const response = await fetch(`${API.baseURL}/ingest/metrics`, {
         headers: {
-          'X-Company-ID': await API.getCompanyId(),
+          'X-Tenant-ID': 'wedosoft',
+          'X-Platform': 'freshdesk',
         },
       });
 
@@ -238,12 +243,13 @@ const IngestJobAPI = {
 
       const headers = {
         'Content-Type': 'application/json',
-        'X-Company-ID': await API.getCompanyId(),
+        'X-Tenant-ID': 'wedosoft',
+        'X-Platform': 'freshdesk',
       };
 
-      // 동적 Freshdesk 설정 추가
-      if (domain) headers['X-Freshdesk-Domain'] = domain;
-      if (apiKey) headers['X-Freshdesk-API-Key'] = apiKey;
+      // 동적 Freshdesk 설정 추가 (백엔드 dependencies.py 헤더명 사용)
+      if (domain) headers['X-Domain'] = domain;
+      if (apiKey) headers['X-API-Key'] = apiKey;
 
       const response = await fetch(`${API.baseURL}/ingest`, {
         method: 'POST',
@@ -276,6 +282,9 @@ const IngestJobAPI = {
  * 최적화된 API 모듈
  */
 const API = {
+  // 백엔드 서버 기본 URL (.env의 HOST:PORT 기반)
+  baseURL: 'http://localhost:8000',
+
   /**
    * 모듈 가용성 확인
    */
@@ -465,10 +474,10 @@ const API = {
         // 개발 환경용 기본값 설정 (실제 운영에서는 iparams에서 가져와야 함)
         if (window.location.hostname === 'localhost' || window.location.hostname.includes('10001')) {
           finalConfig = {
-            domain: 'wedosoft.freshdesk.com', // 개발용 기본값
-            apiKey: 'Ug9H1cKCZZtZ4haamBy', // 개발용 기본값
+            domain: 'wedosoft.freshdesk.com', // .env의 FRESHDESK_DOMAIN 값
+            apiKey: 'Ug9H1cKCZZtZ4haamBy', // .env의 FRESHDESK_API_KEY 값
           };
-          console.log('🛠️ 개발 환경: 기본 Freshdesk 설정 사용');
+          console.log('🛠️ 개발 환경: .env 파일의 Freshdesk 설정 사용');
         }
       }
 
@@ -477,8 +486,11 @@ const API = {
         method: method,
         headers: {
           'Content-Type': 'application/json',
-          ...(finalConfig?.domain && { 'X-Freshdesk-Domain': finalConfig.domain }),
-          ...(finalConfig?.apiKey && { 'X-Freshdesk-API-Key': finalConfig.apiKey }),
+          // 백엔드 dependencies.py에서 정의한 정확한 헤더명 사용
+          ...(finalConfig?.domain && { 'X-Domain': finalConfig.domain }),
+          ...(finalConfig?.apiKey && { 'X-API-Key': finalConfig.apiKey }),
+          'X-Tenant-ID': 'wedosoft', // .env의 TENANT_ID 값
+          'X-Platform': 'freshdesk', // 고정값
         },
         ...(data && { body: JSON.stringify(data) }),
       };
@@ -486,8 +498,10 @@ const API = {
       // 헤더 로깅 (개발용)
       if (window.location.hostname === 'localhost') {
         console.log('📤 전송할 헤더:', {
-          'X-Freshdesk-Domain': finalConfig?.domain,
-          'X-Freshdesk-API-Key': finalConfig?.apiKey ? '***' + finalConfig.apiKey.slice(-4) : 'none',
+          'X-Domain': finalConfig?.domain,
+          'X-API-Key': finalConfig?.apiKey ? '***' + finalConfig.apiKey.slice(-4) : 'none',
+          'X-Tenant-ID': 'wedosoft',
+          'X-Platform': 'freshdesk',
         });
       }
 
@@ -599,44 +613,151 @@ const API = {
    */
   async loadInitData(client, ticketId, agentLanguage = null) {
     try {
-      // 에이전트 언어가 제공되지 않은 경우 자동 감지
-      if (!agentLanguage) {
-        agentLanguage = await this.detectAgentLanguage(client);
+      console.log(`🎯 Vector DB 모드로 초기 데이터 로딩 시작: 티켓 ${ticketId}`);
+      
+      // Vector DB 단독 모드 최적화된 파라미터
+      const queryParams = new URLSearchParams({
+        include_summary: 'true',
+        include_kb_docs: 'true', 
+        include_similar_tickets: 'true',
+        top_k_tickets: '5',  // Vector DB에서 충분한 유사 티켓
+        top_k_kb: '3'        // KB 문서는 3개로 제한
+      });
+      
+      if (agentLanguage) {
+        queryParams.append('agent_language', agentLanguage);
       }
       
-      console.log(`[API] 초기 데이터 로드 - 티켓: ${ticketId}, 언어: ${agentLanguage}`);
+      const endpoint = `init/${ticketId}?${queryParams.toString()}`;
       
-      // agent_language 쿼리 매개변수를 포함하여 API 호출
-      const endpoint = `init/${ticketId}?agent_language=${agentLanguage}`;
-      
-      return await this.callBackendAPIWithCache(client, endpoint, null, 'GET', {
-        cacheTTL: 600000, // 10분 캐시
-        loadingContext: '초기 데이터 로드',
+      const result = await this.callBackendAPIWithCache(client, endpoint, null, 'GET', {
+        cacheTTL: 300000, // 5분 캐시 (Vector DB 데이터는 안정적)
+        loadingContext: '🚀 Vector DB 기반 초기 데이터 로드',
+        useOptimizedHeaders: true // Vector DB 모드에서는 헤더 최적화
       });
+      
+      // Vector DB 응답 구조 검증 및 정규화
+      if (result.ok && result.data) {
+        const normalizedData = this.normalizeVectorDBResponse(result.data);
+        console.log('✅ Vector DB 초기 데이터 로딩 완료:', {
+          ticketId,
+          hasSummary: !!normalizedData.summary,
+          similarTicketsCount: normalizedData.similar_tickets?.length || 0,
+          kbDocumentsCount: normalizedData.kb_documents?.length || 0,
+          executionTime: normalizedData.execution_time
+        });
+        
+        return {
+          ...result,
+          data: normalizedData
+        };
+      }
+      
+      return result;
     } catch (error) {
-      console.error('[API] 초기 데이터 로드 중 오류:', error);
+      console.error('❌ Vector DB 초기 데이터 로딩 실패:', error);
       throw error;
     }
   },
 
   /**
-   * 자연어 쿼리 실행
+   * Vector DB 응답 데이터를 정규화하는 함수
+   * @param {Object} rawData - 백엔드에서 받은 원시 데이터
+   * @returns {Object} 정규화된 데이터
    */
-  async executeQuery(client, queryData) {
-    return await this.callBackendAPIWithCache(client, 'query', queryData, 'POST', {
-      useCache: false, // POST 요청은 기본적으로 캐시하지 않음
-      loadingContext: '쿼리 실행',
-    });
+  normalizeVectorDBResponse(rawData) {
+    return {
+      // 기본 메타데이터
+      success: rawData.success || true,
+      ticket_id: rawData.ticket_id,
+      tenant_id: rawData.tenant_id,
+      platform: rawData.platform,
+      
+      // 실시간 생성된 요약 (Vector DB 모드의 핵심)
+      summary: rawData.summary || null,
+      
+      // 유사 티켓 (Vector DB에서 검색된 결과)
+      similar_tickets: this.normalizeSimilarTickets(rawData.similar_tickets || []),
+      
+      // KB 문서 (Vector DB에서 검색된 결과)  
+      kb_documents: this.normalizeKBDocuments(rawData.kb_documents || []),
+      
+      // 성능 메트릭
+      execution_time: rawData.execution_time || null,
+      search_quality_score: rawData.search_quality_score || null,
+      
+      // 오류 정보
+      error: rawData.error || null
+    };
   },
 
   /**
-   * 모든 티켓 목록 가져오기
+   * Vector DB에서 검색된 유사 티켓 데이터 정규화
+   * @param {Array} tickets - 원시 티켓 배열
+   * @returns {Array} 정규화된 티켓 배열
    */
-  async getAllTickets(client) {
-    return await this.callBackendAPIWithCache(client, 'tickets/all', null, 'GET', {
-      cacheTTL: 900000, // 15분 캐시
-      loadingContext: '티켓 목록 조회',
-    });
+  normalizeSimilarTickets(tickets) {
+    return tickets.map(ticket => ({
+      // 기본 정보
+      id: ticket.id || ticket.ticket_id,
+      title: ticket.title || ticket.subject || '제목 없음',
+      content: ticket.content || ticket.description_text || '',
+      
+      // Vector DB 메타데이터
+      status: ticket.status || 'unknown',
+      priority: ticket.priority || 'normal',
+      category: ticket.category || null,
+      agent_name: ticket.agent_name || null,
+      created_at: ticket.created_at || null,
+      
+      // 검색 관련
+      relevance_score: ticket.relevance_score || ticket.score || 0,
+      confidence_score: ticket.confidence_score || null,
+      
+      // Vector DB 단독 모드에서 생성된 요약
+      ai_summary: ticket.ai_summary || null,
+      
+      // 추가 메타데이터
+      source_type: 'vector_db',
+      doc_type: 'ticket'
+    }));
+  },
+
+  /**
+   * Vector DB에서 검색된 KB 문서 데이터 정규화
+   * @param {Array} documents - 원시 문서 배열
+   * @returns {Array} 정규화된 문서 배열
+   */
+  normalizeKBDocuments(documents) {
+    return documents.map(doc => ({
+      // 기본 정보
+      id: doc.id || doc.article_id,
+      title: doc.title || '제목 없음',
+      content: doc.content || doc.description || '',
+      excerpt: doc.excerpt || doc.content?.substring(0, 200) + '...' || '',
+      
+      // Vector DB 메타데이터
+      category: doc.category || null,
+      folder: doc.folder || null,
+      status: doc.status || 'unknown',
+      article_type: doc.article_type || 'solution',
+      
+      // 검색 관련
+      relevance_score: doc.relevance_score || doc.score || 0,
+      confidence_score: doc.confidence_score || null,
+      
+      // Vector DB 단독 모드에서 생성된 요약
+      ai_summary: doc.ai_summary || null,
+      
+      // URL 및 메타데이터
+      source_url: doc.source_url || null,
+      created_at: doc.created_at || null,
+      updated_at: doc.updated_at || null,
+      
+      // 추가 메타데이터
+      source_type: 'vector_db',
+      doc_type: 'kb'
+    }));
   },
 
   /**
@@ -731,6 +852,105 @@ const API = {
       };
     }
   },
+
+  /**
+   * Vector DB 기반 상담사 AI 검색 (향후 확장용)
+   * @param {Object} client - FDK 클라이언트
+   * @param {Object} searchQuery - 검색 쿼리 객체
+   * @param {string} searchQuery.query - 자연어 검색 쿼리
+   * @param {Object} searchQuery.filters - 메타데이터 필터
+   * @param {Array} searchQuery.dateRange - 날짜 범위 [start, end]
+   * @returns {Promise<Object>} 검색 결과
+   */
+  async performAdvancedVectorSearch(client, searchQuery) {
+    try {
+      console.log('🔍 Vector DB 고급 검색 실행:', searchQuery);
+      
+      const endpoint = 'search/agent';
+      const searchData = {
+        query: searchQuery.query,
+        filters: {
+          ...searchQuery.filters,
+          date_range: searchQuery.dateRange,
+          content_types: ['ticket', 'kb'],
+          limit: searchQuery.limit || 20
+        }
+      };
+      
+      const result = await this.callBackendAPIWithCache(client, endpoint, searchData, 'POST', {
+        useCache: false, // 검색은 실시간 결과 필요
+        loadingContext: '🎯 AI 검색 실행 중...'
+      });
+      
+      if (result.ok && result.data) {
+        return {
+          ...result,
+          data: {
+            tickets: this.normalizeSimilarTickets(result.data.tickets || []),
+            kb_documents: this.normalizeKBDocuments(result.data.kb_documents || []),
+            search_metadata: result.data.metadata || {}
+          }
+        };
+      }
+      
+      return result;
+    } catch (error) {
+      console.error('❌ Vector DB 고급 검색 실패:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * 실시간 스트리밍 검색 (WebSocket 기반, 향후 확장)
+   * @param {Object} client - FDK 클라이언트  
+   * @param {string} query - 검색 쿼리
+   * @param {Function} onChunk - 스트리밍 청크 콜백
+   * @returns {Promise<void>}
+   */
+  async performStreamingSearch(client, query, onChunk) {
+    try {
+      console.log('🌊 실시간 스트리밍 검색 시작:', query);
+      
+      // 향후 WebSocket으로 교체 예정
+      const endpoint = `search/stream?q=${encodeURIComponent(query)}`;
+      
+      const response = await fetch(`http://localhost:8000/${endpoint}`, {
+        method: 'GET',
+        headers: {
+          'Accept': 'text/event-stream',
+          'Cache-Control': 'no-cache'
+        }
+      });
+      
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      
+      while (true) {
+        const {done, value} = await reader.read();
+        if (done) break;
+        
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n');
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              onChunk(data);
+            } catch (e) {
+              console.warn('스트리밍 파싱 오류:', e);
+            }
+          }
+        }
+      }
+      
+    } catch (error) {
+      console.error('❌ 스트리밍 검색 실패:', error);
+      throw error;
+    }
+  },
+
+  // ...existing code...
 };
 
 // 의존성 확인 함수

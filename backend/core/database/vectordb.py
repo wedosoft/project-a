@@ -225,24 +225,43 @@ class QdrantAdapter(VectorDBInterface):
             success = True
             points = []
             for i, (text, embedding, metadata, id) in enumerate(zip(texts, embeddings, metadatas, ids)):
-                # Platform-Neutral 3-Tuple 기반 Payload 구성 (최적화된 메타데이터)
-                # 필수 필드만 루트 레벨에 저장하고 나머지는 tenant_metadata로 통합
+                # Platform-Neutral 3-Tuple 기반 Payload 구성 (원본 텍스트 + 풍부한 메타데이터)
+                # 필수 검색 필드를 루트 레벨에 저장
                 essential_fields = {
                     "tenant_id": metadata.get("tenant_id"),
                     "platform": metadata.get("platform"), 
                     "doc_type": metadata.get("doc_type"),
                     "original_id": metadata.get("original_id"),
                     "object_type": metadata.get("object_type", "unknown"),
-                    "summary": text
+                    "content": text,  # summary → content로 변경 (원본 텍스트)
+                    "content_type": metadata.get("content_type", "original"),  # 콘텐츠 타입 명시
                 }
                 
-                # 나머지 메타데이터는 tenant_metadata JSON 필드로 통합
+                # 검색에 자주 사용되는 필드들을 루트 레벨에 유지 (필터링 성능 향상)
+                searchable_fields = {}
+                if metadata.get("status") is not None:
+                    searchable_fields["status"] = metadata.get("status")
+                if metadata.get("priority") is not None:
+                    searchable_fields["priority"] = metadata.get("priority")
+                if metadata.get("subject"):
+                    searchable_fields["subject"] = metadata.get("subject")
+                if metadata.get("title"):
+                    searchable_fields["title"] = metadata.get("title")
+                if metadata.get("has_attachments") is not None:
+                    searchable_fields["has_attachments"] = metadata.get("has_attachments")
+                if metadata.get("created_at"):
+                    searchable_fields["created_at"] = metadata.get("created_at")
+                if metadata.get("updated_at"):
+                    searchable_fields["updated_at"] = metadata.get("updated_at")
+                
+                # 확장 메타데이터: 모든 원본 정보 포함 (첨부파일, 커스텀 필드 등)
                 extended_metadata = {k: v for k, v in metadata.items() 
-                                   if k not in essential_fields and v is not None}
+                                   if k not in essential_fields and k not in searchable_fields and v is not None}
                 
                 payload = {
                     **essential_fields,
-                    "tenant_metadata": extended_metadata  # JSON 객체로 저장
+                    **searchable_fields,  # 검색 최적화를 위해 루트 레벨에 배치
+                    "extended_metadata": extended_metadata  # 확장 정보는 JSON 객체로 저장
                 }
                 
                 # Platform-Neutral 3-Tuple 기반 유니크 Qdrant 포인트 ID 생성
@@ -780,7 +799,7 @@ class QdrantAdapter(VectorDBInterface):
             if scroll_result and scroll_result[0]:
                 point = scroll_result[0][0]
                 payload = point.payload if hasattr(point, 'payload') else {}
-                logger.info(f"검색 결과 - ID: {point.id}, original_id='{payload.get('original_id')}', doc_type='{payload.get('doc_type')}', type='{payload.get('type')}', tenant_id='{payload.get('tenant_id')}'")
+                logger.info(f"검색 결과 - ID: {point.id}, original_id='{payload.get('original_id')}', doc_type='{payload.get('doc_type')}', type='{payload.get('tenant_id')}'")
                 document_type = payload.get("doc_type", "") or payload.get("type", "")
                 return {
                     "id": payload.get("original_id", ""),
@@ -1163,5 +1182,534 @@ def migrate_type_to_doc_type():
     except Exception as e:
         logger.error(f"마이그레이션 중 오류 발생: {e}")
         return {
+            "error": str(e)
+        }
+
+
+# =================================================================
+# 🚀 Vector DB 단독 모드 헬퍼 함수들 (processor.py에서 이동)
+# =================================================================
+
+async def purge_vector_db_data(tenant_id: str, platform: str) -> None:
+    """
+    Vector DB에서 특정 테넌트의 모든 데이터를 삭제합니다.
+    
+    Args:
+        tenant_id: 테넌트 ID
+        platform: 플랫폼 식별자
+    """
+    try:
+        # 메타데이터 필터로 해당 테넌트의 모든 문서 삭제
+        filter_conditions = {
+            "must": [
+                {"key": "tenant_id", "match": {"value": tenant_id}},
+                {"key": "platform", "match": {"value": platform}}
+            ]
+        }
+        
+        # Vector DB에서 삭제
+        vector_db.delete_by_filter(filter_conditions)
+        logger.info(f"Vector DB 데이터 삭제 완료: {tenant_id}/{platform}")
+        
+    except Exception as e:
+        logger.error(f"Vector DB 데이터 삭제 중 오류: {e}")
+        raise
+
+async def process_ticket_to_vector_db(
+    ticket: Dict[str, Any], 
+    tenant_id: str, 
+    platform: str
+) -> bool:
+    """
+    개별 티켓을 처리하여 Vector DB에 저장합니다.
+    
+    Args:
+        ticket: 티켓 데이터
+        tenant_id: 테넌트 ID  
+        platform: 플랫폼 식별자
+        
+    Returns:
+        bool: 처리 성공 여부
+    """
+    try:
+        # LLM Manager import
+        from core.llm.manager import LLMManager
+        from core.search.embeddings import embed_documents
+        
+        llm_manager = LLMManager()
+        
+        ticket_id = str(ticket.get('id', ''))
+        subject = ticket.get('subject', '')
+        description = ticket.get('description_text', '') or ticket.get('description', '')
+        
+        # 대화 데이터 통합
+        conversations = ticket.get('conversations', [])
+        conversation_texts = []
+        for conv in conversations:
+            body = conv.get('body_text', '') or conv.get('body', '')
+            if body and body.strip():
+                conversation_texts.append(body.strip())
+        
+        # 전체 텍스트 조합 (임베딩 대상)
+        full_text_parts = []
+        if subject and subject.strip():
+            full_text_parts.append(f"제목: {subject.strip()}")
+        if description and description.strip():
+            full_text_parts.append(f"설명: {description.strip()}")
+        if conversation_texts:
+            full_text_parts.append(f"대화: {' '.join(conversation_texts)}")
+        
+        full_text = ' '.join(full_text_parts)
+        
+        if not full_text.strip():
+            logger.warning(f"티켓 {ticket_id}: 임베딩할 텍스트가 없음")
+            return False
+        
+        # 🚀 Vector DB 단독 모드: 원본 텍스트 직접 사용 (LLM 요약 없음)
+        content_for_vector = full_text  # 원본 텍스트를 그대로 사용
+        
+        # Vector DB용 메타데이터 구성 (풍부한 정보 포함)
+        vector_metadata = {
+            # 필수 식별 정보
+            "tenant_id": tenant_id,
+            "platform": platform,
+            "original_id": ticket_id,
+            "doc_type": "ticket",
+            "object_type": "ticket",
+            "content_type": "original",  # 원본 텍스트임을 표시
+            
+            # 검색 최적화 필드 (루트 레벨)
+            "subject": subject,
+            "status": ticket.get('status', 2),
+            "priority": ticket.get('priority', 1),
+            "has_attachments": bool(ticket.get('attachments', [])),
+            "conversation_count": len(conversations),
+            "created_at": ticket.get('created_at', ''),
+            "updated_at": ticket.get('updated_at', ''),
+            
+            # 사용자/조직 정보
+            "requester_id": ticket.get('requester_id'),
+            "responder_id": ticket.get('responder_id'),
+            "group_id": ticket.get('group_id'),
+            "company_id": ticket.get('company_id'),
+            
+            # 첨부파일 정보 (상세)
+            "attachments": ticket.get('attachments', []),
+            "attachment_count": len(ticket.get('attachments', [])),
+            
+            # 대화 정보 (상세)
+            "conversations": conversations,
+            
+            # 커스텀 필드 (모든 원본 필드 포함)
+            "description": ticket.get('description', ''),
+            "description_text": description,
+            "type": ticket.get('type'),
+            "source": ticket.get('source'),
+            "fr_escalated": ticket.get('fr_escalated'),
+            "spam": ticket.get('spam'),
+            "is_escalated": ticket.get('is_escalated'),
+            "due_by": ticket.get('due_by'),
+            "fr_due_by": ticket.get('fr_due_by'),
+            "product_id": ticket.get('product_id'),
+            "custom_fields": ticket.get('custom_fields', {}),
+            "tags": ticket.get('tags', []),
+            
+            # 타임스탬프 관련
+            "resolved_at": ticket.get('resolved_at'),
+            "closed_at": ticket.get('closed_at'),
+            "first_responded_at": ticket.get('first_responded_at'),
+            
+            # 추가 시스템 정보
+            "association_type": ticket.get('association_type'),
+            "associated_tickets_count": ticket.get('associated_tickets_count'),
+            "nr_escalated": ticket.get('nr_escalated'),
+            "escalated_at": ticket.get('escalated_at'),
+            
+            # Vector DB 전용 메타데이터
+            "indexed_at": datetime.utcnow().isoformat(),
+            "vector_version": "1.0",
+            "processing_mode": "vector_only"
+        }
+        
+        # None 값 제거
+        vector_metadata = {k: v for k, v in vector_metadata.items() 
+                          if v is not None and v != "" and v != []}
+        
+        # 임베딩 생성 (원본 텍스트 사용)
+        embeddings = embed_documents([content_for_vector])
+        if not embeddings or len(embeddings) != 1:
+            logger.error(f"티켓 {ticket_id}: 임베딩 생성 실패")
+            return False
+        
+        # Vector DB에 저장 (원본 텍스트 사용)
+        vector_id = f"{tenant_id}_{platform}_{ticket_id}"
+        vector_db.add_documents(
+            texts=[content_for_vector],  # 원본 텍스트 저장
+            embeddings=embeddings,
+            metadatas=[vector_metadata],
+            ids=[vector_id]
+        )
+        
+        logger.debug(f"티켓 {ticket_id}: Vector DB 저장 완료")
+        return True
+        
+    except Exception as e:
+        logger.error(f"티켓 {ticket.get('id', 'unknown')} 처리 중 오류: {e}")
+        return False
+
+async def process_article_to_vector_db(
+    article: Dict[str, Any], 
+    tenant_id: str, 
+    platform: str
+) -> bool:
+    """
+    개별 KB 문서를 처리하여 Vector DB에 저장합니다.
+    
+    Args:
+        article: KB 문서 데이터
+        tenant_id: 테넌트 ID
+        platform: 플랫폼 식별자
+        
+    Returns:
+        bool: 처리 성공 여부
+    """
+    try:
+        # LLM Manager import
+        from core.llm.manager import LLMManager
+        from core.search.embeddings import embed_documents
+        
+        llm_manager = LLMManager()
+        
+        article_id = str(article.get('id', ''))
+        title = article.get('title', '')
+        description_text = article.get('description_text', '') or article.get('description', '')
+        
+        # 핵심 텍스트만 임베딩 대상으로 사용: title + description_text
+        full_text_parts = []
+        if title and title.strip():
+            full_text_parts.append(f"제목: {title.strip()}")
+        if description_text and description_text.strip():
+            full_text_parts.append(f"내용: {description_text.strip()}")
+        
+        full_text = ' '.join(full_text_parts)
+        
+        if not full_text.strip():
+            logger.warning(f"KB 문서 {article_id}: 임베딩할 텍스트가 없음")
+            return False
+        
+        # KB 문서는 원본 텍스트를 그대로 사용 (요약하지 않음)
+        display_content = full_text
+        
+        # Vector DB용 메타데이터 구성 (KB 문서의 모든 정보 포함)
+        vector_metadata = {
+            # 필수 식별 정보
+            "tenant_id": tenant_id,
+            "platform": platform,
+            "original_id": article_id,
+            "doc_type": "article",
+            "object_type": "article",
+            "content_type": "semantic_search",  # 의미 검색용
+            
+            # 검색 최적화 필드 (루트 레벨)
+            "title": title,
+            "status": article.get('status', 2),
+            "has_attachments": bool(article.get('attachments', [])),
+            "created_at": article.get('created_at', ''),
+            "updated_at": article.get('updated_at', ''),
+            
+            # KB 문서 핵심 내용
+            "description": article.get('description', ''),
+            "description_text": description_text,  # 핵심 텍스트
+            
+            # 분류 및 조직 정보
+            "category": article.get('category', {}),
+            "category_id": article.get('category_id'),
+            "folder": article.get('folder', {}),
+            "folder_id": article.get('folder_id'),
+            "section_id": article.get('section_id'),
+            
+            # 작성자 및 관리 정보
+            "agent_id": article.get('agent_id'),
+            "author_id": article.get('author_id'),
+            "reviewer_id": article.get('reviewer_id'),
+            
+            # 태그 및 레이블
+            "tags": article.get('tags', []),
+            "labels": article.get('labels', []),
+            
+            # 설정 및 권한
+            "approval_status": article.get('approval_status'),
+            "review_date": article.get('review_date'),
+            "seo_data": article.get('seo_data', {}),
+            
+            # 사용 통계
+            "hits": article.get('hits', 0),
+            "thumbs_up": article.get('thumbs_up', 0),
+            "thumbs_down": article.get('thumbs_down', 0),
+            
+            # 첨부파일 정보
+            "attachments": article.get('attachments', []),
+            "attachment_count": len(article.get('attachments', [])),
+            
+            # 다국어 지원
+            "language": article.get('language', 'ko'),
+            "translated_articles": article.get('translated_articles', []),
+            
+            # 커스텀 필드
+            "custom_fields": article.get('custom_fields', {}),
+            
+            # 발행 관련
+            "published": article.get('published', True),
+            "publish_date": article.get('publish_date'),
+            "scheduled_date": article.get('scheduled_date'),
+            
+            # Vector DB 전용 메타데이터  
+            "display_mode": "original",  # 원본 표시 모드
+            "is_summarized": False,  # 요약되지 않음
+            "indexed_at": datetime.utcnow().isoformat(),
+            "vector_version": "1.0",
+            "processing_mode": "vector_only"
+        }
+        
+        # None 값 제거
+        vector_metadata = {k: v for k, v in vector_metadata.items() 
+                          if v is not None and v != "" and v != []}
+        
+        # 임베딩 생성 (원본 텍스트 사용)
+        embeddings = embed_documents([display_content])
+        if not embeddings or len(embeddings) != 1:
+            logger.error(f"KB 문서 {article_id}: 임베딩 생성 실패")
+            return False
+        
+        # Vector DB에 저장 (원본 텍스트로)
+        vector_id = f"{tenant_id}_{platform}_{article_id}"
+        vector_db.add_documents(
+            texts=[display_content],  # 원본 텍스트 저장
+            embeddings=embeddings,
+            metadatas=[vector_metadata],
+            ids=[vector_id]
+        )
+        
+        logger.debug(f"KB 문서 {article_id}: Vector DB 저장 완료")
+        return True
+        
+    except Exception as e:
+        logger.error(f"KB 문서 {article.get('id', 'unknown')} 처리 중 오류: {e}")
+        return False
+
+async def generate_realtime_summary(
+    content: str, 
+    content_type: str, 
+    metadata: Dict[str, Any]
+) -> str:
+    """
+    실시간 요약을 생성합니다.
+    Vector DB 단독 모드에서는 원본 텍스트를 그대로 반환합니다.
+    
+    Args:
+        content: 요약할 내용
+        content_type: 콘텐츠 타입 ("ticket" 또는 "knowledge_base")
+        metadata: 메타데이터
+        
+    Returns:
+        str: 생성된 요약 또는 원본 텍스트
+    """
+    try:
+        import os
+        
+        # Vector DB 단독 모드인 경우 원본 텍스트 반환
+        enable_full_streaming = os.getenv('ENABLE_FULL_STREAMING_MODE', 'false').lower() == 'true'
+        if enable_full_streaming:
+            logger.debug(f"Vector DB 단독 모드: 원본 텍스트 반환 (content_type: {content_type})")
+            return content  # 원본 텍스트 그대로 반환
+        
+        # 하이브리드 모드인 경우 기존 요약 로직 실행
+        from core.llm.manager import LLMManager
+        llm_manager = LLMManager()
+        
+        if content_type == "ticket":
+            # 티켓 요약 생성
+            ticket_data = {
+                'id': metadata.get('id', ''),
+                'subject': metadata.get('subject', ''),
+                'integrated_text': content,
+                'status': metadata.get('status', ''),
+                'priority': metadata.get('priority', ''),
+                'created_at': metadata.get('created_at', '')
+            }
+            summary_result = await llm_manager.generate_ticket_summary(ticket_data)
+            return summary_result.get('summary', '요약 생성에 실패했습니다.') if summary_result else '요약 생성에 실패했습니다.'
+            
+        elif content_type == "knowledge_base":
+            # KB 문서 요약 생성
+            kb_data = {
+                'id': metadata.get('id', ''),
+                'title': metadata.get('title', ''),
+                'content': content,
+                'category': metadata.get('category', ''),
+                'created_at': metadata.get('created_at', '')
+            }
+            summary_result = await llm_manager.generate_knowledge_base_summary(kb_data)
+            return summary_result.get('summary', '요약 생성에 실패했습니다.') if summary_result else '요약 생성에 실패했습니다.'
+            
+        else:
+            logger.warning(f"알 수 없는 content_type: {content_type}")
+            return "지원하지 않는 콘텐츠 타입입니다."
+        
+    except Exception as e:
+        logger.error(f"실시간 요약 생성 중 오류: {e}")
+        return f"요약 생성 중 오류가 발생했습니다: {str(e)}"
+
+async def search_vector_db_only(
+    query: str,
+    tenant_id: str,
+    platform: str = "freshdesk", 
+    doc_types: Optional[List[str]] = None,
+    limit: int = 10,
+    score_threshold: float = 0.7
+) -> List[Dict[str, Any]]:
+    """
+    Vector DB에서만 검색을 수행합니다 (SQL 없음).
+    
+    Args:
+        query: 검색 쿼리
+        tenant_id: 테넌트 ID
+        platform: 플랫폼 식별자
+        doc_types: 문서 타입 필터 (["ticket", "article"] 등)
+        limit: 최대 결과 수
+        score_threshold: 최소 유사도 점수
+        
+    Returns:
+        List[Dict[str, Any]]: 검색 결과
+    """
+    try:
+        from core.search.embeddings import embed_documents
+        
+        # 검색 쿼리 임베딩 생성
+        query_embeddings = embed_documents([query])
+        if not query_embeddings or len(query_embeddings) != 1:
+            logger.error("검색 쿼리 임베딩 생성 실패")
+            return []
+        
+        query_embedding = query_embeddings[0]
+        
+        # 메타데이터 필터 구성
+        filter_conditions = {
+            "must": [
+                {"key": "tenant_id", "match": {"value": tenant_id}},
+                {"key": "platform", "match": {"value": platform}}
+            ]
+        }
+        
+        # 문서 타입 필터 추가
+        if doc_types:
+            if len(doc_types) == 1:
+                filter_conditions["must"].append({
+                    "key": "doc_type", 
+                    "match": {"value": doc_types[0]}
+                })
+            else:
+                filter_conditions["should"] = [
+                    {"key": "doc_type", "match": {"value": doc_type}}
+                    for doc_type in doc_types
+                ]
+        
+        # Vector DB 검색
+        search_results = vector_db.search(
+            query_vector=query_embedding,
+            limit=limit,
+            score_threshold=score_threshold,
+            filter=filter_conditions
+        )
+        
+        # 결과 포맷팅 (새로운 필드 구조 적용)
+        formatted_results = []
+        for result in search_results:
+            payload = result.get("payload", {})
+            formatted_result = {
+                "id": result.get("id", ""),
+                "content": payload.get("content", ""),  # 새로운 content 필드 사용
+                "score": result.get("score", 0.0),
+                "metadata": payload,  # 전체 payload를 metadata로 제공
+                "doc_type": payload.get("doc_type", ""),
+                "original_id": payload.get("original_id", ""),
+                # 검색 최적화된 필드들을 루트 레벨에서 접근 가능
+                "subject": payload.get("subject", ""),
+                "title": payload.get("title", ""),
+                "status": payload.get("status"),
+                "priority": payload.get("priority"),
+                "has_attachments": payload.get("has_attachments", False),
+                "created_at": payload.get("created_at", ""),
+                "updated_at": payload.get("updated_at", ""),
+                "extended_metadata": payload.get("extended_metadata", {})  # 확장 메타데이터
+            }
+            formatted_results.append(formatted_result)
+        
+        logger.info(f"Vector DB 검색 완료: {len(formatted_results)}건 반환")
+        return formatted_results
+        
+    except Exception as e:
+        logger.error(f"Vector DB 검색 중 오류: {e}")
+        return []
+
+async def get_vector_db_stats(tenant_id: str, platform: str) -> Dict[str, Any]:
+    """
+    Vector DB의 통계 정보를 가져옵니다.
+    
+    Args:
+        tenant_id: 테넌트 ID
+        platform: 플랫폼 식별자
+        
+    Returns:
+        Dict[str, Any]: 통계 정보
+    """
+    try:
+        # 메타데이터 필터로 해당 테넌트의 문서 수 조회
+        filter_conditions = {
+            "must": [
+                {"key": "tenant_id", "match": {"value": tenant_id}},
+                {"key": "platform", "match": {"value": platform}}
+            ]
+        }
+        
+        # 전체 문서 수
+        total_count = vector_db.count_documents(filter=filter_conditions)
+        
+        # 티켓 문서 수
+        ticket_filter = {
+            "must": [
+                {"key": "tenant_id", "match": {"value": tenant_id}},
+                {"key": "platform", "match": {"value": platform}},
+                {"key": "doc_type", "match": {"value": "ticket"}}
+            ]
+        }
+        ticket_count = vector_db.count_documents(filter=ticket_filter)
+        
+        # KB 문서 수
+        article_filter = {
+            "must": [
+                {"key": "tenant_id", "match": {"value": tenant_id}},
+                {"key": "platform", "match": {"value": platform}},
+                {"key": "doc_type", "match": {"value": "article"}}
+            ]
+        }
+        article_count = vector_db.count_documents(filter=article_filter)
+        
+        return {
+            "total_documents": total_count,
+            "ticket_documents": ticket_count,
+            "article_documents": article_count,
+            "tenant_id": tenant_id,
+            "platform": platform
+        }
+        
+    except Exception as e:
+        logger.error(f"Vector DB 통계 조회 중 오류: {e}")
+        return {
+            "total_documents": 0,
+            "ticket_documents": 0,
+            "article_documents": 0,
+            "tenant_id": tenant_id,
+            "platform": platform,
             "error": str(e)
         }

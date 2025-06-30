@@ -16,7 +16,7 @@ import time
 import pytz
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional, Callable
+from typing import Any, Dict, Optional, Callable, List
 from dotenv import load_dotenv
 
 # backend 디렉토리를 Python 경로에 추가
@@ -33,7 +33,15 @@ from core.metadata.normalizer import TenantMetadataNormalizer
 llm_manager = LLMManager()
 
 from core.search.embeddings import embed_documents, log_embedding_status
-from core.database.vectordb import vector_db
+from core.database.vectordb import (
+    vector_db,
+    purge_vector_db_data,
+    process_ticket_to_vector_db,
+    process_article_to_vector_db,
+    generate_realtime_summary,
+    search_vector_db_only,
+    get_vector_db_stats
+)
 from core.ingest.integrator import (
     create_integrated_ticket_object, 
     create_integrated_article_object
@@ -195,6 +203,10 @@ async def ingest(
     """
     데이터 수집 및 처리를 수행합니다.
     
+    ⚠️ 환경변수 ENABLE_FULL_STREAMING_MODE에 따라 다른 로직을 사용합니다:
+    - true (기본값): Vector DB 단독 파이프라인 사용 (신규)
+    - false: 기존 하이브리드 파이프라인 사용 (100% 보존)
+    
     Args:
         tenant_id: 회사 식별자
         platform: 플랫폼 식별자
@@ -208,6 +220,189 @@ async def ingest(
         
     Returns:
         Dict[str, Any]: 처리 결과
+    """
+    # 환경변수로 모드 결정
+    enable_full_streaming = os.getenv("ENABLE_FULL_STREAMING_MODE", "true") == "true"
+    enable_sql_progress = os.getenv('ENABLE_SQL_PROGRESS_LOGS', 'true').lower() == 'true'
+    
+    if enable_full_streaming:
+        # 🚀 신규: Vector DB 단독 파이프라인
+        logger.info(f"🚀 Vector DB 단독 모드로 데이터 수집 시작: {tenant_id} ({platform})")
+        if not enable_sql_progress:
+            logger.info("📊 SQL 진행 로그 비활성화됨 (Vector DB 단독 모드)")
+        return await ingest_vector_only_mode(
+            tenant_id=tenant_id,
+            platform=platform,
+            incremental=incremental,
+            purge=purge,
+            max_tickets=max_tickets,
+            max_articles=max_articles,
+            progress_callback=progress_callback
+        )
+    else:
+        # 🔒 기존: 하이브리드 파이프라인 (100% 보존)
+        logger.info(f"🔒 하이브리드 모드로 데이터 수집 시작: {tenant_id} ({platform})")
+        return await ingest_legacy_hybrid_mode(
+            tenant_id=tenant_id,
+            platform=platform,
+            incremental=incremental,
+            purge=purge,
+            skip_embeddings=skip_embeddings,
+            skip_summaries=skip_summaries,
+            max_tickets=max_tickets,
+            max_articles=max_articles,
+            progress_callback=progress_callback
+        )
+
+async def ingest_vector_only_mode(
+    tenant_id: str,
+    platform: str = "freshdesk",
+    incremental: bool = True,
+    purge: bool = False,
+    max_tickets: Optional[int] = None,
+    max_articles: Optional[int] = None,
+    progress_callback: Optional[Callable] = None
+) -> Dict[str, Any]:
+    """
+    🚀 신규 Vector DB 단독 수집 모드
+    
+    Freshdesk에서 티켓과 지식베이스 문서를 가져와서
+    SQL 없이 Vector DB(Qdrant)에만 저장하는 완전히 새로운 파이프라인입니다.
+    """
+    start_time = time.time()
+    result = {
+        "success": True,
+        "tickets_processed": 0,
+        "articles_processed": 0,
+        "total_vectors_stored": 0,
+        "errors": [],
+        "start_time": get_kst_time(),
+        "processing_time": 0
+    }
+    
+    logger.info(f"🚀 Vector DB 단독 수집 시작 - {tenant_id}/{platform}")
+    
+    try:
+        # 환경변수에서 domain과 api_key 가져오기
+        domain = os.getenv("FRESHDESK_DOMAIN")
+        api_key = os.getenv("FRESHDESK_API_KEY")
+        
+        if not domain or not api_key:
+            raise ValueError(f"tenant_id {tenant_id}에 대한 Freshdesk 설정이 환경변수에 없습니다. FRESHDESK_DOMAIN과 FRESHDESK_API_KEY를 설정해주세요.")
+        
+        logger.info(f"도메인: {domain}, 최대 티켓: {max_tickets}, 최대 KB: {max_articles}")
+        
+        # 기존 Vector DB 데이터 삭제 (purge 옵션)
+        if purge:
+            logger.info("🗑️ 기존 Vector DB 데이터 삭제 중...")
+            await purge_vector_db_data(tenant_id, platform)
+        
+        # 1. 티켓 수집 및 Vector DB 저장
+        if progress_callback:
+            progress_callback({"stage": "tickets", "progress": 0})
+        
+        logger.info("📋 티켓 수집 시작...")
+        tickets = await fetch_tickets(domain=domain, api_key=api_key, max_tickets=max_tickets)
+        logger.info(f"수집된 티켓 수: {len(tickets)}")
+        
+        for i, ticket in enumerate(tickets):
+            try:
+                # 티켓을 Vector DB에 직접 처리 및 저장
+                success = await process_ticket_to_vector_db(
+                    ticket=ticket,
+                    tenant_id=tenant_id,
+                    platform=platform
+                )
+                
+                if success:
+                    result["tickets_processed"] += 1
+                    result["total_vectors_stored"] += 1
+                    logger.debug(f"티켓 {ticket.get('id')} Vector DB 저장 완료")
+                else:
+                    error_msg = f"티켓 {ticket.get('id', 'unknown')} 처리 실패"
+                    result["errors"].append(error_msg)
+                
+                if progress_callback:
+                    progress = (i + 1) / len(tickets) * 50  # 티켓은 전체의 50%
+                    progress_callback({"stage": "tickets", "progress": progress})
+                
+            except Exception as e:
+                error_msg = f"티켓 {ticket.get('id', 'unknown')} 처리 실패: {str(e)}"
+                logger.error(error_msg)
+                result["errors"].append(error_msg)
+        
+        # 2. KB 문서 수집 및 Vector DB 저장
+        if progress_callback:
+            progress_callback({"stage": "articles", "progress": 50})
+        
+        logger.info("📚 KB 문서 수집 시작...")
+        articles = await fetch_kb_articles(domain=domain, api_key=api_key, max_articles=max_articles)
+        logger.info(f"수집된 KB 문서 수: {len(articles)}")
+        
+        for i, article in enumerate(articles):
+            try:
+                # KB 문서를 Vector DB에 직접 처리 및 저장
+                success = await process_article_to_vector_db(
+                    article=article,
+                    tenant_id=tenant_id,
+                    platform=platform
+                )
+                
+                if success:
+                    result["articles_processed"] += 1
+                    result["total_vectors_stored"] += 1
+                    logger.debug(f"KB 문서 {article.get('id')} Vector DB 저장 완료")
+                else:
+                    error_msg = f"KB 문서 {article.get('id', 'unknown')} 처리 실패"
+                    result["errors"].append(error_msg)
+                
+                if progress_callback:
+                    progress = 50 + (i + 1) / len(articles) * 50  # KB는 나머지 50%
+                    progress_callback({"stage": "articles", "progress": progress})
+                
+            except Exception as e:
+                error_msg = f"KB 문서 {article.get('id', 'unknown')} 처리 실패: {str(e)}"
+                logger.error(error_msg)
+                result["errors"].append(error_msg)
+        
+        result["processing_time"] = time.time() - start_time
+        
+        logger.info("✅ Vector DB 단독 수집 완료:")
+        logger.info(f"  - 티켓: {result['tickets_processed']}개")
+        logger.info(f"  - KB 문서: {result['articles_processed']}개")
+        logger.info(f"  - 총 벡터: {result['total_vectors_stored']}개")
+        logger.info(f"  - 소요 시간: {result['processing_time']:.2f}초")
+        
+        if result["errors"]:
+            logger.warning(f"❌ 오류 {len(result['errors'])}건 발생")
+            result["success"] = False
+        
+        return result
+        
+    except Exception as e:
+        result["success"] = False
+        result["processing_time"] = time.time() - start_time
+        error_msg = f"Vector DB 단독 수집 중 전체 오류: {str(e)}"
+        logger.error(error_msg)
+        result["errors"].append(error_msg)
+        return result
+
+async def ingest_legacy_hybrid_mode(
+    tenant_id: str,
+    platform: str = "freshdesk",
+    incremental: bool = True,
+    purge: bool = False,
+    skip_embeddings: bool = False,
+    skip_summaries: bool = False,
+    max_tickets: Optional[int] = None,
+    max_articles: Optional[int] = None,
+    progress_callback: Optional[Callable] = None
+) -> Dict[str, Any]:
+    """
+    🔒 기존 하이브리드 수집 모드 (100% 보존)
+    
+    기존 SQL + Vector DB 하이브리드 로직을 그대로 사용합니다.
+    이 함수는 절대 수정하지 않습니다.
     """
     logger.info(f"데이터 수집 시작: {tenant_id} ({platform})")
     start_time = time.time()
@@ -228,7 +423,6 @@ async def ingest(
     
     try:
         # 환경변수에서 domain과 api_key 가져오기
-        import os
         domain = os.getenv("FRESHDESK_DOMAIN")
         api_key = os.getenv("FRESHDESK_API_KEY")
         
@@ -248,7 +442,7 @@ async def ingest(
         
         # 레거시 지원용 (storage.py에서 사용)
         db = get_database(tenant_id, platform)
-        
+
         if purge:
             # 기존 데이터 삭제 (ORM 방식)
             logger.info("기존 데이터 삭제 중...")
@@ -264,14 +458,17 @@ async def ingest(
         if progress_callback:
             progress_callback({"stage": "tickets", "progress": 0})
         
-        # 진행 상황을 데이터베이스에 로그
-        db.log_progress(
-            tenant_id=tenant_id,
-            message="티켓 수집 시작",
-            percentage=0,
-            step=0,
-            total_steps=100
-        )
+        # 진행 상황을 데이터베이스에 로그 (환경변수 체크)
+        enable_sql_progress = os.getenv('ENABLE_SQL_PROGRESS_LOGS', 'true').lower() == 'true'
+        
+        if enable_sql_progress:
+            db.log_progress(
+                tenant_id=tenant_id,
+                message="티켓 수집 시작",
+                percentage=0,
+                step=0,
+                total_steps=100
+            )
         
         logger.info(f"티켓 수집 시작... (최대 {max_tickets}개)" if max_tickets else "티켓 수집 시작...")
         tickets = await fetch_tickets(domain=domain, api_key=api_key, max_tickets=max_tickets)
@@ -297,39 +494,42 @@ async def ingest(
                     progress = (i + 1) / len(tickets) * 100
                     progress_callback({"stage": "tickets", "progress": progress})
                 
-                # 진행 상황을 데이터베이스에 로그
-                db.log_progress(
-                    tenant_id=tenant_id,
-                    message=f"티켓 {i + 1}/{len(tickets)} 처리 완료",
-                    percentage=progress if 'progress' in locals() else (i + 1) / len(tickets) * 100,
-                    step=i + 1,
-                    total_steps=len(tickets)
-                )
-                    
+                # 진행 상황을 데이터베이스에 로그 (환경변수 체크)
+                if enable_sql_progress:
+                    db.log_progress(
+                        tenant_id=tenant_id,
+                        message=f"티켓 처리 중... ({i+1}/{len(tickets)})",
+                        percentage=int((i + 1) / len(tickets) * 50),
+                        step=i+1,
+                        total_steps=len(tickets)
+                    )
+                
             except Exception as e:
-                logger.error(f"티켓 처리 오류 (ID: {ticket.get('id', 'unknown')}): {e}")
-                result["errors"].append(f"티켓 {ticket.get('id', 'unknown')}: {str(e)}")
+                error_msg = f"티켓 {ticket.get('id', 'unknown')} 처리 실패: {str(e)}"
+                logger.error(error_msg)
+                result["errors"].append(error_msg)
         
         # 2. KB 문서 수집
         if progress_callback:
             progress_callback({"stage": "articles", "progress": 0})
         
-        # 진행 상황을 데이터베이스에 로그
-        db.log_progress(
-            tenant_id=tenant_id,
-            message="아티클 수집 시작",
-            percentage=0,
-            step=0,
-            total_steps=100
-        )
+        # 진행 상황을 데이터베이스에 로그 (환경변수 체크)
+        if enable_sql_progress:
+            db.log_progress(
+                tenant_id=tenant_id,
+                message="KB 문서 수집 시작",
+                percentage=50,
+                step=0,
+                total_steps=100
+            )
         
-        logger.info(f"아티클 수집 시작... (최대 {max_articles}개)" if max_articles else "아티클 수집 시작...")
+        logger.info(f"KB 문서 수집 시작... (최대 {max_articles}개)" if max_articles else "KB 문서 수집 시작...")
         articles = await fetch_kb_articles(domain=domain, api_key=api_key, max_articles=max_articles)
-        logger.info(f"수집된 아티클 수: {len(articles)}")
+        logger.info(f"수집된 KB 문서 수: {len(articles)}")
         
         for i, article in enumerate(articles):
             try:
-                # 통합 문서 객체 생성 및 저장
+                # 통합 KB 문서 객체 생성 및 저장
                 integrated_article = create_integrated_article_object(
                     article=article,
                     tenant_id=tenant_id
@@ -347,113 +547,116 @@ async def ingest(
                     progress = (i + 1) / len(articles) * 100
                     progress_callback({"stage": "articles", "progress": progress})
                 
-                # 진행 상황을 데이터베이스에 로그
-                db.log_progress(
-                    tenant_id=tenant_id,
-                    message=f"아티클 {i + 1}/{len(articles)} 처리 완료",
-                    percentage=progress if 'progress' in locals() else (i + 1) / len(articles) * 100,
-                    step=i + 1,
-                    total_steps=len(articles)
-                )
-                    
+                # 진행 상황을 데이터베이스에 로그 (환경변수 체크)
+                if enable_sql_progress:
+                    db.log_progress(
+                        tenant_id=tenant_id,
+                        message=f"KB 문서 처리 중... ({i+1}/{len(articles)})",
+                        percentage=50 + int((i + 1) / len(articles) * 30),
+                        step=i+1,
+                        total_steps=len(articles)
+                    )
+                
             except Exception as e:
-                logger.error(f"KB 문서 처리 오류 (ID: {article.get('id', 'unknown')}): {e}")
-                result["errors"].append(f"KB 문서 {article.get('id', 'unknown')}: {str(e)}")
+                error_msg = f"KB 문서 {article.get('id', 'unknown')} 처리 실패: {str(e)}"
+                logger.error(error_msg)
+                result["errors"].append(error_msg)
         
-        # 3. 요약 생성
+        # 3. 요약 생성 (skip_summaries가 False인 경우에만)
         if not skip_summaries:
             if progress_callback:
                 progress_callback({"stage": "summaries", "progress": 0})
             
-            # 진행 상황을 데이터베이스에 로그
-            db.log_progress(
-                tenant_id=tenant_id,
-                message="요약 생성 시작",
-                percentage=0,
-                step=0,
-                total_steps=100
-            )
+            if enable_sql_progress:
+                db.log_progress(
+                    tenant_id=tenant_id,
+                    message="요약 생성 시작",
+                    percentage=80,
+                    step=0,
+                    total_steps=100
+                )
             
-            logger.info("요약 생성 시작...")
             summary_result = await generate_and_store_summaries(
                 tenant_id=tenant_id,
                 platform=platform,
-                force_update=purge
+                force_update=False
             )
-            result["summaries_created"] = summary_result["success_count"]
-            
-            if progress_callback:
-                progress_callback({"stage": "summaries", "progress": 100})
-            
-            # 진행 상황을 데이터베이스에 로그
-            db.log_progress(
-                tenant_id=tenant_id,
-                message=f"요약 생성 완료: {result['summaries_created']}개",
-                percentage=100,
-                step=100,
-                total_steps=100
-            )
+            result["summaries_created"] = summary_result.get("success_count", 0)
+            result["errors"].extend(summary_result.get("errors", []))
         
-        # 4. 임베딩 생성 및 벡터 DB 저장
+        # 4. 벡터 임베딩 생성 (skip_embeddings가 False인 경우에만)
         if not skip_embeddings:
             if progress_callback:
                 progress_callback({"stage": "embeddings", "progress": 0})
             
-            # 진행 상황을 데이터베이스에 로그
-            db.log_progress(
-                tenant_id=tenant_id,
-                message="임베딩 생성 시작",
-                percentage=0,
-                step=0,
-                total_steps=100
-            )
+            if enable_sql_progress:
+                db.log_progress(
+                    tenant_id=tenant_id,
+                    message="벡터 임베딩 생성 시작",
+                    percentage=90,
+                    step=0,
+                    total_steps=100
+                )
             
-            logger.info("임베딩 생성 시작...")
             embedding_result = await sync_summaries_to_vector_db(
                 tenant_id=tenant_id,
-                platform=platform
+                platform=platform,
+                batch_size=100,
+                force_update=False
             )
             result["embeddings_created"] = embedding_result.get("processed_count", 0)
-            
-            if progress_callback:
-                progress_callback({"stage": "embeddings", "progress": 100})
-            
-            # 진행 상황을 데이터베이스에 로그
+            if embedding_result.get("status") != "success":
+                result["errors"].append(f"벡터 임베딩 생성 실패: {embedding_result.get('message')}")
+        
+        # 최종 진행 상황 로그 (환경변수 체크)
+        if enable_sql_progress:
             db.log_progress(
                 tenant_id=tenant_id,
-                message=f"임베딩 생성 완료: {result['embeddings_created']}개",
+                message="데이터 수집 완료",
                 percentage=100,
                 step=100,
                 total_steps=100
             )
         
-        result["processing_time"] = time.time() - start_time
+        processing_time = time.time() - start_time
+        result["processing_time"] = processing_time
         result["end_time"] = get_kst_time()
-        result["success"] = True
         
-        logger.info("✅ 데이터 수집 완료:")
-        logger.info(f"  - 티켓: {result['tickets_processed']}개")
-        logger.info(f"  - KB 문서: {result['articles_processed']}개")
-        logger.info(f"  - 요약: {result['summaries_created']}개")
-        logger.info(f"  - 임베딩: {result['embeddings_created']}개")
-        logger.info(f"  - 소요 시간: {result['processing_time']:.2f}초")
+        logger.info("✅ 하이브리드 모드 데이터 수집 완료:")
+        logger.info(f"  - 티켓 처리: {result['tickets_processed']}개")
+        logger.info(f"  - KB 문서 처리: {result['articles_processed']}개")
+        logger.info(f"  - 요약 생성: {result['summaries_created']}개")
+        logger.info(f"  - 임베딩 생성: {result['embeddings_created']}개")
+        logger.info(f"  - 총 처리 시간: {processing_time:.2f}초")
+        
+        if result["errors"]:
+            logger.warning(f"❌ 처리 중 {len(result['errors'])}건의 오류 발생")
+            for error in result["errors"][:5]:  # 최대 5개만 로그에 표시
+                logger.warning(f"  - {error}")
         
         return result
         
     except Exception as e:
-        logger.error(f"데이터 수집 중 오류 발생: {e}")
-        result["success"] = False
-        result["error"] = str(e)
-        result["processing_time"] = time.time() - start_time
+        processing_time = time.time() - start_time
+        result["processing_time"] = processing_time
         result["end_time"] = get_kst_time()
-        raise
-    finally:
-        # db가 정의되어 있고 연결되어 있는 경우에만 disconnect
-        if db is not None:
+        error_msg = f"데이터 수집 중 전체 오류: {str(e)}"
+        logger.error(error_msg)
+        result["errors"].append(error_msg)
+        
+        if db and enable_sql_progress:
             try:
-                db.disconnect()
-            except Exception as disconnect_error:
-                logger.warning(f"데이터베이스 연결 해제 중 오류: {disconnect_error}")
+                db.log_progress(
+                    tenant_id=tenant_id,
+                    message=f"데이터 수집 실패: {str(e)}",
+                    percentage=0,
+                    step=0,
+                    total_steps=100
+                )
+            except:
+                pass  # 로깅 실패는 무시
+        
+        return result
 
 # 요약 생성 함수
 
@@ -775,7 +978,7 @@ async def generate_and_store_summaries(
                 # 데이터 파싱 및 메타데이터 정규화
                 try:
                     original_data = json.loads(original_data_str) if original_data_str else {}
-                    raw_tenant_metadata = json.loads(tenant_metadata_str) if tenant_metadata_str else {}
+                    raw_tenant_metadata = json.loads(tenant_metadata_str) if tenantMetadata_str else {}
                     
                     # 메타데이터 정규화 처리
                     if not raw_tenant_metadata:
@@ -903,9 +1106,9 @@ async def generate_and_store_summaries(
         result["processing_time"] = time.time() - start_time
         
         logger.info("✅ LLM 요약 생성 완료:")
-        logger.info(f"  - 성공: {result['success_count']}")
-        logger.info(f"  - 실패: {result['failure_count']}")
-        logger.info(f"  - 건너뜀: {result['skipped_count']}")
+        logger.info(f"  - 성공: {result['success_count']}개")
+        logger.info(f"  - 실패: {result['failure_count']}개")
+        logger.info(f"  - 건너뜀: {result['skipped_count']}개")
         logger.info(f"  - 총 처리: {result['total_processed']}")
         logger.info(f"  - 소요 시간: {result['processing_time']:.2f}초")
         

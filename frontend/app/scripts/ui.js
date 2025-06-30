@@ -498,7 +498,7 @@ window.UI = {
       resultsElement.innerHTML = `
         <div class="similar-tickets-content">
           <div class="mb-3">
-            <small class="text-muted">발견된 유사 티켓: ${similarTickets.length}개</small>
+            <small class="text-muted">🚀 Vector DB에서 발견된 유사 티켓: ${similarTickets.length}개</small>
           </div>
           <div id="tickets-container"></div>
         </div>
@@ -506,62 +506,53 @@ window.UI = {
 
       const ticketsContainer = this.safeGetElement('tickets-container');
 
-      // 각 유사 티켓을 새로운 리스트 아이템으로 렌더링
+      // 각 유사 티켓을 Vector DB 데이터 구조에 맞게 렌더링
       similarTickets.forEach((similarTicket) => {
         const ticketItem = document.createElement('div');
-        ticketItem.className = 'list-item';
+        ticketItem.className = 'list-item vector-db-item';
 
-        // 유사도 점수 계산 (임시)
-        const similarityScore = similarTicket.score || Math.random() * 30 + 70;
+        // Vector DB의 relevance_score 사용 (0-1 범위를 백분율로 변환)
+        const relevanceScore = Math.round((similarTicket.relevance_score || 0) * 100);
+        const confidenceScore = similarTicket.confidence_score ? Math.round(similarTicket.confidence_score * 100) : null;
 
         ticketItem.innerHTML = `
           <div class="list-item-header">
-            <div class="list-item-title">${similarTicket.subject || 'No subject'}</div>
+            <div class="list-item-title">${similarTicket.title || similarTicket.subject || 'No subject'}</div>
             <div class="d-flex align-items-center gap-2">
-              <span class="score-badge">${Math.round(similarityScore)}%</span>
-              <span class="badge-custom ${getStatusClass(
+              <span class="score-badge">${relevanceScore}%</span>
+              ${confidenceScore ? `<span class="confidence-badge">${confidenceScore}%</span>` : ''}
+              <span class="badge-custom ${this.getStatusClass(
                 similarTicket.status
-              )}">${getStatusText(similarTicket.status)}</span>
+              )}">${this.getStatusText(similarTicket.status)}</span>
             </div>
           </div>
           <div class="list-item-meta">
             <span>티켓 #${similarTicket.id}</span> • 
-            <span>우선순위: ${getPriorityText(similarTicket.priority)}</span>
+            <span>우선순위: ${this.getPriorityText(similarTicket.priority)}</span>
+            ${similarTicket.agent_name ? ` • <span>담당자: ${similarTicket.agent_name}</span>` : ''}
             ${
               similarTicket.created_at
-                ? ` • <span>${formatDate(similarTicket.created_at)}</span>`
+                ? ` • <span>${this.formatDate(similarTicket.created_at)}</span>`
                 : ''
             }
           </div>
           ${
-            similarTicket.issue || similarTicket.solution
+            similarTicket.ai_summary
+              ? `
+            <div class="list-item-excerpt vector-summary">
+              <div class="mb-2">🤖 <strong>AI 요약:</strong> ${this.truncateText(
+                similarTicket.ai_summary,
+                120
+              )}</div>
+            </div>
+          `
+              : similarTicket.content || similarTicket.description_text
               ? `
             <div class="list-item-excerpt">
-              ${
-                similarTicket.issue
-                  ? `<div class="mb-2">🔍 <strong>문제:</strong> ${truncateText(
-                      similarTicket.issue,
-                      100
-                    )}</div>`
-                  : ''
-              }
-              ${
-                similarTicket.solution
-                  ? `<div>💡 <strong>해결책:</strong> ${truncateText(
-                      similarTicket.solution,
-                      100
-                    )}</div>`
-                  : ''
-              }
+              ${this.truncateText(similarTicket.content || similarTicket.description_text, 150)}
             </div>
           `
-              : similarTicket.description_text || similarTicket.description
-                ? `
-            <div class="list-item-excerpt">
-              ${truncateText(similarTicket.description_text || similarTicket.description, 150)}
-            </div>
-          `
-                : ''
+              : ''
           }
           ${
             similarTicket.tags && similarTicket.tags.length > 0
@@ -882,657 +873,210 @@ window.UI = {
     console.log('✅ 티켓 요약 표시 완료');
   },
 
-  // 에러 메시지를 결과 영역에 표시하는 함수
-  showErrorInResultsInResults(message, containerId = 'similar-tickets-list') {
+  /**
+   * 🚀 Vector DB 기반 티켓 요약 업데이트
+   *
+   * Vector DB에서 조회된 또는 실시간 생성된 티켓 요약을 표시합니다.
+   * 마크다운 포맷, 성능 메트릭, 신뢰도 점수 등을 지원합니다.
+   *
+   * @param {string|Object} summary - 요약 텍스트 또는 요약 객체
+   * @param {Object} metadata - 성능 메트릭 및 메타데이터
+   */
+  updateTicketSummaryVectorDB(summary, metadata = {}) {
+    const summaryElement = this.safeGetElement('#ticket-summary');
+    if (!summaryElement) {
+      console.warn('[UI] 티켓 요약 엘리먼트를 찾을 수 없음');
+      return;
+    }
+
     try {
-      const container = this.safeGetElement(containerId);
-      if (container) {
-        container.innerHTML = `
-          <div class="error-message alert alert-warning">
-            <i class="fas fa-exclamation-triangle"></i>
-            ${message}
+      // 요약 텍스트 추출
+      let summaryText = '';
+      if (typeof summary === 'string') {
+        summaryText = summary;
+      } else if (summary && summary.text) {
+        summaryText = summary.text;
+      } else if (summary && summary.summary) {
+        summaryText = summary.summary;
+      } else {
+        summaryText = '요약을 생성할 수 없습니다.';
+      }
+
+      // 마크다운을 HTML로 변환 (간단한 변환)
+      const htmlContent = this.convertMarkdownToHTML(summaryText);
+
+      // 성능 메트릭 HTML 생성
+      let metricsHTML = '';
+      if (metadata.executionTime || metadata.searchQualityScore) {
+        metricsHTML = `
+          <div class="performance-metrics">
+            ${metadata.executionTime ? `
+              <div class="metric-item">
+                <span>⏱️ 응답시간:</span>
+                <span class="metric-value">${metadata.executionTime.toFixed(2)}초</span>
+              </div>
+            ` : ''}
+            ${metadata.searchQualityScore ? `
+              <div class="metric-item">
+                <span>📊 검색품질:</span>
+                <span class="metric-value">${(metadata.searchQualityScore * 100).toFixed(1)}%</span>
+              </div>
+            ` : ''}
+            <div class="metric-item">
+              <span>🔍 모드:</span>
+              <span class="metric-value">Vector DB</span>
+            </div>
           </div>
         `;
-      } else {
-        console.warn(`⚠️ 컨테이너를 찾을 수 없음: ${containerId}`);
       }
-    } catch (error) {
-      console.error('❌ showErrorInResultsInResults 오류', error);
-    }
-  },
 
-  /**
-   * 로딩 인디케이터 표시
-   *
-   * 데이터 로딩 중임을 사용자에게 시각적으로 알립니다.
-   * 진행률과 설명 메시지를 함께 표시할 수 있습니다.
-   *
-   * @param {string} message - 로딩 중 표시할 메시지
-   * @param {number} progress - 진행률 (0-100, 선택사항)
-   * @param {string} containerId - 로딩을 표시할 컨테이너 ID (선택사항)
-   *
-   * @example
-   * UI.showLoading('데이터를 불러오는 중...', 30);
-   * UI.showLoading('AI 응답 생성 중...', null, 'chat-container');
-   */
-  showLoading(message = '로딩 중...', progress = null, containerId = null) {
-    try {
-      console.log(`[UI] 로딩 표시: ${message} ${progress !== null ? `(${progress}%)` : ''}`);
-
-      // 기존 로딩 인디케이터 제거
-      this.hideLoading(containerId);
-
-      // 로딩 인디케이터 생성
-      const loadingElement = document.createElement('div');
-      loadingElement.className = 'loading-indicator';
-      loadingElement.setAttribute('data-container', containerId || 'global');
-
-      // 진행률 바가 있는 경우와 없는 경우 구분
-      const progressBarHTML =
-        progress !== null
-          ? `
-        <div class="progress-container">
-          <div class="progress-bar">
-            <div class="progress-fill" style="width: ${Math.max(0, Math.min(100, progress))}%"></div>
-          </div>
-          <div class="progress-text">${Math.round(progress)}%</div>
+      // HTML 업데이트
+      summaryElement.innerHTML = `
+        <div class="summary-content">
+          ${htmlContent}
         </div>
-      `
-          : '';
-
-      loadingElement.innerHTML = `
-        <div class="loading-content">
-          <div class="loading-spinner">
-            <div class="spinner-ring"></div>
-            <div class="spinner-ring"></div>
-            <div class="spinner-ring"></div>
-          </div>
-          <div class="loading-message">${message}</div>
-          ${progressBarHTML}
-        </div>
+        ${metricsHTML}
       `;
 
-      // 스타일 적용
-      Object.assign(loadingElement.style, {
-        position: 'absolute',
-        top: '0',
-        left: '0',
-        right: '0',
-        bottom: '0',
-        background: 'rgba(255, 255, 255, 0.9)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: '9999',
-        fontSize: '14px',
-        fontFamily: 'system-ui, -apple-system, sans-serif',
-      });
-
-      // CSS 스타일을 head에 추가 (한 번만)
-      if (!document.querySelector('#loading-styles')) {
-        const style = document.createElement('style');
-        style.id = 'loading-styles';
-        style.textContent = `
-          .loading-content {
-            text-align: center;
-            max-width: 300px;
-            padding: 20px;
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-          }
-          .loading-spinner {
-            display: inline-block;
-            position: relative;
-            width: 40px;
-            height: 40px;
-            margin-bottom: 12px;
-          }
-          .spinner-ring {
-            position: absolute;
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #2196f3;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-          }
-          .spinner-ring:nth-child(1) { width: 40px; height: 40px; }
-          .spinner-ring:nth-child(2) { width: 30px; height: 30px; top: 5px; left: 5px; animation-delay: -0.3s; }
-          .spinner-ring:nth-child(3) { width: 20px; height: 20px; top: 10px; left: 10px; animation-delay: -0.6s; }
-          @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-          }
-          .loading-message {
-            color: #333;
-            font-weight: 500;
-            margin-bottom: 12px;
-          }
-          .progress-container {
-            margin-top: 16px;
-          }
-          .progress-bar {
-            width: 100%;
-            height: 6px;
-            background: #e0e0e0;
-            border-radius: 3px;
-            overflow: hidden;
-          }
-          .progress-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #2196f3, #21cbf3);
-            transition: width 0.3s ease;
-          }
-          .progress-text {
-            font-size: 12px;
-            color: #666;
-            margin-top: 8px;
-          }
-        `;
-        document.head.appendChild(style);
+      // 요약이 너무 긴 경우 펼치기/접기 기능 추가
+      if (summaryText.length > 500) {
+        this.addExpandCollapseToSummary(summaryElement);
       }
 
-      // 컨테이너 지정
-      const container = containerId ? this.safeGetElement(`#${containerId}`) : document.body;
-      if (container) {
-        // 컨테이너가 relative position이 아니면 설정
-        if (window.getComputedStyle(container).position === 'static') {
-          container.style.position = 'relative';
-        }
-        container.appendChild(loadingElement);
+      console.log('[UI] Vector DB 기반 티켓 요약 업데이트 완료');
+    } catch (error) {
+      console.error('[UI] 티켓 요약 업데이트 오류:', error);
+      summaryElement.innerHTML = '<div class="error-message">요약을 표시하는 중 오류가 발생했습니다.</div>';
+    }
+  },
+
+  /**
+   * 📝 간단한 마크다운을 HTML로 변환
+   *
+   * @param {string} markdown - 마크다운 텍스트
+   * @returns {string} HTML 텍스트
+   */
+  convertMarkdownToHTML(markdown) {
+    if (!markdown) return '';
+
+    return markdown
+      // 헤더 변환
+      .replace(/^### (.*$)/gim, '<h3>$1</h3>')
+      .replace(/^## (.*$)/gim, '<h2>$1</h2>')
+      .replace(/^# (.*$)/gim, '<h1>$1</h1>')
+      // 굵은 글씨
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      .replace(/__(.*?)__/g, '<strong>$1</strong>')
+      // 기울임
+      .replace(/\*(.*?)\*/g, '<em>$1</em>')
+      .replace(/_(.*?)_/g, '<em>$1</em>')
+      // 이모지 헤더 (특별 처리)
+      .replace(/^(🔍|📋|💡|⚡|🎯|📊|🛠️|🚀)(.*$)/gim, '<div class="emoji-header"><span class="emoji">$1</span><span class="header-text">$2</span></div>')
+      // 줄바꿈
+      .replace(/\n\n/g, '</p><p>')
+      .replace(/\n/g, '<br>')
+      // 전체를 p 태그로 감싸기
+      .replace(/^(.*)$/, '<p>$1</p>');
+  },
+
+  /**
+   * 🔽 요약 펼치기/접기 기능 추가
+   *
+   * @param {Element} summaryElement - 요약 엘리먼트
+   */
+  addExpandCollapseToSummary(summaryElement) {
+    const content = summaryElement.querySelector('.summary-content');
+    if (!content) return;
+
+    // 펼치기/접기 버튼 추가
+    const toggleButton = document.createElement('button');
+    toggleButton.className = 'summary-toggle';
+    toggleButton.innerHTML = '더 보기';
+    toggleButton.style.cssText = `
+      background: none;
+      border: none;
+      color: #667eea;
+      font-size: 12px;
+      cursor: pointer;
+      padding: 4px 0;
+      text-decoration: underline;
+    `;
+
+    let isExpanded = false;
+    content.style.maxHeight = '100px';
+    content.style.overflow = 'hidden';
+
+    toggleButton.addEventListener('click', () => {
+      if (isExpanded) {
+        content.style.maxHeight = '100px';
+        content.style.overflow = 'hidden';
+        toggleButton.innerHTML = '더 보기';
+        isExpanded = false;
       } else {
-        document.body.appendChild(loadingElement);
+        content.style.maxHeight = 'none';
+        content.style.overflow = 'visible';
+        toggleButton.innerHTML = '접기';
+        isExpanded = true;
       }
+    });
 
-      console.log('[UI] 로딩 인디케이터 표시 완료');
-    } catch (error) {
-      console.error('[UI] 로딩 인디케이터 표시 오류:', error);
-    }
+    summaryElement.appendChild(toggleButton);
   },
 
   /**
-   * 로딩 인디케이터 숨기기
+   * 📊 실시간 스트리밍 상태 표시
    *
-   * 표시된 로딩 인디케이터를 제거합니다.
+   * Vector DB 모드에서 실시간 요약 생성 상태를 표시합니다.
    *
-   * @param {string} containerId - 특정 컨테이너의 로딩만 숨기기 (선택사항)
-   *
-   * @example
-   * UI.hideLoading(); // 모든 로딩 인디케이터 숨기기
-   * UI.hideLoading('chat-container'); // 특정 컨테이너의 로딩만 숨기기
+   * @param {string} stage - 현재 단계 ('fetching'|'analyzing'|'generating'|'complete')
+   * @param {string} message - 표시할 메시지
    */
-  hideLoading(containerId = null) {
-    try {
-      const selector = containerId
-        ? `.loading-indicator[data-container="${containerId}"]`
-        : '.loading-indicator';
+  updateStreamingStatus(stage, message) {
+    const statusElement = this.safeGetElement('#streaming-status');
+    if (!statusElement) return;
 
-      const loadingElements = document.querySelectorAll(selector);
-      loadingElements.forEach((element) => {
-        element.remove();
-      });
-
-      if (loadingElements.length > 0) {
-        console.log(`[UI] 로딩 인디케이터 숨김 완료 (${loadingElements.length}개)`);
-      }
-    } catch (error) {
-      console.error('[UI] 로딩 인디케이터 숨기기 오류:', error);
-    }
-  },
-
-  /**
-   * 로딩 진행률 업데이트
-   *
-   * 현재 표시된 로딩 인디케이터의 진행률을 업데이트합니다.
-   *
-   * @param {number} progress - 새로운 진행률 (0-100)
-   * @param {string} message - 업데이트할 메시지 (선택사항)
-   * @param {string} containerId - 업데이트할 컨테이너 ID (선택사항)
-   *
-   * @example
-   * UI.updateLoadingProgress(75, '거의 완료되었습니다...');
-   */
-  updateLoadingProgress(progress, message = null, containerId = null) {
-    try {
-      const selector = containerId
-        ? `.loading-indicator[data-container="${containerId}"]`
-        : '.loading-indicator';
-
-      const loadingElement = document.querySelector(selector);
-      if (!loadingElement) {
-        console.warn('[UI] 업데이트할 로딩 인디케이터를 찾을 수 없음');
-        return;
-      }
-
-      // 진행률 바 업데이트
-      const progressFill = loadingElement.querySelector('.progress-fill');
-      const progressText = loadingElement.querySelector('.progress-text');
-
-      if (progressFill) {
-        progressFill.style.width = `${Math.max(0, Math.min(100, progress))}%`;
-      }
-
-      if (progressText) {
-        progressText.textContent = `${Math.round(progress)}%`;
-      }
-
-      // 메시지 업데이트
-      if (message) {
-        const messageElement = loadingElement.querySelector('.loading-message');
-        if (messageElement) {
-          messageElement.textContent = message;
-        }
-      }
-
-      console.log(`[UI] 로딩 진행률 업데이트: ${progress}%`);
-    } catch (error) {
-      console.error('[UI] 로딩 진행률 업데이트 오류:', error);
-    }
-  },
-
-  /**
-   * 🎯 FDK 네이티브 메인 모달 함수 (단순화된 버전)
-   * 
-   * 캐시된 데이터 여부와 관계없이 간단하게 모달을 표시합니다.
-   */
-  async showMainModal() {
-    try {
-      console.log('🚀 FDK 네이티브 메인 모달 열기 시작');
-
-      // 티켓 데이터 가져오기 (안전한 FDK API 호출)
-      let data = null;
-      let ticket = null;
-      
-      try {
-        data = await client.data.get('ticket');
-        ticket = data?.ticket;
-        console.log('✅ 메인 모달용 티켓 데이터 가져오기 성공');
-      } catch (error) {
-        console.warn('⚠️ 메인 모달용 티켓 데이터 가져오기 실패:', error.message);
-        // EventAPI 오류가 발생해도 모달은 계속 표시
-        ticket = null;
-      }
-
-      await client.interface.trigger('showModal', {
-        title: 'Copilot Canvas',
-        template: 'index.html',
-        data: {
-          ticket: ticket,
-          isMainModal: true,
-          timestamp: new Date().toISOString()
-        },
-        size: {
-          width: '900px',
-          height: '700px'
-        },
-        noBackdrop: true
-      });
-
-      console.log('✅ FDK 네이티브 메인 모달 열림 완료');
-    } catch (error) {
-      console.error('❌ FDK 메인 모달 오류:', error);
-      
-      // 폴백: 토스트 알림
-      this.showToast('모달을 열 수 없습니다.', 'error');
-    }
-  },
-
-  /**
-   * DOM 요소 캐싱 및 최적화된 접근
-   */
-  getDOMElement(selector, forceRefresh = false) {
-    return window.PerformanceOptimizer.getDOMElement(selector, forceRefresh);
-  },
-
-  /**
-   * 배치 DOM 업데이트 처리
-   * 여러 DOM 조작을 한 번에 처리하여 리플로우/리페인트 최소화
-   */
-  async batchDOMUpdates(updates) {
-    return await window.PerformanceOptimizer.batchDOMUpdates(updates);
-  },
-
-  /**
-   * 가상 스크롤링 지원 (대량 데이터 렌더링 최적화)
-   */
-  createVirtualList(container, items, renderItem, itemHeight = 50) {
-    const virtualList = {
-      container: container,
-      items: items,
-      renderItem: renderItem,
-      itemHeight: itemHeight,
-      visibleStart: 0,
-      visibleEnd: 0,
-      scrollTop: 0,
-      containerHeight: 0,
-      totalHeight: items.length * itemHeight,
-
-      init() {
-        this.containerHeight = container.clientHeight;
-        this.calculateVisibleRange();
-        this.render();
-        this.setupScrollListener();
-      },
-
-      calculateVisibleRange() {
-        const buffer = 5; // 버퍼 아이템 수
-        this.visibleStart = Math.max(0, Math.floor(this.scrollTop / this.itemHeight) - buffer);
-        this.visibleEnd = Math.min(
-          this.items.length,
-          Math.ceil((this.scrollTop + this.containerHeight) / this.itemHeight) + buffer
-        );
-      },
-
-      render() {
-        // 기존 내용 정리
-        container.innerHTML = '';
-
-        // 전체 높이를 위한 스페이서
-        const spacer = document.createElement('div');
-        spacer.style.height = `${this.totalHeight}px`;
-        spacer.style.position = 'relative';
-        container.appendChild(spacer);
-
-        // 보이는 아이템들만 렌더링
-        for (let i = this.visibleStart; i < this.visibleEnd; i++) {
-          const item = this.items[i];
-          const element = this.renderItem(item, i);
-          element.style.position = 'absolute';
-          element.style.top = `${i * this.itemHeight}px`;
-          element.style.width = '100%';
-          element.style.height = `${this.itemHeight}px`;
-          spacer.appendChild(element);
-        }
-      },
-
-      setupScrollListener() {
-        const throttledScroll = window.PerformanceOptimizer.throttle(() => {
-          const newScrollTop = container.scrollTop;
-          if (Math.abs(newScrollTop - this.scrollTop) > this.itemHeight) {
-            this.scrollTop = newScrollTop;
-            this.calculateVisibleRange();
-            this.render();
-          }
-        }, 16); // 60fps
-
-        container.addEventListener('scroll', throttledScroll);
-      },
-
-      updateItems(newItems) {
-        this.items = newItems;
-        this.totalHeight = newItems.length * this.itemHeight;
-        this.calculateVisibleRange();
-        this.render();
-      },
+    const stageEmojis = {
+      fetching: '🔍',
+      analyzing: '📊',
+      generating: '✨',
+      complete: '✅'
     };
 
-    virtualList.init();
-    return virtualList;
-  },
+    const emoji = stageEmojis[stage] || '⏳';
+    
+    statusElement.innerHTML = `
+      <div class="streaming-status ${stage}">
+        <span class="status-emoji">${emoji}</span>
+        <span class="status-message">${message}</span>
+      </div>
+    `;
 
-  /**
-   * 레이지 로딩 이미지 지원
-   */
-  setupLazyImages(container = document) {
-    const imageObserver = new IntersectionObserver((entries) => {
-      entries.forEach((entry) => {
-        if (entry.isIntersecting) {
-          const img = entry.target;
-          if (img.dataset.src) {
-            img.src = img.dataset.src;
-            img.removeAttribute('data-src');
-            imageObserver.unobserve(img);
-          }
-        }
-      });
-    });
-
-    container.querySelectorAll('img[data-src]').forEach((img) => {
-      imageObserver.observe(img);
-    });
-
-    return imageObserver;
-  },
-
-  /**
-   * 스마트 검색 및 필터링 (디바운스 적용)
-   */
-  setupSmartSearch(inputElement, searchCallback, options = {}) {
-    const { debounceMs = 300, minLength = 2, placeholder = '검색어를 입력하세요...' } = options;
-
-    inputElement.placeholder = placeholder;
-
-    const debouncedSearch = window.PerformanceOptimizer.debounce(async (query) => {
-      if (query.length >= minLength) {
-        try {
-          this.showLoading('검색 중...', 'search-loading');
-          await searchCallback(query);
-        } catch (error) {
-          if (window.GlobalState && window.GlobalState.ErrorHandler) {
-            window.GlobalState.ErrorHandler.handleError(error, {
-              context: 'smart_search',
-              userMessage: '검색 중 오류가 발생했습니다.',
-            });
-          }
-        } finally {
-          this.hideLoading('search-loading');
-        }
-      } else if (query.length === 0) {
-        searchCallback(''); // 전체 목록 표시
-      }
-    }, debounceMs);
-
-    inputElement.addEventListener('input', (e) => {
-      debouncedSearch(e.target.value.trim());
-    });
-  },
-
-  /**
-   * 최적화된 티켓 리스트 렌더링
-   */
-  async renderOptimizedTicketList(tickets, container) {
-    if (!tickets || tickets.length === 0) {
-      container.innerHTML = '<div class="no-data">표시할 티켓이 없습니다.</div>';
-      return;
+    // 완료되면 3초 후 자동 숨김
+    if (stage === 'complete') {
+      setTimeout(() => {
+        statusElement.innerHTML = '';
+      }, 3000);
     }
-
-    // 대량 데이터의 경우 가상 스크롤링 사용
-    if (tickets.length > 100) {
-      return this.createVirtualList(
-        container,
-        tickets,
-        (ticket) => {
-          const element = document.createElement('div');
-          element.className = 'ticket-item';
-          element.innerHTML = this.generateTicketHTML(ticket);
-          return element;
-        },
-        80
-      );
-    }
-
-    // 일반적인 경우 배치 렌더링
-    const updates = tickets.map((ticket) => ({
-      type: 'create',
-      tag: 'div',
-      properties: {
-        className: 'ticket-item',
-        innerHTML: this.generateTicketHTML(ticket),
-      },
-      parent: container,
-    }));
-
-    // 기존 내용 정리
-    container.innerHTML = '';
-
-    // 배치 업데이트 실행
-    await this.batchDOMUpdates(updates);
   },
 
   /**
-   * 최적화된 솔루션 리스트 렌더링
-   */
-  async renderOptimizedSolutionList(solutions, container) {
-    if (!solutions || solutions.length === 0) {
-      container.innerHTML = '<div class="no-data">표시할 솔루션이 없습니다.</div>';
-      return;
-    }
-
-    // 배치 렌더링으로 성능 최적화
-    const updates = solutions.map((solution) => ({
-      type: 'create',
-      tag: 'div',
-      properties: {
-        className: 'solution-item',
-        innerHTML: this.generateSolutionHTML(solution),
-      },
-      parent: container,
-    }));
-
-    container.innerHTML = '';
-    await this.batchDOMUpdates(updates);
-  },
-
-  /**
-   * 사용자 친화적인 에러 메시지를 표시하고 재시도 옵션을 제공하는 함수
+   * 🔄 기존 updateTicketSummary 메서드 호환성 유지
    * 
-   * @param {Error} error - 발생한 에러 객체
-   * @param {Function} retryCallback - 재시도 시 실행할 콜백 함수
-   * @param {string} context - 에러가 발생한 컨텍스트 (예: "티켓 요약 로드")
+   * @param {string} summary - 요약 텍스트
    */
-  showErrorWithRetry(error, retryCallback, context = '작업') {
-    try {
-      const errorMessage = error.userMessage || error.message || '알 수 없는 오류가 발생했습니다.';
-      
-      const errorContent = `
-        <div class="error-container">
-          <div class="error-icon">⚠️</div>
-          <div class="error-message">
-            <h3>${context} 중 문제가 발생했습니다</h3>
-            <p>${errorMessage}</p>
-          </div>
-          <div class="error-actions">
-            <button id="retry-button" class="btn btn-primary">다시 시도</button>
-            <button id="refresh-button" class="btn btn-secondary">페이지 새로고침</button>
-          </div>
-        </div>
-        <style>
-          .error-container {
-            text-align: center;
-            padding: 20px;
-            max-width: 400px;
-            margin: 0 auto;
-          }
-          .error-icon {
-            font-size: 48px;
-            margin-bottom: 16px;
-          }
-          .error-message h3 {
-            color: #d73027;
-            margin-bottom: 8px;
-          }
-          .error-message p {
-            color: #666;
-            margin-bottom: 20px;
-            line-height: 1.4;
-          }
-          .error-actions {
-            display: flex;
-            gap: 10px;
-            justify-content: center;
-          }
-          .btn {
-            padding: 8px 16px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-          }
-          .btn-primary {
-            background-color: #007bff;
-            color: white;
-          }
-          .btn-primary:hover {
-            background-color: #0056b3;
-          }
-          .btn-secondary {
-            background-color: #6c757d;
-            color: white;
-          }
-          .btn-secondary:hover {
-            background-color: #545b62;
-          }
-        </style>
-      `;
-
-      // 기존 컨테이너가 있으면 업데이트, 없으면 메인 컨테이너에 표시
-      const container = this.safeGetElement('init-container') || this.safeGetElement('main-container');
-      if (container) {
-        container.innerHTML = errorContent;
-        
-        // 이벤트 리스너 연결
-        const retryButton = document.getElementById('retry-button');
-        const refreshButton = document.getElementById('refresh-button');
-        
-        if (retryButton) {
-          retryButton.addEventListener('click', async () => {
-            retryButton.disabled = true;
-            retryButton.textContent = '재시도 중...';
-            
-            try {
-              await retryCallback();
-            } catch (retryError) {
-              console.error('[UI] 재시도 실패:', retryError);
-              // 재시도도 실패한 경우 다시 에러 표시
-              this.showErrorWithRetry(retryError, retryCallback, context);
-            }
-          });
-        }
-        
-        if (refreshButton) {
-          refreshButton.addEventListener('click', () => {
-            window.location.reload();
-          });
-        }
-      }
-      
-      console.error(`[UI] ${context} 에러 표시:`, error);
-    } catch (uiError) {
-      console.error('[UI] 에러 표시 중 오류:', uiError);
-      // 폴백: 콘솔에만 에러 기록 (UI 없음)
-      console.error(`🚨 UI 에러 처리 실패: ${context} - ${error.userMessage || error.message}`);
-    }
+  updateTicketSummary(summary) {
+    // Vector DB 모드로 리다이렉트
+    this.updateTicketSummaryVectorDB(summary);
   },
 
-  /**
-   * 토스트 아이콘을 반환하는 헬퍼 함수
-   */
-  getToastIcon(type) {
-    switch (type) {
-      case 'success': return '✅';
-      case 'error': return '❌';  
-      case 'warning': return '⚠️';
-      case 'info': return 'ℹ️';
-      default: return 'ℹ️';
-    }
-  },
-
-  // 의존성 확인 함수 - 다른 모듈에서 UI 모듈 사용 가능 여부 체크
-  isAvailable: function () {
-    try {
-      // UI 모듈의 핵심 의존성: GlobalState, Utils, Data
-      return (
-        typeof GlobalState !== 'undefined' &&
-        typeof Utils !== 'undefined' &&
-        typeof Data !== 'undefined'
-      );
-    } catch (error) {
-      console.error('[UI] 의존성 확인 중 오류:', error);
-      return false;
-    }
-  },
+  // ...existing code...
 };
 
-// ✅ FDK 네이티브 전역 함수 (단순화된 버전)
+/**
+ * 🚀 FDK 네이티브 전역 함수 (단순화된 버전)
+ * 
+ * FDK 네이티브 방식으로 UI 모듈의 showModal/hideModal 함수를 호출합니다.
+ */
 window.showModal = function(content, title) {
   if (window.UI && window.UI.showModal) {
     return window.UI.showModal(content, title);

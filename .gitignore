@@ -188,6 +188,11 @@ backend/attachment_cache
 backend/freshdesk_full_data*/
 backend/freshdesk_test_data*/
 
+# Embedding cache files (임베딩 캐시 파일들)
+backend/core/search/data/embedding_cache/
+**/embedding_cache/*.json
+**/embedding_cache/
+
 # Added by Claude Task Master
 # Logs
 logs
