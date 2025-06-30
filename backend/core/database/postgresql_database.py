@@ -197,26 +197,25 @@ class PostgreSQLDatabase:
             # =====================================================
             
             # 통합 객체 인덱스
-            cursor.execute(f"""
-                CREATE INDEX IF NOT EXISTS idx_{self.schema_name}_integrated_platform 
-                ON {self.schema_name}.integrated_objects(platform)
-            """)
+            # integrated_objects 테이블 인덱스 제거됨 - Vector DB 단독 모드
+            # cursor.execute(f"""
+            #     CREATE INDEX IF NOT EXISTS idx_{self.schema_name}_integrated_platform 
+            #     ON {self.schema_name}.integrated_objects(platform)
+            # """)
+            # cursor.execute(f"""
+            #     CREATE INDEX IF NOT EXISTS idx_{self.schema_name}_integrated_type 
+            #     ON {self.schema_name}.integrated_objects(object_type)
+            # """)
+            # cursor.execute(f"""
+            #     CREATE INDEX IF NOT EXISTS idx_{self.schema_name}_integrated_created 
+            #     ON {self.schema_name}.integrated_objects(created_at)
+            # """)
+            # cursor.execute(f"""
+            #     CREATE INDEX IF NOT EXISTS idx_{self.schema_name}_metadata_gin 
+            #     ON {self.schema_name}.integrated_objects USING GIN (metadata)
+            # """)
             
-            cursor.execute(f"""
-                CREATE INDEX IF NOT EXISTS idx_{self.schema_name}_integrated_type 
-                ON {self.schema_name}.integrated_objects(object_type)
-            """)
-            
-            cursor.execute(f"""
-                CREATE INDEX IF NOT EXISTS idx_{self.schema_name}_integrated_created 
-                ON {self.schema_name}.integrated_objects(created_at)
-            """)
-            
-            # JSON 인덱스 (PostgreSQL 특화)
-            cursor.execute(f"""
-                CREATE INDEX IF NOT EXISTS idx_{self.schema_name}_metadata_gin 
-                ON {self.schema_name}.integrated_objects USING GIN (metadata)
-            """)
+            logger.debug("integrated_objects 테이블 인덱스 생성 제거됨 - Vector DB 단독 모드")
             
             # 진행 로그 인덱스
             cursor.execute(f"""

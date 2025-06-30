@@ -192,8 +192,7 @@ async def query_endpoint(
         
     else:
         # 기존 벡터 검색 로직 유지
-        # 임베딩 생성 (TODO: embed_documents 함수를 llm_router에서 가져와야 함)
-        # query_embedding = embed_documents([query_for_embedding_str])[0]
+        # 임베딩 생성
         query_embedding = await llm_router.generate_embedding(
             query_for_embedding_str
         )
@@ -211,7 +210,6 @@ async def query_endpoint(
             "documents": [], "metadatas": [], "ids": [], "distances": []
         }
         if "tickets" in content_types:
-            # TODO: retrieve_top_k_docs 함수를 vector_db에서 가져와야 함
             ticket_results = vector_db.retrieve_top_k_docs(
                 query_embedding,
                 top_k_per_type,
@@ -287,7 +285,6 @@ async def query_endpoint(
     
     # 최적화된 컨텍스트를 구성합니다. (검색된 문서들로부터)
     # 새로운 최적화 매개변수들을 활용하여 품질과 성능을 향상시킵니다.
-    # TODO: build_optimized_context 함수를 llm_router에서 가져와야 함
     base_context, optimized_metadatas, context_meta = await llm_router.build_optimized_context(
         docs=docs,
         metadatas=metadatas,
@@ -300,7 +297,6 @@ async def query_endpoint(
     # LLM에 전달할 최종 컨텍스트 (티켓 정보 + 검색된 문서 정보)
     final_context_for_llm = f"{ticket_context_for_llm}{base_context}"
     
-    # TODO: build_prompt 함수를 llm_router에서 가져와야 함
     prompt = await llm_router.build_prompt(final_context_for_llm, req.query, answer_instructions=req.answer_instructions)
     
     structured_docs = []

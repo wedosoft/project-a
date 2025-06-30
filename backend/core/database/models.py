@@ -159,53 +159,25 @@ class UsageLog(Base):
 
 
 # =====================================================
-# 🗂️ 통합 객체 모델 (핵심)
+# 🗂️ [DEPRECATED] 통합 객체 모델 - Vector DB 단독 모드로 전환됨
 # =====================================================
 
+# IntegratedObject 모델 제거됨 - 모든 데이터는 Vector DB에 저장
+# 하위 호환성을 위해 빈 클래스만 유지
 class IntegratedObject(Base):
-    """통합 객체 (모든 비즈니스 로직의 중심)"""
-    __tablename__ = 'integrated_objects'
+    """[DEPRECATED] 통합 객체 모델 - Vector DB 단독 모드로 전환됨"""
+    __tablename__ = 'integrated_objects_deprecated'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    
-    # 식별 정보
-    original_id = Column(String(255), nullable=False)
-    tenant_id = Column(String(100), nullable=False)  # String for compatibility
-    platform = Column(String(50), nullable=False, default='freshdesk')
-    object_type = Column(String(50), nullable=False)
-    
-    # 핵심 데이터
-    original_data = Column(get_json_type(), nullable=False)
-    integrated_content = Column(Text, nullable=True)
-    summary = Column(Text, nullable=True)
-    
-    # 메타데이터 (검색 및 필터링용)
-    tenant_metadata = Column(get_json_type(), nullable=True)  # 최신 컬럼명
-    processed_at = Column(DateTime, nullable=True)
-    summary_generated_at = Column(DateTime, nullable=True)
-    
-    # 시간 정보
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow)
-    
-    # 관계 (복잡한 관계 제거로 테이블 생성 문제 해결)
-    ai_processing_logs = relationship("AIProcessingLog", back_populates="integrated_object")
-    
-    # 제약 조건
-    __table_args__ = (
-        Index('idx_integrated_objects_unique', 'tenant_id', 'platform', 'object_type', 'original_id', unique=True),
-        Index('idx_integrated_objects_company_platform', 'tenant_id', 'platform'),
-        Index('idx_integrated_objects_type', 'object_type'),
-        Index('idx_integrated_objects_created_at', 'created_at'),
-    )
+    # 모든 필드 제거됨 - Vector DB 사용
 
 
 class AIProcessingLog(Base):
-    """AI 처리 로그 (통합 객체 기반)"""
-    __tablename__ = 'ai_processing_logs'
+    """[DEPRECATED] AI 처리 로그 - Vector DB 단독 모드로 전환됨"""
+    __tablename__ = 'ai_processing_logs_deprecated'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    integrated_object_id = Column(Integer, ForeignKey('integrated_objects.id'), nullable=False)
+    # integrated_object_id 제거됨 - Vector DB 사용
     
     # 처리 정보
     processing_type = Column(String(50), nullable=False)

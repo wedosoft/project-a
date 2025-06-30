@@ -42,12 +42,14 @@ from core.database.vectordb import (
     search_vector_db_only,
     get_vector_db_stats
 )
-from core.ingest.integrator import (
-    create_integrated_ticket_object, 
-    create_integrated_article_object
-)
+# [DEPRECATED] integrator 기능 제거됨 - Vector DB 단독 모드
+# from core.ingest.integrator import (
+#     create_integrated_ticket_object, 
+#     create_integrated_article_object
+# )
 from core.ingest.storage import sanitize_metadata
-from core.migration_layer import store_integrated_object_with_migration
+# [DEPRECATED] migration_layer 제거됨 - Vector DB 단독 모드
+# from core.migration_layer import store_integrated_object_with_migration
 from core.ingest.validator import load_status_mappings, save_status_mappings
 from core.platforms.freshdesk.fetcher import (
     extract_tenant_id_from_domain,
@@ -227,9 +229,7 @@ async def ingest(
     
     if enable_full_streaming:
         # 🚀 신규: Vector DB 단독 파이프라인
-        logger.info(f"🚀 Vector DB 단독 모드로 데이터 수집 시작: {tenant_id} ({platform})")
-        if not enable_sql_progress:
-            logger.info("📊 SQL 진행 로그 비활성화됨 (Vector DB 단독 모드)")
+        logger.info(f"Vector DB 단독 모드 데이터 수집 시작: {tenant_id} ({platform})")
         return await ingest_vector_only_mode(
             tenant_id=tenant_id,
             platform=platform,
@@ -280,7 +280,7 @@ async def ingest_vector_only_mode(
         "processing_time": 0
     }
     
-    logger.info(f"🚀 Vector DB 단독 수집 시작 - {tenant_id}/{platform}")
+    logger.info(f"Vector DB 단독 수집 시작: {tenant_id}/{platform}")
     
     try:
         # 환경변수에서 domain과 api_key 가져오기
@@ -294,16 +294,16 @@ async def ingest_vector_only_mode(
         
         # 기존 Vector DB 데이터 삭제 (purge 옵션)
         if purge:
-            logger.info("🗑️ 기존 Vector DB 데이터 삭제 중...")
+            logger.info("기존 Vector DB 데이터 삭제 중...")
             await purge_vector_db_data(tenant_id, platform)
         
         # 1. 티켓 수집 및 Vector DB 저장
         if progress_callback:
             progress_callback({"stage": "tickets", "progress": 0})
         
-        logger.info("📋 티켓 수집 시작...")
+        logger.info("티켓 수집 시작...")
         tickets = await fetch_tickets(domain=domain, api_key=api_key, max_tickets=max_tickets)
-        logger.info(f"수집된 티켓 수: {len(tickets)}")
+        logger.info(f"수집된 티켓: {len(tickets)}개")
         
         for i, ticket in enumerate(tickets):
             try:
@@ -317,7 +317,6 @@ async def ingest_vector_only_mode(
                 if success:
                     result["tickets_processed"] += 1
                     result["total_vectors_stored"] += 1
-                    logger.debug(f"티켓 {ticket.get('id')} Vector DB 저장 완료")
                 else:
                     error_msg = f"티켓 {ticket.get('id', 'unknown')} 처리 실패"
                     result["errors"].append(error_msg)
@@ -331,13 +330,15 @@ async def ingest_vector_only_mode(
                 logger.error(error_msg)
                 result["errors"].append(error_msg)
         
+        logger.info(f"티켓 처리 완료: {result['tickets_processed']}개 성공, {len([e for e in result['errors'] if '티켓' in e])}개 실패")
+        
         # 2. KB 문서 수집 및 Vector DB 저장
         if progress_callback:
             progress_callback({"stage": "articles", "progress": 50})
         
-        logger.info("📚 KB 문서 수집 시작...")
+        logger.info("KB 문서 수집 시작...")
         articles = await fetch_kb_articles(domain=domain, api_key=api_key, max_articles=max_articles)
-        logger.info(f"수집된 KB 문서 수: {len(articles)}")
+        logger.info(f"수집된 KB 문서: {len(articles)}개")
         
         for i, article in enumerate(articles):
             try:
@@ -351,7 +352,6 @@ async def ingest_vector_only_mode(
                 if success:
                     result["articles_processed"] += 1
                     result["total_vectors_stored"] += 1
-                    logger.debug(f"KB 문서 {article.get('id')} Vector DB 저장 완료")
                 else:
                     error_msg = f"KB 문서 {article.get('id', 'unknown')} 처리 실패"
                     result["errors"].append(error_msg)
@@ -365,16 +365,18 @@ async def ingest_vector_only_mode(
                 logger.error(error_msg)
                 result["errors"].append(error_msg)
         
+        logger.info(f"KB 문서 처리 완료: {result['articles_processed']}개 성공, {len([e for e in result['errors'] if 'KB' in e])}개 실패")
+        
         result["processing_time"] = time.time() - start_time
         
-        logger.info("✅ Vector DB 단독 수집 완료:")
+        logger.info("Vector DB 단독 수집 완료:")
         logger.info(f"  - 티켓: {result['tickets_processed']}개")
         logger.info(f"  - KB 문서: {result['articles_processed']}개")
         logger.info(f"  - 총 벡터: {result['total_vectors_stored']}개")
         logger.info(f"  - 소요 시간: {result['processing_time']:.2f}초")
         
-        if result["errors"]:
-            logger.warning(f"❌ 오류 {len(result['errors'])}건 발생")
+        if result['errors']:
+            logger.warning(f"오류 {len(result['errors'])}건 발생")
             result["success"] = False
         
         return result
@@ -476,17 +478,15 @@ async def ingest_legacy_hybrid_mode(
         
         for i, ticket in enumerate(tickets):
             try:
-                # 통합 티켓 객체 생성 및 저장
-                integrated_ticket = create_integrated_ticket_object(
+                # Vector DB에 직접 저장 (integrated_object 생성 없이)
+                success = await process_ticket_to_vector_db(
                     ticket=ticket,
-                    tenant_id=tenant_id
-                )
-                
-                store_integrated_object_with_migration(
-                    integrated_object=integrated_ticket, 
-                    tenant_id=tenant_id, 
+                    tenant_id=tenant_id,
                     platform=platform
                 )
+                
+                if not success:
+                    logger.warning(f"티켓 {ticket.get('id')} Vector DB 저장 실패")
                 
                 result["tickets_processed"] += 1
                 
@@ -529,17 +529,15 @@ async def ingest_legacy_hybrid_mode(
         
         for i, article in enumerate(articles):
             try:
-                # 통합 KB 문서 객체 생성 및 저장
-                integrated_article = create_integrated_article_object(
+                # Vector DB에 직접 저장 (integrated_object 생성 없이)
+                success = await process_article_to_vector_db(
                     article=article,
-                    tenant_id=tenant_id
-                )
-                
-                store_integrated_object_with_migration(
-                    integrated_object=integrated_article, 
-                    tenant_id=tenant_id, 
+                    tenant_id=tenant_id,
                     platform=platform
                 )
+                
+                if not success:
+                    logger.warning(f"KB 문서 {article.get('id')} Vector DB 저장 실패")
                 
                 result["articles_processed"] += 1
                 
@@ -1243,7 +1241,7 @@ async def sync_summaries_to_vector_db(
                     # 벡터 DB용 문서 생성
                     doc = {
                         "id": f"{tenant_id}_{platform}_{obj.original_id}",
-                        "content": obj.summary,
+                        "content": obj.content,
                         "metadata": filtered_metadata
                     }
                     documents.append(doc)

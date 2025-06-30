@@ -233,8 +233,7 @@ class QdrantAdapter(VectorDBInterface):
                     "doc_type": metadata.get("doc_type"),
                     "original_id": metadata.get("original_id"),
                     "object_type": metadata.get("object_type", "unknown"),
-                    "content": text,  # summary → content로 변경 (원본 텍스트)
-                    "content_type": metadata.get("content_type", "original"),  # 콘텐츠 타입 명시
+                    "content": text,  # 문서 내용 (원본 텍스트)
                 }
                 
                 # 검색에 자주 사용되는 필드들을 루트 레벨에 유지 (필터링 성능 향상)
@@ -286,13 +285,12 @@ class QdrantAdapter(VectorDBInterface):
                 # 배치 크기에 도달하거나 마지막 항목이면 저장
                 if len(points) >= BATCH_SIZE or i == len(texts) - 1:
                     try:
-                        logger.info(f"배치 저장 시도 (크기: {len(points)})")
                         self.client.upsert(
                             collection_name=self.collection_name,
                             points=points,
                             wait=True
                         )
-                        logger.info(f"배치 저장 성공 (크기: {len(points)})")
+                        logger.debug(f"배치 저장 성공: {len(points)}개")
                         points = []
                     except Exception as batch_error:
                         logger.error(f"배치 저장 실패: {batch_error}")
@@ -479,13 +477,13 @@ class QdrantAdapter(VectorDBInterface):
                 FieldCondition(key="doc_type", match=MatchValue(value=doc_type))
             )
         
-        logger.info(f"검색 요청: tenant_id={tenant_id}, platform={platform}, doc_type={doc_type}, top_k={top_k}")
+        logger.debug(f"검색 요청: tenant_id={tenant_id}, top_k={top_k}")
         
         # 모든 필터를 Qdrant 쿼리에 적용
         search_filter = Filter(must=filter_conditions)
         
         try:
-            logger.info(f"Qdrant 검색 시도 (필터: tenant_id={tenant_id}, platform={platform}, doc_type={doc_type})")
+            logger.debug(f"Qdrant 검색 시도: {top_k}개 문서")
             
             # 최신 API 사용: query_points (search는 deprecated)
             try:
@@ -499,7 +497,7 @@ class QdrantAdapter(VectorDBInterface):
                     with_payload=True,
                     with_vectors=False
                 ).points
-                logger.info(f"Qdrant query_points 검색 성공: {len(search_results)}개 결과")
+                logger.debug(f"query_points 검색 성공: {len(search_results)}개")
             except (ImportError, AttributeError) as api_error:
                 logger.info(f"query_points API 미지원, search API 사용: {api_error}")
                 # 이전 API 방식 (search) 사용
@@ -511,7 +509,7 @@ class QdrantAdapter(VectorDBInterface):
                     with_payload=True,
                     with_vectors=False  # 성능 최적화: 벡터 반환 비활성화
                 )
-                logger.info(f"Qdrant search 검색 성공: {len(search_results)}개 결과")
+                logger.debug(f"search 검색 성공: {len(search_results)}개")
                 
         except Exception as e:
             logger.warning(f"최신 API 검색 실패: {e}, 이전 API로 재시도...")
@@ -526,7 +524,7 @@ class QdrantAdapter(VectorDBInterface):
                     with_payload=True,
                     with_vectors=False
                 )
-                logger.info(f"filter 방식으로 검색 성공: {len(search_results)}개 결과")
+                logger.debug(f"filter 방식 검색 성공: {len(search_results)}개")
             except Exception as filter_error:
                 logger.error(f"검색 실패: {filter_error}")
                 # 오류 발생 시 빈 결과 반환
@@ -548,7 +546,7 @@ class QdrantAdapter(VectorDBInterface):
             }
             filtered_results.append(result)
         
-        logger.info(f"최종 검색 결과: {len(filtered_results)}개 (Qdrant 쿼리 레벨 필터링 완료)")
+        logger.debug(f"최종 검색 결과: {len(filtered_results)}개")
         
         # 호환성을 위해 필드 보정 처리
         for result in filtered_results:
@@ -585,12 +583,10 @@ class QdrantAdapter(VectorDBInterface):
         
         for result in filtered_results:
             # 문서 텍스트 (내용)
-            if "text" in result:
-                documents.append(result["text"])
-            elif "description" in result:
-                documents.append(result["description"])
-            elif "content" in result:
+            if "content" in result:
                 documents.append(result["content"])
+            elif "text" in result:
+                documents.append(result["text"])
             else:
                 # 적절한 텍스트 필드가 없으면 빈 문자열 사용
                 documents.append("")
@@ -1276,7 +1272,6 @@ async def process_ticket_to_vector_db(
             "original_id": ticket_id,
             "doc_type": "ticket",
             "object_type": "ticket",
-            "content_type": "original",  # 원본 텍스트임을 표시
             
             # 검색 최적화 필드 (루트 레벨)
             "subject": subject,
@@ -1297,12 +1292,7 @@ async def process_ticket_to_vector_db(
             "attachments": ticket.get('attachments', []),
             "attachment_count": len(ticket.get('attachments', [])),
             
-            # 대화 정보 (상세)
-            "conversations": conversations,
-            
-            # 커스텀 필드 (모든 원본 필드 포함)
-            "description": ticket.get('description', ''),
-            "description_text": description,
+            # 티켓 속성
             "type": ticket.get('type'),
             "source": ticket.get('source'),
             "fr_escalated": ticket.get('fr_escalated'),
@@ -1350,7 +1340,7 @@ async def process_ticket_to_vector_db(
             ids=[vector_id]
         )
         
-        logger.debug(f"티켓 {ticket_id}: Vector DB 저장 완료")
+        logger.debug(f"티켓 {ticket_id} Vector DB 저장 완료")
         return True
         
     except Exception as e:
@@ -1408,7 +1398,6 @@ async def process_article_to_vector_db(
             "original_id": article_id,
             "doc_type": "article",
             "object_type": "article",
-            "content_type": "semantic_search",  # 의미 검색용
             
             # 검색 최적화 필드 (루트 레벨)
             "title": title,
@@ -1417,9 +1406,6 @@ async def process_article_to_vector_db(
             "created_at": article.get('created_at', ''),
             "updated_at": article.get('updated_at', ''),
             
-            # KB 문서 핵심 내용
-            "description": article.get('description', ''),
-            "description_text": description_text,  # 핵심 텍스트
             
             # 분류 및 조직 정보
             "category": article.get('category', {}),
@@ -1490,7 +1476,7 @@ async def process_article_to_vector_db(
             ids=[vector_id]
         )
         
-        logger.debug(f"KB 문서 {article_id}: Vector DB 저장 완료")
+        logger.debug(f"KB 문서 {article_id} Vector DB 저장 완료")
         return True
         
     except Exception as e:
