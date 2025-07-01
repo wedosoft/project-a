@@ -176,15 +176,17 @@ class LLMManager:
         Returns:
             요약 정보
         """
+        import time
+        
         try:
+            summary_start_time = time.time()
+            logger.info(f"🎯 [조회 티켓 요약] 시작 - ID: {ticket_data.get('id', 'unknown')}")
+            
             # 새로운 모듈식 요약 시스템 사용
             from core.llm.summarizer.core.summarizer import core_summarizer
             
-            # Vector DB 단독 모드: description_text 우선 사용 (HTML 대신 파싱된 텍스트)
-            content = (
-                ticket_data.get("description_text") or  # 파싱된 텍스트 우선
-                ticket_data.get("description", "")      # HTML 폴백
-            )
+            # 순수 텍스트만 사용 (description_text는 필수 필드)
+            content = ticket_data.get("description_text", "")
             
             if not content.strip():
                 ticket_id = ticket_data.get('id', 'unknown')
@@ -205,34 +207,26 @@ class LLMManager:
             tenant_metadata = TenantMetadataNormalizer.normalize(raw_tenant_metadata)
             logger.debug(f"메타데이터 정규화 완료: {len(tenant_metadata)}개 필드")
             
-            # 첨부파일 정보 통합 (tenant_metadata 우선 사용)
-            attachments = []
-            if tenant_metadata.get('has_attachments') and tenant_metadata.get('attachments'):
-                attachments = tenant_metadata['attachments']
-                logger.info(f"tenant_metadata에서 {len(attachments)}개 첨부파일 로드")
-            elif ticket_data.get("attachments"):
-                attachments = ticket_data.get("attachments", [])
-                logger.info(f"ticket_data에서 {len(attachments)}개 첨부파일 로드")
-            
+            # 조회티켓(realtime_ticket)은 첨부파일 처리 제외 (속도 최적화)
             metadata = {
                 "status": ticket_data.get("status"),
                 "priority": ticket_data.get("priority"),
                 "created_at": ticket_data.get("created_at"),
-                "attachments": attachments,
-                "has_attachments": len(attachments) > 0,
-                "attachment_count": len(attachments),
                 "has_conversations": tenant_metadata.get('has_conversations', False),
                 "conversation_count": tenant_metadata.get('conversation_count', 0)
             }
             
-            # 새로운 요약 시스템으로 생성 (OpenAI 강제 사용)
+            # 새로운 요약 시스템으로 생성 (YAML 템플릿 기반)
             summary = await core_summarizer.generate_summary(
                 content=content,
-                content_type="ticket",
+                content_type="realtime_ticket",  # 실시간 티켓 전용 YAML 템플릿 사용 (최고 품질)
                 subject=ticket_data.get("subject", ""),
                 metadata=metadata,
                 ui_language="ko"
             )
+            
+            summary_time = time.time() - summary_start_time
+            logger.info(f"⏱️ [조회 티켓 요약] 완료 - ID: {ticket_data.get('id')} - 소요시간: {summary_time:.2f}초")
             
             # AI 처리 정보 업데이트
             updated_metadata = TenantMetadataNormalizer.update_ai_processing_info(
@@ -280,7 +274,7 @@ class LLMManager:
         
         for i, ticket in enumerate(similar_tickets):
             try:
-                print(f"🔍 [유사 티켓 요약] {i+1}/{len(similar_tickets)} 요약 생성 중 (ID: {ticket.get('id', 'unknown')})")
+                logger.info(f"🔍 [유사 티켓 요약] {i+1}/{len(similar_tickets)} 요약 생성 중 (ID: {ticket.get('id', 'unknown')})")
                 
                 # 티켓 데이터 구조 변환 (generate_ticket_summary 형식에 맞춤)
                 ticket_data_for_summary = {
@@ -295,34 +289,47 @@ class LLMManager:
                 }
                 
                 # YAML 템플릿 기반 유사 티켓 요약 생성
-                content = ticket.get("content", "")
-                title = ticket.get("title", "제목 없음")
-                
-                if not content.strip():
-                    summary_text = "유사 티켓 내용이 비어있어 요약을 생성할 수 없습니다."
-                    print(f"⚠️ [유사 티켓 요약] 티켓 {ticket.get('id')} 내용이 비어있음")
-                else:
-                    try:
-                        # 기존 generate_ticket_summary 함수 사용 (YAML 템플릿 기반)
-                        summary_result_dict = await self.generate_ticket_summary(ticket_data_for_summary)
-                        summary_result = summary_result_dict.get("summary", "요약 생성 실패")
-                        
-                        # 유사도 정보 추가
+                try:
+                    import time
+                    ticket_start_time = time.time()
+                    
+                    # 유사 티켓용 간소화된 요약 생성 (직접 core_summarizer 호출)
+                    from core.llm.summarizer.core.summarizer import core_summarizer
+                    
+                    summary_result = await core_summarizer.generate_summary(
+                        content=ticket_data_for_summary.get("description_text", ""),
+                        content_type="ticket",  # 일반 ticket 템플릿 사용 (조회 티켓보다 간소화)
+                        subject=ticket_data_for_summary.get("subject", ""),
+                        metadata=ticket_data_for_summary.get("tenant_metadata", {}),
+                        ui_language="ko"
+                    )
+                    
+                    ticket_time = time.time() - ticket_start_time
+                    logger.info(f"⏱️ [유사 티켓 {i+1}] 요약 소요시간: {ticket_time:.2f}초")
+                    
+                    # 요약 결과 검증
+                    if summary_result and summary_result.strip():
                         summary_text = f"{summary_result}\n\n**🎯 유사도**: {ticket.get('score', 0.0):.3f}"
-                        
-                        print(f"✅ [유사 티켓 요약] 티켓 {ticket.get('id')} YAML 템플릿 기반 요약 완료 ({len(summary_text)}자)")
-                        print(f"    유사 티켓 제목: {title}")
-                        print(f"    유사도: {ticket.get('score', 0.0):.3f}")
-                        
-                    except Exception as e:
-                        print(f"❌ [유사 티켓 요약] 티켓 {ticket.get('id')} YAML 템플릿 요약 실패: {e}")
-                        # 폴백: 간단한 마크다운 요약
-                        summary_parts = []
-                        summary_parts.append(f"## 🔍 {title}")
-                        summary_parts.append(f"**유사 문제**: {content[:300]}...")
-                        summary_parts.append(f"**유사도**: {ticket.get('score', 0.0):.3f}")
-                        summary_text = "\n\n".join(summary_parts)
-                        print(f"⚠️ [유사 티켓 요약] 티켓 {ticket.get('id')} 폴백 요약 사용")
+                    else:
+                        logger.warning(f"Empty summary result for ticket {ticket.get('id')}, using fallback")
+                        ticket_title = ticket.get("title", "제목 없음")
+                        summary_text = f"## 🔍 {ticket_title}\n\n**문제 상황**: 유사 티켓 요약 생성 실패\n\n**🎯 유사도**: {ticket.get('score', 0.0):.3f}"
+                    
+                    logger.info(f"✅ [유사 티켓 요약] 티켓 {ticket.get('id')} YAML 템플릿 기반 요약 완료 ({len(summary_text)}자)")
+                    logger.info(f"\n📄 [유사 티켓 {ticket.get('id')}] \n{summary_text}")
+                    
+                except Exception as e:
+                    logger.error(f"❌ [유사 티켓 요약] 티켓 {ticket.get('id')} YAML 템플릿 요약 실패: {e}")
+                    # 폴백: 간단한 마크다운 요약
+                    ticket_title = ticket.get("title", "제목 없음")
+                    ticket_content = ticket.get("content", "")
+                    summary_parts = []
+                    summary_parts.append(f"## 🔍 {ticket_title}")
+                    summary_parts.append(f"**유사 문제**: {ticket_content[:300] if ticket_content else '내용 없음'}...")
+                    summary_parts.append(f"**유사도**: {ticket.get('score', 0.0):.3f}")
+                    summary_text = "\n\n".join(summary_parts)
+                    logger.warning(f"⚠️ [유사 티켓 요약] 티켓 {ticket.get('id')} 폴백 요약 사용")
+                    logger.info(f"\n📄 [유사 티켓 {ticket.get('id')} - 폴백] \n{summary_text}")
                 
                 # 결과 구성
                 summarized_ticket = {
@@ -347,7 +354,7 @@ class LLMManager:
                 }
                 summarized_tickets.append(fallback_ticket)
         
-        print(f"🎯 [유사 티켓 요약] 완료: {len(summarized_tickets)}건 처리")
+        logger.info(f"🎯 [유사 티켓 요약] 완료: {len(summarized_tickets)}건 처리")
         return summarized_tickets
     
     async def generate_knowledge_base_summary(self, kb_data: Dict[str, Any]) -> Dict[str, Any]:

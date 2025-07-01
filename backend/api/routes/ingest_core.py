@@ -437,6 +437,7 @@ async def trigger_data_ingestion(
         enable_full_streaming = os.getenv("ENABLE_FULL_STREAMING_MODE", "true") == "true"
         enable_llm_summary = os.getenv("ENABLE_LLM_SUMMARY_GENERATION", "true") == "true"
         
+        
         summary_success = False
         summary_result = {}
         
@@ -495,12 +496,9 @@ async def trigger_data_ingestion(
         if summary_success:
             if enable_full_streaming and not enable_llm_summary:
                 # Vector DB 단독 모드에서는 벡터 DB 동기화도 건너뜀 (이미 ingest에서 처리됨)
-                logger.info("   ├─ 3단계: LLM 요약 생성 ⏭️ (건너뜀)")
-                logger.info("   └─ 4단계: 벡터 DB 동기화 ⏭️ (이미 완료됨)")
                 progress_callback("Vector DB 단독 모드 - 처리 완료", 100.0)
                 sync_success = True  # 동기화도 성공으로 처리
             else:
-                logger.info("   ├─ 3단계: LLM 요약 생성 ✅")
                 
                 # 요약 생성이 성공한 경우에만 벡터 DB 동기화 진행
                 logger.info("   └─ 4단계: 벡터 DB 동기화 🔄")
@@ -541,9 +539,7 @@ async def trigger_data_ingestion(
                     logger.error(f"   └─ 5단계: 벡터 DB 동기화 ❌ (오류: {str(e)[:100]}...)")
                     progress_callback("벡터 DB 동기화 실패", 95.0)
         else:
-            logger.error("   ├─ 4단계: LLM 요약 생성 ❌")
-            logger.warning("   └─ 5단계: 벡터 DB 동기화 건너뜀 (요약 생성 실패로 인해)")
-            progress_callback("요약 생성 실패로 벡터 DB 동기화 건너뜀", 95.0)
+            progress_callback("처리 실패", 95.0)
             sync_success = False
         
         end_time = datetime.now()
@@ -570,9 +566,6 @@ async def trigger_data_ingestion(
         logger.info(f"   ├─ 시작시간: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
         logger.info(f"   ├─ 완료시간: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
         logger.info(f"   ├─ 이미지 메타데이터: ✅")
-        if not (enable_full_streaming and not enable_llm_summary):
-            # LLM 요약이 활성화된 경우만 표시
-            logger.info(f"   ├─ 요약 생성: {'✅' if summary_success else '❌'}")
         logger.info(f"   └─ 벡터 DB: {'✅' if sync_success else '❌'}")
         
         # 상황에 맞는 메시지 생성

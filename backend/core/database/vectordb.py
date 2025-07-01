@@ -1249,6 +1249,9 @@ async def process_ticket_to_vector_db(
         
         ticket_id = str(ticket.get('id', ''))
         subject = ticket.get('subject', '')
+        
+        # 디버깅: 티켓 처리 시작
+        logger.info(f"🎫 티켓 처리 시작: ID={ticket_id}, 제목={subject[:50]}...")
         description = ticket.get('description_text', '') or ticket.get('description', '')
         
         # 대화 데이터 통합
@@ -1372,12 +1375,18 @@ async def process_ticket_to_vector_db(
         
         # Vector DB에 저장 (원본 텍스트 사용)
         vector_id = f"{tenant_id}_{platform}_{ticket_id}"
+        logger.info(f"🔍 벡터 DB 저장 시도: vector_id={vector_id}")
         vector_db.add_documents(
             texts=[content_for_vector],  # 원본 텍스트 저장
             embeddings=embeddings,
             metadatas=[vector_metadata],
             ids=[vector_id]
         )
+        logger.info(f"✅ 벡터 DB 저장 완료: vector_id={vector_id}")
+        
+        # 저장 후 총 문서 수 확인
+        total_count = vector_db.count(tenant_id=tenant_id, platform=platform)
+        logger.info(f"📊 현재 총 문서 수: {total_count}개")
         
         logger.debug(f"티켓 {ticket_id} Vector DB 저장 완료")
         return True
@@ -1690,10 +1699,8 @@ async def search_vector_db_only(
                 # id, score를 제외한 나머지 필드들이 payload 데이터
                 metadata_keys = [k for k in result.keys() if k not in ['id', 'score']]
                 logger.debug(f"첫 번째 검색 결과 메타데이터: {metadata_keys}")
-                logger.info(f"[DEBUG] doc_type: '{result.get('doc_type', 'MISSING')}', original_id: '{result.get('original_id', 'MISSING')}'")
-                logger.info(f"[DEBUG] subject: '{result.get('subject', 'MISSING')}', title: '{result.get('title', 'MISSING')}'")
-                logger.info(f"[DEBUG] 전체 payload 샘플: {dict(list(result.items())[:10])}")
-                logger.info(f"[DEBUG] result 타입: {type(result)}, 키 수: {len(result)}")
+                # 간단한 디버그 정보만 로깅
+                logger.debug(f"Search result: doc_type='{result.get('doc_type')}', id='{result.get('original_id')}'")
             
             formatted_result = {
                 "id": result.get("id", ""),
@@ -1731,14 +1738,17 @@ async def search_vector_db_only(
             score = result.get("score", 0.0)
             original_id = result.get("original_id", "unknown")
             
-            result_summary.append(f"{i+1}. [{doc_type}] {title[:50]}{'...' if len(title) > 50 else ''} (ID: {original_id}, 점수: {score:.3f})")
+            # 간단한 상위 결과 요약 (제목 25자 제한)
+            short_title = title[:25] + '...' if len(title) > 25 else title
+            result_summary.append(f"{short_title} (ID: {original_id}, {score:.3f})")
         
         search_type = "혼합" if not doc_types else "/".join(doc_types)
         logger.info(f"Vector DB 검색 완료 [{search_type}]: {len(formatted_results)}건 반환")
+        
+        # 상위 3건만 간단하게 로깅
         if result_summary:
-            logger.info(f"상위 결과: {'; '.join(result_summary)}")
-        else:
-            logger.warning("검색 결과가 없거나 결과 포맷팅에 문제가 있습니다")
+            top_3 = result_summary[:3]  # 상위 3건만
+            logger.info(f"상위 결과: {' | '.join(top_3)}")
         
         return formatted_results
         

@@ -71,6 +71,13 @@ class CoreSummarizer:
         try:
             logger.info(f"Starting summary generation - Type: {content_type}, Language: {ui_language}")
             
+            # Content 검증
+            if not content or not content.strip():
+                logger.warning(f"Empty or None content provided for {content_type}")
+                content = f"제목: {subject}\n내용: 상세 내용이 없습니다."
+                
+            logger.debug(f"Content length: {len(content)} characters")
+            
             # 1. Select relevant attachments (choose between LLM or rule-based)
             selected_attachments = []
             if metadata and metadata.get('attachments'):
@@ -119,20 +126,71 @@ class CoreSummarizer:
                 ui_language=ui_language
             )
             
+            # 조회 티켓 프롬프트 디버깅 로그
+            if content_type == "realtime_ticket":
+                logger.info(f"\n📝 [조회 티켓 프롬프트 디버깅]")
+                logger.info(f"System Prompt 길이: {len(system_prompt)} 문자")
+                logger.info(f"System Prompt 미리보기: {system_prompt[:300]}...")
+                logger.info(f"User Prompt 길이: {len(user_prompt)} 문자")
+                # 한국어/영어 섹션 타이틀 모두 체크
+                korean_sections = "🔍 문제 현황" in system_prompt or "💡 원인 분석" in system_prompt
+                english_sections = "🔍 Problem Overview" in system_prompt or "💡 Root Cause" in system_prompt
+                if korean_sections or english_sections:
+                    logger.info("✅ realtime_ticket 템플릿 구조 확인됨")
+                else:
+                    logger.warning("⚠️ realtime_ticket 템플릿 구조가 누락됨!")
+            
             # 5. Generate summary using LLM
+            # 메시지 검증
+            if not system_prompt or not system_prompt.strip():
+                raise ValueError("Empty system prompt generated")
+            if not user_prompt or not user_prompt.strip():
+                raise ValueError("Empty user prompt generated")
+                
             messages = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ]
             
-            response = await self._get_manager().generate_for_use_case(
-                messages=messages,
-                use_case="summarization",
-                max_tokens=1200,
-                temperature=0.3
-            )
+            logger.debug(f"Messages prepared - System: {len(system_prompt)} chars, User: {len(user_prompt)} chars")
+            
+            # 환경변수로 모델 설정 제어
+            import os
+            
+            if content_type == "realtime_ticket":
+                # 조회 티켓: REALTIME_ 환경변수 사용
+                max_tokens = int(os.getenv("REALTIME_MAX_TOKENS", "1200"))
+                temperature = float(os.getenv("REALTIME_TEMPERATURE", "0.05"))
+                response = await self._get_manager().generate_for_use_case(
+                    messages=messages,
+                    use_case="realtime",
+                    max_tokens=max_tokens,
+                    temperature=temperature
+                )
+            else:
+                # 유사 티켓: BATCH_ 환경변수 사용 (빠르고 효율적)
+                max_tokens = int(os.getenv("BATCH_MAX_TOKENS", "800"))
+                temperature = float(os.getenv("BATCH_TEMPERATURE", "0.1"))
+                response = await self._get_manager().generate_for_use_case(
+                    messages=messages,
+                    use_case="summarization",
+                    max_tokens=max_tokens,
+                    temperature=temperature
+                )
             
             summary = response.content.strip() if response.success else "요약 생성 실패"
+            
+            # 조회 티켓 결과 품질 검증
+            if content_type == "realtime_ticket" and summary:
+                # 한국어/영어 섹션 구조 모두 체크
+                korean_structure = any(section in summary for section in ["🔍 문제 현황", "💡 원인 분석", "⚡ 해결 진행상황", "🎯 중요 인사이트"])
+                english_structure = any(section in summary for section in ["🔍 Problem Overview", "💡 Root Cause", "⚡ Resolution Progress", "🎯 Key Insights"])
+                has_structure = korean_structure or english_structure
+                if has_structure:
+                    logger.info("✅ [조회 티켓] realtime_ticket 구조화된 요약 생성 성공")
+                else:
+                    logger.warning("⚠️ [조회 티켓] 구조화되지 않은 요약 - 재생성 고려 필요")
+                    logger.debug(f"생성된 요약 미리보기: {summary[:500]}...")
             
             # 6. Validate quality
             validation_result = self.quality_validator.validate_summary_quality(

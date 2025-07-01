@@ -77,6 +77,14 @@ strictly_forbidden:
   - "Using generic terms when specific product/service names are available"
   - "Approximating dates, times, or numerical values"
   - "Adding parenthetical explanations not present in original text"
+  - "Creating bilingual formats like 'Company (회사명)' unless appearing exactly in original"
+  - "Adding Korean/English translations in parentheses not in original text"  
+  - "Translating or converting company names from original text"
+  - "Translating or converting person names from original text" 
+  - "Adding any translations, explanations, or alternative spellings to names, companies, or contact information"
+  - "Converting between Korean and English versions of names - use EXACT original text only"
+  - "Including detailed personal information like full addresses, phone numbers, or email addresses"
+  - "Displaying sensitive contact details beyond company name and contact person name"
   - "Summarizing or paraphrasing exact error messages or codes"
 
 formatting_rules:
@@ -84,7 +92,7 @@ formatting_rules:
     다음 구조를 정확히 따라 마크다운으로 작성하세요:
     
     ## 🔍 문제 현황
-    - 고객사 정보 및 담당자 연락처 (실제 고객, 상담원 아님)
+    - 고객사 및 담당자: 회사명과 담당자명만 표기 (상세 주소, 전화번호, 이메일 등 개인정보 제외)
     - 기술적 문제 또는 비즈니스 요구사항
     - 관련 제품/서비스/시스템 (원문의 정확한 명칭 사용)
     - 중요한 날짜, 데드라인, 긴급도 요소
@@ -109,6 +117,8 @@ formatting_rules:
     - 서비스 요구사항: 제한사항, 종속성, 호환성 요구사항
     - 프로세스 인사이트: 모범 사례, 워크플로우, 절차적 지식
     - 향후 고려사항: 유사 사례에 대한 권장사항, 예방 조치
+    
+    **중요: 회사명과 담당자명은 원문 표기 그대로 사용하되, 개인정보 보호를 위해 상세 주소, 전화번호, 이메일은 제외하세요!**
   en: |
     Follow this exact structure in markdown format:
     

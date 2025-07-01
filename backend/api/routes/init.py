@@ -230,9 +230,9 @@ async def init_vector_only_mode(
         if include_summary:
             llm_manager = get_llm_manager()
             
-            print(f"🎯 [실시간 티켓 요약] 티켓 {ticket_id} AI 요약 생성 시작")
-            print(f"    제목: {ticket_data.get('subject', 'N/A')}")
-            print(f"    대화수: {len(ticket_data.get('conversations', []))}개, 첨부파일: {len(ticket_data.get('attachments', []))}개")
+            logger.info(f"🎯 [실시간 티켓 요약] 티켓 {ticket_id} AI 요약 생성 시작")
+            logger.info(f"    제목: {ticket_data.get('subject', 'N/A')}")
+            logger.info(f"    대화수: {len(ticket_data.get('conversations', []))}개, 첨부파일: {len(ticket_data.get('attachments', []))}개")
             
             # YAML 템플릿 기반 실시간 요약 생성
             try:
@@ -242,12 +242,12 @@ async def init_vector_only_mode(
                 summary_result = summary_result_dict.get("summary", "요약 생성 실패")
                 
                 summary_text = summary_result
-                print(f"✅ [실시간 티켓 요약] 티켓 {ticket_id} YAML 템플릿 기반 요약 완료 ({len(summary_text)}자)")
-                print(f"    실시간 요약 (첫 100자): {summary_text[:100]}...")
+                logger.info(f"✅ [실시간 티켓 요약] 티켓 {ticket_id} YAML 템플릿 기반 요약 완료 ({len(summary_text)}자)")
+                logger.info(f"\n📄 [조회 티켓 요약] \n{summary_text}")
                 
             except Exception as e:
                 summary_text = f"YAML 템플릿 기반 요약 생성 중 오류 발생: {str(e)}"
-                print(f"❌ [실시간 티켓 요약] 티켓 {ticket_id} YAML 템플릿 요약 생성 실패: {e}")
+                logger.error(f"❌ [실시간 티켓 요약] 티켓 {ticket_id} YAML 템플릿 요약 생성 실패: {e}")
         
         # 3. 유사 티켓 검색 및 요약 생성 (Vector DB + AI 요약)
         similar_tickets = []
@@ -281,6 +281,11 @@ async def init_vector_only_mode(
                 logger.info(f"유사 티켓 {len(raw_similar_tickets)}건에 대한 AI 요약 생성 시작")
                 similar_tickets = await llm_manager.generate_similar_ticket_summaries(raw_similar_tickets)
                 logger.info(f"유사 티켓 AI 요약 완료: {len(similar_tickets)}건")
+                
+                # 유사 티켓 요약 결과 로깅
+                for i, ticket in enumerate(similar_tickets, 1):
+                    ticket_summary = ticket.get('summary', '요약없음')
+                    logger.info(f"\n📄 [유사 티켓 {i}] ID: {ticket.get('id')} \n{ticket_summary}")
         
         # 4. KB 문서 검색 (메타데이터만, 요약 없음)
         kb_documents = []
@@ -680,33 +685,36 @@ async def init_streaming_vector_only_mode(
                 }
             }
             
-            # 간단한 요약 생성 (스트리밍 모드)
+            # 조회 티켓 최우선 품질: realtime_ticket 템플릿 사용
             try:
-                # 기본 정보 수집
-                subject = ticket_data.get("subject", "제목 없음")
-                description = ticket_data.get("description_text") or ticket_data.get("description", "")
-                conversations = ticket_data.get("conversations", [])
+                logger.info("🎯 [조회 티켓 최우선] realtime_ticket 템플릿 사용 시작")
                 
-                # 간단한 마크다운 요약 생성
-                summary_parts = []
-                summary_parts.append(f"## 🎫 {subject}")
+                # LLM 매니저를 통해 YAML 템플릿 기반 요약 생성
+                summary_result_dict = await llm_manager.generate_ticket_summary(ticket_data)
+                summary_text = summary_result_dict.get("summary", "요약 생성 실패")
                 
-                if description:
-                    summary_parts.append(f"**문제 상황**: {description[:200]}...")
+                # realtime_ticket 템플릿 구조 확인 (한국어/영어 모두)
+                if summary_text and len(summary_text) > 100:
+                    korean_sections = any(section in summary_text for section in ["🔍 문제 현황", "💡 원인 분석", "⚡ 해결 진행상황", "🎯 중요 인사이트"])
+                    english_sections = any(section in summary_text for section in ["🔍 Problem Overview", "💡 Root Cause", "⚡ Resolution Progress", "🎯 Key Insights"])
+                    has_sections = korean_sections or english_sections
+                    if has_sections:
+                        lang = "한국어" if korean_sections else "영어"
+                        logger.info(f"✅ [조회 티켓] realtime_ticket 4개 섹션 구조 정상 생성 ({lang})")
+                    else:
+                        logger.warning("⚠️ [조회 티켓] realtime_ticket 구조가 적용되지 않음")
+                        logger.warning(f"생성된 요약 미리보기: {summary_text[:300]}...")
                 
-                if conversations:
-                    summary_parts.append(f"**대화 진행**: {len(conversations)}개 대화")
-                    latest_conv = conversations[-1] if conversations else None
-                    if latest_conv and latest_conv.get("body_text"):
-                        summary_parts.append(f"**최근 업데이트**: {latest_conv['body_text'][:150]}...")
-                
-                summary_parts.append(f"**상태**: {ticket_data.get('status', 'Unknown')}")
-                summary_parts.append(f"**우선순위**: {ticket_data.get('priority', 'Normal')}")
-                
-                summary_text = "\n\n".join(summary_parts)
+                logger.info(f"✅ [조회 티켓 최우선] realtime_ticket 템플릿 기반 요약 생성 완료 ({len(summary_text)}문자)")
+                logger.info(f"\n📄 [조회 티켓 요약] \n{summary_text}")
                 
             except Exception as e:
-                summary_text = f"요약 생성 중 오류 발생: {str(e)}"
+                logger.error(f"❌ [조회 티켓 최우선] realtime_ticket 템플릿 사용 실패: {e}")
+                # 폴백: 기존 간단한 형식
+                subject = ticket_data.get("subject", "제목 없음")
+                description = ticket_data.get("description_text") or ticket_data.get("description", "")
+                summary_text = f"## 🎫 {subject}\n\n**문제 상황**: {description[:200]}...\n\n**오류**: {str(e)}"
+                logger.info(f"\n📄 [조회 티켓 요약 - 폴백] \n{summary_text}")
             
             # 요약 결과 전송
             summary_chunk = {
@@ -748,6 +756,8 @@ async def init_streaming_vector_only_mode(
                 if raw_similar_tickets:
                     yield f"data: {json.dumps(send_progress('similar_summaries', 70, f'유사 티켓 요약 생성 중 (0/{len(raw_similar_tickets)})'))}\n\n"
                     similar_tickets = await llm_manager.generate_similar_ticket_summaries(raw_similar_tickets)
+                    
+                    # 유사 티켓 요약 완료 (로깅은 non-streaming 모드와 중복 방지)
                 
                 similar_chunk = {
                     "type": "similar_tickets",

@@ -1269,6 +1269,7 @@ async def sync_summaries_to_vector_db(
                         
                         if embeddings and len(embeddings) == len(texts):
                             # 벡터 DB에 저장
+                            logger.info(f"🔍 벡터 DB 저장 시도: {len(texts)}개 문서")
                             vector_db.add_documents(
                                 texts=texts,
                                 embeddings=embeddings,
@@ -1276,7 +1277,11 @@ async def sync_summaries_to_vector_db(
                                 ids=ids
                             )
                             total_processed += len(batch_documents)
-                            logger.info(f"배치 {batch_num} 완료: {len(batch_documents)}건 처리")
+                            logger.info(f"✅ 배치 {batch_num} 완료: {len(batch_documents)}건 벡터 DB에 저장됨")
+                            
+                            # 벡터 DB 저장 확인
+                            collection_count = vector_db.count(tenant_id=tenant_id, platform=platform)
+                            logger.info(f"📊 현재 벡터 DB 총 문서 수: {collection_count}개")
                         else:
                             logger.error(f"배치 {batch_num} 임베딩 생성 실패: {len(embeddings) if embeddings else 0}/{len(texts)}")
                             return {"status": "error", "message": f"배치 {batch_num} 임베딩 생성 실패", "processed_count": total_processed}
@@ -1401,6 +1406,7 @@ async def sync_summaries_to_vector_db(
                         
                         if embeddings and len(embeddings) == len(texts):
                             # 벡터 DB에 저장
+                            logger.info(f"🔍 벡터 DB 저장 시도: {len(texts)}개 문서")
                             vector_db.add_documents(
                                 texts=texts,
                                 embeddings=embeddings,
@@ -1408,7 +1414,11 @@ async def sync_summaries_to_vector_db(
                                 ids=ids
                             )
                             total_processed += len(batch_documents)
-                            logger.info(f"배치 {batch_num} 완료: {len(batch_documents)}건 처리")
+                            logger.info(f"✅ 배치 {batch_num} 완료: {len(batch_documents)}건 벡터 DB에 저장됨")
+                            
+                            # 벡터 DB 저장 확인
+                            collection_count = vector_db.count(tenant_id=tenant_id, platform=platform)
+                            logger.info(f"📊 현재 벡터 DB 총 문서 수: {collection_count}개")
                         else:
                             logger.error(f"배치 {batch_num} 임베딩 생성 실패: {len(embeddings) if embeddings else 0}/{len(texts)}")
                             return {"status": "error", "message": f"배치 {batch_num} 임베딩 생성 실패", "processed_count": total_processed}

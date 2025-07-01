@@ -45,6 +45,16 @@ class PromptLoader:
             with open(template_path, 'r', encoding='utf-8') as f:
                 template_data = yaml.safe_load(f)
             
+            # realtime_ticket 템플릿 로딩 디버깅
+            if template_name == "realtime_ticket":
+                logger.info(f"📝 [realtime_ticket 템플릿] 로드 성공: {template_path}")
+                logger.info(f"Content type: {template_data.get('content_type')}")
+                logger.info(f"Quality level: {template_data.get('quality_level')}")
+                if 'formatting_rules' in template_data:
+                    ko_format = template_data['formatting_rules'].get('ko', '')
+                    has_sections = '🔍 문제 현황' in ko_format
+                    logger.info(f"Korean formatting rules present: {bool(ko_format)}, Has sections: {has_sections}")
+            
             logger.debug(f"Loaded template: {template_path}")
             return template_data
             

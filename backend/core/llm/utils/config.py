@@ -38,10 +38,10 @@ class ConfigManager:
                     "temperature": float(os.getenv("SUMMARIZATION_TEMPERATURE", "0.1"))
                 },
                 "realtime": {
-                    "provider": os.getenv("REALTIME_MODEL_PROVIDER", "openai"),
-                    "model": os.getenv("REALTIME_MODEL_NAME", "gpt-4o-mini"),
-                    "max_tokens": int(os.getenv("REALTIME_MAX_TOKENS", "2000")),
-                    "temperature": float(os.getenv("REALTIME_TEMPERATURE", "0.2"))
+                    "provider": os.getenv("REALTIME_MODEL_PROVIDER", "gemini"),
+                    "model": os.getenv("REALTIME_MODEL_NAME", "gemini-1.5-flash"),
+                    "max_tokens": int(os.getenv("REALTIME_MAX_TOKENS", "1500")),
+                    "temperature": float(os.getenv("REALTIME_TEMPERATURE", "0.02"))
                 },
                 "batch": {
                     "provider": os.getenv("BATCH_MODEL_PROVIDER", "gemini"),

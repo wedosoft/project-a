@@ -67,18 +67,15 @@ class InitHybridAdapter:
                 def create_summary_runnable():
                     async def summary_func(_):
                         summary_start = time.time()
-                        self.logger.info("빠른 JSON 요약 생성 시작 (병렬)")
+                        self.logger.info("🎯 [조회 티켓 프리미엄] realtime_ticket 템플릿 요약 생성 시작")
                         
-                        # 최적화된 JSON 요약 생성
-                        json_summary = await self._generate_fast_json_summary(
+                        # 조회 티켓 최우선 품질: realtime_ticket 템플릿 직접 사용
+                        markdown_summary = await self._generate_premium_realtime_summary(
                             llm_manager, ticket_data
                         )
                         
-                        # JSON을 아름다운 마크다운으로 변환
-                        markdown_summary = self._json_to_beautiful_markdown(json_summary)
-                        
                         summary_time = time.time() - summary_start
-                        self.logger.info(f"빠른 요약 완료 ({summary_time:.2f}초)")
+                        self.logger.info(f"🎯 [조회 티켓 프리미엄] 완료 ({summary_time:.2f}초) - 길이: {len(markdown_summary)}문자")
                         
                         # 기존 형식과 호환되도록 래핑
                         return {
@@ -86,7 +83,7 @@ class InitHybridAdapter:
                                 "task_type": "summary",
                                 "summary": {"ticket_summary": markdown_summary},
                                 "success": True,
-                                "json_metadata": json_summary  # 디버깅용
+                                "template_used": "realtime_ticket"  # 디버깅용
                             }, 
                             "execution_time": summary_time
                         }
@@ -486,9 +483,65 @@ class InitHybridAdapter:
             "estimated_time": "1-2시간"
         }
     
-    def _json_to_beautiful_markdown(self, json_data: Dict[str, Any]) -> str:
+    async def _generate_premium_realtime_summary(self, llm_manager, ticket_data: Dict[str, Any]) -> str:
         """
-        JSON 데이터를 아름다운 마크다운으로 변환
+        조회 티켓 최우선 품질: realtime_ticket 템플릿을 직접 사용한 프리미엄 요약 생성
+        """
+        try:
+            self.logger.info("🎯 [조회 티켓 프리미엄] realtime_ticket 템플릿 사용 시작")
+            from core.llm.summarizer.core.summarizer import core_summarizer
+            
+            # 티켓 내용 구성
+            content = (
+                ticket_data.get("description_text") or  # 파싱된 텍스트 우선
+                ticket_data.get("description", "")      # HTML 폴백
+            )
+            
+            if not content.strip():
+                content = f"제목: {ticket_data.get('subject', '')}\n내용: 상세 내용이 없습니다."
+            
+            # 메타데이터 구성
+            metadata = {
+                "status": ticket_data.get("metadata", {}).get("status"),
+                "priority": ticket_data.get("metadata", {}).get("priority"),
+                "created_at": ticket_data.get("metadata", {}).get("created_at"),
+                "company_name": ticket_data.get("metadata", {}).get("company_name"),
+                "customer_email": ticket_data.get("metadata", {}).get("customer_email")
+            }
+            
+            # realtime_ticket 템플릿으로 최고 품질 요약 생성
+            self.logger.info(f"📝 [조회 티켓] 콘텐츠 길이: {len(content)} 문자")
+            self.logger.info(f"📝 [조회 티켓] 제목: {ticket_data.get('subject', '')[:100]}...")
+            
+            summary = await core_summarizer.generate_summary(
+                content=content,
+                content_type="realtime_ticket",  # 최고 품질 템플릿
+                subject=ticket_data.get("subject", ""),
+                metadata=metadata,
+                ui_language="ko"
+            )
+            
+            # 생성된 요약의 구조 확인
+            if summary and len(summary) > 100:
+                has_sections = any(section in summary for section in ["🔍 문제 현황", "💡 원인 분석", "⚡ 해결 진행상황", "🎯 중요 인사이트"])
+                if has_sections:
+                    self.logger.info("✅ [조회 티켓] realtime_ticket 4개 섹션 구조 정상 생성")
+                else:
+                    self.logger.warning("⚠️ [조회 티켓] realtime_ticket 구조가 적용되지 않음")
+                    self.logger.warning(f"생성된 요약 미리보기: {summary[:300]}...")
+            
+            self.logger.info("✅ [조회 티켓] realtime_ticket 템플릿 기반 프리미엄 요약 생성 완료")
+            return summary
+            
+        except Exception as e:
+            self.logger.error(f"프리미엄 요약 생성 실패: {e}")
+            # 폴백: 기존 JSON 방식
+            json_summary = await self._generate_fast_json_summary(llm_manager, ticket_data)
+            return self._json_to_beautiful_markdown_fallback(json_summary)
+    
+    def _json_to_beautiful_markdown_fallback(self, json_data: Dict[str, Any]) -> str:
+        """
+        폴백용 마크다운 변환 (기존 로직 유지)
         """
         try:
             # 아이콘 매핑

@@ -9,8 +9,8 @@ services:
     image: backend
     container_name: project-a
     environment:
-      # 로그 레벨 설정 (ERROR로 설정하여 시작시 상세 로그 숨김)
-      - LOG_LEVEL=ERROR
+      # 로그 레벨 설정 (디버깅을 위해 INFO로 임시 변경)
+      - LOG_LEVEL=INFO
       # 표준화된 환경변수 사용
       - TENANT_ID=${TENANT_ID}
       - FRESHDESK_API_KEY=${FRESHDESK_API_KEY}
@@ -20,6 +20,14 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      # LLM 모델 설정
+      - REALTIME_MODEL_PROVIDER=${REALTIME_MODEL_PROVIDER}
+      - REALTIME_MODEL_NAME=${REALTIME_MODEL_NAME}
+      - REALTIME_MAX_TOKENS=${REALTIME_MAX_TOKENS}
+      - REALTIME_TEMPERATURE=${REALTIME_TEMPERATURE}
+      - BATCH_MODEL_PROVIDER=${BATCH_MODEL_PROVIDER}
+      - BATCH_MODEL_NAME=${BATCH_MODEL_NAME}
+      - ENABLE_LLM_SUMMARY_GENERATION=${ENABLE_LLM_SUMMARY_GENERATION}
       # Qdrant Cloud 사용 (로컬 Qdrant 서비스 제거됨)
       - QDRANT_URL=${QDRANT_URL}
       - QDRANT_API_KEY=${QDRANT_API_KEY}

@@ -64,20 +64,13 @@ class PromptBuilder:
             # 템플릿 로드
             if content_type == "ticket":
                 template_data = self.prompt_loader.get_system_prompt_template("ticket")
-            elif content_type == "realtime_ticket":
-                template_data = self.prompt_loader.get_system_prompt_template("realtime_ticket")
-                sections = self.get_section_titles(ui_language)
                 
-                # 언어별 지시사항 선택
+                # 일반 ticket 템플릿 처리
                 language_instruction = template_data['language_instructions'].get(
                     content_language, 
                     template_data['language_instructions']['default']
                 )
                 
-                # 첨부파일 포맷
-                attachment_format = self.get_attachment_format(ui_language)
-                
-                # 프롬프트 구성
                 base_instruction = template_data['base_instruction'].get(
                     ui_language, 
                     template_data['base_instruction']['ko']
@@ -87,6 +80,46 @@ class PromptBuilder:
                 forbidden = '\n'.join([f"- {item}" for item in template_data['strictly_forbidden']])
                 formatting = template_data['formatting_rules'].get(
                     ui_language, 
+                    template_data['formatting_rules']['ko']
+                )
+                
+                return f"""{base_instruction}
+
+CRITICAL MISSION: {template_data['critical_mission']}
+
+ABSOLUTE REQUIREMENTS:
+{requirements}
+
+STRICTLY FORBIDDEN:
+{forbidden}
+
+FORMATTING RULES:
+- {language_instruction}
+{formatting}"""
+                
+            elif content_type == "realtime_ticket":
+                template_data = self.prompt_loader.get_system_prompt_template("realtime_ticket")
+                sections = self.get_section_titles(ui_language)
+                
+                # 언어별 지시사항 선택 (원문 언어에 따라 결정)
+                language_instruction = template_data['language_instructions'].get(
+                    content_language, 
+                    template_data['language_instructions']['default']
+                )
+                
+                # 첨부파일 포맷 (항상 영어 버전 사용)
+                attachment_format = self.get_attachment_format('en')
+                
+                # 프롬프트 구성 (항상 영어 버전 사용 - AI 이해도 향상)
+                base_instruction = template_data['base_instruction'].get(
+                    'en', 
+                    template_data['base_instruction']['ko']
+                )
+                
+                requirements = '\n'.join([f"- {req}" for req in template_data['absolute_requirements']])
+                forbidden = '\n'.join([f"- {item}" for item in template_data['strictly_forbidden']])
+                formatting = template_data['formatting_rules'].get(
+                    'en', 
                     template_data['formatting_rules']['ko']
                 )
                 
@@ -125,9 +158,6 @@ STRUCTURE YOUR SUMMARY:
 - Service Requirements: Limitations, dependencies, compatibility requirements
 - Process Insights: Best practices, workflows, procedural knowledge
 - Future Considerations: Recommendations for similar cases, preventive measures
-
-{sections['references']}
-{attachment_format}
 
 STRICTLY FORBIDDEN:
 {forbidden}
@@ -228,12 +258,24 @@ FORMATTING RULES:
             # Jinja2 템플릿 렌더링
             template = self.jinja_env.from_string(template_data['template'])
             
-            return template.render(
-                subject=subject if subject else None,
-                metadata_formatted=metadata_formatted if metadata_formatted else None,
-                content=content,
+            # content 검증 및 기본값 설정
+            safe_content = content if content and content.strip() else "티켓 내용을 찾을 수 없습니다."
+            safe_subject = subject if subject and subject.strip() else "제목 없음"
+            safe_metadata = metadata_formatted if metadata_formatted and metadata_formatted.strip() else "메타데이터 없음"
+            
+            user_prompt = template.render(
+                subject=safe_subject,
+                metadata_formatted=safe_metadata,
+                content=safe_content,
                 instruction_text=instruction_text
             )
+            
+            # 생성된 프롬프트 검증
+            if not user_prompt or user_prompt.strip() == "":
+                logger.error(f"Generated empty user prompt for content_type: {content_type}")
+                raise ValueError(f"Empty user prompt generated for {content_type}")
+                
+            return user_prompt
             
         except Exception as e:
             logger.error(f"Failed to build user prompt for {content_type}: {e}")

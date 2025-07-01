@@ -26,64 +26,69 @@ template: |
 # 언어별 분석 지시사항 (실시간 요약 전용 - 최고 품질)
 instructions:
   ko: |
-    위 내용을 분석하여 상담원이 티켓을 열었을 때 즉시 완벽한 이해를 할 수 있는 최고 품질의 실시간 요약을 작성하세요.
-    이 요약은 유사티켓 요약보다 더 상세하고 정확하며 즉시 활용 가능해야 합니다.
+    Analyze the content above and create a PREMIUM-QUALITY real-time summary that enables agents to achieve perfect understanding instantly when opening tickets.
+    This summary must be more detailed, accurate, and immediately actionable than similar ticket summaries.
+    
+    **CRITICAL: Respond in the same language as the original content (Korean content → Korean response, English content → English response)**
 
-    🚀 실시간 요약 PREMIUM 요구사항 (유사티켓보다 우수해야 함):
-    - 모든 회사명, 담당자명, 연락처 정보 (100% 정확도)
-    - 모든 기술적 용어와 에러 메시지 (정확한 인용부호 사용)
-    - 모든 날짜, 시간, 데드라인 (정확한 연도와 시간 포함)
-    - 모든 도메인명, URL, 이메일 주소 (완전한 주소)
-    - 고객의 모든 질문, 우려사항, 요청사항
-    - 서비스명과 제품명 (정확한 버전 정보 포함)
-    - 모든 시도된 해결책과 그 구체적 결과
-    - 비즈니스 영향도와 긴급성 지표
-    - 대화 흐름과 문제 발전 과정
+    🚀 Real-time Summary PREMIUM Requirements (Must exceed similar tickets):
+    - Company names and contact person names ONLY (protect privacy - exclude detailed addresses, phone numbers, emails)
+    - All technical terms and error messages (with exact quotation marks)
+    - All dates, times, deadlines (precise years and timestamps)
+    - All domain names, URLs (when relevant to technical issues)
+    - All customer questions, concerns, and requests
+    - Service and product names (including exact version information)
+    - All attempted solutions and their specific outcomes
+    - Business impact levels and urgency indicators
+    - Conversation flow and problem evolution process
 
-    ⚡ 실시간 분석 특화 요구사항:
-    - 상담원이 5초 내에 핵심을 파악할 수 있도록 구조화
-    - 에스컬레이션 시 필요한 모든 정보 포함
-    - 다음 조치 사항을 명확히 제시
-    - 관련 당사자들의 역할과 책임 명확히 구분
-    - 기술적 맥락과 비즈니스 맥락 모두 포함
-    - 첨부파일 처리 제외 (실시간 속도 최적화)
-    - 상담원의 인지 부하 최소화
+    ⚡ Real-time Analysis Specialization:
+    - Structure for 5-second core comprehension by agents
+    - Include all information needed for escalation
+    - Clearly present next action items
+    - Distinguish roles and responsibilities of all parties
+    - Include both technical and business context
+    - Exclude attachment processing (real-time speed optimization)
+    - Minimize cognitive load for agents
 
-    🎯 실시간 요약 고유 기능:
-    - 즉시 에스컬레이션 준비: 상급자에게 바로 전달 가능한 정보
-    - 제로 모호성: 모든 문장이 명확하고 애매하지 않아야 함
-    - 맥락 완성도: 원본 티켓을 다시 볼 필요 없는 완전한 정보
-    - 긴급도 표시: 시간에 민감한 요소를 눈에 띄게 강조
-    - 이해관계자 매핑: 모든 당사자와 현재 상태 명확히 식별
-    - 문제 진화: 시간에 따른 문제 발전 과정 표시
-    - 해결 상태: 모든 시도된 해결책의 현재 상태
-    - 고객 기대치: 고객이 기대하는 것과 시점
+    🎯 Real-time Summary Unique Features:
+    - Instant Escalation Prep: Information ready for immediate handoff to seniors
+    - Zero Ambiguity: Every statement must be crystal clear and unambiguous
+    - Context Completeness: Full information without needing to review original ticket
+    - Urgency Indicators: Highlight time-sensitive elements prominently
+    - Stakeholder Mapping: Clearly identify all parties and their current status
+    - Problem Evolution: Show how issue has developed over time
+    - Resolution Status: Current state of all attempted solutions
+    - Customer Expectations: What customer expects and when
 
-    🚫 절대 금지 (실시간 품질 저하 방지):
-    - "원문에서 충분한 정보가 제공되지 않아" 같은 변명 문구
-    - "추가 정보 제공 시" 같은 면책 조항
-    - "해결 과정이 아직 시작되지 않았습니다" 같은 추측
-    - 원문에 없는 괄호 설명이나 번역 추가
-    - 일반적인 표현으로 구체적 정보 대체
-    - 에러 메시지 요약 (정확한 인용 필수)
-    - 요약을 짧게 만들기 위해 기술적 세부사항 생략
-    - 구체적인 제품/서비스명 대신 일반적 용어 사용
+    🚫 Absolutely Forbidden (Real-time quality degradation prevention):
+    - Excuse phrases like "insufficient information provided"
+    - Disclaimer clauses like "more information needed"
+    - Speculative phrases like "resolution process not yet started"
+    - Adding parenthetical explanations or translations not in original
+    - Replacing specific information with generic expressions
+    - Summarizing error messages (exact quotation required)
+    - Omitting technical details to make summary shorter
+    - Using generic terms when specific product/service names are available
+    - Including detailed personal info (addresses, phone numbers, emails)
 
-    💎 용어 정확성 (최고 수준):
-    - 회사명: 원문의 정확한 표기법 (대소문자, 띄어쓰기 포함)
-    - 기술 용어: 업계 표준 용어를 원문 그대로 (DNS, MX, API, SSL 등)
-    - 제품/서비스명: 공식 명칭 그대로 (Google Workspace, Office 365 등)
-    - 도메인명과 URL: 완전한 주소를 정확히
-    - 에러 코드와 메시지: 정확한 인용부호로 표시
-    - 설정값과 매개변수: 숫자와 문자열을 정확히
+    💎 Terminology Accuracy (Highest level):
+    - Company names: Exact original notation (including case, spacing)
+    - Technical terms: Industry standard terms exactly as in original (DNS, MX, API, SSL, etc.)
+    - Product/service names: Official names exactly (Google Workspace, Office 365, etc.)
+    - Domain names and URLs: Complete addresses exactly
+    - Error codes and messages: Display with exact quotation marks
+    - Configuration values and parameters: Numbers and strings exactly
 
-    📝 실시간 작성 원칙 (프리미엄 기준):
-    - 간결함과 완전성의 완벽한 균형
-    - 기술적 정확성과 비즈니스 맥락의 조화
-    - 시간 순서에 따른 논리적 구성
-    - 즉시 실행 가능한 정보 제공
-    - 원문 언어와 톤 완벽 보존
-    - 상담원의 즉시 이해를 위한 최적화
+    📝 Real-time Writing Principles (Premium standards):
+    - Perfect balance of conciseness and completeness
+    - Harmony of technical accuracy and business context
+    - Logical organization following chronological order
+    - Provide immediately actionable information
+    - Perfect preservation of original language and tone
+    - Optimization for instant agent comprehension
+    
+    **IMPORTANT: Output must be in Korean language only, despite English instructions**
 
   en: |
     Analyze the content above and create a PREMIUM-QUALITY real-time summary that enables agents to achieve perfect understanding instantly when opening tickets.
