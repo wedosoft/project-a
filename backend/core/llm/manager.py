@@ -180,11 +180,18 @@ class LLMManager:
             # 새로운 모듈식 요약 시스템 사용
             from core.llm.summarizer.core.summarizer import core_summarizer
             
-            # integrated_text 우선 사용, 없으면 description 사용
-            content = ticket_data.get("integrated_text") or ticket_data.get("description", "")
+            # Vector DB 단독 모드: description_text 우선 사용 (HTML 대신 파싱된 텍스트)
+            content = (
+                ticket_data.get("description_text") or  # 파싱된 텍스트 우선
+                ticket_data.get("description", "")      # HTML 폴백
+            )
             
             if not content.strip():
-                logger.warning("티켓 내용이 비어있음")
+                ticket_id = ticket_data.get('id', 'unknown')
+                has_desc_text = bool(ticket_data.get('description_text'))
+                has_desc = bool(ticket_data.get('description'))
+                logger.warning(f"티켓 {ticket_id} 내용이 비어있음 - description_text: {has_desc_text}, description: {has_desc}")
+                logger.debug(f"티켓 {ticket_id} 데이터 구조: {list(ticket_data.keys())}")
                 return {
                     "summary": "분석할 내용이 없습니다.",
                     "key_points": ["빈 내용"],
@@ -252,6 +259,96 @@ class LLMManager:
                 "priority_recommendation": "확인 필요",
                 "urgency_level": "보통"
             }
+    
+    async def generate_similar_ticket_summaries(self, similar_tickets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        유사 티켓들에 대한 요약 생성 (순차 처리)
+        
+        Args:
+            similar_tickets: 유사 티켓 목록 [{
+                "id": "123",
+                "title": "제목", 
+                "content": "내용",
+                "score": 0.85,
+                "metadata": {...}
+            }]
+            
+        Returns:
+            요약이 포함된 유사 티켓 목록
+        """
+        summarized_tickets = []
+        
+        for i, ticket in enumerate(similar_tickets):
+            try:
+                print(f"🔍 [유사 티켓 요약] {i+1}/{len(similar_tickets)} 요약 생성 중 (ID: {ticket.get('id', 'unknown')})")
+                
+                # 티켓 데이터 구조 변환 (generate_ticket_summary 형식에 맞춤)
+                ticket_data_for_summary = {
+                    "id": ticket.get("id"),
+                    "subject": ticket.get("title", ""),
+                    "description_text": ticket.get("content", ""),  # Vector DB의 content 사용
+                    "description": ticket.get("content", ""),       # 폴백용
+                    "status": ticket.get("metadata", {}).get("status"),
+                    "priority": ticket.get("metadata", {}).get("priority"),
+                    "created_at": ticket.get("metadata", {}).get("created_at"),
+                    "tenant_metadata": ticket.get("metadata", {})
+                }
+                
+                # YAML 템플릿 기반 유사 티켓 요약 생성
+                content = ticket.get("content", "")
+                title = ticket.get("title", "제목 없음")
+                
+                if not content.strip():
+                    summary_text = "유사 티켓 내용이 비어있어 요약을 생성할 수 없습니다."
+                    print(f"⚠️ [유사 티켓 요약] 티켓 {ticket.get('id')} 내용이 비어있음")
+                else:
+                    try:
+                        # 기존 generate_ticket_summary 함수 사용 (YAML 템플릿 기반)
+                        summary_result_dict = await self.generate_ticket_summary(ticket_data_for_summary)
+                        summary_result = summary_result_dict.get("summary", "요약 생성 실패")
+                        
+                        # 유사도 정보 추가
+                        summary_text = f"{summary_result}\n\n**🎯 유사도**: {ticket.get('score', 0.0):.3f}"
+                        
+                        print(f"✅ [유사 티켓 요약] 티켓 {ticket.get('id')} YAML 템플릿 기반 요약 완료 ({len(summary_text)}자)")
+                        print(f"    유사 티켓 제목: {title}")
+                        print(f"    유사도: {ticket.get('score', 0.0):.3f}")
+                        
+                    except Exception as e:
+                        print(f"❌ [유사 티켓 요약] 티켓 {ticket.get('id')} YAML 템플릿 요약 실패: {e}")
+                        # 폴백: 간단한 마크다운 요약
+                        summary_parts = []
+                        summary_parts.append(f"## 🔍 {title}")
+                        summary_parts.append(f"**유사 문제**: {content[:300]}...")
+                        summary_parts.append(f"**유사도**: {ticket.get('score', 0.0):.3f}")
+                        summary_text = "\n\n".join(summary_parts)
+                        print(f"⚠️ [유사 티켓 요약] 티켓 {ticket.get('id')} 폴백 요약 사용")
+                
+                # 결과 구성
+                summarized_ticket = {
+                    "id": ticket.get("id"),
+                    "title": ticket.get("title", ""),
+                    "content": summary_text,  # YAML 템플릿 기반 마크다운 요약
+                    "score": ticket.get("score", 0.0),
+                    "metadata": ticket.get("metadata", {})
+                }
+                
+                summarized_tickets.append(summarized_ticket)
+                
+            except Exception as e:
+                print(f"❌ [유사 티켓 요약] 티켓 {ticket.get('id', 'unknown')} 요약 생성 실패: {e}")
+                # 실패한 경우 원본 content 사용
+                fallback_ticket = {
+                    "id": ticket.get("id"),
+                    "title": ticket.get("title", ""),
+                    "content": ticket.get("content", "요약 생성에 실패했습니다.")[:200] + "...",
+                    "score": ticket.get("score", 0.0),
+                    "metadata": ticket.get("metadata", {})
+                }
+                summarized_tickets.append(fallback_ticket)
+        
+        print(f"🎯 [유사 티켓 요약] 완료: {len(summarized_tickets)}건 처리")
+        return summarized_tickets
     
     async def generate_knowledge_base_summary(self, kb_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -410,10 +507,12 @@ class LLMManager:
             top_k_tickets = inputs.get("top_k_tickets", 5)
             top_k_kb = inputs.get("top_k_kb", 5)
             
-            # 검색 쿼리 구성
+            # 검색 쿼리 구성 (로그 개선)
             subject = ticket_data.get("subject", "")
             description = ticket_data.get("description_text", "")
             search_query = f"{subject} {description}".strip()
+            
+            logger.info(f"티켓 {ticket_data.get('id', 'unknown')} 검색 쿼리: '{search_query[:100]}...'")
             
             if len(search_query) > 500:
                 search_query = search_query[:500]

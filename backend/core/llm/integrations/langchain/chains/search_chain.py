@@ -199,7 +199,7 @@ class SearchChain:
             "title": title,
             "ticket_url": ticket_url,
             "similarity_score": round(similarity_score, 3),
-            "summary": summary,
+            "content": summary,
             "metadata": metadata,
             "full_content": summary_text
         }

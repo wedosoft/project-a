@@ -253,6 +253,18 @@ class QdrantAdapter(VectorDBInterface):
                 if metadata.get("updated_at"):
                     searchable_fields["updated_at"] = metadata.get("updated_at")
                 
+                # 이미지/첨부파일 관련 메타데이터 (벡터 DB 검색 최적화)
+                if metadata.get("inline_images"):
+                    searchable_fields["inline_images"] = metadata.get("inline_images")
+                    searchable_fields["inline_image_count"] = len(metadata.get("inline_images", []))
+                if metadata.get("all_images"):
+                    searchable_fields["all_images"] = metadata.get("all_images")
+                    searchable_fields["total_image_count"] = len(metadata.get("all_images", []))
+                if metadata.get("has_inline_images") is not None:
+                    searchable_fields["has_inline_images"] = metadata.get("has_inline_images")
+                if metadata.get("image_count") is not None:
+                    searchable_fields["image_count"] = metadata.get("image_count")
+                
                 # 확장 메타데이터: 모든 원본 정보 포함 (첨부파일, 커스텀 필드 등)
                 extended_metadata = {k: v for k, v in metadata.items() 
                                    if k not in essential_fields and k not in searchable_fields and v is not None}
@@ -1231,6 +1243,7 @@ async def process_ticket_to_vector_db(
         # LLM Manager import
         from core.llm.manager import LLMManager
         from core.search.embeddings import embed_documents
+        from core.utils.image_metadata_extractor import extract_ticket_image_metadata, validate_image_metadata
         
         llm_manager = LLMManager()
         
@@ -1264,6 +1277,22 @@ async def process_ticket_to_vector_db(
         # 🚀 Vector DB 단독 모드: 원본 텍스트 직접 사용 (LLM 요약 없음)
         content_for_vector = full_text  # 원본 텍스트를 그대로 사용
         
+        # 🖼️ 이미지 메타데이터 추출
+        image_metadata = extract_ticket_image_metadata(ticket)
+        
+        # 이미지 메타데이터 유효성 검증
+        if not validate_image_metadata(image_metadata):
+            logger.warning(f"티켓 {ticket_id}: 이미지 메타데이터 유효성 검증 실패")
+            # 기본값으로 설정
+            image_metadata = {
+                "inline_images": [],
+                "all_images": [],
+                "has_inline_images": False,
+                "inline_image_count": 0,
+                "total_image_count": 0,
+                "image_count": 0
+            }
+        
         # Vector DB용 메타데이터 구성 (풍부한 정보 포함)
         vector_metadata = {
             # 필수 식별 정보
@@ -1277,7 +1306,7 @@ async def process_ticket_to_vector_db(
             "subject": subject,
             "status": ticket.get('status', 2),
             "priority": ticket.get('priority', 1),
-            "has_attachments": bool(ticket.get('attachments', [])),
+            "has_attachments": bool(ticket.get('all_attachments', []) or ticket.get('attachments', [])),
             "conversation_count": len(conversations),
             "created_at": ticket.get('created_at', ''),
             "updated_at": ticket.get('updated_at', ''),
@@ -1289,8 +1318,18 @@ async def process_ticket_to_vector_db(
             "company_id": ticket.get('company_id'),
             
             # 첨부파일 정보 (상세)
-            "attachments": ticket.get('attachments', []),
-            "attachment_count": len(ticket.get('attachments', [])),
+            "attachments": ticket.get('all_attachments', []) or ticket.get('attachments', []),
+            "attachment_count": len(ticket.get('all_attachments', []) or ticket.get('attachments', [])),
+            
+            # 🖼️ 인라인 이미지 정보 (자동 추출)
+            "inline_images": image_metadata["inline_images"],
+            "inline_image_count": image_metadata["inline_image_count"],
+            "has_inline_images": image_metadata["has_inline_images"],
+            
+            # 🖼️ 통합 이미지 정보 (첨부파일 + 인라인 이미지)
+            "all_images": image_metadata["all_images"],
+            "total_image_count": image_metadata["total_image_count"],
+            "image_count": image_metadata["image_count"],  # 호환성
             
             # 티켓 속성
             "type": ticket.get('type'),
@@ -1367,6 +1406,7 @@ async def process_article_to_vector_db(
         # LLM Manager import
         from core.llm.manager import LLMManager
         from core.search.embeddings import embed_documents
+        from core.utils.image_metadata_extractor import extract_article_image_metadata, validate_image_metadata
         
         llm_manager = LLMManager()
         
@@ -1390,6 +1430,22 @@ async def process_article_to_vector_db(
         # KB 문서는 원본 텍스트를 그대로 사용 (요약하지 않음)
         display_content = full_text
         
+        # 🖼️ 이미지 메타데이터 추출
+        image_metadata = extract_article_image_metadata(article)
+        
+        # 이미지 메타데이터 유효성 검증
+        if not validate_image_metadata(image_metadata):
+            logger.warning(f"KB 문서 {article_id}: 이미지 메타데이터 유효성 검증 실패")
+            # 기본값으로 설정
+            image_metadata = {
+                "inline_images": [],
+                "all_images": [],
+                "has_inline_images": False,
+                "inline_image_count": 0,
+                "total_image_count": 0,
+                "image_count": 0
+            }
+        
         # Vector DB용 메타데이터 구성 (KB 문서의 모든 정보 포함)
         vector_metadata = {
             # 필수 식별 정보
@@ -1402,7 +1458,7 @@ async def process_article_to_vector_db(
             # 검색 최적화 필드 (루트 레벨)
             "title": title,
             "status": article.get('status', 2),
-            "has_attachments": bool(article.get('attachments', [])),
+            "has_attachments": bool(article.get('all_attachments', []) or article.get('attachments', [])),
             "created_at": article.get('created_at', ''),
             "updated_at": article.get('updated_at', ''),
             
@@ -1434,8 +1490,18 @@ async def process_article_to_vector_db(
             "thumbs_down": article.get('thumbs_down', 0),
             
             # 첨부파일 정보
-            "attachments": article.get('attachments', []),
-            "attachment_count": len(article.get('attachments', [])),
+            "attachments": article.get('all_attachments', []) or article.get('attachments', []),
+            "attachment_count": len(article.get('all_attachments', []) or article.get('attachments', [])),
+            
+            # 🖼️ 인라인 이미지 정보 (자동 추출)
+            "inline_images": image_metadata["inline_images"],
+            "inline_image_count": image_metadata["inline_image_count"],
+            "has_inline_images": image_metadata["has_inline_images"],
+            
+            # 🖼️ 통합 이미지 정보 (첨부파일 + 인라인 이미지)
+            "all_images": image_metadata["all_images"],
+            "total_image_count": image_metadata["total_image_count"],
+            "image_count": image_metadata["image_count"],
             
             # 다국어 지원
             "language": article.get('language', 'ko'),
@@ -1571,6 +1637,8 @@ async def search_vector_db_only(
     try:
         from core.search.embeddings import embed_documents
         
+        logger.info(f"Vector DB 검색 시작 - 쿼리: '{query[:100]}...', 테넌트: {tenant_id}, 문서타입: {doc_types}, 제한: {limit}")
+        
         # 검색 쿼리 임베딩 생성
         query_embeddings = embed_documents([query])
         if not query_embeddings or len(query_embeddings) != 1:
@@ -1601,37 +1669,77 @@ async def search_vector_db_only(
                 ]
         
         # Vector DB 검색
-        search_results = vector_db.search(
-            query_vector=query_embedding,
-            limit=limit,
-            score_threshold=score_threshold,
-            filter=filter_conditions
+        search_response = vector_db.search(
+            query_embedding=query_embedding,
+            top_k=limit,
+            tenant_id=tenant_id,
+            platform=platform
         )
+        
+        # 검색 결과 추출
+        search_results = search_response.get("results", []) if isinstance(search_response, dict) else search_response
         
         # 결과 포맷팅 (새로운 필드 구조 적용)
         formatted_results = []
         for result in search_results:
-            payload = result.get("payload", {})
+            # **중요**: payload 데이터는 result의 루트 레벨에 이미 spread되어 있음
+            # result.get("payload", {}) -> 빈 딕셔너리 반환으로 인한 빈 메타데이터 버그 수정
+            
+            # 디버깅을 위한 메타데이터 로그 (첫 번째 결과만)
+            if len(formatted_results) == 0:
+                # id, score를 제외한 나머지 필드들이 payload 데이터
+                metadata_keys = [k for k in result.keys() if k not in ['id', 'score']]
+                logger.debug(f"첫 번째 검색 결과 메타데이터: {metadata_keys}")
+                logger.info(f"[DEBUG] doc_type: '{result.get('doc_type', 'MISSING')}', original_id: '{result.get('original_id', 'MISSING')}'")
+                logger.info(f"[DEBUG] subject: '{result.get('subject', 'MISSING')}', title: '{result.get('title', 'MISSING')}'")
+                logger.info(f"[DEBUG] 전체 payload 샘플: {dict(list(result.items())[:10])}")
+                logger.info(f"[DEBUG] result 타입: {type(result)}, 키 수: {len(result)}")
+            
             formatted_result = {
                 "id": result.get("id", ""),
-                "content": payload.get("content", ""),  # 새로운 content 필드 사용
+                "content": result.get("content", ""),  # payload는 이미 result 루트에 spread됨
                 "score": result.get("score", 0.0),
-                "metadata": payload,  # 전체 payload를 metadata로 제공
-                "doc_type": payload.get("doc_type", ""),
-                "original_id": payload.get("original_id", ""),
+                "metadata": result,  # 전체 result를 metadata로 제공 (id, score 포함)
+                "doc_type": result.get("doc_type", ""),
+                "original_id": result.get("original_id", ""),
                 # 검색 최적화된 필드들을 루트 레벨에서 접근 가능
-                "subject": payload.get("subject", ""),
-                "title": payload.get("title", ""),
-                "status": payload.get("status"),
-                "priority": payload.get("priority"),
-                "has_attachments": payload.get("has_attachments", False),
-                "created_at": payload.get("created_at", ""),
-                "updated_at": payload.get("updated_at", ""),
-                "extended_metadata": payload.get("extended_metadata", {})  # 확장 메타데이터
+                "subject": result.get("subject", ""),
+                "title": result.get("title", ""),
+                "status": result.get("status"),
+                "priority": result.get("priority"),
+                "has_attachments": result.get("has_attachments", False),
+                "created_at": result.get("created_at", ""),
+                "updated_at": result.get("updated_at", ""),
+                "extended_metadata": result.get("extended_metadata", {})  # 확장 메타데이터
             }
             formatted_results.append(formatted_result)
         
-        logger.info(f"Vector DB 검색 완료: {len(formatted_results)}건 반환")
+        # 검색 결과 상세 로그
+        result_summary = []
+        for i, result in enumerate(formatted_results[:3]):  # 상위 3개만 로그
+            doc_type = result.get("doc_type", "unknown")
+            metadata = result.get("metadata", {})
+            
+            # 제목 추출 (티켓은 subject, 문서는 title)
+            title = metadata.get("subject") or metadata.get("title", "")
+            if not title:
+                # 메타데이터에서 직접 찾기
+                title = result.get("subject") or result.get("title", "")
+            if not title:
+                title = f"ID_{result.get('original_id', 'unknown')}"
+            
+            score = result.get("score", 0.0)
+            original_id = result.get("original_id", "unknown")
+            
+            result_summary.append(f"{i+1}. [{doc_type}] {title[:50]}{'...' if len(title) > 50 else ''} (ID: {original_id}, 점수: {score:.3f})")
+        
+        search_type = "혼합" if not doc_types else "/".join(doc_types)
+        logger.info(f"Vector DB 검색 완료 [{search_type}]: {len(formatted_results)}건 반환")
+        if result_summary:
+            logger.info(f"상위 결과: {'; '.join(result_summary)}")
+        else:
+            logger.warning("검색 결과가 없거나 결과 포맷팅에 문제가 있습니다")
+        
         return formatted_results
         
     except Exception as e:

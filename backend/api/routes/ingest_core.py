@@ -444,17 +444,19 @@ async def trigger_data_ingestion(
             # Vector DB 단독 모드에서는 요약 생성 건너뛰기
             logger.info("🔄 데이터 처리 단계 시작...")
             logger.info("   ├─ 1단계: 원시 데이터 수집 ✅")
-            logger.info("   ├─ 2단계: 데이터 저장 및 정규화 ✅") 
-            logger.info("   └─ 3단계: LLM 요약 생성 ⏭️ (Vector DB 단독 모드에서는 건너뜀)")
-            progress_callback("Vector DB 단독 모드 - 요약 생성 건너뜀", 85.0)
+            logger.info("   ├─ 2단계: 이미지 메타데이터 추출 ✅")
+            logger.info("   ├─ 3단계: 벡터 임베딩 생성 및 저장 ✅") 
+            logger.info("   └─ 4단계: LLM 요약 생성 ⏭️ (Vector DB 단독 모드에서는 건너뜀)")
+            progress_callback("Vector DB 단독 모드 - 이미지 메타데이터 포함 처리 완료", 85.0)
             summary_success = True  # 건너뛴 것을 성공으로 처리
         else:
             # 데이터 수집 완료 후 요약 생성 (기존 로직)
             logger.info("🔄 데이터 처리 단계 시작...")
             logger.info("   ├─ 1단계: 원시 데이터 수집 ✅")
-            logger.info("   ├─ 2단계: 데이터 저장 및 정규화 ✅") 
-            logger.info("   └─ 3단계: LLM 요약 생성 🔄")
-            progress_callback("LLM 요약 생성 중...", 85.0)
+            logger.info("   ├─ 2단계: 이미지 메타데이터 추출 ✅")
+            logger.info("   ├─ 3단계: 데이터 저장 및 정규화 ✅") 
+            logger.info("   └─ 4단계: LLM 요약 생성 🔄")
+            progress_callback("이미지 메타데이터 포함 - LLM 요약 생성 중...", 85.0)
             
             try:
                 # 요약 생성 단계 추가
@@ -520,27 +522,27 @@ async def trigger_data_ingestion(
                     
                     if sync_result.get("status") == "success" and synced_count > 0:
                         sync_success = True
-                        logger.info(f"   └─ 4단계: 벡터 DB 동기화 ✅ ({synced_count:,}개 문서 처리)")
-                        progress_callback("벡터 DB 동기화 완료", 100.0)
+                        logger.info(f"   └─ 5단계: 벡터 DB 동기화 ✅ ({synced_count:,}개 문서 처리)")
+                        progress_callback("이미지 메타데이터 포함 벡터 DB 동기화 완료", 100.0)
                     else:
                         errors = sync_result.get('errors', [])
                         error_count = len(errors) if errors else 0
                         
                         if errors:
-                            logger.error(f"   └─ 4단계: 벡터 DB 동기화 ❌ (성공: {synced_count}개, 오류: {error_count}개)")
+                            logger.error(f"   └─ 5단계: 벡터 DB 동기화 ❌ (성공: {synced_count}개, 오류: {error_count}개)")
                             logger.error(f"      └─ 주요 오류: {errors[:3]}")  # 첫 3개 오류만 표시
                         elif synced_count == 0:
-                            logger.warning(f"   └─ 4단계: 벡터 DB 동기화 ⚠️ (처리할 데이터 없음)")
+                            logger.warning(f"   └─ 5단계: 벡터 DB 동기화 ⚠️ (처리할 데이터 없음)")
                         else:
-                            logger.warning(f"   └─ 4단계: 벡터 DB 동기화 ⚠️ (처리: {synced_count}개, 상태: {sync_result.get('status', 'unknown')})")
+                            logger.warning(f"   └─ 5단계: 벡터 DB 동기화 ⚠️ (처리: {synced_count}개, 상태: {sync_result.get('status', 'unknown')})")
                         
                         progress_callback("벡터 DB 동기화 완료 (일부 오류)", 95.0)
                 except Exception as e:
-                    logger.error(f"   └─ 4단계: 벡터 DB 동기화 ❌ (오류: {str(e)[:100]}...)")
+                    logger.error(f"   └─ 5단계: 벡터 DB 동기화 ❌ (오류: {str(e)[:100]}...)")
                     progress_callback("벡터 DB 동기화 실패", 95.0)
         else:
-            logger.error("   ├─ 3단계: LLM 요약 생성 ❌")
-            logger.warning("   └─ 4단계: 벡터 DB 동기화 건너뜀 (요약 생성 실패로 인해)")
+            logger.error("   ├─ 4단계: LLM 요약 생성 ❌")
+            logger.warning("   └─ 5단계: 벡터 DB 동기화 건너뜀 (요약 생성 실패로 인해)")
             progress_callback("요약 생성 실패로 벡터 DB 동기화 건너뜀", 95.0)
             sync_success = False
         
@@ -548,7 +550,12 @@ async def trigger_data_ingestion(
         duration = (end_time - start_time).total_seconds()
         
         # 전체 성공 여부 판단
-        overall_success = summary_success and sync_success
+        if enable_full_streaming and not enable_llm_summary:
+            # Vector DB 단독 모드: 요약 무시하고 벡터 DB 성공 여부만 확인
+            overall_success = sync_success
+        else:
+            # 하이브리드 모드: 요약과 벡터 DB 모두 성공해야 함
+            overall_success = summary_success and sync_success
         
         # 수집 결과 요약 로깅
         if overall_success:
@@ -562,18 +569,29 @@ async def trigger_data_ingestion(
         logger.info(f"   ├─ 소요시간: {duration:.2f}초 ({duration/60:.1f}분)")
         logger.info(f"   ├─ 시작시간: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
         logger.info(f"   ├─ 완료시간: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
-        logger.info(f"   ├─ 요약 생성: {'✅' if summary_success else '❌'}")
+        logger.info(f"   ├─ 이미지 메타데이터: ✅")
+        if not (enable_full_streaming and not enable_llm_summary):
+            # LLM 요약이 활성화된 경우만 표시
+            logger.info(f"   ├─ 요약 생성: {'✅' if summary_success else '❌'}")
         logger.info(f"   └─ 벡터 DB: {'✅' if sync_success else '❌'}")
         
         # 상황에 맞는 메시지 생성
-        if overall_success:
-            message = f"데이터 수집이 성공적으로 완료되었습니다. (소요시간: {duration:.1f}초)"
-        elif summary_success and not sync_success:
-            message = f"데이터 수집 및 요약 생성 완료, 벡터 DB 동기화 실패. (소요시간: {duration:.1f}초)"
-        elif not summary_success and sync_success:
-            message = f"데이터 수집 및 벡터 DB 동기화 완료, 요약 생성 실패. (소요시간: {duration:.1f}초)"
+        if enable_full_streaming and not enable_llm_summary:
+            # Vector DB 단독 모드
+            if overall_success:
+                message = f"이미지 메타데이터 포함 Vector DB 직접 저장이 성공적으로 완료되었습니다. (소요시간: {duration:.1f}초)"
+            else:
+                message = f"이미지 메타데이터 포함 데이터 수집은 완료했으나 Vector DB 저장 실패. (소요시간: {duration:.1f}초)"
         else:
-            message = f"데이터 수집은 완료했으나 요약 생성 및 벡터 DB 동기화 실패. (소요시간: {duration:.1f}초)"
+            # 하이브리드 모드
+            if overall_success:
+                message = f"이미지 메타데이터 포함 데이터 수집이 성공적으로 완료되었습니다. (소요시간: {duration:.1f}초)"
+            elif summary_success and not sync_success:
+                message = f"이미지 메타데이터 포함 데이터 수집 및 요약 생성 완료, 벡터 DB 동기화 실패. (소요시간: {duration:.1f}초)"
+            elif not summary_success and sync_success:
+                message = f"이미지 메타데이터 포함 데이터 수집 및 벡터 DB 동기화 완료, 요약 생성 실패. (소요시간: {duration:.1f}초)"
+            else:
+                message = f"이미지 메타데이터 포함 데이터 수집은 완료했으나 요약 생성 및 벡터 DB 동기화 실패. (소요시간: {duration:.1f}초)"
         
         # 기본 응답 생성
         response_data = {

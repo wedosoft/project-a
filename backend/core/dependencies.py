@@ -10,7 +10,16 @@ from typing import Any, Dict, Optional
 
 from fastapi import Depends, Header, HTTPException, Request, status
 
-from core.utils import setup_logger
+import importlib.util
+import os
+
+# core.utils 모듈을 직접 로드
+utils_path = os.path.join(os.path.dirname(__file__), 'utils.py')
+spec = importlib.util.spec_from_file_location("core_utils", utils_path)
+core_utils = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(core_utils)
+
+setup_logger = core_utils.setup_logger
 from core.database.tenant_context import TenantContext
 
 # 로거 설정

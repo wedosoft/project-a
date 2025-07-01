@@ -406,29 +406,56 @@ def extract_attachment_id_from_url(url: str) -> Optional[int]:
         Returns: 12345678901
     """
     try:
-        # Freshdesk 첨부파일 URL 패턴들
+        # URL 디코딩 (인코딩된 URL 처리)
+        from urllib.parse import unquote
+        url = unquote(url)
+        
+        # Freshdesk 첨부파일 URL 패턴들 (확장)
         patterns = [
-            r'/attachments/(\d+)',           # 일반적인 패턴
-            r'attachment_id=(\d+)',          # 쿼리 파라미터
-            r'/helpdesk/attachments/(\d+)',  # 헬프데스크 패턴
+            r'/attachments/(\d+)',                    # 일반적인 패턴
+            r'attachment_id=(\d+)',                   # 쿼리 파라미터
+            r'/helpdesk/attachments/(\d+)',           # 헬프데스크 패턴
+            r'/api/v2/attachments/(\d+)',             # API v2 패턴
+            r'/desk/attachments/(\d+)',               # desk 패턴
+            r'/attachment/(\d+)',                     # 단수형
+            r'files/(\d+)',                           # files 패턴
+            r'/secure/attachment/(\d+)',              # secure 패턴
+            r'download/attachments/(\d+)',            # download 패턴
+            r'/production/(\d+)/',                    # AWS S3 production 패턴
+            r'/original/blob(\d+)',                   # blob 패턴
         ]
         
         for pattern in patterns:
-            match = re.search(pattern, url)
+            match = re.search(pattern, url, re.IGNORECASE)
             if match:
-                return int(match.group(1))
+                attachment_id = int(match.group(1))
+                logger.info(f"패턴 '{pattern}'으로 attachment_id {attachment_id} 추출 성공")
+                return attachment_id
         
         # URL 파싱으로 쿼리 파라미터 확인
         from urllib.parse import urlparse, parse_qs
         parsed = urlparse(url)
         query_params = parse_qs(parsed.query)
         
-        if 'attachment_id' in query_params:
-            return int(query_params['attachment_id'][0])
+        # 다양한 쿼리 파라미터 이름 확인
+        param_names = ['attachment_id', 'attachmentId', 'id', 'fileId', 'file_id']
+        for param_name in param_names:
+            if param_name in query_params:
+                attachment_id = int(query_params[param_name][0])
+                logger.info(f"쿼리 파라미터 '{param_name}'으로 attachment_id {attachment_id} 추출 성공")
+                return attachment_id
+                
+        # base64 data URL인 경우 None 반환 (attachment_id 없음)
+        if url.startswith('data:'):
+            logger.info("base64 data URL - attachment_id 없음")
+            return None
             
     except (ValueError, IndexError) as e:
         logger.warning(f"첨부파일 ID 추출 실패: {url} - {e}")
+    except Exception as e:
+        logger.error(f"첨부파일 ID 추출 중 예외 발생: {url} - {e}")
     
+    logger.warning(f"어떤 패턴으로도 attachment_id를 추출할 수 없음: {url}")
     return None
 
 
@@ -456,6 +483,10 @@ def extract_inline_images_from_html(html_content: str) -> List[Dict[str, Any]]:
     if not html_content or not isinstance(html_content, str):
         return []
     
+    # HTML 내용 샘플링 (디버깅용)
+    html_sample = html_content[:200].replace('\n', ' ').replace('\r', ' ')
+    logger.info(f"HTML 파싱 시작 - 길이: {len(html_content)}, 샘플: {html_sample}...")
+    
     inline_images = []
     
     if HAS_BEAUTIFULSOUP:
@@ -463,23 +494,69 @@ def extract_inline_images_from_html(html_content: str) -> List[Dict[str, Any]]:
         try:
             soup = BeautifulSoup(html_content, 'html.parser')
             
-            for position, img in enumerate(soup.find_all('img')):
+            img_tags = soup.find_all('img')
+            logger.info(f"BeautifulSoup으로 {len(img_tags)}개의 img 태그 발견")
+            
+            for position, img in enumerate(img_tags):
                 src = img.get('src', '').strip()
                 alt = img.get('alt', '').strip()
                 
-                # Freshdesk 첨부파일인지 확인
-                if src and ('freshdesk.com' in src or 'attachments' in src):
+                logger.info(f"img 태그 #{position}: src='{src}', alt='{alt}'")
+                
+                # 추적 픽셀 제외 패턴
+                is_tracking_pixel = src and (
+                    'confirm.mail.' in src.lower() or
+                    'tracking.' in src.lower() or
+                    'pixel.' in src.lower() or
+                    'beacon.' in src.lower() or
+                    'open.' in src.lower() or
+                    'read.' in src.lower() or
+                    'view.' in src.lower() or
+                    'mail.google.com' in src.lower() or
+                    'outlook.com' in src.lower()
+                )
+                
+                # 실제 콘텐츠 이미지만 수집 (추적 픽셀 제외)
+                is_collectible_image = src and not is_tracking_pixel and (
+                    # Freshdesk 관련 패턴들
+                    'freshdesk.com' in src.lower() or 
+                    'attachments' in src.lower() or
+                    '/helpdesk/' in src.lower() or
+                    'cdn.freshdesk.com' in src.lower() or
+                    '/api/v2/' in src.lower() or
+                    'freshworkscdn.com' in src.lower() or
+                    'freshworks.com' in src.lower() or
+                    's3.amazonaws.com/cdn.freshdesk.com' in src.lower() or
+                    # base64 이미지 (실제 콘텐츠)
+                    src.startswith('data:image/') or
+                    # 일반적인 이미지 확장자를 가진 URL
+                    any(src.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'])
+                )
+                
+                if is_tracking_pixel:
+                    logger.info(f"추적 픽셀 감지하여 제외: {src[:100]}...")
+                else:
+                    logger.info(f"img src URL 패턴 확인: 수집대상={is_collectible_image}")
+                
+                if is_collectible_image:
                     attachment_id = extract_attachment_id_from_url(src)
                     
+                    # attachment_id가 없어도 이미지 정보 저장
+                    image_info = {
+                        "attachment_id": attachment_id,  # None일 수 있음
+                        "alt_text": alt,
+                        "type": "inline",
+                        "src_url": src,  # 임시 저장 (나중에 제거됨)
+                        "position": position,
+                        "tag_attributes": dict(img.attrs) if hasattr(img, 'attrs') else {}  # 추가 속성들
+                    }
+                    
                     if attachment_id:
-                        inline_images.append({
-                            "attachment_id": attachment_id,
-                            "alt_text": alt,
-                            "type": "inline",
-                            "src_url": src,  # 임시 저장 (나중에 제거됨)
-                            "position": position,
-                            "tag_attributes": dict(img.attrs)  # 추가 속성들
-                        })
+                        logger.info(f"attachment_id {attachment_id} 추출 성공")
+                    else:
+                        logger.warning(f"attachment_id 추출 실패했지만 이미지 정보는 저장: {src}")
+                    
+                    inline_images.append(image_info)
                         
         except Exception as e:
             logger.warning(f"BeautifulSoup 파싱 실패, 정규식 사용: {e}")
@@ -489,7 +566,7 @@ def extract_inline_images_from_html(html_content: str) -> List[Dict[str, Any]]:
         # BeautifulSoup이 없는 경우 정규식 사용
         inline_images = _extract_images_with_regex(html_content)
     
-    logger.debug(f"HTML에서 {len(inline_images)}개의 인라인 이미지 추출됨")
+    logger.info(f"HTML에서 {len(inline_images)}개의 인라인 이미지 추출됨")
     return inline_images
 
 
@@ -505,25 +582,73 @@ def _extract_images_with_regex(html_content: str) -> List[Dict[str, Any]]:
     """
     inline_images = []
     
-    # img 태그 패턴 (src와 alt 속성 추출)
-    img_pattern = r'<img[^>]*src=["\']([^"\']*)["\'][^>]*(?:alt=["\']([^"\']*)["\'][^>]*)?>'
+    # img 태그에서 src 속성 찾기
+    img_tags = re.finditer(r'<img[^>]+>', html_content, re.IGNORECASE | re.DOTALL)
     
-    for position, match in enumerate(re.finditer(img_pattern, html_content, re.IGNORECASE)):
-        src = match.group(1).strip()
-        alt = match.group(2).strip() if match.group(2) else ""
+    for position, img_match in enumerate(img_tags):
+        img_tag = img_match.group(0)
         
-        # Freshdesk 첨부파일인지 확인
-        if src and ('freshdesk.com' in src or 'attachments' in src):
+        # src 속성 추출
+        src_match = re.search(r'src=["\']([^"\']+)["\']', img_tag, re.IGNORECASE)
+        if not src_match:
+            continue
+            
+        src = src_match.group(1).strip()
+        
+        # alt 속성 추출 (옵션)
+        alt_match = re.search(r'alt=["\']([^"\']*)["\']', img_tag, re.IGNORECASE)
+        alt = alt_match.group(1).strip() if alt_match else ""
+        
+        logger.info(f"정규식으로 img 태그 #{position} 발견: src='{src}', alt='{alt}'")
+        
+        # 추적 픽셀 제외 패턴
+        is_tracking_pixel = src and (
+            'confirm.mail.' in src.lower() or
+            'tracking.' in src.lower() or
+            'pixel.' in src.lower() or
+            'beacon.' in src.lower() or
+            'open.' in src.lower() or
+            'read.' in src.lower() or
+            'view.' in src.lower() or
+            'mail.google.com' in src.lower() or
+            'outlook.com' in src.lower()
+        )
+        
+        # 실제 콘텐츠 이미지만 수집 (추적 픽셀 제외)
+        is_collectible_image = src and not is_tracking_pixel and (
+            'freshdesk.com' in src.lower() or 
+            'attachments' in src.lower() or
+            '/helpdesk/' in src.lower() or
+            'cdn.freshdesk.com' in src.lower() or
+            '/api/v2/' in src.lower() or
+            'freshworkscdn.com' in src.lower() or
+            'freshworks.com' in src.lower() or
+            's3.amazonaws.com/cdn.freshdesk.com' in src.lower() or
+            src.startswith('data:image/') or
+            any(src.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'])
+        )
+        
+        if is_tracking_pixel:
+            logger.info(f"추적 픽셀 감지하여 제외: {src[:100]}...")
+        
+        if is_collectible_image:
             attachment_id = extract_attachment_id_from_url(src)
             
+            # attachment_id가 없어도 이미지 정보 저장
+            image_info = {
+                "attachment_id": attachment_id,  # None일 수 있음
+                "alt_text": alt,
+                "type": "inline",
+                "src_url": src,  # 임시 저장 (나중에 제거됨)
+                "position": position
+            }
+            
             if attachment_id:
-                inline_images.append({
-                    "attachment_id": attachment_id,
-                    "alt_text": alt,
-                    "type": "inline",
-                    "src_url": src,  # 임시 저장 (나중에 제거됨)
-                    "position": position
-                })
+                logger.info(f"attachment_id {attachment_id} 추출 성공")
+            else:
+                logger.warning(f"attachment_id 추출 실패했지만 이미지 정보는 저장: {src}")
+                
+            inline_images.append(image_info)
     
     return inline_images
 

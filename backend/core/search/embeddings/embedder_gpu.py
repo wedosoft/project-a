@@ -31,6 +31,16 @@ try:
     import torch
     from sentence_transformers import SentenceTransformer
     
+    logger = logging.getLogger(__name__)
+    
+    # 디바이스 감지 상세 로그
+    logger.info(f"PyTorch 버전: {torch.__version__}")
+    logger.info(f"CUDA 사용 가능: {torch.cuda.is_available()}")
+    logger.info(f"MPS 백엔드 존재: {hasattr(torch.backends, 'mps')}")
+    if hasattr(torch.backends, 'mps'):
+        logger.info(f"MPS 사용 가능: {torch.backends.mps.is_available()}")
+        logger.info(f"MPS 빌트인: {torch.backends.mps.is_built()}")
+    
     # 디바이스 우선순위: CUDA > MPS > CPU
     if torch.cuda.is_available():
         GPU_AVAILABLE = True
@@ -45,8 +55,21 @@ try:
         DEVICE = 'cpu'
         gpu_info = "CPU only"
     
-    logger = logging.getLogger(__name__)
-    logger.info(f"PyTorch 디바이스: {DEVICE} ({gpu_info})")
+    logger.info(f"선택된 디바이스: {DEVICE} ({gpu_info})")
+    
+    # 추가 MPS 테스트 (Apple Silicon인 경우)
+    if hasattr(torch.backends, 'mps'):
+        try:
+            # MPS 테스트 텐서 생성 시도
+            test_tensor = torch.tensor([1.0, 2.0])
+            if torch.backends.mps.is_available():
+                try:
+                    mps_tensor = test_tensor.to('mps')
+                    logger.info("✅ MPS 디바이스 테스트 성공")
+                except Exception as e:
+                    logger.warning(f"❌ MPS 디바이스 테스트 실패: {e}")
+        except Exception as e:
+            logger.warning(f"MPS 테스트 중 오류: {e}")
     
 except ImportError as e:
     logger = logging.getLogger(__name__)
@@ -320,7 +343,7 @@ def embed_documents_gpu(
             raise RuntimeError("임베딩 생성 실패")
         final_embeddings.append(emb)
     
-    logger.info(f"GPU 임베딩 완료: {len(final_embeddings)}개 벡터 생성")
+    logger.info(f"{DEVICE.upper()} 임베딩 완료: {len(final_embeddings)}개 벡터 생성")
     return final_embeddings
 
 

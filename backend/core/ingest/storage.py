@@ -45,7 +45,7 @@ def store_integrated_object_to_sqlite(
     Returns:
         bool: 항상 True 반환 (호환성 유지)
     """
-    logger.warning("store_integrated_object_to_sqlite 함수는 deprecated됨 - Vector DB 단독 모드 사용")
+    logger.debug("store_integrated_object_to_sqlite 함수는 deprecated됨 - Vector DB 단독 모드 사용")
     return True
     # 기존 복잡한 저장 로직 제거됨 - Vector DB 단독 모드 사용
     return True

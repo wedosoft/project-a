@@ -16,9 +16,12 @@ echo "  Architecture: $(uname -m)"
 echo "  CPU cores: $(nproc)"
 echo "  Memory: $(free -h | awk '/^Mem:/ {print $2}')"
 
-# GPU 확인 (선택사항)
+# GPU 확인 및 PyTorch 버전 결정
+GPU_AVAILABLE=false
 if command -v nvidia-smi &> /dev/null; then
-    echo "  GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader,nounits)"
+    GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader,nounits)
+    echo "  GPU: $GPU_NAME"
+    GPU_AVAILABLE=true
 else
     echo "  GPU: None (CPU 모드로 실행)"
 fi
@@ -32,8 +35,14 @@ source venv/bin/activate
 echo "📦 의존성 설치"
 pip install --upgrade pip
 
-# PyTorch (CPU 버전)
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+# PyTorch 버전 선택 (GPU vs CPU)
+if [ "$GPU_AVAILABLE" = true ]; then
+    echo "🚀 GPU 감지됨 - CUDA PyTorch 설치"
+    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+else
+    echo "💻 CPU 전용 PyTorch 설치"
+    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+fi
 
 # sentence-transformers
 pip install sentence-transformers
