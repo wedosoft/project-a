@@ -219,7 +219,7 @@ class LLMManager:
             # 새로운 요약 시스템으로 생성 (YAML 템플릿 기반)
             summary = await core_summarizer.generate_summary(
                 content=content,
-                content_type="realtime_ticket",  # 실시간 티켓 전용 YAML 템플릿 사용 (최고 품질)
+                content_type="ticket_view",  # 조회 티켓 전용 YAML 템플릿 사용 (최고 품질)
                 subject=ticket_data.get("subject", ""),
                 metadata=metadata,
                 ui_language="ko"
@@ -254,7 +254,7 @@ class LLMManager:
                 "urgency_level": "보통"
             }
     
-    async def generate_similar_ticket_summaries(self, similar_tickets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    async def generate_similar_ticket_summaries(self, similar_tickets: List[Dict[str, Any]], ui_language: str = "ko") -> List[Dict[str, Any]]:
         """
         유사 티켓들에 대한 요약 생성 (순차 처리)
         
@@ -266,6 +266,7 @@ class LLMManager:
                 "score": 0.85,
                 "metadata": {...}
             }]
+            ui_language: UI 언어 (ko, en, ja, zh)
             
         Returns:
             요약이 포함된 유사 티켓 목록
@@ -293,15 +294,38 @@ class LLMManager:
                     import time
                     ticket_start_time = time.time()
                     
-                    # 유사 티켓용 간소화된 요약 생성 (직접 core_summarizer 호출)
+                    # 유사 티켓/문서용 요약 생성 (doc_type에 따라 템플릿 선택)
                     from core.llm.summarizer.core.summarizer import core_summarizer
+                    
+                    # doc_type 확인 - 아티클은 요약하지 않고 스킵
+                    metadata = ticket.get("metadata", {})
+                    doc_type = metadata.get("doc_type", "ticket")
+                    
+                    logger.info(f"🔍 [doc_type 확인] ID: {ticket.get('id')}, doc_type: '{doc_type}'")
+                    
+                    if doc_type == "article":
+                        logger.info(f"📚 [KB 문서 스킵] 아티클 ID {ticket.get('id')} - 요약 생성하지 않음")
+                        # 아티클은 메타데이터만 사용하므로 요약 생성하지 않음
+                        summarized_ticket = {
+                            "id": ticket.get("id"),
+                            "title": ticket.get("title", ""),
+                            "content": f"📚 **지식베이스 문서**\n\n**제목**: {ticket.get('title', '')}\n\n원본 링크에서 확인하세요.",
+                            "score": ticket.get("score", 0.0),
+                            "metadata": ticket.get("metadata", {})
+                        }
+                        summarized_tickets.append(summarized_ticket)
+                        continue  # 아티클은 LLM 요약 없이 바로 다음으로
+                    
+                    # 티켓만 요약 생성
+                    content_type = "ticket_similar"
+                    logger.info(f"🎫 [티켓] 티켓 ID {ticket.get('id')} - ticket_similar 템플릿 사용")
                     
                     summary_result = await core_summarizer.generate_summary(
                         content=ticket_data_for_summary.get("description_text", ""),
-                        content_type="ticket",  # 일반 ticket 템플릿 사용 (조회 티켓보다 간소화)
+                        content_type=content_type,  # doc_type에 따라 올바른 템플릿 사용
                         subject=ticket_data_for_summary.get("subject", ""),
                         metadata=ticket_data_for_summary.get("tenant_metadata", {}),
-                        ui_language="ko"
+                        ui_language=ui_language
                     )
                     
                     ticket_time = time.time() - ticket_start_time
@@ -357,64 +381,7 @@ class LLMManager:
         logger.info(f"🎯 [유사 티켓 요약] 완료: {len(summarized_tickets)}건 처리")
         return summarized_tickets
     
-    async def generate_knowledge_base_summary(self, kb_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        KB 문서 요약 생성 (새로운 모듈식 시스템 사용)
-        
-        Args:
-            kb_data: KB 문서 정보 (title, content 포함)
-            
-        Returns:
-            요약 정보
-        """
-        try:
-            # 새로운 모듈식 요약 시스템 사용
-            from core.llm.summarizer.core.summarizer import core_summarizer
-            
-            # KB 데이터 준비
-            content = kb_data.get("content", "")
-            
-            if not content.strip():
-                logger.warning("KB 문서 내용이 비어있음")
-                return {
-                    "summary": "분석할 내용이 없습니다.",
-                    "key_points": ["빈 내용"],
-                    "topics": ["미분류"],
-                    "category": "확인 필요"
-                }
-            
-            # 메타데이터 준비
-            metadata = {
-                "category": kb_data.get("category"),
-                "tags": kb_data.get("tags", []),
-                "created_at": kb_data.get("created_at"),
-                "updated_at": kb_data.get("updated_at")
-            }
-            
-            # 새로운 요약 시스템으로 생성 (knowledge_base 타입)
-            summary = await core_summarizer.generate_summary(
-                content=content,
-                content_type="knowledge_base",
-                subject=kb_data.get("title", ""),
-                metadata=metadata,
-                ui_language="ko"
-            )
-            
-            return {
-                "summary": summary,
-                "key_points": ["구조화된 KB 요약"],
-                "topics": ["지식베이스"],
-                "category": "기술문서"
-            }
-                
-        except Exception as e:
-            logger.error(f"KB 문서 요약 생성 실패: {e}")
-            return {
-                "summary": f"오류로 인해 요약 생성에 실패했습니다. 오류: {str(e)}",
-                "key_points": ["요약 생성 오류", "수동 검토 필요"],
-                "topics": ["오류"],
-                "category": "확인 필요"
-            }
+    # KB 문서 요약 함수 제거 - 아티클은 메타데이터만 사용하기로 결정
 
     async def get_embeddings(self, texts: List[str], model: Optional[str] = None) -> List[List[float]]:
         """임베딩 생성"""

@@ -37,17 +37,18 @@ class ConfigManager:
                     "max_tokens": int(os.getenv("SUMMARIZATION_MAX_TOKENS", "1000")),
                     "temperature": float(os.getenv("SUMMARIZATION_TEMPERATURE", "0.1"))
                 },
-                "realtime": {
-                    "provider": os.getenv("REALTIME_MODEL_PROVIDER", "gemini"),
-                    "model": os.getenv("REALTIME_MODEL_NAME", "gemini-1.5-flash"),
-                    "max_tokens": int(os.getenv("REALTIME_MAX_TOKENS", "1500")),
-                    "temperature": float(os.getenv("REALTIME_TEMPERATURE", "0.02"))
+                # 템플릿 이름과 일치하는 명명 규칙
+                "ticket_view": {
+                    "provider": os.getenv("TICKET_VIEW_MODEL_PROVIDER", "gemini"),
+                    "model": os.getenv("TICKET_VIEW_MODEL_NAME", "gemini-1.5-flash"),
+                    "max_tokens": int(os.getenv("TICKET_VIEW_MAX_TOKENS", "1200")),
+                    "temperature": float(os.getenv("TICKET_VIEW_TEMPERATURE", "0.05"))
                 },
-                "batch": {
-                    "provider": os.getenv("BATCH_MODEL_PROVIDER", "gemini"),
-                    "model": os.getenv("BATCH_MODEL_NAME", "gemini-1.5-flash"),
-                    "max_tokens": int(os.getenv("BATCH_MAX_TOKENS", "800")),
-                    "temperature": float(os.getenv("BATCH_TEMPERATURE", "0.1"))
+                "ticket_similar": {
+                    "provider": os.getenv("TICKET_SIMILAR_MODEL_PROVIDER", "gemini"),
+                    "model": os.getenv("TICKET_SIMILAR_MODEL_NAME", "gemini-1.5-flash"),
+                    "max_tokens": int(os.getenv("TICKET_SIMILAR_MAX_TOKENS", "800")),
+                    "temperature": float(os.getenv("TICKET_SIMILAR_TEMPERATURE", "0.1"))
                 }
             },
             "conversation_filtering": {

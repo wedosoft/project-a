@@ -425,6 +425,34 @@ def extract_attachment_id_from_url(url: str) -> Optional[int]:
             r'/original/blob(\d+)',                   # blob 패턴
         ]
         
+        # JWT 토큰에서 attachment_id 추출 시도
+        if 'token=' in url and 'attachment.freshdesk.com' in url:
+            try:
+                import base64
+                import json
+                from urllib.parse import parse_qs, urlparse
+                
+                parsed_url = urlparse(url)
+                query_params = parse_qs(parsed_url.query)
+                token = query_params.get('token', [None])[0]
+                
+                if token:
+                    # JWT 토큰의 페이로드 부분 디코드 (두 번째 부분)
+                    token_parts = token.split('.')
+                    if len(token_parts) >= 2:
+                        payload = token_parts[1]
+                        # Base64 패딩 추가
+                        payload += '=' * (4 - len(payload) % 4)
+                        decoded_payload = base64.b64decode(payload)
+                        payload_data = json.loads(decoded_payload.decode('utf-8'))
+                        
+                        if 'id' in payload_data:
+                            attachment_id = int(payload_data['id'])
+                            logger.info(f"JWT 토큰에서 attachment_id {attachment_id} 추출 성공")
+                            return attachment_id
+            except Exception as e:
+                logger.warning(f"JWT 토큰 파싱 실패: {e}")
+        
         for pattern in patterns:
             match = re.search(pattern, url, re.IGNORECASE)
             if match:

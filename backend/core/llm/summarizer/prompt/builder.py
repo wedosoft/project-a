@@ -64,8 +64,9 @@ class PromptBuilder:
             # 템플릿 로드
             if content_type == "ticket":
                 template_data = self.prompt_loader.get_system_prompt_template("ticket")
+                sections = self.get_section_titles(ui_language)  # 섹션 구조 추가
                 
-                # 일반 ticket 템플릿 처리
+                # 일반 ticket 템플릿 처리 (구조화된 섹션 추가)
                 language_instruction = template_data['language_instructions'].get(
                     content_language, 
                     template_data['language_instructions']['default']
@@ -90,6 +91,27 @@ CRITICAL MISSION: {template_data['critical_mission']}
 ABSOLUTE REQUIREMENTS:
 {requirements}
 
+STRUCTURE YOUR SUMMARY:
+
+{sections['problem']}
+- 고객사 및 담당자 정보
+- 기술적 문제 또는 비즈니스 요구사항
+- 관련 제품/서비스/시스템 (원문의 정확한 명칭 사용)
+- 중요한 날짜, 데드라인, 긴급도 요소
+
+{sections['cause']}
+- 주요 원인: 문제를 야기한 주된 기술적 또는 비즈니스 요인
+- 기여 요소: 문제로 이어지거나 증폭시킨 추가 요소들
+
+{sections['solution']}
+- 현재 상태: 해결이 현재 어느 단계에 있는지
+- 완료된 조치: 날짜별 구체적 조치와 그 결과
+- 다음 단계: 계획된 구체적 조치
+
+{sections['insights']}
+- 기술적 사양: 설정, 구성, 기술적 매개변수
+- 프로세스 인사이트: 모범 사례, 워크플로우, 절차적 지식
+
 STRICTLY FORBIDDEN:
 {forbidden}
 
@@ -97,8 +119,8 @@ FORMATTING RULES:
 - {language_instruction}
 {formatting}"""
                 
-            elif content_type == "realtime_ticket":
-                template_data = self.prompt_loader.get_system_prompt_template("realtime_ticket")
+            elif content_type == "ticket_view":
+                template_data = self.prompt_loader.get_system_prompt_template("ticket_view")
                 sections = self.get_section_titles(ui_language)
                 
                 # 언어별 지시사항 선택 (원문 언어에 따라 결정)
@@ -107,19 +129,19 @@ FORMATTING RULES:
                     template_data['language_instructions']['default']
                 )
                 
-                # 첨부파일 포맷 (항상 영어 버전 사용)
-                attachment_format = self.get_attachment_format('en')
+                # 첨부파일 포맷 (UI 언어에 따라 선택)
+                attachment_format = self.get_attachment_format(ui_language)
                 
-                # 프롬프트 구성 (항상 영어 버전 사용 - AI 이해도 향상)
+                # 프롬프트 구성 (UI 언어에 따라 선택 - 언어 일관성 보장)
                 base_instruction = template_data['base_instruction'].get(
-                    'en', 
+                    ui_language, 
                     template_data['base_instruction']['ko']
                 )
                 
                 requirements = '\n'.join([f"- {req}" for req in template_data['absolute_requirements']])
                 forbidden = '\n'.join([f"- {item}" for item in template_data['strictly_forbidden']])
                 formatting = template_data['formatting_rules'].get(
-                    'en', 
+                    ui_language, 
                     template_data['formatting_rules']['ko']
                 )
                 
@@ -166,9 +188,10 @@ FORMATTING RULES:
 - {language_instruction}
 {formatting}"""
                 
-            elif content_type == "knowledge_base":
-                # KB 문서용 시스템 프롬프트 (기존 로직 유지)
-                return self._build_kb_system_prompt(content_language, ui_language)
+            # knowledge_base 템플릿 사용 제거됨 - 아티클은 요약하지 않음
+            # elif content_type == "knowledge_base":
+            #     # KB 문서용 시스템 프롬프트 (기존 로직 유지)
+            #     return self._build_kb_system_prompt(content_language, ui_language)
                 
             else:  # conversation type
                 # 대화 분석용 시스템 프롬프트 (기존 로직 유지)

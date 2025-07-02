@@ -1677,16 +1677,37 @@ async def search_vector_db_only(
                     for doc_type in doc_types
                 ]
         
-        # Vector DB 검색
-        search_response = vector_db.search(
-            query_embedding=query_embedding,
-            top_k=limit,
-            tenant_id=tenant_id,
-            platform=platform
-        )
+        # Vector DB 검색 (개별 doc_type별로 순차적 수행)
+        all_results = []
         
-        # 검색 결과 추출
-        search_results = search_response.get("results", []) if isinstance(search_response, dict) else search_response
+        if not doc_types:
+            # doc_type 필터 없이 모든 문서 검색
+            search_response = vector_db.search(
+                query_embedding=query_embedding,
+                top_k=limit,
+                tenant_id=tenant_id,
+                platform=platform
+            )
+            all_results = search_response.get("results", []) if isinstance(search_response, dict) else search_response
+        else:
+            # 각 doc_type별로 개별 검색 수행
+            for doc_type in doc_types:
+                search_response = vector_db.search(
+                    query_embedding=query_embedding,
+                    top_k=limit,
+                    tenant_id=tenant_id,
+                    platform=platform,
+                    doc_type=doc_type  # 중요: doc_type 필터 추가
+                )
+                doc_results = search_response.get("results", []) if isinstance(search_response, dict) else search_response
+                all_results.extend(doc_results)
+            
+            # 유사도 점수로 정렬 후 상위 limit개만 선택
+            all_results.sort(key=lambda x: x.get("score", 0.0), reverse=True)
+            all_results = all_results[:limit]
+        
+        # 검색 결과 사용 (이미 all_results에 저장됨)
+        search_results = all_results
         
         # 결과 포맷팅 (새로운 필드 구조 적용)
         formatted_results = []

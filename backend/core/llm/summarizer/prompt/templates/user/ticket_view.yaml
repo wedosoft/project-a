@@ -1,7 +1,7 @@
 # 실시간 티켓 요약 전용 사용자 프롬프트 템플릿 (Premium Quality)
 version: "1.0"
 last_updated: "2025-06-28"
-content_type: "realtime_ticket"
+content_type: "ticket_view"
 quality_level: "premium"  # 유사티켓 대비 최고 품질
 purpose: "실시간 티켓 요약 (상담원이 티켓 열 때 즉시 제공)"
 

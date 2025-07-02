@@ -45,9 +45,9 @@ class PromptLoader:
             with open(template_path, 'r', encoding='utf-8') as f:
                 template_data = yaml.safe_load(f)
             
-            # realtime_ticket 템플릿 로딩 디버깅
-            if template_name == "realtime_ticket":
-                logger.info(f"📝 [realtime_ticket 템플릿] 로드 성공: {template_path}")
+            # ticket_view 템플릿 로딩 디버깅
+            if template_name == "ticket_view":
+                logger.info(f"📝 [ticket_view 템플릿] 로드 성공: {template_path}")
                 logger.info(f"Content type: {template_data.get('content_type')}")
                 logger.info(f"Quality level: {template_data.get('quality_level')}")
                 if 'formatting_rules' in template_data:

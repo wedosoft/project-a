@@ -33,7 +33,7 @@ async def test_init_model_switching():
         
         # 현재 설정 확인
         print("📋 현재 모델 설정:")
-        use_cases = ["realtime", "batch", "summarization"]
+        use_cases = ["ticket_view", "ticket_similar", "summarization"]
         for use_case in use_cases:
             config = llm_manager.config_manager.get_use_case_config(use_case)
             if config:
@@ -114,8 +114,8 @@ async def test_init_model_switching():
         print("\n" + "=" * 50)
         print("🎉 테스트 완료!")
         print("\n💡 이제 환경변수만 바꾸면 /init 엔드포인트의 요약 모델이 즉시 변경됩니다:")
-        print("   REALTIME_MODEL_NAME=claude-3-haiku")
-        print("   REALTIME_MODEL_PROVIDER=anthropic")
+        print("   TICKET_VIEW_MODEL_NAME=claude-3-haiku")
+        print("   TICKET_VIEW_MODEL_PROVIDER=anthropic")
         
     except Exception as e:
         logger.error(f"테스트 실행 중 오류: {e}", exc_info=True)

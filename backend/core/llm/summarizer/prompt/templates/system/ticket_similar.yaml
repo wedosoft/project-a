@@ -1,7 +1,7 @@
-# 티켓 요약용 시스템 프롬프트
+# 유사 티켓 요약용 시스템 프롬프트
 version: "2.0"
-last_updated: "2025-06-25"
-content_type: "ticket"
+last_updated: "2025-07-02"
+content_type: "ticket_similar"
 
 base_instruction:
   ko: |

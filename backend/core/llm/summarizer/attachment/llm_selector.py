@@ -108,26 +108,37 @@ class LLMAttachmentSelector:
         user_prompt = self._build_user_prompt(
             attachment_metadata, content, subject)
 
-        response = await self._get_manager().generate(
+        # 환경변수 기반 모델 선택 (TICKET_SIMILAR 사용 사례 사용)
+        response = await self._get_manager().generate_for_use_case(
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            provider=self._get_llm_provider().OPENAI,
-            max_tokens=800,
-            temperature=0.1,  # 일관성을 위해 낮게 설정
-            model_preference=["gpt-4o-mini"]
+            use_case="ticket_similar"  # TICKET_SIMILAR_MODEL_PROVIDER/NAME 환경변수 사용
         )
 
         if not response or not response.success:
             raise Exception("LLM 응답 실패")
 
-        # JSON 응답 파싱
+        # JSON 응답 파싱 (코드 블록 제거)
         try:
-            result = json.loads(response.content.strip())
+            content = response.content.strip()
+            
+            # ```json 및 ``` 태그 제거
+            if content.startswith('```json'):
+                content = content[7:]  # '```json' 제거
+            elif content.startswith('```'):
+                content = content[3:]   # '```' 제거
+                
+            if content.endswith('```'):
+                content = content[:-3]  # 마지막 '```' 제거
+                
+            content = content.strip()
+            
+            result = json.loads(content)
             return result.get('selected_files', [])
         except json.JSONDecodeError as e:
-            logger.error(f"LLM 응답 JSON 파싱 실패: {e}, 원본: {response.content}")
+            logger.error(f"LLM 응답 JSON 파싱 실패: {e}, 정리된 내용: {content[:200]}...")
             raise Exception("JSON 파싱 실패")
 
     def _build_system_prompt(self) -> str:

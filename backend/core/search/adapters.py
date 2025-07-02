@@ -67,9 +67,9 @@ class InitHybridAdapter:
                 def create_summary_runnable():
                     async def summary_func(_):
                         summary_start = time.time()
-                        self.logger.info("🎯 [조회 티켓 프리미엄] realtime_ticket 템플릿 요약 생성 시작")
+                        self.logger.info("🎯 [조회 티켓 프리미엄] ticket_view 템플릿 요약 생성 시작")
                         
-                        # 조회 티켓 최우선 품질: realtime_ticket 템플릿 직접 사용
+                        # 조회 티켓 최우선 품질: ticket_view 템플릿 직접 사용
                         markdown_summary = await self._generate_premium_realtime_summary(
                             llm_manager, ticket_data
                         )
@@ -83,7 +83,7 @@ class InitHybridAdapter:
                                 "task_type": "summary",
                                 "summary": {"ticket_summary": markdown_summary},
                                 "success": True,
-                                "template_used": "realtime_ticket"  # 디버깅용
+                                "template_used": "ticket_view"  # 디버깅용
                             }, 
                             "execution_time": summary_time
                         }
@@ -232,9 +232,9 @@ class InitHybridAdapter:
                     from core.llm.summarizer.prompt.builder import PromptBuilder
                     prompt_builder = PromptBuilder()
                     
-                    # 시스템 프롬프트 (realtime_ticket YAML 템플릿 사용)
+                    # 시스템 프롬프트 (ticket_view YAML 템플릿 사용)
                     system_prompt = prompt_builder.build_system_prompt(
-                        content_type="realtime_ticket",
+                        content_type="ticket_view",
                         content_language="ko",
                         ui_language="ko"
                     )
@@ -250,7 +250,7 @@ class InitHybridAdapter:
                     # 사용자 프롬프트 빌드
                     user_prompt = prompt_builder.build_user_prompt(
                         content=ticket_content,
-                        content_type="realtime_ticket",
+                        content_type="ticket_view",
                         subject=ticket_data.get('subject', '제목 없음'),
                         metadata={},
                         content_language="ko",
@@ -485,10 +485,10 @@ class InitHybridAdapter:
     
     async def _generate_premium_realtime_summary(self, llm_manager, ticket_data: Dict[str, Any]) -> str:
         """
-        조회 티켓 최우선 품질: realtime_ticket 템플릿을 직접 사용한 프리미엄 요약 생성
+        조회 티켓 최우선 품질: ticket_view 템플릿을 직접 사용한 프리미엄 요약 생성
         """
         try:
-            self.logger.info("🎯 [조회 티켓 프리미엄] realtime_ticket 템플릿 사용 시작")
+            self.logger.info("🎯 [조회 티켓 프리미엄] ticket_view 템플릿 사용 시작")
             from core.llm.summarizer.core.summarizer import core_summarizer
             
             # 티켓 내용 구성
@@ -509,13 +509,13 @@ class InitHybridAdapter:
                 "customer_email": ticket_data.get("metadata", {}).get("customer_email")
             }
             
-            # realtime_ticket 템플릿으로 최고 품질 요약 생성
+            # ticket_view 템플릿으로 최고 품질 요약 생성
             self.logger.info(f"📝 [조회 티켓] 콘텐츠 길이: {len(content)} 문자")
             self.logger.info(f"📝 [조회 티켓] 제목: {ticket_data.get('subject', '')[:100]}...")
             
             summary = await core_summarizer.generate_summary(
                 content=content,
-                content_type="realtime_ticket",  # 최고 품질 템플릿
+                content_type="ticket_view",  # 최고 품질 템플릿
                 subject=ticket_data.get("subject", ""),
                 metadata=metadata,
                 ui_language="ko"
@@ -525,12 +525,12 @@ class InitHybridAdapter:
             if summary and len(summary) > 100:
                 has_sections = any(section in summary for section in ["🔍 문제 현황", "💡 원인 분석", "⚡ 해결 진행상황", "🎯 중요 인사이트"])
                 if has_sections:
-                    self.logger.info("✅ [조회 티켓] realtime_ticket 4개 섹션 구조 정상 생성")
+                    self.logger.info("✅ [조회 티켓] ticket_view 4개 섹션 구조 정상 생성")
                 else:
-                    self.logger.warning("⚠️ [조회 티켓] realtime_ticket 구조가 적용되지 않음")
+                    self.logger.warning("⚠️ [조회 티켓] ticket_view 구조가 적용되지 않음")
                     self.logger.warning(f"생성된 요약 미리보기: {summary[:300]}...")
             
-            self.logger.info("✅ [조회 티켓] realtime_ticket 템플릿 기반 프리미엄 요약 생성 완료")
+            self.logger.info("✅ [조회 티켓] ticket_view 템플릿 기반 프리미엄 요약 생성 완료")
             return summary
             
         except Exception as e:

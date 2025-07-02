@@ -1,7 +1,7 @@
 # 티켓 분석용 사용자 프롬프트 템플릿
 version: "2.0"
 last_updated: "2025-06-28"
-content_type: "ticket"
+content_type: "ticket_similar"
 
 # Jinja2 템플릿 
 template: |

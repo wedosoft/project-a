@@ -127,7 +127,7 @@ class CoreSummarizer:
             )
             
             # 조회 티켓 프롬프트 디버깅 로그
-            if content_type == "realtime_ticket":
+            if content_type == "ticket_view":
                 logger.info(f"\n📝 [조회 티켓 프롬프트 디버깅]")
                 logger.info(f"System Prompt 길이: {len(system_prompt)} 문자")
                 logger.info(f"System Prompt 미리보기: {system_prompt[:300]}...")
@@ -157,31 +157,23 @@ class CoreSummarizer:
             # 환경변수로 모델 설정 제어
             import os
             
-            if content_type == "realtime_ticket":
-                # 조회 티켓: REALTIME_ 환경변수 사용
-                max_tokens = int(os.getenv("REALTIME_MAX_TOKENS", "1200"))
-                temperature = float(os.getenv("REALTIME_TEMPERATURE", "0.05"))
+            if content_type == "ticket_view":
+                # 조회 티켓: TICKET_VIEW_ 환경변수 사용
                 response = await self._get_manager().generate_for_use_case(
                     messages=messages,
-                    use_case="realtime",
-                    max_tokens=max_tokens,
-                    temperature=temperature
+                    use_case="ticket_view"
                 )
             else:
-                # 유사 티켓: BATCH_ 환경변수 사용 (빠르고 효율적)
-                max_tokens = int(os.getenv("BATCH_MAX_TOKENS", "800"))
-                temperature = float(os.getenv("BATCH_TEMPERATURE", "0.1"))
+                # 유사 티켓: TICKET_SIMILAR_ 환경변수 사용 (빠르고 효율적)
                 response = await self._get_manager().generate_for_use_case(
                     messages=messages,
-                    use_case="summarization",
-                    max_tokens=max_tokens,
-                    temperature=temperature
+                    use_case="ticket_similar"
                 )
             
             summary = response.content.strip() if response.success else "요약 생성 실패"
             
             # 조회 티켓 결과 품질 검증
-            if content_type == "realtime_ticket" and summary:
+            if content_type == "ticket_view" and summary:
                 # 한국어/영어 섹션 구조 모두 체크
                 korean_structure = any(section in summary for section in ["🔍 문제 현황", "💡 원인 분석", "⚡ 해결 진행상황", "🎯 중요 인사이트"])
                 english_structure = any(section in summary for section in ["🔍 Problem Overview", "💡 Root Cause", "⚡ Resolution Progress", "🎯 Key Insights"])
