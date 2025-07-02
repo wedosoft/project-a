@@ -224,3 +224,7 @@ frontend/.report.json
 # OS specific
 tasks.json
 tasks/ 
+backend/core/search/data/embedding_cache/
+
+#SQLite
+backend/core/data/*.db*
