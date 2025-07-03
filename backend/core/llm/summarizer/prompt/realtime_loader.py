@@ -29,11 +29,11 @@ class RealtimePromptLoader:
     
     def get_system_prompt_template(self) -> Dict[str, Any]:
         """실시간 요약용 시스템 프롬프트 템플릿 로드"""
-        if "realtime_ticket" in self._system_prompt_cache:
-            return self._system_prompt_cache["realtime_ticket"]
+        if "ticket_view" in self._system_prompt_cache:
+            return self._system_prompt_cache["ticket_view"]
         
         try:
-            template_path = self.system_path / "realtime_ticket.yaml"
+            template_path = self.system_path / "ticket_view.yaml"
             
             if not template_path.exists():
                 raise FileNotFoundError(f"실시간 시스템 프롬프트 파일이 없습니다: {template_path}")
@@ -42,14 +42,14 @@ class RealtimePromptLoader:
                 template_data = yaml.safe_load(f)
             
             # 유효성 검증
-            if template_data.get('content_type') != 'realtime_ticket':
+            if template_data.get('content_type') != 'ticket_view':
                 raise ValueError(f"잘못된 content_type: {template_data.get('content_type')}")
             
             if template_data.get('quality_level') != 'premium':
                 logger.warning("실시간 요약이 premium 품질이 아닙니다")
             
-            self._system_prompt_cache["realtime_ticket"] = template_data
-            logger.info("실시간 시스템 프롬프트 로드 완료")
+            self._system_prompt_cache["ticket_view"] = template_data
+            logger.info("조회 티켓 시스템 프롬프트 로드 완료")
             
             return template_data
             
@@ -59,11 +59,11 @@ class RealtimePromptLoader:
     
     def get_user_prompt_template(self) -> Dict[str, Any]:
         """실시간 요약용 사용자 프롬프트 템플릿 로드"""
-        if "realtime_ticket" in self._user_prompt_cache:
-            return self._user_prompt_cache["realtime_ticket"]
+        if "ticket_view" in self._user_prompt_cache:
+            return self._user_prompt_cache["ticket_view"]
         
         try:
-            template_path = self.user_path / "realtime_ticket.yaml"
+            template_path = self.user_path / "ticket_view.yaml"
             
             if not template_path.exists():
                 raise FileNotFoundError(f"실시간 사용자 프롬프트 파일이 없습니다: {template_path}")
@@ -72,13 +72,13 @@ class RealtimePromptLoader:
                 template_data = yaml.safe_load(f)
             
             # 유효성 검증
-            if template_data.get('content_type') != 'realtime_ticket':
+            if template_data.get('content_type') != 'ticket_view':
                 raise ValueError(f"잘못된 content_type: {template_data.get('content_type')}")
             
             if template_data.get('quality_level') != 'premium':
                 logger.warning("실시간 요약이 premium 품질이 아닙니다")
             
-            self._user_prompt_cache["realtime_ticket"] = template_data
+            self._user_prompt_cache["ticket_view"] = template_data
             logger.info("실시간 사용자 프롬프트 로드 완료")
             
             return template_data
@@ -284,7 +284,7 @@ Format your response in the following structure:
             user_data = self.get_user_prompt_template()
             
             return {
-                "type": "realtime_ticket",
+                "type": "ticket_view",
                 "quality_level": "premium",
                 "system_version": system_data.get("version", "unknown"),
                 "user_version": user_data.get("version", "unknown"),
@@ -301,7 +301,7 @@ Format your response in the following structure:
         except Exception as e:
             logger.error(f"프롬프트 정보 조회 실패: {e}")
             return {
-                "type": "realtime_ticket",
+                "type": "ticket_view",
                 "quality_level": "premium",
                 "status": "error",
                 "error": str(e)

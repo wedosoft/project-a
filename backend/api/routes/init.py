@@ -228,34 +228,40 @@ async def init_vector_only_mode(
         
         ticket_content = "\n".join(ticket_content_parts)
         
-        # 2. 실시간 요약 생성 (실시간 Freshdesk 데이터 사용)
-        summary_text = None
-        if include_summary:
-            llm_manager = get_llm_manager()
-            
+        # 병렬 처리를 위한 작업 정의
+        import asyncio
+        
+        llm_manager = get_llm_manager()
+        
+        # 2. 병렬 실행할 작업들 정의
+        async def generate_summary_task():
+            """티켓 요약 생성 작업"""
+            if not include_summary:
+                return None
+                
             logger.info(f"🎯 [실시간 티켓 요약] 티켓 {ticket_id} AI 요약 생성 시작")
             logger.info(f"    제목: {ticket_data.get('subject', 'N/A')}")
             logger.info(f"    대화수: {len(ticket_data.get('conversations', []))}개, 첨부파일: {len(ticket_data.get('attachments', []))}개")
             
-            # YAML 템플릿 기반 실시간 요약 생성
             try:
-                # 기존 generate_ticket_summary 함수 사용 (YAML 템플릿 기반)
-                llm_manager = get_llm_manager()
                 summary_result_dict = await llm_manager.generate_ticket_summary(ticket_data)
                 summary_result = summary_result_dict.get("summary", "요약 생성 실패")
                 
-                summary_text = summary_result
-                logger.info(f"✅ [실시간 티켓 요약] 티켓 {ticket_id} YAML 템플릿 기반 요약 완료 ({len(summary_text)}자)")
-                logger.info(f"\n📄 [조회 티켓 요약] \n{summary_text}")
+                logger.info(f"✅ [실시간 티켓 요약] 티켓 {ticket_id} YAML 템플릿 기반 요약 완료 ({len(summary_result)}자)")
+                logger.info(f"\n📄 [조회 티켓 요약] \n{summary_result}")
+                
+                return summary_result
                 
             except Exception as e:
-                summary_text = f"YAML 템플릿 기반 요약 생성 중 오류 발생: {str(e)}"
+                error_msg = f"YAML 템플릿 기반 요약 생성 중 오류 발생: {str(e)}"
                 logger.error(f"❌ [실시간 티켓 요약] 티켓 {ticket_id} YAML 템플릿 요약 생성 실패: {e}")
-        
-        # 3. 유사 티켓 검색 및 요약 생성 (Vector DB + AI 요약)
-        similar_tickets = []
-        if include_similar_tickets:
-            # 3-1. Vector DB에서 유사 티켓 검색
+                return error_msg
+
+        async def search_similar_tickets_task():
+            """유사 티켓 검색 작업"""
+            if not include_similar_tickets:
+                return []
+                
             logger.info(f"유사 티켓 검색 시작 (최대 {top_k_tickets}건)")
             similar_results = await search_vector_db_only(
                 query=ticket_content,
@@ -265,10 +271,9 @@ async def init_vector_only_mode(
                 limit=top_k_tickets + 1  # 현재 티켓 제외를 위해 +1
             )
             
-            # 3-2. 현재 티켓 제외하고 유사 티켓만 추출
+            # 현재 티켓 제외하고 유사 티켓만 추출
             raw_similar_tickets = []
             for result in similar_results:
-                # 여러 가능한 필드로 현재 티켓 확인
                 result_ticket_id = (
                     result["metadata"].get("ticket_id") or 
                     result["metadata"].get("original_id") or 
@@ -276,12 +281,11 @@ async def init_vector_only_mode(
                     result.get("id")
                 )
                 
-                # 현재 티켓과 다른 경우만 추가
                 if str(result_ticket_id) != str(ticket_id):
                     raw_similar_tickets.append({
                         "id": result.get("original_id") or result["metadata"].get("original_id"),
                         "title": result.get("subject") or result["metadata"].get("subject", ""),
-                        "content": result.get("content", ""),  # Vector DB의 원본 텍스트
+                        "content": result.get("content", ""),
                         "score": result["score"],
                         "metadata": result.get("extended_metadata", result.get("metadata", {}))
                     })
@@ -292,20 +296,13 @@ async def init_vector_only_mode(
                 if len(raw_similar_tickets) >= top_k_tickets:
                     break
             
-            # 3-3. 유사 티켓들에 대한 AI 요약 생성 (순차 처리)
-            if raw_similar_tickets:
-                logger.info(f"유사 티켓 {len(raw_similar_tickets)}건에 대한 AI 요약 생성 시작")
-                similar_tickets = await llm_manager.generate_similar_ticket_summaries(raw_similar_tickets, ui_language)
-                logger.info(f"유사 티켓 AI 요약 완료: {len(similar_tickets)}건")
+            return raw_similar_tickets
+
+        async def search_kb_documents_task():
+            """KB 문서 검색 작업"""
+            if not include_kb_docs:
+                return []
                 
-                # 유사 티켓 요약 결과 로깅
-                for i, ticket in enumerate(similar_tickets, 1):
-                    ticket_summary = ticket.get('summary', '요약없음')
-                    logger.info(f"\n📄 [유사 티켓 {i}] ID: {ticket.get('id')} \n{ticket_summary}")
-        
-        # 4. KB 문서 검색 (메타데이터만, 요약 없음)
-        kb_documents = []
-        if include_kb_docs:
             logger.info(f"KB 문서 검색 시작 (최대 {top_k_kb}건)")
             kb_results = await search_vector_db_only(
                 query=ticket_content,
@@ -315,18 +312,59 @@ async def init_vector_only_mode(
                 limit=top_k_kb
             )
             
-            # KB 문서는 메타데이터만 반환 (요약 생성 없음)
+            # KB 문서는 메타데이터만 반환
+            kb_documents = []
             for result in kb_results:
                 kb_documents.append({
                     "id": result.get("original_id") or result["metadata"].get("original_id"),
                     "title": result.get("title") or result["metadata"].get("title", ""),
-                    "url": f"/kb/articles/{result.get('original_id')}",  # 원본 링크 (클릭시 이동)
+                    "url": f"/kb/articles/{result.get('original_id')}",
                     "score": result["score"],
                     "created_at": result.get("created_at", ""),
                     "updated_at": result.get("updated_at", ""),
-                    # content 필드 제거 - 목록만 표시
                 })
             logger.info(f"KB 문서 검색 완료: {len(kb_documents)}건")
+            return kb_documents
+
+        # 3. 1단계: 티켓 요약과 벡터 검색을 병렬로 실행
+        logger.info("🚀 [병렬 처리] 1단계: 티켓 요약 + 벡터 검색 병렬 실행 시작")
+        parallel_stage1_start = time.time()
+        
+        summary_text, raw_similar_tickets, kb_documents = await asyncio.gather(
+            generate_summary_task(),
+            search_similar_tickets_task(), 
+            search_kb_documents_task()
+        )
+        
+        parallel_stage1_time = time.time() - parallel_stage1_start
+        logger.info(f"⏱️ [병렬 처리] 1단계 완료 - 소요시간: {parallel_stage1_time:.2f}초")
+        
+        # 성능 최적화: 조회 티켓 요약본 로깅을 DEBUG 레벨로 제한
+        if summary_text and summary_text.strip():
+            logger.info(f"✅ [조회 티켓 요약] 완료 - {len(summary_text)}자")
+            # DEBUG 레벨에서만 전체 요약 내용 로깅
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"📄 [조회 티켓 최종 요약본] \n{summary_text[:500]}...")
+
+        # 4. 2단계: 유사 티켓 요약 생성 (병렬 처리)
+        similar_tickets = []
+        if raw_similar_tickets:
+            logger.info("🚀 [병렬 처리] 2단계: 유사 티켓 요약 병렬 생성 시작")
+            parallel_stage2_start = time.time()
+            
+            similar_tickets = await llm_manager.generate_similar_ticket_summaries(raw_similar_tickets, ui_language)
+            
+            parallel_stage2_time = time.time() - parallel_stage2_start
+            logger.info(f"⏱️ [병렬 처리] 2단계 완료 - 유사 티켓 {len(similar_tickets)}건, 소요시간: {parallel_stage2_time:.2f}초")
+            
+            # 성능 최적화: 상세 요약 로깅을 DEBUG 레벨로 제한
+            logger.info(f"✅ [유사 티켓 요약] {len(similar_tickets)}건 완료")
+            
+            # DEBUG 레벨에서만 상세 로깅
+            if logger.isEnabledFor(logging.DEBUG):
+                for i, ticket in enumerate(similar_tickets, 1):
+                    ticket_summary = ticket.get('content', '요약없음')[:100] + "..."  # 요약 내용 제한
+                    logger.debug(f"📄 [유사 티켓 {i}] ID: {ticket.get('id')} - {ticket_summary}")
         
         execution_time = time.time() - start_time
         
@@ -678,60 +716,105 @@ async def init_streaming_vector_only_mode(
             
             ticket_content = "\n".join(ticket_content_parts)
             
-            # 2. 실시간 요약 생성 (실시간 Freshdesk 데이터 사용)
-            yield f"data: {json.dumps(send_progress('summary', 30, '실시간 요약 생성 중'))}\n\n"
-            
+            # 2. 스트리밍 버전도 병렬 처리 적용
+            import asyncio
             llm_manager = get_llm_manager()
             
-            # 실시간 티켓 데이터를 LLM Manager 형식으로 변환
-            ticket_data_for_summary = {
-                "id": ticket_id,
-                "subject": ticket_data.get("subject", ""),
-                "description": ticket_data.get("description", ""),
-                "description_text": ticket_data.get("description_text", ""),
-                "status": ticket_data.get("status", ""),
-                "priority": ticket_data.get("priority", ""),
-                "created_at": ticket_data.get("created_at", ""),
-                "conversations": ticket_data.get("conversations", []),
-                "attachments": ticket_data.get("attachments", []),
-                "tenant_metadata": {
-                    "has_conversations": len(ticket_data.get("conversations", [])) > 0,
-                    "conversation_count": len(ticket_data.get("conversations", [])),
-                    "has_attachments": len(ticket_data.get("attachments", [])) > 0,
-                    "attachment_count": len(ticket_data.get("attachments", []))
-                }
-            }
+            # 병렬 실행할 작업들 정의 (스트리밍 버전)
+            async def streaming_summary_task():
+                """스트리밍용 티켓 요약 생성 작업"""
+                try:
+                    logger.info("🎯 [조회 티켓 최우선] ticket_view 템플릿 사용 시작")
+                    
+                    summary_result_dict = await llm_manager.generate_ticket_summary(ticket_data)
+                    summary_text = summary_result_dict.get("summary", "요약 생성 실패")
+                    
+                    # 템플릿 구조 확인
+                    if summary_text and len(summary_text) > 100:
+                        korean_sections = any(section in summary_text for section in ["🔍 문제 현황", "💡 원인 분석", "⚡ 해결 진행상황", "🎯 중요 인사이트"])
+                        english_sections = any(section in summary_text for section in ["🔍 Problem Overview", "💡 Root Cause", "⚡ Resolution Progress", "🎯 Key Insights"])
+                        has_sections = korean_sections or english_sections
+                        if has_sections:
+                            lang = "한국어" if korean_sections else "영어"
+                            logger.info(f"✅ [조회 티켓] ticket_view 4개 섹션 구조 정상 생성 ({lang})")
+                    
+                    logger.info(f"✅ [조회 티켓 최우선] ticket_view 템플릿 기반 요약 생성 완료 ({len(summary_text)}문자)")
+                    logger.info(f"\n📄 [조회 티켓 요약] \n{summary_text}")
+                    
+                    return summary_text
+                    
+                except Exception as e:
+                    logger.error(f"❌ [조회 티켓 최우선] ticket_view 템플릿 사용 실패: {e}")
+                    # 폴백
+                    subject = ticket_data.get("subject", "제목 없음")
+                    description = ticket_data.get("description_text") or ticket_data.get("description", "")
+                    fallback_summary = f"## 🎫 {subject}\n\n**문제 상황**: {description[:200]}...\n\n**오류**: {str(e)}"
+                    logger.info(f"\n📄 [조회 티켓 요약 - 폴백] \n{fallback_summary}")
+                    return fallback_summary
+
+            async def streaming_search_similar_task():
+                """스트리밍용 유사 티켓 검색 작업"""
+                if not include_similar:
+                    return []
+                    
+                similar_results = await search_vector_db_only(
+                    query=ticket_content,
+                    tenant_id=tenant_id,
+                    platform=platform,
+                    doc_types=["ticket"],
+                    limit=4  # 현재 티켓 제외를 위해 +1
+                )
+                
+                raw_similar_tickets = []
+                for result in similar_results:
+                    if result["metadata"].get("ticket_id") != ticket_id:
+                        raw_similar_tickets.append({
+                            "id": result.get("original_id") or result["metadata"].get("original_id"),
+                            "title": result.get("subject") or result["metadata"].get("subject", ""),
+                            "content": result.get("content", ""),
+                            "score": result["score"],
+                            "metadata": result.get("extended_metadata", result.get("metadata", {}))
+                        })
+                        if len(raw_similar_tickets) >= 3:
+                            break
+                
+                return raw_similar_tickets
+
+            async def streaming_search_kb_task():
+                """스트리밍용 KB 문서 검색 작업"""
+                if not include_kb:
+                    return []
+                    
+                kb_results = await search_vector_db_only(
+                    query=ticket_content,
+                    tenant_id=tenant_id,
+                    platform=platform,
+                    doc_types=["article"],
+                    limit=3
+                )
+                
+                kb_documents = []
+                for result in kb_results:
+                    kb_documents.append({
+                        "id": result.get("original_id") or result["metadata"].get("original_id"),
+                        "title": result.get("title") or result["metadata"].get("title", ""),
+                        "url": f"/kb/articles/{result.get('original_id')}",
+                        "score": result["score"],
+                        "created_at": result.get("created_at", ""),
+                        "updated_at": result.get("updated_at", ""),
+                    })
+                
+                return kb_documents
+
+            # 1단계: 요약 생성 시작 알림
+            yield f"data: {json.dumps(send_progress('summary', 20, '실시간 요약 및 검색 병렬 실행 중'))}\n\n"
             
-            # 조회 티켓 최우선 품질: ticket_view 템플릿 사용
-            try:
-                logger.info("🎯 [조회 티켓 최우선] ticket_view 템플릿 사용 시작")
-                
-                # LLM 매니저를 통해 YAML 템플릿 기반 요약 생성
-                summary_result_dict = await llm_manager.generate_ticket_summary(ticket_data)
-                summary_text = summary_result_dict.get("summary", "요약 생성 실패")
-                
-                # ticket_view 템플릿 구조 확인 (한국어/영어 모두)
-                if summary_text and len(summary_text) > 100:
-                    korean_sections = any(section in summary_text for section in ["🔍 문제 현황", "💡 원인 분석", "⚡ 해결 진행상황", "🎯 중요 인사이트"])
-                    english_sections = any(section in summary_text for section in ["🔍 Problem Overview", "💡 Root Cause", "⚡ Resolution Progress", "🎯 Key Insights"])
-                    has_sections = korean_sections or english_sections
-                    if has_sections:
-                        lang = "한국어" if korean_sections else "영어"
-                        logger.info(f"✅ [조회 티켓] ticket_view 4개 섹션 구조 정상 생성 ({lang})")
-                    else:
-                        logger.warning("⚠️ [조회 티켓] ticket_view 구조가 적용되지 않음")
-                        logger.warning(f"생성된 요약 미리보기: {summary_text[:300]}...")
-                
-                logger.info(f"✅ [조회 티켓 최우선] ticket_view 템플릿 기반 요약 생성 완료 ({len(summary_text)}문자)")
-                logger.info(f"\n📄 [조회 티켓 요약] \n{summary_text}")
-                
-            except Exception as e:
-                logger.error(f"❌ [조회 티켓 최우선] ticket_view 템플릿 사용 실패: {e}")
-                # 폴백: 기존 간단한 형식
-                subject = ticket_data.get("subject", "제목 없음")
-                description = ticket_data.get("description_text") or ticket_data.get("description", "")
-                summary_text = f"## 🎫 {subject}\n\n**문제 상황**: {description[:200]}...\n\n**오류**: {str(e)}"
-                logger.info(f"\n📄 [조회 티켓 요약 - 폴백] \n{summary_text}")
+            # 1단계: 요약과 검색을 병렬로 실행
+            summary_text, raw_similar_tickets, kb_documents = await asyncio.gather(
+                streaming_summary_task(),
+                streaming_search_similar_task(),
+                streaming_search_kb_task()
+            )
             
             # 요약 결과 전송
             summary_chunk = {
@@ -741,40 +824,11 @@ async def init_streaming_vector_only_mode(
             }
             yield f"data: {json.dumps(summary_chunk)}\n\n"
             
-            # 3. 유사 티켓 검색 및 요약 생성
-            if include_similar:
-                yield f"data: {json.dumps(send_progress('similar_tickets', 60, '유사 티켓 검색 중'))}\n\n"
+            # 2단계: 유사 티켓 요약 생성 (병렬 처리)
+            if raw_similar_tickets:
+                yield f"data: {json.dumps(send_progress('similar_summaries', 60, f'유사 티켓 요약 병렬 생성 중 (0/{len(raw_similar_tickets)})'))}\n\n"
                 
-                # 3-1. Vector DB에서 유사 티켓 검색
-                similar_results = await search_vector_db_only(
-                    query=ticket_content,
-                    tenant_id=tenant_id,
-                    platform=platform,
-                    doc_types=["ticket"],
-                    limit=4  # 현재 티켓 제외를 위해 +1
-                )
-                
-                # 3-2. 현재 티켓 제외하고 유사 티켓만 추출
-                raw_similar_tickets = []
-                for result in similar_results:
-                    if result["metadata"].get("ticket_id") != ticket_id:
-                        raw_similar_tickets.append({
-                            "id": result.get("original_id") or result["metadata"].get("original_id"),
-                            "title": result.get("subject") or result["metadata"].get("subject", ""),
-                            "content": result.get("content", ""),  # Vector DB의 원본 텍스트
-                            "score": result["score"],
-                            "metadata": result.get("extended_metadata", result.get("metadata", {}))
-                        })
-                        if len(raw_similar_tickets) >= 3:
-                            break
-                
-                # 3-3. 유사 티켓들에 대한 AI 요약 생성 (스트리밍 진행률 포함)
-                similar_tickets = []
-                if raw_similar_tickets:
-                    yield f"data: {json.dumps(send_progress('similar_summaries', 70, f'유사 티켓 요약 생성 중 (0/{len(raw_similar_tickets)})'))}\n\n"
-                    similar_tickets = await llm_manager.generate_similar_ticket_summaries(raw_similar_tickets, ui_language)
-                    
-                    # 유사 티켓 요약 완료 (로깅은 non-streaming 모드와 중복 방지)
+                similar_tickets = await llm_manager.generate_similar_ticket_summaries(raw_similar_tickets, ui_language)
                 
                 similar_chunk = {
                     "type": "similar_tickets",
@@ -782,31 +836,8 @@ async def init_streaming_vector_only_mode(
                 }
                 yield f"data: {json.dumps(similar_chunk)}\n\n"
             
-            # 4. KB 문서 검색 (메타데이터만, 요약 없음)
-            if include_kb:
-                yield f"data: {json.dumps(send_progress('kb_documents', 80, 'KB 문서 검색 중'))}\n\n"
-                
-                kb_results = await search_vector_db_only(
-                    query=ticket_content,
-                    tenant_id=tenant_id,
-                    platform=platform,
-                    doc_types=["article"],
-                    limit=3
-                )
-                
-                # KB 문서는 메타데이터만 반환 (요약 생성 없음)
-                kb_documents = []
-                for result in kb_results:
-                    kb_documents.append({
-                        "id": result.get("original_id") or result["metadata"].get("original_id"),
-                        "title": result.get("title") or result["metadata"].get("title", ""),
-                        "url": f"/kb/articles/{result.get('original_id')}",  # 원본 링크 (클릭시 이동)
-                        "score": result["score"],
-                        "created_at": result.get("created_at", ""),
-                        "updated_at": result.get("updated_at", ""),
-                        # content 필드 제거 - 목록만 표시
-                    })
-                
+            # KB 문서 결과 전송
+            if kb_documents:
                 kb_chunk = {
                     "type": "kb_documents",
                     "content": kb_documents
