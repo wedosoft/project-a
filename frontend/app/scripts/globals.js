@@ -720,40 +720,19 @@ if (window.location.hostname === 'localhost' || window.location.hostname.include
   console.log('💡 EventAPI 상태 확인: window.GlobalDebug.checkEventAPI()');
 }
 
-// 전역 모듈 로드 추적 시스템 (세션 전체에서 유지)
+// 단순화된 모듈 로드 추적 시스템
 if (typeof window.MODULE_LOAD_TRACKER === 'undefined') {
   window.MODULE_LOAD_TRACKER = {
     loaded: new Set(),
-    shouldLog: window.location.hostname === 'localhost',
-    sessionId: Date.now(), // 세션 구분
-    contexts: new Set() // 컨텍스트별 로딩 추적
+    shouldLog: window.location.hostname === 'localhost' && !window.location.search.includes('quiet=true'),
+    initialized: false
   };
-  
-  // 현재 컨텍스트 식별
-  const context = window.isFDKModal ? 'modal' : (window.isSidebar ? 'sidebar' : 'standard');
-  window.MODULE_LOAD_TRACKER.contexts.add(context);
-  
-  if (window.MODULE_LOAD_TRACKER.shouldLog) {
-    console.log(`🔧 MODULE_LOAD_TRACKER 초기화 (${context} 컨텍스트)`);
-  }
 }
 
-// 컨텍스트별 고유 키 생성
-const moduleKey = `globals-${window.isFDKModal ? 'modal' : (window.isSidebar ? 'sidebar' : 'standard')}`;
-
-if (window.MODULE_LOAD_TRACKER.shouldLog && !window.MODULE_LOAD_TRACKER.loaded.has(moduleKey)) {
-  window.MODULE_LOAD_TRACKER.loaded.add(moduleKey);
-  window.MODULE_LOAD_TRACKER.loaded.add('globals'); // 기본 키도 추가
-  
-  // 중복 로그 방지: 세션당 한 번만 출력
-  if (!window.MODULE_LOAD_TRACKER.logged) {
-    window.MODULE_LOAD_TRACKER.logged = {};
-  }
-  
-  if (!window.MODULE_LOAD_TRACKER.logged['globals']) {
-    console.log('✅ globals.js 모듈 로드 완료 - 전역 상태 관리 준비됨');
-    window.MODULE_LOAD_TRACKER.logged['globals'] = true;
-  }
+// 모듈 시스템 초기화 완료 (단일 로그)
+if (window.MODULE_LOAD_TRACKER.shouldLog && !window.MODULE_LOAD_TRACKER.initialized) {
+  window.MODULE_LOAD_TRACKER.initialized = true;
+  console.log('✅ 모듈 시스템 초기화 완료');
 }
 
 // 글로벌 에러 처리 시스템 개선

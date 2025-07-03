@@ -1209,21 +1209,7 @@ window.hideModal = function() {
   }
 };
 
-if (window.MODULE_LOAD_TRACKER && window.MODULE_LOAD_TRACKER.shouldLog) {
-  const moduleKey = `ui-${window.isFDKModal ? 'modal' : (window.isSidebar ? 'sidebar' : 'standard')}`;
-  if (!window.MODULE_LOAD_TRACKER.loaded.has(moduleKey)) {
-    window.MODULE_LOAD_TRACKER.loaded.add(moduleKey);
-    window.MODULE_LOAD_TRACKER.loaded.add('ui');
-    // 중복 로그 방지
-    if (!window.MODULE_LOAD_TRACKER.logged) {
-      window.MODULE_LOAD_TRACKER.logged = {};
-    }
-    if (!window.MODULE_LOAD_TRACKER.logged['ui']) {
-      console.log('🎨 UI 모듈 로드 완료 - FDK 네이티브 방식으로 단순화됨');
-      window.MODULE_LOAD_TRACKER.logged['ui'] = true;
-    }
-  }
-}
+// 모듈 등록 (로그 없음)
 
 // 모듈 의존성 시스템에 등록 (data 의존성 명시)
 if (typeof ModuleDependencyManager !== 'undefined') {

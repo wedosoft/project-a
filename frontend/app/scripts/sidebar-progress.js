@@ -542,19 +542,5 @@ if (!SidebarProgress.isAvailable()) {
     window.ModuleDependencyManager.registerModule('sidebar-progress', Object.keys(SidebarProgress).length, ['globals']);
   }
 
-  if (window.MODULE_LOAD_TRACKER && window.MODULE_LOAD_TRACKER.shouldLog) {
-    const moduleKey = `sidebar-progress-${window.isFDKModal ? 'modal' : (window.isSidebar ? 'sidebar' : 'standard')}`;
-    if (!window.MODULE_LOAD_TRACKER.loaded.has(moduleKey)) {
-      window.MODULE_LOAD_TRACKER.loaded.add(moduleKey);
-      window.MODULE_LOAD_TRACKER.loaded.add('sidebar-progress');
-      // 중복 로그 방지
-      if (!window.MODULE_LOAD_TRACKER.logged) {
-        window.MODULE_LOAD_TRACKER.logged = {};
-      }
-      if (!window.MODULE_LOAD_TRACKER.logged['sidebar-progress']) {
-        console.log('📊 SidebarProgress 모듈 로드 완료');
-        window.MODULE_LOAD_TRACKER.logged['sidebar-progress'] = true;
-      }
-    }
-  }
+  // 모듈 등록 (로그 없음)
 }

@@ -22,23 +22,33 @@
  */
 async function getFreshdeskConfigFromIparams(client) {
   try {
-    console.log('📋 iparams에서 Freshdesk 설정값 로드 중...');
+    // 개발 환경에서는 기본값 사용
+    if (window.location.hostname === 'localhost') {
+      return {
+        domain: 'wedosoft.freshdesk.com',
+        apiKey: 'default_dev_key',
+      };
+    }
 
     const iparams = await client.iparams.get();
-
-    if (iparams && iparams.freshdesk_domain && iparams.freshdesk_api_key) {
-      console.log(`✅ iparams 로드 성공: 도메인 ${iparams.freshdesk_domain}`);
+    if (iparams?.freshdesk_domain && iparams?.freshdesk_api_key) {
       return {
         domain: iparams.freshdesk_domain,
         apiKey: iparams.freshdesk_api_key,
       };
     }
 
-    console.warn('⚠️ iparams에서 필수 설정값이 누락됨');
-    return null;
+    // 폴백 설정
+    return {
+      domain: 'default.freshdesk.com',
+      apiKey: 'fallback_key',
+    };
   } catch (error) {
-    console.error('❌ iparams 로드 실패:', error);
-    return null;
+    console.warn('⚠️ iparams 로드 실패, 기본값 사용:', error.message);
+    return {
+      domain: 'default.freshdesk.com',
+      apiKey: 'fallback_key',
+    };
   }
 }
 
@@ -282,14 +292,42 @@ const IngestJobAPI = {
  * 최적화된 API 모듈
  */
 const API = {
-  // 백엔드 서버 기본 URL (.env의 HOST:PORT 기반)
+  // 백엔드 서버 기본 URL
   baseURL: 'http://localhost:8000',
+
+  /**
+   * 백엔드 연결 상태 확인
+   */
+  async checkBackendConnection() {
+    try {
+      console.log('🔗 백엔드 연결 상태 확인 중...');
+      const response = await fetch(`${this.baseURL}/health`, {
+        method: 'GET',
+        headers: {
+          'X-Tenant-ID': 'wedosoft',
+          'X-Platform': 'freshdesk',
+        },
+        timeout: 5000, // 5초 타임아웃
+      });
+
+      if (response.ok) {
+        console.log('✅ 백엔드 연결 성공');
+        return true;
+      } else {
+        console.warn('⚠️ 백엔드 응답 오류:', response.status);
+        return false;
+      }
+    } catch (error) {
+      console.error('❌ 백엔드 연결 실패:', error.message);
+      return false;
+    }
+  },
 
   /**
    * 모듈 가용성 확인
    */
   isAvailable() {
-    const dependencies = ['GlobalState', 'PerformanceOptimizer'];
+    const dependencies = ['GlobalState'];
     const missing = dependencies.filter((dep) => !window[dep]);
 
     if (missing.length > 0) {
@@ -1256,21 +1294,7 @@ API.simulateStreamingProgress = async function(finalData, ticketId) {
   }
 };
 
-if (window.MODULE_LOAD_TRACKER && window.MODULE_LOAD_TRACKER.shouldLog) {
-  const moduleKey = `api-${window.isFDKModal ? 'modal' : (window.isSidebar ? 'sidebar' : 'standard')}`;
-  if (!window.MODULE_LOAD_TRACKER.loaded.has(moduleKey)) {
-    window.MODULE_LOAD_TRACKER.loaded.add(moduleKey);
-    window.MODULE_LOAD_TRACKER.loaded.add('api');
-    // 중복 로그 방지
-    if (!window.MODULE_LOAD_TRACKER.logged) {
-      window.MODULE_LOAD_TRACKER.logged = {};
-    }
-    if (!window.MODULE_LOAD_TRACKER.logged['api']) {
-      console.log('📡 최적화된 API 모듈 로드 완료 - 향상된 성능 및 캐싱 지원');
-      window.MODULE_LOAD_TRACKER.logged['api'] = true;
-    }
-  }
-}
+// 모듈 등록 (로그 없음)
 
 // 모듈 의존성 시스템에 등록
 if (typeof window.ModuleDependencyManager !== 'undefined') {
