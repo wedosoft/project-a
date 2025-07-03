@@ -1627,7 +1627,8 @@ async def search_vector_db_only(
     platform: str = "freshdesk", 
     doc_types: Optional[List[str]] = None,
     limit: int = 10,
-    score_threshold: float = 0.7
+    score_threshold: float = 0.7,
+    exclude_id: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
     Vector DB에서만 검색을 수행합니다 (SQL 없음).
@@ -1639,6 +1640,7 @@ async def search_vector_db_only(
         doc_types: 문서 타입 필터 (["ticket", "article"] 등)
         limit: 최대 결과 수
         score_threshold: 최소 유사도 점수
+        exclude_id: 제외할 문서 ID (자기 자신 제외용)
         
     Returns:
         List[Dict[str, Any]]: 검색 결과
@@ -1646,7 +1648,8 @@ async def search_vector_db_only(
     try:
         from core.search.embeddings import embed_documents
         
-        logger.info(f"Vector DB 검색 시작 - 쿼리: '{query[:100]}...', 테넌트: {tenant_id}, 문서타입: {doc_types}, 제한: {limit}")
+        exclude_msg = f", 제외 ID: {exclude_id}" if exclude_id else ""
+        logger.info(f"Vector DB 검색 시작 - 쿼리: '{query[:100]}...', 테넌트: {tenant_id}, 문서타입: {doc_types}, 제한: {limit}{exclude_msg}")
         
         # 검색 쿼리 임베딩 생성
         query_embeddings = embed_documents([query])
@@ -1663,6 +1666,13 @@ async def search_vector_db_only(
                 {"key": "platform", "match": {"value": platform}}
             ]
         }
+        
+        # 제외할 ID가 있으면 must_not 조건 추가 (자기 자신 제외)
+        if exclude_id:
+            filter_conditions["must_not"] = [
+                {"key": "original_id", "match": {"value": str(exclude_id)}}
+            ]
+            logger.debug(f"🚫 제외 ID 설정: {exclude_id} (벡터 검색에서 자동 제외)")
         
         # 문서 타입 필터 추가
         if doc_types:

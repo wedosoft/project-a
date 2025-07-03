@@ -219,14 +219,69 @@ async def init_vector_only_mode(
         elif ticket_data.get("description"):
             ticket_content_parts.append(f"설명: {ticket_data['description']}")
         
-        # 대화내역 추가
-        if ticket_data.get("conversations"):
-            ticket_content_parts.append("대화내역:")
-            for conv in ticket_data["conversations"][:5]:  # 최근 5개 대화
-                if conv.get("body_text"):
-                    ticket_content_parts.append(f"- {conv['body_text'][:200]}...")
+        # LLM 기반 통합 지능형 처리 (Beta)
+        use_intelligent_processing = ticket_data.get("conversations") and len(ticket_data.get("conversations", [])) > 10
         
-        ticket_content = "\n".join(ticket_content_parts)
+        if use_intelligent_processing:
+            try:
+                from core.llm.intelligent_ticket_processor import get_intelligent_processor
+                
+                logger.info(f"🧠 LLM 통합 지능형 처리 시작 - 대화 수: {len(ticket_data.get('conversations', []))}")
+                
+                # 통합 분석 수행
+                intelligent_processor = get_intelligent_processor()
+                analysis = await intelligent_processor.process_ticket_intelligently(ticket_data, "ko")
+                
+                # 최적화된 콘텐츠 생성
+                ticket_content = intelligent_processor.get_optimized_ticket_content(ticket_data, analysis)
+                
+                logger.info(f"✅ 지능형 처리 완료 - 언어: {analysis.language}, "
+                           f"선별 대화: {len(analysis.important_conversation_indices)}개, "
+                           f"관련 첨부파일: {len(analysis.relevant_attachments)}개")
+                
+                # 분석 결과를 메타데이터에 추가
+                if "metadata" not in ticket_data:
+                    ticket_data["metadata"] = {}
+                
+                ticket_data["metadata"]["intelligent_analysis"] = {
+                    "language": analysis.language,
+                    "selected_conversations": len(analysis.important_conversation_indices),
+                    "relevant_attachments": len(analysis.relevant_attachments)
+                }
+                
+                # 관련 첨부파일을 메타데이터에 설정 (기존 첨부파일 선별 로직 대체)
+                if analysis.relevant_attachments:
+                    ticket_data["metadata"]["relevant_attachments"] = analysis.relevant_attachments
+                
+            except Exception as e:
+                logger.warning(f"⚠️ 지능형 처리 실패, 기존 방식으로 폴백: {e}")
+                use_intelligent_processing = False
+        
+        # 기존 방식 (폴백 또는 짧은 대화)
+        if not use_intelligent_processing:
+            # 대화내역 추가 (기존 로직 유지)
+            if ticket_data.get("conversations"):
+                conversations = ticket_data["conversations"]
+                total_conversations = len(conversations)
+                
+                ticket_content_parts.append(f"대화내역 (총 {total_conversations}개):")
+                
+                # 간단한 선별 로직 (10개 이하는 전체, 이상은 후반 위주)
+                if total_conversations <= 10:
+                    for i, conv in enumerate(conversations, 1):
+                        if conv.get("body_text"):
+                            content = conv['body_text'][:800]
+                            ticket_content_parts.append(f"대화 {i}: {content}{'...' if len(conv['body_text']) > 800 else ''}")
+                else:
+                    # 후반 위주 선별
+                    selected_indices = list(range(max(0, total_conversations - 10), total_conversations))
+                    for idx in selected_indices:
+                        conv = conversations[idx]
+                        if conv.get("body_text"):
+                            content = conv['body_text'][:700]
+                            ticket_content_parts.append(f"대화 {idx+1}: {content}{'...' if len(conv['body_text']) > 700 else ''}")
+            
+            ticket_content = "\n".join(ticket_content_parts)
         
         # 병렬 처리를 위한 작업 정의
         import asyncio
@@ -263,38 +318,28 @@ async def init_vector_only_mode(
                 return []
                 
             logger.info(f"유사 티켓 검색 시작 (최대 {top_k_tickets}건)")
+            # 스마트 벡터 검색 - 자기 자신 자동 제외
             similar_results = await search_vector_db_only(
                 query=ticket_content,
                 tenant_id=tenant_id,
                 platform=platform,
                 doc_types=["ticket"],
-                limit=top_k_tickets + 1  # 현재 티켓 제외를 위해 +1
+                limit=top_k_tickets,  # 정확한 개수만 요청 (데이터베이스 레벨에서 필터링됨)
+                exclude_id=ticket_id  # 자기 자신 제외 (벡터 DB 레벨에서 처리)
             )
             
-            # 현재 티켓 제외하고 유사 티켓만 추출
+            # 검색 결과를 유사 티켓 형식으로 변환 (수동 필터링 불필요)
             raw_similar_tickets = []
             for result in similar_results:
-                result_ticket_id = (
-                    result["metadata"].get("ticket_id") or 
-                    result["metadata"].get("original_id") or 
-                    result.get("original_id") or
-                    result.get("id")
-                )
+                raw_similar_tickets.append({
+                    "id": result.get("original_id") or result["metadata"].get("original_id"),
+                    "title": result.get("subject") or result["metadata"].get("subject", ""),
+                    "content": result.get("content", ""),
+                    "score": result["score"],
+                    "metadata": result.get("extended_metadata", result.get("metadata", {}))
+                })
                 
-                if str(result_ticket_id) != str(ticket_id):
-                    raw_similar_tickets.append({
-                        "id": result.get("original_id") or result["metadata"].get("original_id"),
-                        "title": result.get("subject") or result["metadata"].get("subject", ""),
-                        "content": result.get("content", ""),
-                        "score": result["score"],
-                        "metadata": result.get("extended_metadata", result.get("metadata", {}))
-                    })
-                    logger.debug(f"✅ 유사 티켓 추가: ID {result_ticket_id} (현재: {ticket_id})")
-                else:
-                    logger.info(f"🚫 현재 티켓 제외: ID {result_ticket_id} (현재: {ticket_id})")
-                    
-                if len(raw_similar_tickets) >= top_k_tickets:
-                    break
+            logger.info(f"✅ 유사 티켓 검색 완료: {len(raw_similar_tickets)}개 (현재 티켓 {ticket_id} 자동 제외됨)")
             
             return raw_similar_tickets
 
@@ -757,26 +802,25 @@ async def init_streaming_vector_only_mode(
                 if not include_similar:
                     return []
                     
+                # 스마트 벡터 검색 - 자기 자신 자동 제외 (스트리밍용)
                 similar_results = await search_vector_db_only(
                     query=ticket_content,
                     tenant_id=tenant_id,
                     platform=platform,
                     doc_types=["ticket"],
-                    limit=4  # 현재 티켓 제외를 위해 +1
+                    limit=3,  # 정확한 개수만 요청 (데이터베이스 레벨에서 필터링됨)
+                    exclude_id=ticket_id  # 자기 자신 제외 (벡터 DB 레벨에서 처리)
                 )
                 
                 raw_similar_tickets = []
                 for result in similar_results:
-                    if result["metadata"].get("ticket_id") != ticket_id:
-                        raw_similar_tickets.append({
-                            "id": result.get("original_id") or result["metadata"].get("original_id"),
-                            "title": result.get("subject") or result["metadata"].get("subject", ""),
-                            "content": result.get("content", ""),
-                            "score": result["score"],
-                            "metadata": result.get("extended_metadata", result.get("metadata", {}))
-                        })
-                        if len(raw_similar_tickets) >= 3:
-                            break
+                    raw_similar_tickets.append({
+                        "id": result.get("original_id") or result["metadata"].get("original_id"),
+                        "title": result.get("subject") or result["metadata"].get("subject", ""),
+                        "content": result.get("content", ""),
+                        "score": result["score"],
+                        "metadata": result.get("extended_metadata", result.get("metadata", {}))
+                    })
                 
                 return raw_similar_tickets
 
