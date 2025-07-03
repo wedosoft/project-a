@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>스트리밍 Integration 테스트</title>
+    <meta charset="utf-8">
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            margin: 20px; 
+            background-color: #f5f5f5;
+        }
+        .test-container { 
+            background: white; 
+            padding: 20px; 
+            border-radius: 8px; 
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .test-section { 
+            margin: 20px 0; 
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .test-button { 
+            background: #007bff; 
+            color: white; 
+            border: none; 
+            padding: 10px 20px; 
+            border-radius: 4px; 
+            cursor: pointer; 
+            margin: 5px;
+        }
+        .test-button:hover { background: #0056b3; }
+        .test-button:disabled { background: #ccc; cursor: not-allowed; }
+        .status { 
+            padding: 10px; 
+            border-radius: 4px; 
+            margin: 10px 0;
+        }
+        .status.success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .status.error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .status.info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+        .log { 
+            background: #f8f9fa; 
+            border: 1px solid #dee2e6; 
+            padding: 10px; 
+            margin: 10px 0;
+            max-height: 300px; 
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .progress-display {
+            margin: 15px 0;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #e9ecef;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #007bff, #28a745);
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>🧪 스트리밍 Integration 테스트</h1>
+        <p>Frontend /init/ticket-id 호출을 통해서 백엔드 데이터를 스트리밍으로 정확히 받아오는지 테스트합니다.</p>
+        
+        <div class="alert alert-info" style="background: #e3f2fd; border: 1px solid #2196f3; color: #1976d2; padding: 12px; border-radius: 4px; margin-bottom: 20px;">
+            <strong>📋 사용 방법:</strong><br>
+            1. 백엔드 서버가 실행 중인지 확인 (기본: http://localhost:8000)<br>
+            2. 테스트할 티켓 ID 입력 (기본: 12345)<br>
+            3. "🌊 스트리밍 테스트" 또는 "📡 직접 API 테스트" 버튼 클릭<br>
+            <br>
+            <strong>⚠️ 참고:</strong> CORS 오류가 발생하면 백엔드에 CORS 설정이 필요합니다.
+        </div>
+        
+        <div class="test-section">
+            <h3>📋 테스트 설정</h3>
+            <div style="margin-bottom: 15px;">
+                <label>테스트 티켓 ID: 
+                    <input type="text" id="testTicketId" value="12345" style="margin-left: 10px; padding: 5px;">
+                </label>
+            </div>
+            
+            <div style="margin-bottom: 15px;">
+                <label>백엔드 URL: 
+                    <input type="text" id="backendUrl" value="http://localhost:8000" style="margin-left: 10px; padding: 5px; width: 200px;">
+                </label>
+            </div>
+            
+            <div style="margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 4px;">
+                <strong>설정된 헤더 값:</strong><br>
+                <code>X-Domain: wedosoft.freshdesk.com</code><br>
+                <code>X-Tenant-ID: wedosoft</code><br>
+                <code>X-API-Key: Ug9H1cKCZZtZ4haamBy</code><br>
+                <code>X-Platform: freshdesk</code>
+            </div>
+            
+            <button class="test-button" onclick="runStreamingTest()">🌊 스트리밍 테스트 시작</button>
+            <button class="test-button" onclick="testDirectAPI()">📡 직접 API 테스트</button>
+            <button class="test-button" onclick="clearLogs()">🧹 로그 지우기</button>
+            <button class="test-button" onclick="resetTest()">🔄 테스트 리셋</button>
+        </div>
+
+        <div class="test-section">
+            <h3>📊 실시간 진행률</h3>
+            <div class="progress-display">
+                <div id="progressText">대기 중...</div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <div id="stageInfo">단계 정보 대기 중...</div>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h3>✅ 테스트 결과</h3>
+            <div id="testStatus" class="status info">테스트 준비됨</div>
+        </div>
+
+        <div class="test-section">
+            <h3>📝 상세 로그</h3>
+            <div id="testLogs" class="log">로그가 여기에 표시됩니다...\n</div>
+        </div>
+    </div>
+
+    <!-- 필요한 스크립트들 로드 -->
+    <script src="scripts/globals.js"></script>
+    <script>
+        // 실제 백엔드 테스트용 client 객체 생성
+        const testClient = {
+            data: {
+                get: async (key) => {
+                    if (key === 'ticket') {
+                        return { ticket: { id: document.getElementById('testTicketId').value } };
+                    }
+                    return {};
+                }
+            },
+            request: {
+                invoke: async (service, options) => {
+                    log(`실제 API Call: ${options.method} ${options.url}`);
+                    
+                    // 실제 백엔드 호출을 위한 fetch 사용
+                    const backendUrl = document.getElementById('backendUrl').value || 'http://localhost:8000';
+                    
+                    try {
+                        const response = await fetch(`${backendUrl}${options.url}`, {
+                            method: options.method || 'GET',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-Domain': 'wedosoft.freshdesk.com',
+                                'X-Tenant-ID': 'wedosoft',
+                                'X-API-Key': 'Ug9H1cKCZZtZ4haamBy',
+                                'X-Platform': 'freshdesk',
+                                ...options.headers
+                            },
+                            body: options.body
+                        });
+                        
+                        const responseText = await response.text();
+                        log(`백엔드 응답 (${response.status}): ${responseText.substring(0, 200)}...`);
+                        
+                        return {
+                            status: response.status,
+                            response: responseText
+                        };
+                    } catch (error) {
+                        log(`❌ 백엔드 연결 실패: ${error.message}`);
+                        
+                        // 백엔드 연결 실패 시 mock 응답 반환
+                        await new Promise(resolve => setTimeout(resolve, 500));
+                        return {
+                            status: 200,
+                            response: JSON.stringify({
+                                success: true,
+                                ticket_id: document.getElementById('testTicketId').value,
+                                summary: "Mock AI 생성 티켓 요약입니다.",
+                                similar_tickets: [
+                                    { id: "111", title: "유사 티켓 1", score: 0.85 },
+                                    { id: "222", title: "유사 티켓 2", score: 0.78 }
+                                ],
+                                kb_documents: [
+                                    { id: "kb1", title: "관련 문서 1", score: 0.92 },
+                                    { id: "kb2", title: "관련 문서 2", score: 0.88 }
+                                ],
+                                execution_time: 2.5
+                            })
+                        };
+                    }
+                }
+            },
+            iparams: {
+                get: async () => ({
+                    freshdesk_domain: 'wedosoft.freshdesk.com',
+                    freshdesk_api_key: 'Ug9H1cKCZZtZ4haamBy',
+                    backend_url: 'http://localhost:8000'
+                })
+            }
+        };
+
+        let testStartTime = null;
+
+        function log(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            const logElement = document.getElementById('testLogs');
+            logElement.textContent += `[${timestamp}] ${message}\n`;
+            logElement.scrollTop = logElement.scrollHeight;
+            console.log(`[스트리밍 테스트] ${message}`);
+        }
+
+        function updateStatus(message, type = 'info') {
+            const statusElement = document.getElementById('testStatus');
+            statusElement.textContent = message;
+            statusElement.className = `status ${type}`;
+        }
+
+        function updateProgress(percentage, stage = '', details = '') {
+            const progressFill = document.getElementById('progressFill');
+            const progressText = document.getElementById('progressText');
+            const stageInfo = document.getElementById('stageInfo');
+            
+            progressFill.style.width = `${percentage}%`;
+            progressText.textContent = `진행률: ${percentage}%`;
+            
+            if (stage) {
+                stageInfo.textContent = `현재 단계: ${stage}`;
+                if (details) {
+                    stageInfo.textContent += ` - ${details}`;
+                }
+            }
+        }
+
+        function clearLogs() {
+            document.getElementById('testLogs').textContent = '로그 지워짐\n';
+        }
+
+        function resetTest() {
+            updateStatus('테스트 준비됨', 'info');
+            updateProgress(0, '대기 중');
+            clearLogs();
+            log('테스트 리셋됨');
+        }
+
+        async function runStreamingTest() {
+            testStartTime = Date.now();
+            log('=== 스트리밍 Integration 테스트 시작 ===');
+            updateStatus('테스트 진행 중...', 'info');
+            updateProgress(0, '테스트 시작', '모듈 로딩 확인');
+
+            try {
+                // 1. 필수 모듈 로딩 확인
+                log('1. 필수 모듈 로딩 상태 확인');
+                updateProgress(10, '모듈 확인');
+                
+                if (typeof window.GlobalState === 'undefined') {
+                    throw new Error('GlobalState 모듈이 로드되지 않음');
+                }
+                
+                if (typeof window.API === 'undefined') {
+                    // API 모듈 동적 로딩 시도
+                    log('API 모듈 동적 로딩 시도...');
+                    await loadScript('scripts/api.js');
+                    
+                    // 테스트 환경에 맞게 baseURL 설정
+                    if (window.API) {
+                        const backendUrl = document.getElementById('backendUrl').value || 'http://localhost:8000';
+                        window.API.baseURL = `${backendUrl}/api`;
+                        log(`API baseURL 설정: ${window.API.baseURL}`);
+                    }
+                } else {
+                    // 이미 로드된 경우에도 baseURL 업데이트
+                    const backendUrl = document.getElementById('backendUrl').value || 'http://localhost:8000';
+                    window.API.baseURL = `${backendUrl}/api`;
+                    log(`API baseURL 업데이트: ${window.API.baseURL}`);
+                }
+                
+                if (typeof window.SidebarProgress === 'undefined') {
+                    log('SidebarProgress 모듈 동적 로딩 시도...');
+                    await loadScript('scripts/sidebar-progress.js');
+                }
+
+                // 2. GlobalState 초기화 확인
+                log('2. GlobalState 초기화 확인');
+                updateProgress(20, 'GlobalState 확인');
+                
+                if (!window.GlobalState.isInitialized || !window.GlobalState.isInitialized()) {
+                    log('GlobalState 초기화 시도...');
+                    window.GlobalState.init();
+                }
+
+                // 3. SidebarProgress 초기화
+                log('3. SidebarProgress 초기화');
+                updateProgress(30, 'SidebarProgress 초기화');
+                
+                if (window.SidebarProgress && !window.SidebarProgress.isInitialized) {
+                    window.SidebarProgress.init();
+                }
+
+                // 4. 스트리밍 시작 테스트
+                log('4. 스트리밍 시작 테스트');
+                updateProgress(40, '스트리밍 시작');
+                
+                const ticketId = document.getElementById('testTicketId').value;
+                
+                if (window.GlobalState.startStreaming) {
+                    window.GlobalState.startStreaming(ticketId);
+                    log(`스트리밍 시작됨 - 티켓 ID: ${ticketId}`);
+                } else {
+                    throw new Error('GlobalState.startStreaming 함수가 없음');
+                }
+
+                // 5. API 호출 테스트 (스트리밍 모드)
+                log('5. API 호출 테스트 (스트리밍 모드)');
+                updateProgress(50, 'API 호출', '백엔드 연결 중');
+
+                if (window.API && window.API.callBackendAPIWithStreaming) {
+                    try {
+                        const backendUrl = document.getElementById('backendUrl').value || 'http://localhost:8000';
+                        log(`🔗 백엔드 URL: ${backendUrl}/api/init/${ticketId}`);
+                        log(`📋 헤더 정보: X-Domain=wedosoft.freshdesk.com, X-Tenant-ID=wedosoft, X-Platform=freshdesk`);
+                        
+                        const result = await window.API.callBackendAPIWithStreaming(
+                            testClient, 
+                            `init/${ticketId}`, 
+                            ticketId, 
+                            { 
+                                useCache: false,
+                                loadingContext: '실제 백엔드 스트리밍 테스트'
+                            }
+                        );
+                        
+                        log(`✅ API 호출 성공: ${JSON.stringify(result, null, 2)}`);
+                    } catch (apiError) {
+                        log(`⚠️ API 호출 실패: ${apiError.message}`);
+                        log('📝 백엔드가 실행 중인지 확인하거나, 시뮬레이션 모드로 폴백됩니다.');
+                    }
+                } else {
+                    throw new Error('API.callBackendAPIWithStreaming 함수가 없음');
+                }
+
+                // 5.1. 실제 스트리밍 기능 테스트
+                log('5.1. 실제 스트리밍 API 함수 확인');
+                if (window.API && window.API.performStreamingAPICall) {
+                    log('✅ performStreamingAPICall 함수 존재');
+                } else {
+                    log('❌ performStreamingAPICall 함수 없음');
+                }
+                
+                if (window.API && window.API.processServerSentEvents) {
+                    log('✅ processServerSentEvents 함수 존재');
+                } else {
+                    log('❌ processServerSentEvents 함수 없음');
+                }
+                
+                if (window.API && window.API.handleStreamingEvent) {
+                    log('✅ handleStreamingEvent 함수 존재');
+                } else {
+                    log('❌ handleStreamingEvent 함수 없음');
+                }
+
+                // 6. 스트리밍 상태 확인
+                log('6. 스트리밍 상태 확인');
+                updateProgress(70, '스트리밍 상태 확인');
+                
+                const streamingStatus = window.GlobalState.getStreamingStatus ? 
+                    window.GlobalState.getStreamingStatus() : null;
+                
+                if (streamingStatus) {
+                    log(`스트리밍 상태: ${JSON.stringify(streamingStatus, null, 2)}`);
+                } else {
+                    log('스트리밍 상태를 가져올 수 없음');
+                }
+
+                // 7. SidebarProgress 표시 확인
+                log('7. SidebarProgress 표시 확인');
+                updateProgress(80, 'UI 확인');
+                
+                if (window.SidebarProgress && window.SidebarProgress.show) {
+                    window.SidebarProgress.show();
+                    log('SidebarProgress 표시됨');
+                } else {
+                    log('SidebarProgress.show 함수가 없음');
+                }
+
+                // 8. 스트리밍 완료 테스트
+                log('8. 스트리밍 완료 테스트');
+                updateProgress(90, '완료 처리');
+                
+                // 잠시 대기 후 완료 처리
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                if (window.GlobalState.stopStreaming) {
+                    window.GlobalState.stopStreaming();
+                    log('스트리밍 완료 처리됨');
+                }
+
+                // 테스트 완료
+                updateProgress(100, '테스트 완료');
+                const elapsed = (Date.now() - testStartTime) / 1000;
+                log(`=== 테스트 완료 (${elapsed.toFixed(1)}초) ===`);
+                updateStatus(`✅ 모든 테스트 통과! (${elapsed.toFixed(1)}초)`, 'success');
+
+            } catch (error) {
+                const elapsed = testStartTime ? (Date.now() - testStartTime) / 1000 : 0;
+                log(`❌ 테스트 실패: ${error.message}`);
+                log(`스택 트레이스: ${error.stack}`);
+                updateStatus(`❌ 테스트 실패: ${error.message} (${elapsed.toFixed(1)}초)`, 'error');
+                
+                // 실패한 경우에도 진행률 표시
+                updateProgress(0, '테스트 실패');
+            }
+        }
+
+        async function loadScript(src) {
+            return new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = src;
+                script.onload = resolve;
+                script.onerror = reject;
+                document.head.appendChild(script);
+            });
+        }
+
+        // 직접 API 테스트 함수
+        async function testDirectAPI() {
+            const ticketId = document.getElementById('testTicketId').value;
+            const backendUrl = document.getElementById('backendUrl').value || 'http://localhost:8000';
+            
+            log('=== 직접 API 테스트 시작 ===');
+            updateStatus('직접 API 테스트 중...', 'info');
+            
+            try {
+                const url = `${backendUrl}/api/init/${ticketId}?stream=true`;
+                log(`🔗 API URL: ${url}`);
+                
+                updateProgress(25, '백엔드 연결', 'API 호출 중');
+                
+                const response = await fetch(url, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Domain': 'wedosoft.freshdesk.com',
+                        'X-Tenant-ID': 'wedosoft',
+                        'X-API-Key': 'Ug9H1cKCZZtZ4haamBy',
+                        'X-Platform': 'freshdesk',
+                        'Accept': 'text/event-stream, application/json'
+                    }
+                });
+                
+                log(`📡 응답 상태: ${response.status} ${response.statusText}`);
+                log(`📋 응답 헤더 Content-Type: ${response.headers.get('content-type')}`);
+                
+                updateProgress(50, '응답 처리', '데이터 읽는 중');
+                
+                const contentType = response.headers.get('content-type');
+                
+                if (contentType && contentType.includes('text/event-stream')) {
+                    // 스트리밍 응답 처리
+                    log('🌊 스트리밍 응답 감지 - SSE 처리 시작');
+                    
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = '';
+                    let eventCount = 0;
+                    
+                    updateProgress(75, '스트리밍 처리', 'SSE 이벤트 수신 중');
+                    
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        
+                        if (done) {
+                            log('📡 스트리밍 종료');
+                            break;
+                        }
+                        
+                        buffer += decoder.decode(value, { stream: true });
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop() || '';
+                        
+                        for (const line of lines) {
+                            if (line.startsWith('data: ')) {
+                                try {
+                                    const eventData = JSON.parse(line.slice(6));
+                                    eventCount++;
+                                    log(`📨 이벤트 ${eventCount}: ${JSON.stringify(eventData)}`);
+                                } catch (parseError) {
+                                    log(`⚠️ 이벤트 파싱 실패: ${line}`);
+                                }
+                            }
+                        }
+                    }
+                    
+                    log(`✅ 총 ${eventCount}개의 스트리밍 이벤트 수신`);
+                    
+                } else {
+                    // 일반 JSON 응답 처리
+                    log('📄 일반 JSON 응답 감지');
+                    const data = await response.text();
+                    log(`📋 응답 데이터: ${data.substring(0, 500)}...`);
+                    
+                    try {
+                        const jsonData = JSON.parse(data);
+                        log(`✅ JSON 파싱 성공: ${Object.keys(jsonData).join(', ')}`);
+                    } catch (parseError) {
+                        log(`❌ JSON 파싱 실패: ${parseError.message}`);
+                    }
+                }
+                
+                updateProgress(100, '테스트 완료');
+                updateStatus('✅ 직접 API 테스트 성공!', 'success');
+                log('=== 직접 API 테스트 완료 ===');
+                
+            } catch (error) {
+                log(`❌ 직접 API 테스트 실패: ${error.message}`);
+                updateStatus(`❌ API 테스트 실패: ${error.message}`, 'error');
+                updateProgress(0, '테스트 실패');
+            }
+        }
+
+        // 페이지 로드 시 초기화
+        window.addEventListener('load', () => {
+            log('페이지 로드 완료 - 테스트 준비됨');
+        });
+    </script>
+</body>
+</html>

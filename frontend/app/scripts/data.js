@@ -631,7 +631,7 @@ window.Data = {
       }
       
       // 백엔드 /init 엔드포인트 호출 (에이전트 언어 포함)
-      const response = await API.loadInitData(client, ticket.id, agentLanguage);
+      const response = await API.loadInitData(client, ticket.id);
       
       console.log('🔍 백엔드 응답 상세 분석:', {
         response: response,
@@ -1198,8 +1198,20 @@ Data.isAvailable = function () {
   return typeof GlobalState !== 'undefined' && typeof API !== 'undefined';
 };
 
-if (window.location.hostname === 'localhost') {
-  console.log('📊 Data 모듈 로드 완료 - 7개 함수 export됨');
+if (window.MODULE_LOAD_TRACKER && window.MODULE_LOAD_TRACKER.shouldLog) {
+  const moduleKey = `data-${window.isFDKModal ? 'modal' : (window.isSidebar ? 'sidebar' : 'standard')}`;
+  if (!window.MODULE_LOAD_TRACKER.loaded.has(moduleKey)) {
+    window.MODULE_LOAD_TRACKER.loaded.add(moduleKey);
+    window.MODULE_LOAD_TRACKER.loaded.add('data');
+    // 중복 로그 방지
+    if (!window.MODULE_LOAD_TRACKER.logged) {
+      window.MODULE_LOAD_TRACKER.logged = {};
+    }
+    if (!window.MODULE_LOAD_TRACKER.logged['data']) {
+      console.log('📊 Data 모듈 로드 완료 - 7개 함수 export됨');
+      window.MODULE_LOAD_TRACKER.logged['data'] = true;
+    }
+  }
 }
 
 // 모듈 의존성 시스템에 등록

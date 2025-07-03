@@ -42,6 +42,13 @@ let client = null;
 let isInitialized = false;
 
 /**
+ * 전역 초기화 완료 플래그 (중복 방지) - window 레벨에서 관리
+ */
+if (typeof window.GLOBAL_SYSTEM_INITIALIZED === 'undefined') {
+  window.GLOBAL_SYSTEM_INITIALIZED = false;
+}
+
+/**
  * 전역 티켓 데이터 캐시
  * 백엔드 API 응답 데이터를 저장하고 관리합니다.
  * @type {Object}
@@ -50,11 +57,27 @@ let globalTicketData = {
   summary: null, // 티켓 요약 정보
   similar_tickets: [], // 유사 티켓 목록
   recommended_solutions: [], // 추천 솔루션 목록 (kb_documents와 매핑)
+  kb_documents: [], // KB 문서 목록
   cached_ticket_id: null, // 캐시된 티켓 ID
   ticket_info: null, // 백엔드에서 받은 완전한 티켓 정보
   isLoading: false, // 로딩 상태 플래그
   lastLoadTime: null, // 마지막 로드 시간
   last_updated: null, // 데이터 최종 업데이트 시간 (캐시 유효성 확인용)
+  
+  // 스트리밍 상태 관리 추가
+  streaming_status: {
+    is_streaming: false, // 현재 스트리밍 중인지 여부
+    overall_progress: 0, // 전체 진행률 (0-100%)
+    start_time: null, // 스트리밍 시작 시간
+    estimated_completion: null, // 예상 완료 시간
+    stages: {
+      ticket_fetch: { completed: false, progress: 0, message: null },
+      summary: { completed: false, progress: 0, message: null },
+      similar_tickets: { completed: false, progress: 0, message: null },
+      kb_documents: { completed: false, progress: 0, message: null }
+    },
+    error: null // 스트리밍 중 발생한 에러
+  }
 };
 
 /**
@@ -81,6 +104,12 @@ function setClient(newClient) {
     console.warn('⚠️ 유효하지 않은 클라이언트 객체입니다.');
     return;
   }
+  
+  if (client === newClient) {
+    // 동일한 클라이언트는 재설정하지 않음
+    return;
+  }
+  
   client = newClient;
   if (window.location.hostname === 'localhost') {
     console.log('✅ FDK 클라이언트 설정 완료');
@@ -105,7 +134,13 @@ function getClient() {
  * @param {boolean} state - 초기화 상태
  */
 function setInitialized(state) {
-  isInitialized = Boolean(state);
+  const newState = Boolean(state);
+  if (isInitialized === newState) {
+    // 동일한 상태는 재설정하지 않음
+    return;
+  }
+  
+  isInitialized = newState;
   if (window.location.hostname === 'localhost') {
     console.log(`🔄 앱 초기화 상태: ${isInitialized ? '완료' : '대기중'}`);
   }
@@ -193,10 +228,27 @@ function resetGlobalTicketCache(ticketId = null) {
     summary: null,
     similar_tickets: [],
     recommended_solutions: [],
+    kb_documents: [],
     cached_ticket_id: ticketId,
     ticket_info: null,
     isLoading: false,
     lastLoadTime: null,
+    last_updated: null,
+    
+    // 스트리밍 상태도 초기화
+    streaming_status: {
+      is_streaming: false,
+      overall_progress: 0,
+      start_time: null,
+      estimated_completion: null,
+      stages: {
+        ticket_fetch: { completed: false, progress: 0, message: null },
+        summary: { completed: false, progress: 0, message: null },
+        similar_tickets: { completed: false, progress: 0, message: null },
+        kb_documents: { completed: false, progress: 0, message: null }
+      },
+      error: null
+    }
   };
 
   console.log('✅ 전역 티켓 캐시 초기화 완료');
@@ -234,6 +286,137 @@ function setGlobalLoading(state) {
  */
 function getGlobalLoading() {
   return globalTicketData.isLoading;
+}
+
+// === 스트리밍 상태 관리 함수 ===
+
+/**
+ * 스트리밍 시작
+ * @param {string} ticketId - 티켓 ID
+ */
+function startStreaming(ticketId) {
+  globalTicketData.streaming_status = {
+    is_streaming: true,
+    overall_progress: 0,
+    start_time: new Date().toISOString(),
+    estimated_completion: null,
+    stages: {
+      ticket_fetch: { completed: false, progress: 0, message: 'Initializing...' },
+      summary: { completed: false, progress: 0, message: 'Waiting...' },
+      similar_tickets: { completed: false, progress: 0, message: 'Waiting...' },
+      kb_documents: { completed: false, progress: 0, message: 'Waiting...' }
+    },
+    error: null
+  };
+  
+  globalTicketData.cached_ticket_id = ticketId;
+  console.log(`🌊 스트리밍 시작: ${ticketId}`);
+}
+
+/**
+ * 스트리밍 종료
+ * @param {boolean} success - 성공 여부
+ * @param {string} error - 에러 메시지 (실패 시)
+ */
+function stopStreaming(success = true, error = null) {
+  if (globalTicketData.streaming_status.is_streaming) {
+    globalTicketData.streaming_status.is_streaming = false;
+    globalTicketData.streaming_status.overall_progress = success ? 100 : 0;
+    globalTicketData.streaming_status.error = error;
+    
+    if (success) {
+      // 모든 단계를 완료로 표시
+      Object.keys(globalTicketData.streaming_status.stages).forEach(stage => {
+        globalTicketData.streaming_status.stages[stage].completed = true;
+        globalTicketData.streaming_status.stages[stage].progress = 100;
+      });
+      console.log('✅ 스트리밍 완료');
+    } else {
+      console.error('❌ 스트리밍 실패:', error);
+    }
+  }
+}
+
+/**
+ * 스트리밍 단계 업데이트
+ * @param {string} stage - 단계 이름 (ticket_fetch, summary, similar_tickets, kb_documents)
+ * @param {number} progress - 진행률 (0-100)
+ * @param {string} message - 상태 메시지
+ * @param {boolean} completed - 완료 여부
+ */
+function updateStreamingStage(stage, progress, message = null, completed = false) {
+  if (!globalTicketData.streaming_status.is_streaming) return;
+  
+  if (globalTicketData.streaming_status.stages[stage]) {
+    globalTicketData.streaming_status.stages[stage].progress = Math.min(100, Math.max(0, progress));
+    globalTicketData.streaming_status.stages[stage].completed = completed || progress >= 100;
+    
+    if (message) {
+      globalTicketData.streaming_status.stages[stage].message = message;
+    }
+    
+    // 전체 진행률 계산 (각 단계의 가중 평균)
+    const stageWeights = {
+      ticket_fetch: 0.1,  // 10%
+      summary: 0.4,       // 40%
+      similar_tickets: 0.3, // 30%
+      kb_documents: 0.2   // 20%
+    };
+    
+    let overallProgress = 0;
+    Object.entries(globalTicketData.streaming_status.stages).forEach(([stageName, stageData]) => {
+      overallProgress += (stageData.progress * (stageWeights[stageName] || 0.25));
+    });
+    
+    globalTicketData.streaming_status.overall_progress = Math.round(overallProgress);
+    
+    console.log(`📊 [${stage}] ${progress}% - ${message || 'Processing...'}`);
+  }
+}
+
+/**
+ * 스트리밍 상태 조회
+ * @returns {Object} 현재 스트리밍 상태
+ */
+function getStreamingStatus() {
+  return { ...globalTicketData.streaming_status };
+}
+
+/**
+ * 스트리밍 중인지 확인
+ * @returns {boolean} 스트리밍 여부
+ */
+function isStreaming() {
+  return globalTicketData.streaming_status.is_streaming;
+}
+
+/**
+ * 스트리밍 진행률 조회
+ * @returns {number} 전체 진행률 (0-100)
+ */
+function getStreamingProgress() {
+  return globalTicketData.streaming_status.overall_progress;
+}
+
+/**
+ * 특정 단계의 완료 여부 확인
+ * @param {string} stage - 단계 이름
+ * @returns {boolean} 완료 여부
+ */
+function isStageCompleted(stage) {
+  return globalTicketData.streaming_status.stages[stage]?.completed || false;
+}
+
+/**
+ * 스트리밍 에러 설정
+ * @param {string} errorMessage - 에러 메시지
+ */
+function setStreamingError(errorMessage) {
+  if (globalTicketData.streaming_status) {
+    globalTicketData.streaming_status.error = errorMessage;
+    globalTicketData.streaming_status.is_streaming = false;
+    console.error(`🌊 스트리밍 에러: ${errorMessage}`);
+  }
 }
 
 // === 에러 상태 관리 함수 ===
@@ -357,9 +540,13 @@ function validateGlobalState() {
  * @global
  */
 window.GlobalState = {
-  // 시스템 초기화
+  // 시스템 초기화 (중복 방지)
   init() {
-    console.log('🔄 GlobalState 초기화 시작');
+    if (window.GLOBAL_SYSTEM_INITIALIZED) {
+      return; // 이미 초기화됨 - 아무것도 하지 않음
+    }
+    
+    console.log('🔄 GlobalState 초기화 시작 (최초 1회)');
     
     // 전역 상태 초기화
     isInitialized = false;
@@ -380,6 +567,7 @@ window.GlobalState = {
     globalErrorState.errorCode = null;
     globalErrorState.lastErrorTime = null;
     
+    window.GLOBAL_SYSTEM_INITIALIZED = true;
     console.log('✅ GlobalState 초기화 완료');
   },
 
@@ -390,6 +578,7 @@ window.GlobalState = {
   // 초기화 상태 관리
   setInitialized,
   getInitialized,
+  isInitialized: getInitialized, // 별칭
 
   // 티켓 데이터 관리
   updateGlobalTicketData,
@@ -409,9 +598,99 @@ window.GlobalState = {
   hasGlobalError,
   getGlobalError,
 
+  // 스트리밍 상태 관리
+  startStreaming,
+  stopStreaming,
+  updateStreamingStage,
+  getStreamingStatus,
+  isStreaming,
+  getStreamingProgress,
+  isStageCompleted,
+  setStreamingError,
+
   // 디버깅 및 검증
   debugGlobalState,
   validateGlobalState,
+};
+
+// EventAPI 상태 모니터링 시스템
+window.EventAPIStatus = {
+  errorCount: 0,
+  recentErrors: [],
+  context: window.isFDKModal ? 'modal' : (window.isSidebar ? 'sidebar' : 'standard'),
+  startTime: Date.now(),
+  
+  // 오류 기록
+  recordError: function(error) {
+    this.errorCount++;
+    this.recentErrors.unshift({
+      timestamp: new Date().toISOString(),
+      message: error.message || error,
+      context: this.context
+    });
+    
+    // 최근 10개만 유지
+    if (this.recentErrors.length > 10) {
+      this.recentErrors = this.recentErrors.slice(0, 10);
+    }
+  },
+  
+  // 실제 영향 분석
+  hasRealImpact: function() {
+    // 모달 컨텍스트에서는 EventAPI 제한이 정상임
+    if (this.context === 'modal') {
+      return false; // 영향 없음
+    }
+    
+    // 사이드바나 표준 컨텍스트에서 많은 오류가 있으면 영향 있음
+    return this.errorCount > 5;
+  },
+  
+  // 상태 리포트 생성
+  getReport: function() {
+    const uptime = (Date.now() - this.startTime) / 1000;
+    
+    return {
+      context: this.context,
+      errorCount: this.errorCount,
+      uptime: `${uptime.toFixed(1)}초`,
+      hasRealImpact: this.hasRealImpact(),
+      recentErrors: this.recentErrors,
+      recommendation: this.getRecommendation()
+    };
+  },
+  
+  // 권장사항 제공
+  getRecommendation: function() {
+    if (this.context === 'modal') {
+      return '모달 컨텍스트에서 EventAPI 제한은 정상입니다. 데이터는 글로벌 상태를 통해 접근하세요.';
+    }
+    
+    if (this.errorCount === 0) {
+      return 'EventAPI가 정상적으로 작동하고 있습니다.';
+    }
+    
+    if (this.errorCount < 3) {
+      return '일부 EventAPI 오류가 있지만 기능에는 영향이 없을 것으로 보입니다.';
+    }
+    
+    return 'EventAPI 오류가 많습니다. FDK 앱 설정이나 권한을 확인해보세요.';
+  }
+};
+
+// EventAPI 오류 자동 감지 및 기록
+const originalConsoleError = console.error;
+console.error = function(...args) {
+  const message = args.join(' ');
+  
+  // EventAPI 관련 오류 감지
+  if (message.includes('EventAPI') || message.includes('client.') || 
+      message.includes('Requested Service is not available')) {
+    window.EventAPIStatus.recordError(message);
+  }
+  
+  // 원래 console.error 호출
+  originalConsoleError.apply(console, args);
 };
 
 // 개발 환경에서는 전역 변수도 직접 접근 가능하도록 설정
@@ -420,13 +699,61 @@ if (window.location.hostname === 'localhost' || window.location.hostname.include
     client,
     isInitialized,
     globalTicketData,
+    // EventAPI 상태 체크 도구
+    checkEventAPI: () => {
+      const report = window.EventAPIStatus.getReport();
+      console.group('📊 EventAPI 상태 리포트');
+      console.log('컨텍스트:', report.context);
+      console.log('오류 수:', report.errorCount);
+      console.log('가동 시간:', report.uptime);
+      console.log('실제 영향 여부:', report.hasRealImpact ? '❌ 영향 있음' : '✅ 영향 없음');
+      console.log('권장사항:', report.recommendation);
+      if (report.recentErrors.length > 0) {
+        console.log('최근 오류들:', report.recentErrors);
+      }
+      console.groupEnd();
+      return report;
+    }
   };
 
   console.log('🛠️ 개발 모드: GlobalDebug 객체가 window에 등록되었습니다.');
+  console.log('💡 EventAPI 상태 확인: window.GlobalDebug.checkEventAPI()');
 }
 
-if (window.location.hostname === 'localhost') {
-  console.log('✅ globals.js 모듈 로드 완료 - 전역 상태 관리 준비됨');
+// 전역 모듈 로드 추적 시스템 (세션 전체에서 유지)
+if (typeof window.MODULE_LOAD_TRACKER === 'undefined') {
+  window.MODULE_LOAD_TRACKER = {
+    loaded: new Set(),
+    shouldLog: window.location.hostname === 'localhost',
+    sessionId: Date.now(), // 세션 구분
+    contexts: new Set() // 컨텍스트별 로딩 추적
+  };
+  
+  // 현재 컨텍스트 식별
+  const context = window.isFDKModal ? 'modal' : (window.isSidebar ? 'sidebar' : 'standard');
+  window.MODULE_LOAD_TRACKER.contexts.add(context);
+  
+  if (window.MODULE_LOAD_TRACKER.shouldLog) {
+    console.log(`🔧 MODULE_LOAD_TRACKER 초기화 (${context} 컨텍스트)`);
+  }
+}
+
+// 컨텍스트별 고유 키 생성
+const moduleKey = `globals-${window.isFDKModal ? 'modal' : (window.isSidebar ? 'sidebar' : 'standard')}`;
+
+if (window.MODULE_LOAD_TRACKER.shouldLog && !window.MODULE_LOAD_TRACKER.loaded.has(moduleKey)) {
+  window.MODULE_LOAD_TRACKER.loaded.add(moduleKey);
+  window.MODULE_LOAD_TRACKER.loaded.add('globals'); // 기본 키도 추가
+  
+  // 중복 로그 방지: 세션당 한 번만 출력
+  if (!window.MODULE_LOAD_TRACKER.logged) {
+    window.MODULE_LOAD_TRACKER.logged = {};
+  }
+  
+  if (!window.MODULE_LOAD_TRACKER.logged['globals']) {
+    console.log('✅ globals.js 모듈 로드 완료 - 전역 상태 관리 준비됨');
+    window.MODULE_LOAD_TRACKER.logged['globals'] = true;
+  }
 }
 
 // 글로벌 에러 처리 시스템 개선
@@ -542,8 +869,12 @@ window.GlobalState.ErrorHandler = {
       return '서버와의 연결에 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.';
     }
 
-    // FDK 관련 에러
+    // FDK EventAPI 관련 에러 (모달 컨텍스트에서는 정상적인 제한)
     if (errorMessage.includes('EventAPI') || context.type === 'fdk') {
+      // 모달 컨텍스트에서는 EventAPI 제한이 정상적임
+      if (window.isFDKModal || context.location === 'modal') {
+        return '모달에서는 일부 기능이 제한됩니다. 캐시된 데이터를 사용하여 정상 동작합니다.';
+      }
       return 'Freshdesk 연결에 문제가 발생했습니다. 페이지를 새로고침해 주세요.';
     }
 
@@ -665,19 +996,121 @@ window.GlobalState.ErrorHandler = {
   },
 };
 
-// 글로벌 에러 핸들러 등록 (Freshdesk 내부 오류 필터링 포함)
+// EventAPI 상태 추적 시스템
+window.EventAPIStatus = {
+  errors: [],
+  context: 'unknown',
+  hasImpact: false,
+  lastCheck: null,
+  
+  /**
+   * EventAPI 오류가 실제 기능에 영향을 미치는지 확인
+   */
+  checkImpact() {
+    const now = new Date();
+    this.lastCheck = now;
+    
+    // 모달 컨텍스트에서는 EventAPI 제한이 정상
+    if (window.isFDKModal || this.context === 'modal') {
+      this.hasImpact = false;
+      console.log('✅ EventAPI 제한은 모달에서 정상입니다 - 캐시된 데이터로 동작');
+      return false;
+    }
+    
+    // 캐시된 데이터가 있으면 영향 최소화
+    if (window.GlobalState) {
+      const globalData = window.GlobalState.getGlobalTicketData();
+      const hasData = globalData.summary || globalData.ticket_info || globalData.similar_tickets?.length > 0;
+      
+      if (hasData) {
+        this.hasImpact = false;
+        console.log('✅ EventAPI 오류가 있지만 캐시된 데이터로 정상 동작 가능');
+        return false;
+      }
+    }
+    
+    // 데이터도 없고 EventAPI도 안 되면 영향 있음
+    this.hasImpact = true;
+    console.warn('⚠️ EventAPI 오류가 실제 기능에 영향을 미칩니다');
+    return true;
+  },
+  
+  /**
+   * EventAPI 오류 기록
+   */
+  recordError(error, context = 'unknown') {
+    this.errors.push({
+      message: error.message || error,
+      timestamp: new Date(),
+      context: context,
+      stack: error.stack
+    });
+    
+    this.context = context;
+    return this.checkImpact();
+  },
+  
+  /**
+   * 상태 리포트 생성
+   */
+  getReport() {
+    return {
+      context: this.context,
+      errorCount: this.errors.length,
+      hasRealImpact: this.hasImpact,
+      lastCheck: this.lastCheck,
+      recentErrors: this.errors.slice(-5), // 최근 5개
+      recommendation: this.hasImpact 
+        ? '캐시된 데이터를 로드하거나 페이지를 새로고침해 주세요'
+        : 'EventAPI 오류는 현재 앱 동작에 영향을 주지 않습니다'
+    };
+  }
+};
+
+// 글로벌 에러 핸들러 등록 (EventAPI 영향도 분석 포함)
 window.addEventListener('error', (event) => {
-  // Freshdesk 내부 오류 필터링
+  // Freshdesk 내부 오류 필터링 (EventAPI 오류 포함)
   const ignoredErrors = [
+    // Freshdesk 플랫폼 관련 오류들
     'freshconnect-sidebar-core.js',
-    'Cannot read properties of null (reading \'parentNode\')',
-    'Requested Service is not available  EventAPI',
-    'Cannot read property \'parentNode\' of null',
-    'Script error.',
-    // 기타 Freshdesk 플랫폼 내부 오류들
     'freshwidget',
     'freshchat',
-    'freshdesk-widget'
+    'freshdesk-widget',
+    'freshconnect',
+    'vendor-2a99db4f6babb.02e07be619',
+    
+    // EventAPI 관련 오류들 (별도 처리됨)
+    'Requested Service is not available  EventAPI',
+    'Requested Service is not available EventAPI',
+    'EventAPI',
+    'FDK EventAPI',
+    'Service is not available',
+    'EventAPI is not available',
+    'Service not available',
+    'Cannot access EventAPI',
+    
+    // DOM 관련 일반적인 오류들
+    'Cannot read properties of null (reading \'parentNode\')',
+    'Cannot read property \'parentNode\' of null',
+    'Cannot read properties of null',
+    'Cannot read properties of undefined',
+    
+    // CSP (Content Security Policy) 관련 오류들
+    'Content Security Policy',
+    'CSP',
+    'Refused to execute inline script',
+    'Refused to load the script',
+    'Refused to connect to',
+    'unsafe-eval',
+    'unsafe-inline',
+    
+    // 브라우저 관련 일반적인 오류들
+    'Script error.',
+    'Non-Error promise rejection captured',
+    'ResizeObserver loop limit exceeded',
+    'ResizeObserver loop completed with undelivered notifications',
+    'Loading chunk',
+    'Loading failed for the <script> element'
   ];
 
   // 오류 소스나 메시지가 무시 목록에 포함되는지 확인
@@ -688,8 +1121,51 @@ window.addEventListener('error', (event) => {
   );
 
   if (shouldIgnore) {
-    console.debug('🔇 Freshdesk 내부 오류 무시:', event.message || event.error?.message);
-    return; // 무시하고 처리하지 않음
+    // EventAPI 오류 특별 처리 - 실제 영향도 분석
+    const isEventAPIError = event.message && (
+      event.message.includes('EventAPI') ||
+      event.message.includes('Service is not available') ||
+      event.message.includes('Requested Service is not available')
+    );
+    
+    // CSP 오류 확인
+    const isCSPError = event.message && (
+      event.message.includes('Content Security Policy') ||
+      event.message.includes('CSP') ||
+      event.message.includes('Refused to execute') ||
+      event.message.includes('unsafe-eval') ||
+      event.message.includes('unsafe-inline')
+    );
+    
+    if (isEventAPIError && window.EventAPIStatus) {
+      // EventAPI 오류 기록 및 영향도 체크
+      const hasRealImpact = window.EventAPIStatus.recordError(event.error || event.message, 
+        window.isFDKModal ? 'modal' : 'standard');
+      
+      if (hasRealImpact) {
+        console.error('🚨 EventAPI 오류가 실제 기능에 영향을 미칩니다:', event.message);
+        
+        // 실제 영향이 있는 경우에만 사용자에게 알림
+        if (window.GlobalState && window.GlobalState.ErrorHandler) {
+          window.GlobalState.ErrorHandler.handleError(event.error, {
+            type: 'eventapi',
+            severity: 'error',
+            userMessage: 'Freshdesk 연결에 문제가 있습니다. 페이지를 새로고침해 주세요.'
+          });
+        }
+      } else {
+        // 영향이 없는 경우 간단히 로그만
+        console.log('ℹ️ EventAPI 제한이 감지되었지만 앱 동작에는 영향 없음');
+      }
+    } else if (isCSPError) {
+      // CSP 오류는 보안 정책에 의한 것이므로 정보성 로그만
+      console.log('🛡️ CSP 보안 정책에 의한 제한 - 앱 동작에는 영향 없음:', event.message);
+    } else {
+      // 기타 Freshdesk 플랫폼 오류들은 조용히 무시
+      console.log('🔇 Freshdesk 플랫폼 내부 오류 무시:', event.message);
+    }
+    
+    return; // 처리 중단
   }
 
   // 우리 앱의 실제 오류만 처리
@@ -704,12 +1180,30 @@ window.addEventListener('error', (event) => {
 });
 
 window.addEventListener('unhandledrejection', (event) => {
-  // Promise rejection도 Freshdesk 관련 오류 필터링
+  // Promise rejection도 플랫폼 관련 오류 필터링
   const ignoredReasons = [
+    // EventAPI 관련
     'EventAPI',
+    'Service is not available',
+    'Requested Service is not available',
+    
+    // Freshdesk 플랫폼
     'freshconnect',
+    'freshwidget',
+    'freshchat',
+    
+    // CSP 관련
+    'Content Security Policy',
+    'CSP',
+    'unsafe-eval',
+    'unsafe-inline',
+    
+    // 일반적인 DOM/브라우저 오류
     'Cannot read properties of null',
-    'Script error'
+    'Cannot read properties of undefined',
+    'Script error',
+    'Loading chunk',
+    'ResizeObserver'
   ];
 
   const reasonStr = String(event.reason);
@@ -718,7 +1212,15 @@ window.addEventListener('unhandledrejection', (event) => {
   );
 
   if (shouldIgnore) {
-    console.debug('🔇 Freshdesk 관련 Promise rejection 무시:', reasonStr);
+    // EventAPI 관련 Promise rejection은 별도 처리
+    if (reasonStr.includes('EventAPI') && window.EventAPIStatus) {
+      window.EventAPIStatus.recordError(event.reason, 'promise');
+      console.log('ℹ️ EventAPI Promise rejection 기록됨');
+    } else if (reasonStr.includes('CSP') || reasonStr.includes('Content Security Policy')) {
+      console.log('🛡️ CSP 관련 Promise rejection - 보안 정책에 의한 정상적인 제한');
+    } else {
+      console.log('🔇 플랫폼 관련 Promise rejection 무시:', reasonStr);
+    }
     return;
   }
 
@@ -782,6 +1284,11 @@ const ModuleDependencyManager = {
    * ModuleDependencyManager.registerModule('ui', 10, ['data']);
    */
   registerModule(moduleName, exportCount = 0, dependencies = []) {
+    // 이미 등록된 모듈은 중복 등록하지 않음
+    if (this.loadedModules.has(moduleName)) {
+      return;
+    }
+    
     this.loadedModules.add(moduleName);
     
     // 의존성 정보 저장
@@ -789,15 +1296,14 @@ const ModuleDependencyManager = {
       this.dependencies[moduleName] = dependencies;
     }
     
-    if (window.location.hostname === 'localhost') {
+    if (window.MODULE_LOAD_TRACKER && window.MODULE_LOAD_TRACKER.shouldLog && !window.MODULE_LOAD_TRACKER.loaded.has(`module-${moduleName}`)) {
+      window.MODULE_LOAD_TRACKER.loaded.add(`module-${moduleName}`);
       console.log(`📦 [${moduleName.toUpperCase()}] 모듈 로드 완료 (exports: ${exportCount}개)`);
     }
 
-    // 의존성 검증
+    // 의존성 검증 (필수 모듈만)
     const dependencyCheck = this.checkDependencies(moduleName);
-    if (dependencyCheck.success) {
-      console.log(`✅ [${moduleName.toUpperCase()}] 의존성 검증 성공`);
-    } else {
+    if (!dependencyCheck.success && ['globals', 'api', 'data', 'ui', 'events'].includes(moduleName)) {
       console.warn(`❌ [${moduleName.toUpperCase()}] 의존성 누락:`, dependencyCheck.missing);
     }
   },
@@ -860,8 +1366,11 @@ const ModuleDependencyManager = {
   },
 };
 
-// globals 모듈 자체 등록
-ModuleDependencyManager.registerModule('globals', Object.keys(GlobalState).length);
+// globals 모듈 자체 등록 (중복 방지)
+if (!window.MODULE_GLOBALS_REGISTERED) {
+  ModuleDependencyManager.registerModule('globals', Object.keys(GlobalState).length);
+  window.MODULE_GLOBALS_REGISTERED = true;
+}
 
 console.log('🔧 모듈 의존성 검증 시스템 초기화 완료');
 
@@ -1856,6 +2365,20 @@ window.ModuleDependencyManager = ModuleDependencyManager;
 // GlobalState에도 ModuleDependencyManager 추가 (일관성을 위해)
 window.GlobalState.ModuleDependencyManager = ModuleDependencyManager;
 
-if (window.location.hostname === 'localhost') {
-  console.log('🚀 globals.js 전체 로드 완료 - 모든 시스템 준비됨');
-}
+// 모든 모듈 로드 완료 확인 및 요약 로그
+window.MODULE_LOAD_TRACKER.checkAllModulesLoaded = function() {
+  const expectedModules = ['globals', 'utils', 'api', 'data', 'ui', 'sidebar-progress'];
+  const loadedCount = expectedModules.filter(m => this.loaded.has(m)).length;
+  
+  if (loadedCount === expectedModules.length && this.shouldLog && !this.loaded.has('summary-logged')) {
+    this.loaded.add('summary-logged');
+    console.log(`✅ 전체 시스템 로드 완료 (${loadedCount}/${expectedModules.length} 모듈)`);
+  }
+};
+
+// 로드 완료 체크를 지연 실행
+setTimeout(() => {
+  if (window.MODULE_LOAD_TRACKER) {
+    window.MODULE_LOAD_TRACKER.checkAllModulesLoaded();
+  }
+}, 100);

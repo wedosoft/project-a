@@ -450,8 +450,20 @@ window.Utils = {
   },
 };
 
-if (window.location.hostname === 'localhost') {
-  console.log('📦 Utils 모듈 로드 완료 - 11개 함수 export됨');
+if (window.MODULE_LOAD_TRACKER && window.MODULE_LOAD_TRACKER.shouldLog) {
+  const moduleKey = `utils-${window.isFDKModal ? 'modal' : (window.isSidebar ? 'sidebar' : 'standard')}`;
+  if (!window.MODULE_LOAD_TRACKER.loaded.has(moduleKey)) {
+    window.MODULE_LOAD_TRACKER.loaded.add(moduleKey);
+    window.MODULE_LOAD_TRACKER.loaded.add('utils');
+    // 중복 로그 방지
+    if (!window.MODULE_LOAD_TRACKER.logged) {
+      window.MODULE_LOAD_TRACKER.logged = {};
+    }
+    if (!window.MODULE_LOAD_TRACKER.logged['utils']) {
+      console.log('📦 Utils 모듈 로드 완료 - 11개 함수 export됨');
+      window.MODULE_LOAD_TRACKER.logged['utils'] = true;
+    }
+  }
 }
 
 // 모듈 의존성 시스템에 등록

@@ -825,17 +825,38 @@ if (typeof window.GlobalState !== 'undefined' &&
     typeof window.GlobalState.ModuleDependencyManager !== 'undefined') {
   window.GlobalState.ModuleDependencyManager.registerModule('events', Object.keys(window.Events).length);
   if (window.location.hostname === 'localhost') {
-    console.log('✅ Events 모듈 등록 완료');
+    // 중복 로그 방지
+    if (!window.MODULE_LOAD_TRACKER.logged) {
+      window.MODULE_LOAD_TRACKER.logged = {};
+    }
+    if (!window.MODULE_LOAD_TRACKER.logged['events']) {
+      console.log('✅ Events 모듈 등록 완료');
+      window.MODULE_LOAD_TRACKER.logged['events'] = true;
+    }
   }
 } else if (typeof window.ModuleDependencyManager !== 'undefined') {
   window.ModuleDependencyManager.registerModule('events', Object.keys(window.Events).length);
   if (window.location.hostname === 'localhost') {
-    console.log('✅ Events 모듈 등록 완료 (fallback)');
+    // 중복 로그 방지 (fallback)
+    if (!window.MODULE_LOAD_TRACKER.logged) {
+      window.MODULE_LOAD_TRACKER.logged = {};
+    }
+    if (!window.MODULE_LOAD_TRACKER.logged['events-fallback']) {
+      console.log('✅ Events 모듈 등록 완료 (fallback)');
+      window.MODULE_LOAD_TRACKER.logged['events-fallback'] = true;
+    }
   }
 } else if (typeof ModuleDependencyManager !== 'undefined') {
   ModuleDependencyManager.registerModule('events', Object.keys(window.Events).length);
   if (window.location.hostname === 'localhost') {
-    console.log('✅ Events 모듈 등록 완료 (global)');
+    // 중복 로그 방지 (global)
+    if (!window.MODULE_LOAD_TRACKER.logged) {
+      window.MODULE_LOAD_TRACKER.logged = {};
+    }
+    if (!window.MODULE_LOAD_TRACKER.logged['events-global']) {
+      console.log('✅ Events 모듈 등록 완료 (global)');
+      window.MODULE_LOAD_TRACKER.logged['events-global'] = true;
+    }
   }
 } else {
   if (window.location.hostname === 'localhost') {
