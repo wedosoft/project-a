@@ -376,9 +376,14 @@ class LLMManager:
                             else:
                                 attachment_summary.append(f"{emoji} {name}")
                 
-                # 첨부파일 정보 저장
+                # 첨부파일 정보 저장 (한 줄씩 표시로 변경)
                 if attachment_summary:
-                    tenant_metadata['attachment_summary'] = " | ".join(attachment_summary)
+                    # 각 파일을 한 줄씩 표시 (이쁜 형태로)
+                    formatted_attachments = []
+                    for attachment_info in attachment_summary:
+                        formatted_attachments.append(f"- {attachment_info}")
+                    
+                    tenant_metadata['attachment_summary'] = "\n".join(formatted_attachments)
                     tenant_metadata['attachment_count'] = len(attachment_summary)
                     # LLM 선별된 첨부파일도 프롬프트 빌더에서 사용할 수 있도록 보존
                     if relevant_attachments:

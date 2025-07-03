@@ -39,7 +39,14 @@ load_dotenv(backend_dir / ".env")
 settings = get_settings()
 QDRANT_URL = settings.QDRANT_URL
 QDRANT_API_KEY = settings.QDRANT_API_KEY
-VECTOR_SIZE = 1536  # OpenAI/Anthropic 임베딩 차원 수, 모델에 따라 조정 필요
+# 🌍 임베딩 시스템에 따른 벡터 차원 자동 설정
+USE_MULTILINGUAL = os.getenv("USE_MULTILINGUAL_EMBEDDING", "false").lower() == "true"
+if USE_MULTILINGUAL:
+    VECTOR_SIZE = 3072  # text-embedding-3-large (다국어 최적화)
+    logger.info("🌍 벡터 차원: 3072 (다국어 최적화 모드)")
+else:
+    VECTOR_SIZE = 1536  # text-embedding-3-small (기존 시스템)
+    logger.info("🔄 벡터 차원: 1536 (기존 하이브리드 모드)")
 COLLECTION_NAME = "documents"  # 기본 컬렉션명
 
 
@@ -614,11 +621,12 @@ class QdrantAdapter(VectorDBInterface):
             else:
                 ids.append(str(uuid.uuid4()))  # 임의 ID 생성
                 
-            # 거리/점수 (1 - 유사도)
+            # 🔧 FIX: 유사도 점수 계산 수정 (COSINE 유사도는 그대로 사용)
             if "score" in result:
-                distances.append(1.0 - result["score"])
+                # Qdrant COSINE 유사도는 1에 가까울수록 유사함 (그대로 사용)
+                distances.append(result["score"])  # 기존: 1.0 - result["score"] (잘못된 계산)
             else:
-                distances.append(0.0)  # 기본 거리 0 (최대 유사도)
+                distances.append(0.0)  # 기본값
         
         # 검색 결과 반환 (원래 형식 + 호환성을 위한 추가 필드)
         return {
@@ -1722,6 +1730,17 @@ async def search_vector_db_only(
         
         # 검색 결과 사용 (이미 all_results에 저장됨)
         search_results = all_results
+        
+        # 🔧 FIX: exclude_id로 지정된 티켓을 결과에서 제외 (자기 자신 제외)
+        if exclude_id:
+            original_count = len(search_results)
+            search_results = [
+                result for result in search_results 
+                if str(result.get("original_id", "")) != str(exclude_id)
+            ]
+            filtered_count = len(search_results)
+            if original_count != filtered_count:
+                logger.debug(f"🚫 제외 ID {exclude_id} 필터링 완료: {original_count}건 → {filtered_count}건")
         
         # 결과 포맷팅 최적화 (불필요한 루프와 로깅 최소화)
         formatted_results = []

@@ -32,7 +32,7 @@ from core.metadata.normalizer import TenantMetadataNormalizer
 # LLM Manager 전역 인스턴스
 llm_manager = LLMManager()
 
-from core.search.embeddings import embed_documents, log_embedding_status
+from core.search.embeddings import embed_documents
 from core.database.vectordb import (
     vector_db,
     purge_vector_db_data,

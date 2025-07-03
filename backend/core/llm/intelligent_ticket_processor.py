@@ -64,16 +64,28 @@ class IntelligentTicketProcessor:
             ]
             
             # Use-case에 따른 적절한 모델 선택 (LLM Manager의 라우팅 활용)
+            # 긴 대화에 대해 토큰 예산 증가 (비용 vs 품질 트레이드오프)
+            conversation_count = len(ticket_data.get("conversations", []))
+            if conversation_count > 40:
+                max_tokens = 4000  # 40개 초과: 4000 토큰
+                model_preference = "gpt-4o-mini"  # 긴 컨텍스트에 강한 모델
+            elif conversation_count > 20:
+                max_tokens = 3000  # 20-40개: 3000 토큰  
+                model_preference = "gpt-4o-mini"
+            else:
+                max_tokens = 2000  # 20개 이하: 기본
+                model_preference = None  # 라우터 선택
+                
             response = await self.llm_manager.generate(
                 messages=messages,
-                model=None,  # 라우터가 최적 모델 선택
-                max_tokens=2000,
+                model=model_preference,  # 긴 대화용 모델 우선
+                max_tokens=max_tokens,
                 temperature=0.1
             )
             
             # 3. LLM 응답 파싱 (LLMResponse.content 속성 사용)
             response_content = response.content if hasattr(response, 'content') else str(response)
-            analysis_result = self._parse_llm_analysis(response_content, ticket_data)
+            analysis_result = self._parse_llm_analysis(response_content, ticket_data, ui_language)
             
             logger.info(f"✅ LLM 통합 분석 완료 - 언어: {analysis_result.language}, "
                        f"중요 대화: {len(analysis_result.important_conversation_indices)}개, "
@@ -99,8 +111,17 @@ class IntelligentTicketProcessor:
         if conversations:
             conversation_summary = f"\n대화 목록 (총 {len(conversations)}개):\n"
             for i, conv in enumerate(conversations):
-                body = conv.get("body_text", "")[:300]  # 첫 300자만
-                conversation_summary += f"대화 {i+1}: {body}{'...' if len(conv.get('body_text', '')) > 300 else ''}\n"
+                # 적응형 미리보기: 대화 수에 따라 동적 조정
+                body_text = conv.get("body_text", "")
+                if len(conversations) <= 20:
+                    preview_length = 1200  # 적은 대화: 상세히
+                elif len(conversations) <= 40:
+                    preview_length = 800   # 중간 대화: 균형
+                else:
+                    preview_length = 500   # 많은 대화: 압축
+                    
+                body = body_text[:preview_length]
+                conversation_summary += f"대화 {i+1}: {body}{'...' if len(body_text) > preview_length else ''}\n"
         
         # 첨부파일 정보
         attachments = ticket_data.get("metadata", {}).get("all_attachments", [])
@@ -113,39 +134,39 @@ class IntelligentTicketProcessor:
                 content_type = att.get("content_type", "")
                 attachment_summary += f"파일 {i+1}: {name} ({size_mb}MB, {content_type})\n"
         
-        # 통합 분석 프롬프트
-        prompt = f"""당신은 고급 티켓 분석 전문가입니다. 다음 티켓을 종합적으로 분석해주세요.
+        # 통합 분석 프롬프트 (영어로 작성하여 LLM 성능 최적화)
+        prompt = f"""You are an expert ticket analysis specialist. Please analyze the following ticket comprehensively.
 
-===== 티켓 정보 =====
-제목: {subject}
-설명: {description}
+===== TICKET INFORMATION =====
+Title: {subject}
+Description: {description}
 {conversation_summary}
 {attachment_summary}
 
-===== 분석 요청 =====
-다음 4가지를 동시에 분석하여 JSON 형태로 응답해주세요:
+===== ANALYSIS REQUEST =====
+Please analyze the following 4 aspects simultaneously and respond in JSON format:
 
-1. **언어 감지**: 티켓의 주요 언어 (ko/en/ja/zh)
-2. **중요 대화 선별**: 문제 해결과정이 포함된 중요한 대화들의 인덱스 (최대 15개)
-3. **관련 첨부파일**: 문제 해결에 실제로 도움이 되는 첨부파일들의 인덱스
-4. **고품질 요약**: 문제 상황, 원인 분석, 해결 과정, 중요 인사이트를 포함한 요약
+1. **Language Detection**: Detect the primary language of the ticket content (ko/en/ja/zh)
+2. **Important Conversation Selection**: Select conversation indices that contain problem-solving processes (max 25 conversations)
+3. **Relevant Attachments**: Select attachment indices that are actually helpful for problem resolution
+4. **High-Quality Summary**: Summary including problem situation, root cause analysis, resolution process, and key insights
 
-분석 기준:
-- 언어: 기술용어가 섞여있어도 주요 대화 언어 판단
-- 중요 대화: 초기 문제 제기 + 해결 과정 + 최종 결과 중심
-- 첨부파일: 로그, 스크린샷, 설정파일 등 기술적 도움이 되는 것 우선
-- 요약: 시간순 흐름을 반영하되 해결 과정에 중점
+Analysis Criteria:
+- Language: Determine the main conversation language even if technical terms are mixed
+- Important conversations: Focus on initial problem reporting + resolution process + final results, especially those containing resolution keywords like "solved", "completed", "fixed", "deployed", "resolved", "confirmed"
+- Attachments: Prioritize logs, screenshots, configuration files, and other technically helpful items
+- Summary: Reflect chronological flow while focusing on the resolution process
 
-응답 형식 (JSON):
+Response Format (JSON):
 {{
   "language": "ko",
   "important_conversations": [0, 1, 15, 16, 45, 46, 47, 48, 49],
   "relevant_attachments": [0, 2],
   "summary": {{
-    "problem": "문제 상황 요약",
-    "cause": "원인 분석",
-    "resolution": "해결 과정 및 결과",
-    "insights": "중요 인사이트 및 향후 참고사항"
+    "problem": "Problem situation summary",
+    "cause": "Root cause analysis", 
+    "resolution": "Resolution process and results",
+    "insights": "Key insights and future reference points"
   }},
   "metadata": {{
     "total_conversations": {len(conversations)},
@@ -154,11 +175,28 @@ class IntelligentTicketProcessor:
   }}
 }}
 
-UI 언어가 '{ui_language}'이므로 요약은 해당 언어로 작성해주세요."""
+IMPORTANT: Please write the summary content in the SAME LANGUAGE as the detected ticket language, not in the UI language. The UI language '{ui_language}' is only for section headers."""
 
         return prompt
     
-    def _parse_llm_analysis(self, llm_response: str, ticket_data: Dict[str, Any]) -> TicketAnalysis:
+    def _get_section_headers(self, ui_language: str) -> Dict[str, str]:
+        """UI 언어에 따른 섹션 헤더 반환"""
+        if ui_language == "ko":
+            return {
+                "problem": "🔍 **문제 현황**",
+                "cause": "💡 **원인 분석**", 
+                "resolution": "⚡ **해결 진행상황**",
+                "insights": "🎯 **중요 인사이트**"
+            }
+        else:  # 기본값: 영어
+            return {
+                "problem": "🔍 **Problem Overview**",
+                "cause": "💡 **Root Cause Analysis**",
+                "resolution": "⚡ **Resolution Progress**", 
+                "insights": "🎯 **Key Insights**"
+            }
+
+    def _parse_llm_analysis(self, llm_response: str, ticket_data: Dict[str, Any], ui_language: str = "ko") -> TicketAnalysis:
         """LLM 응답을 파싱하여 TicketAnalysis 객체 생성"""
         
         try:
@@ -180,20 +218,21 @@ UI 언어가 '{ui_language}'이므로 요약은 해당 언어로 작성해주세
                 if 0 <= idx < len(all_attachments):
                     relevant_attachments.append(all_attachments[idx])
             
-            # 요약 구성
+            # 요약 구성 (UI 언어에 따른 섹션 헤더 사용)
             summary_parts = analysis.get("summary", {})
             if isinstance(summary_parts, dict):
-                summary = f"""🔍 **문제 현황**
-{summary_parts.get('problem', '정보 없음')}
+                headers = self._get_section_headers(ui_language)
+                summary = f"""{headers['problem']}
+{summary_parts.get('problem', 'No information available' if ui_language != 'ko' else '정보 없음')}
 
-💡 **원인 분석**
-{summary_parts.get('cause', '분석 중')}
+{headers['cause']}
+{summary_parts.get('cause', 'Under analysis' if ui_language != 'ko' else '분석 중')}
 
-⚡ **해결 진행상황**
-{summary_parts.get('resolution', '진행 중')}
+{headers['resolution']}
+{summary_parts.get('resolution', 'In progress' if ui_language != 'ko' else '진행 중')}
 
-🎯 **중요 인사이트**
-{summary_parts.get('insights', '추가 분석 필요')}"""
+{headers['insights']}
+{summary_parts.get('insights', 'Further analysis needed' if ui_language != 'ko' else '추가 분석 필요')}"""
             else:
                 summary = str(summary_parts)
             

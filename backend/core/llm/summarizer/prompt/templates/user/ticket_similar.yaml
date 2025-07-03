@@ -40,13 +40,11 @@ instructions:
     - 상담원의 답변이나 안내사항
 
     📚 **참고자료**
-    - 📄 문서파일 (.pdf, .doc, .docx)
-    - 🖼️ 이미지파일 (.jpg, .png, .gif)
-    - 📊 스프레드시트 (.xlsx, .csv)
-    - 📋 텍스트파일 (.txt, .log)
-    - 🗂️ 압축파일 (.zip, .rar)
-    - 📎 기타파일
-    - 없으면 "관련 자료 없음"
+    {%- if attachment_summary and attachment_summary.strip() %}
+    {{ attachment_summary }}
+    {%- else %}
+    관련 자료 없음
+    {%- endif %}
 
     작성 원칙:
     - 간결하되 핵심 정보 누락 금지

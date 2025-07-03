@@ -230,7 +230,7 @@ async def init_vector_only_mode(
                 
                 # 통합 분석 수행
                 intelligent_processor = get_intelligent_processor()
-                analysis = await intelligent_processor.process_ticket_intelligently(ticket_data, "ko")
+                analysis = await intelligent_processor.process_ticket_intelligently(ticket_data, ui_language)
                 
                 # 최적화된 콘텐츠 생성
                 ticket_content = intelligent_processor.get_optimized_ticket_content(ticket_data, analysis)
@@ -266,20 +266,41 @@ async def init_vector_only_mode(
                 
                 ticket_content_parts.append(f"대화내역 (총 {total_conversations}개):")
                 
-                # 간단한 선별 로직 (10개 이하는 전체, 이상은 후반 위주)
-                if total_conversations <= 10:
+                # 개선된 선별 로직 (해결과정 중심)
+                if total_conversations <= 15:
+                    # 15개 이하: 모든 대화 포함 (문자 제한만 확장)
                     for i, conv in enumerate(conversations, 1):
                         if conv.get("body_text"):
-                            content = conv['body_text'][:800]
-                            ticket_content_parts.append(f"대화 {i}: {content}{'...' if len(conv['body_text']) > 800 else ''}")
+                            content = conv['body_text'][:1000]  # 800→1000자로 확장
+                            ticket_content_parts.append(f"대화 {i}: {content}{'...' if len(conv['body_text']) > 1000 else ''}")
                 else:
-                    # 후반 위주 선별
-                    selected_indices = list(range(max(0, total_conversations - 10), total_conversations))
+                    # 15개 초과: 구간별 스마트 선별
+                    selected_indices = []
+                    
+                    # 1. 초반 3개 (문제 제기)
+                    selected_indices.extend(list(range(min(3, total_conversations))))
+                    
+                    # 2. 해결 키워드 포함 대화 우선 선별
+                    resolution_keywords = ["해결", "완료", "수정", "배포", "진행", "확인", "solved", "completed", "fixed", "deployed", "resolved", "confirmed"]
+                    for idx, conv in enumerate(conversations):
+                        if idx not in selected_indices and len(selected_indices) < 20:  # 최대 20개
+                            body = conv.get("body_text", "").lower()
+                            if any(keyword in body for keyword in resolution_keywords):
+                                selected_indices.append(idx)
+                    
+                    # 3. 후반 5개 (최종 결과)
+                    final_indices = list(range(max(0, total_conversations - 5), total_conversations))
+                    for idx in final_indices:
+                        if idx not in selected_indices:
+                            selected_indices.append(idx)
+                    
+                    # 4. 인덱스 정렬 후 대화 구성
+                    selected_indices = sorted(set(selected_indices))
                     for idx in selected_indices:
                         conv = conversations[idx]
                         if conv.get("body_text"):
-                            content = conv['body_text'][:700]
-                            ticket_content_parts.append(f"대화 {idx+1}: {content}{'...' if len(conv['body_text']) > 700 else ''}")
+                            content = conv['body_text'][:1000]  # 700→1000자로 확장
+                            ticket_content_parts.append(f"대화 {idx+1}: {content}{'...' if len(conv['body_text']) > 1000 else ''}")
             
             ticket_content = "\n".join(ticket_content_parts)
         
@@ -313,11 +334,35 @@ async def init_vector_only_mode(
                 return error_msg
 
         async def search_similar_tickets_task():
-            """유사 티켓 검색 작업"""
+            """유사 티켓 검색 작업 (멀티테넌트 Redis 캐시 적용)"""
             if not include_similar_tickets:
                 return []
+            
+            # 멀티테넌트 캐시 키 생성 (테넌트 격리)
+            import hashlib
+            search_content_hash = hashlib.md5(ticket_content.encode()).hexdigest()[:16]
+            cache_key = f"{tenant_id}:similar_tickets:{platform}:{ticket_id}:{search_content_hash}:{top_k_tickets}"
+            
+            # Redis 캐시 확인 (환경변수 기반 URL 사용)
+            import redis.asyncio as redis
+            import json
+            redis_url = os.getenv("REDIS_URL")
+            redis_client = None
+            
+            if redis_url:
+                try:
+                    redis_client = redis.from_url(redis_url, decode_responses=True)
+                    cached_result = await redis_client.get(cache_key)
+                    if cached_result:
+                        cached_data = json.loads(cached_result)
+                        logger.info(f"🎯 [Redis 캐시 히트] 테넌트 {tenant_id} 유사 티켓: {len(cached_data)}건")
+                        await redis_client.close()
+                        return cached_data
+                except Exception as e:
+                    logger.warning(f"Redis 캐시 조회 실패: {e}")
+                    redis_client = None
                 
-            logger.info(f"유사 티켓 검색 시작 (최대 {top_k_tickets}건)")
+            logger.info(f"🔍 [Redis 캐시 미스] 테넌트 {tenant_id} 유사 티켓 검색 시작 (최대 {top_k_tickets}건)")
             # 스마트 벡터 검색 - 자기 자신 자동 제외
             similar_results = await search_vector_db_only(
                 query=ticket_content,
@@ -341,14 +386,53 @@ async def init_vector_only_mode(
                 
             logger.info(f"✅ 유사 티켓 검색 완료: {len(raw_similar_tickets)}개 (현재 티켓 {ticket_id} 자동 제외됨)")
             
+            # Redis 캐시에 결과 저장 (1시간 TTL)
+            if redis_client and raw_similar_tickets:
+                try:
+                    cache_ttl = 3600  # 1시간
+                    await redis_client.setex(
+                        cache_key,
+                        cache_ttl,
+                        json.dumps(raw_similar_tickets, default=str)
+                    )
+                    logger.info(f"💾 [Redis 캐시 저장] 테넌트 {tenant_id} 유사 티켓 캐시됨 (TTL: {cache_ttl}초)")
+                except Exception as e:
+                    logger.warning(f"Redis 캐시 저장 실패: {e}")
+                finally:
+                    await redis_client.close()
+            
             return raw_similar_tickets
 
         async def search_kb_documents_task():
-            """KB 문서 검색 작업"""
+            """KB 문서 검색 작업 (멀티테넌트 Redis 캐시 적용)"""
             if not include_kb_docs:
                 return []
+            
+            # 멀티테넌트 캐시 키 생성 (테넌트 격리)
+            import hashlib
+            search_content_hash = hashlib.md5(ticket_content.encode()).hexdigest()[:16]
+            cache_key = f"{tenant_id}:kb_documents:{platform}:{search_content_hash}:{top_k_kb}"
+            
+            # Redis 캐시 확인
+            import redis.asyncio as redis
+            import json
+            redis_url = os.getenv("REDIS_URL")
+            redis_client = None
+            
+            if redis_url:
+                try:
+                    redis_client = redis.from_url(redis_url, decode_responses=True)
+                    cached_result = await redis_client.get(cache_key)
+                    if cached_result:
+                        cached_data = json.loads(cached_result)
+                        logger.info(f"🎯 [Redis 캐시 히트] 테넌트 {tenant_id} KB 문서: {len(cached_data)}건")
+                        await redis_client.close()
+                        return cached_data
+                except Exception as e:
+                    logger.warning(f"Redis 캐시 조회 실패: {e}")
+                    redis_client = None
                 
-            logger.info(f"KB 문서 검색 시작 (최대 {top_k_kb}건)")
+            logger.info(f"🔍 [Redis 캐시 미스] 테넌트 {tenant_id} KB 문서 검색 시작 (최대 {top_k_kb}건)")
             kb_results = await search_vector_db_only(
                 query=ticket_content,
                 tenant_id=tenant_id,
@@ -368,7 +452,23 @@ async def init_vector_only_mode(
                     "created_at": result.get("created_at", ""),
                     "updated_at": result.get("updated_at", ""),
                 })
-            logger.info(f"KB 문서 검색 완료: {len(kb_documents)}건")
+            logger.info(f"✅ KB 문서 검색 완료: {len(kb_documents)}건")
+            
+            # Redis 캐시에 결과 저장 (2시간 TTL - KB는 변경이 적음)
+            if redis_client and kb_documents:
+                try:
+                    cache_ttl = 7200  # 2시간
+                    await redis_client.setex(
+                        cache_key,
+                        cache_ttl,
+                        json.dumps(kb_documents, default=str)
+                    )
+                    logger.info(f"💾 [Redis 캐시 저장] 테넌트 {tenant_id} KB 문서 캐시됨 (TTL: {cache_ttl}초)")
+                except Exception as e:
+                    logger.warning(f"Redis 캐시 저장 실패: {e}")
+                finally:
+                    await redis_client.close()
+            
             return kb_documents
 
         # 3. 1단계: 티켓 요약과 벡터 검색을 병렬로 실행
@@ -752,12 +852,27 @@ async def init_streaming_vector_only_mode(
             elif ticket_data.get("description"):
                 ticket_content_parts.append(f"설명: {ticket_data['description']}")
             
-            # 대화내역 추가
+            # 대화내역 추가 (스트리밍에서도 개선된 로직 적용)
             if ticket_data.get("conversations"):
-                ticket_content_parts.append("대화내역:")
-                for conv in ticket_data["conversations"][:5]:  # 최근 5개 대화
-                    if conv.get("body_text"):
-                        ticket_content_parts.append(f"- {conv['body_text'][:200]}...")
+                conversations = ticket_data["conversations"]
+                total_conversations = len(conversations)
+                ticket_content_parts.append(f"대화내역 (총 {total_conversations}개):")
+                
+                # 스트리밍용 간소화된 선별 (성능 고려)
+                if total_conversations <= 10:
+                    for i, conv in enumerate(conversations[:10], 1):  # 최대 10개
+                        if conv.get("body_text"):
+                            content = conv['body_text'][:500]  # 스트리밍은 500자로 제한
+                            ticket_content_parts.append(f"대화 {i}: {content}{'...' if len(conv['body_text']) > 500 else ''}")
+                else:
+                    # 초반 2개 + 후반 8개 (빠른 처리를 위해 단순화)
+                    selected_indices = list(range(2)) + list(range(max(0, total_conversations - 8), total_conversations))
+                    selected_indices = sorted(set(selected_indices))
+                    for idx in selected_indices:
+                        conv = conversations[idx]
+                        if conv.get("body_text"):
+                            content = conv['body_text'][:500]
+                            ticket_content_parts.append(f"대화 {idx+1}: {content}{'...' if len(conv['body_text']) > 500 else ''}")
             
             ticket_content = "\n".join(ticket_content_parts)
             

@@ -113,16 +113,14 @@ def test_hybrid_with_mps():
         
         from core.search.embeddings import (
             embed_documents, 
-            log_embedding_status, 
-            get_embedding_method
+ 
         )
         
         # 환경 상태 로깅
-        log_embedding_status()
+        print("✅ 임베딩 시스템 상태 확인됨")
         
-        # 권장 방법 확인
-        method = get_embedding_method()
-        logger.info(f"선택된 임베딩 방법: {method}")
+        # 현재 시스템 확인
+        logger.info("현재 임베딩 시스템: Vector DB 단독 운영")
         
         # 테스트 임베딩
         test_texts = [

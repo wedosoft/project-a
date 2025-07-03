@@ -334,7 +334,9 @@ FORMATTING RULES:
                                 attachment_list.append(f"{emoji} {name}")
                     
                     if attachment_list:
-                        attachment_summary = " | ".join(attachment_list)
+                        # 각 파일을 한 줄씩 표시 (이쁜 형태로)
+                        formatted_attachments = [f"- {attachment}" for attachment in attachment_list]
+                        attachment_summary = "\n".join(formatted_attachments)
                         logger.debug(f"LLM 선별된 첨부파일 사용: {len(attachment_list)}개")
                 
                 # 2순위: 기존 attachment_summary (폴백)
