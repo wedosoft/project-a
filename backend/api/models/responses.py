@@ -144,6 +144,67 @@ class AttachmentUploadResponse(BaseModel):
     error: Optional[str] = Field(default=None, description="오류 메시지")
 
 
+class AgentChatResponse(BaseModel):
+    """상담원 채팅 검색 응답 모델"""
+    
+    # 검색 컨텍스트 정보
+    search_context: Dict[str, Any] = Field(
+        description="분석된 검색 컨텍스트 (의도, 우선순위, 키워드, 필터)"
+    )
+    
+    # 검색 결과
+    search_results: List[DocumentInfo] = Field(
+        default_factory=list,
+        description="검색된 문서 목록"
+    )
+    
+    # Constitutional AI 응답
+    structured_response: Optional[str] = Field(
+        default=None,
+        description="Constitutional AI가 생성한 구조화된 응답"
+    )
+    
+    # 액션 아이템
+    action_items: List[str] = Field(
+        default_factory=list,
+        description="상담원을 위한 액션 아이템 목록"
+    )
+    
+    # 관련 제안
+    related_suggestions: List[str] = Field(
+        default_factory=list,
+        description="관련 검색 제안"
+    )
+    
+    # 메타데이터
+    total_results: int = Field(default=0, description="총 검색 결과 수")
+    quality_score: float = Field(default=0.0, description="검색 품질 점수 (0.0-1.0)")
+    response_time_ms: Optional[float] = Field(default=None, description="응답 시간 (밀리초)")
+    
+    # 스트리밍을 위한 청크 정보
+    chunk_type: Optional[str] = Field(
+        default=None,
+        description="청크 타입 (analysis, search, processing, response, final, error)"
+    )
+    is_final: bool = Field(default=True, description="최종 응답 여부")
+
+
+class AgentChatSuggestionResponse(BaseModel):
+    """상담원 채팅 검색 제안 응답 모델"""
+    
+    quick_searches: List[str] = Field(
+        description="빠른 검색 제안"
+    )
+    role_based: Dict[str, List[str]] = Field(
+        default_factory=dict,
+        description="역할별 검색 제안"
+    )
+    category_based: Dict[str, List[str]] = Field(
+        default_factory=dict,
+        description="카테고리별 검색 제안"
+    )
+
+
 class AttachmentListResponse(BaseModel):
     """첨부파일 목록 응답 모델"""
     

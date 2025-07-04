@@ -52,10 +52,7 @@ async def get_ticket_summary_cache():
     return container.get_ticket_summary_cache()
 
 
-async def get_hybrid_search_manager():
-    """하이브리드 검색 매니저 의존성 - IoC 컨테이너에서 반환"""
-    container = await get_container()
-    return container.get_hybrid_search_manager()
+# 하이브리드 검색 기능 제거됨 - 벡터 DB 단독 사용
 
 
 async def get_cache_manager():

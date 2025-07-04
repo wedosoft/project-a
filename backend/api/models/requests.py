@@ -50,6 +50,33 @@ class QueryRequest(BaseModel):
     enable_llm_enrichment: bool = True  # LLM 컨텍스트 강화 활성화 여부
     rerank_results: bool = True  # 결과 재순위 활성화 여부
     
+    # 상담원 채팅 관련 필드들
+    agent_mode: bool = Field(default=False, description="상담원 모드 활성화 (Constitutional AI 적용)")
+    agent_context: Optional[Dict[str, Any]] = Field(
+        default=None, 
+        description="상담원 컨텍스트 정보 (현재 티켓, 고객 정보 등)"
+    )
+    force_intent: Optional[str] = Field(
+        default=None,
+        description="강제 의도 설정 (problem_solving, info_gathering, learning, analysis)"
+    )
+    urgency_override: Optional[str] = Field(
+        default=None,
+        description="우선순위 강제 설정 (immediate, today, general, reference)"
+    )
+    enable_constitutional_ai: bool = Field(
+        default=False,
+        description="Constitutional AI 응답 생성 활성화"
+    )
+    safety_level: str = Field(
+        default="standard",
+        description="안전 수준 (strict, standard, relaxed)"
+    )
+    stream_response: bool = Field(
+        default=False,
+        description="스트리밍 응답 여부 (상담원 모드에서 사용)"
+    )
+    
     # /init 엔드포인트에서 사용되는 추가 필드들
     include_summary: bool = True  # 티켓 요약 생성 여부
     include_kb_docs: bool = True  # 관련 지식베이스 문서 포함 여부
@@ -77,6 +104,8 @@ class IngestRequest(BaseModel):
     force_rebuild: bool = False  # 데이터베이스 강제 재구축 여부
     include_kb: bool = True  # 지식베이스 데이터 포함 여부
     max_tickets: Optional[int] = None  # 최대 수집 티켓 수 (None=무제한, 테스트용으로 100 지정 가능)
+
+
     max_articles: Optional[int] = None  # 최대 수집 KB 문서 수 (None=무제한, 테스트용으로 100 지정 가능)
     start_date: Optional[str] = Field(
         default=None,
