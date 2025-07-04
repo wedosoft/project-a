@@ -123,10 +123,14 @@ class LLMManager:
         Returns:
             LLM 응답
         """
+        # kwargs에서 LLMRequest에 해당하는 필드만 추출
+        valid_fields = {'max_tokens', 'temperature', 'stream', 'metadata'}
+        request_kwargs = {k: v for k, v in kwargs.items() if k in valid_fields}
+        
         request = LLMRequest(
             messages=messages,
             model=model,
-            **kwargs
+            **request_kwargs
         )
         
         # 캐시 확인

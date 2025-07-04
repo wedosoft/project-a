@@ -363,17 +363,15 @@ async def detect_content_language_llm(content: str, ui_language: str = 'ko') -> 
 
 응답 형식: 언어코드만 (ko/en/ja/zh)"""
 
-        from core.llm.models.base import LLMRequest
         llm_manager = LLMManager()
         
-        # 빠른 모델로 언어 감지
-        request = LLMRequest(
-            messages=[{"role": "user", "content": prompt}],
-            model="gemini-1.5-flash",
+        # 빠른 모델로 언어 감지 - LLMRequest 대신 직접 generate 호출
+        messages = [{"role": "user", "content": prompt}]
+        response_obj = await llm_manager.generate(
+            messages=messages,
             max_tokens=10,
             temperature=0.0
         )
-        response_obj = await llm_manager.generate(request)
         response = response_obj.content if response_obj.success else ""
         
         detected_lang = response.strip().lower()

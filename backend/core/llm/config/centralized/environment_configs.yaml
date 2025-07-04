@@ -1,0 +1,320 @@
+# 환경별 설정 오버라이드
+# 이 파일은 environment_configs 키로 중앙집중 관리됩니다.
+
+# 배포 환경별 기본 설정
+deployment_environments:
+  # 로컬 개발 환경
+  local:
+    default_provider: "gemini"
+    default_chat_model: "gemini-1.5-flash"
+    default_embedding_model: "text-embedding-3-small"
+    cost_limit: "low"
+    
+    # 환경별 모델 오버라이드
+    model_overrides:
+      summarization:
+        provider: "gemini"
+        model: "gemini-1.5-flash"
+        reason: "개발 환경 - 빠르고 저비용"
+      
+      chat:
+        provider: "gemini"
+        model: "gemini-1.5-flash"
+        reason: "개발 환경 - 빠른 테스트"
+    
+    # 기능 플래그
+    feature_flags:
+      enable_caching: true
+      enable_rate_limiting: false
+      enable_metrics: true
+      enable_debugging: true
+      enable_ab_testing: false
+    
+    # 속도 제한
+    rate_limits:
+      requests_per_minute: 60
+      tokens_per_minute: 100000
+    
+    # 모니터링 설정
+    monitoring:
+      log_level: "DEBUG"
+      metrics_interval: 60
+      enable_performance_tracking: true
+
+  # AWS 클라우드 환경 (개발/스테이징)
+  aws_dev:
+    default_provider: "anthropic"
+    default_chat_model: "claude-3-5-haiku-20241022"
+    default_embedding_model: "text-embedding-3-small"
+    cost_limit: "medium"
+    
+    model_overrides:
+      summarization:
+        provider: "anthropic"
+        model: "claude-3-5-haiku-20241022"
+        reason: "AWS 개발 - 균형잡힌 성능"
+      
+      analysis:
+        provider: "anthropic"
+        model: "claude-3-sonnet-20240229"
+        reason: "AWS 개발 - 고품질 분석"
+    
+    feature_flags:
+      enable_caching: true
+      enable_rate_limiting: true
+      enable_metrics: true
+      enable_debugging: false
+      enable_ab_testing: true
+    
+    rate_limits:
+      requests_per_minute: 300
+      tokens_per_minute: 500000
+    
+    monitoring:
+      log_level: "INFO"
+      metrics_interval: 30
+      enable_performance_tracking: true
+
+  # AWS 클라우드 환경 (프로덕션)
+  aws_prod:
+    default_provider: "anthropic"
+    default_chat_model: "claude-3-sonnet-20240229"
+    default_embedding_model: "text-embedding-3-small"
+    cost_limit: "high"
+    
+    model_overrides:
+      summarization:
+        provider: "anthropic"
+        model: "claude-3-5-haiku-20241022"
+        reason: "프로덕션 - 속도 최적화"
+      
+      analysis:
+        provider: "anthropic"
+        model: "claude-3-opus-20240229"
+        reason: "프로덕션 - 최고 품질"
+      
+      question_answering:
+        provider: "anthropic"
+        model: "claude-3-sonnet-20240229"
+        reason: "프로덕션 - 안정적 품질"
+    
+    feature_flags:
+      enable_caching: true
+      enable_rate_limiting: true
+      enable_metrics: true
+      enable_debugging: false
+      enable_ab_testing: true
+    
+    rate_limits:
+      requests_per_minute: 1000
+      tokens_per_minute: 2000000
+    
+    monitoring:
+      log_level: "WARNING"
+      metrics_interval: 15
+      enable_performance_tracking: true
+      alert_thresholds:
+        error_rate: 0.05
+        response_time: 10.0
+        cost_per_hour: 50.0
+
+  # Kubernetes 환경
+  kubernetes:
+    default_provider: "anthropic"
+    default_chat_model: "claude-3-5-haiku-20241022"
+    default_embedding_model: "text-embedding-3-small"
+    cost_limit: "medium"
+    
+    model_overrides:
+      summarization:
+        provider: "anthropic"
+        model: "claude-3-5-haiku-20241022"
+        reason: "K8s 환경 - 효율적 리소스 사용"
+    
+    feature_flags:
+      enable_caching: true
+      enable_rate_limiting: true
+      enable_metrics: true
+      enable_debugging: false
+      enable_ab_testing: false
+    
+    rate_limits:
+      requests_per_minute: 500
+      tokens_per_minute: 1000000
+    
+    monitoring:
+      log_level: "INFO"
+      metrics_interval: 30
+      enable_performance_tracking: true
+
+  # Azure 클라우드 환경
+  azure:
+    default_provider: "openai"
+    default_chat_model: "gpt-4-turbo"
+    default_embedding_model: "text-embedding-3-small"
+    cost_limit: "medium"
+    
+    model_overrides:
+      summarization:
+        provider: "openai"
+        model: "gpt-4o-mini"
+        reason: "Azure 환경 - OpenAI 최적화"
+      
+      chat:
+        provider: "openai"
+        model: "gpt-3.5-turbo"
+        reason: "Azure 환경 - 빠른 응답"
+    
+    feature_flags:
+      enable_caching: true
+      enable_rate_limiting: true
+      enable_metrics: true
+      enable_debugging: false
+      enable_ab_testing: true
+    
+    rate_limits:
+      requests_per_minute: 400
+      tokens_per_minute: 800000
+    
+    monitoring:
+      log_level: "INFO"
+      metrics_interval: 30
+      enable_performance_tracking: true
+
+# 테스트 환경별 설정
+test_environments:
+  unit_test:
+    default_provider: "openai"
+    default_chat_model: "gpt-3.5-turbo"
+    default_embedding_model: "text-embedding-3-small"
+    cost_limit: "very_low"
+    
+    feature_flags:
+      enable_caching: false
+      enable_rate_limiting: false
+      enable_metrics: false
+      enable_debugging: true
+      enable_ab_testing: false
+    
+    rate_limits:
+      requests_per_minute: 10
+      tokens_per_minute: 10000
+    
+    monitoring:
+      log_level: "DEBUG"
+      metrics_interval: 120
+      enable_performance_tracking: false
+
+  integration_test:
+    default_provider: "gemini"
+    default_chat_model: "gemini-1.5-flash"
+    default_embedding_model: "text-embedding-3-small"
+    cost_limit: "low"
+    
+    feature_flags:
+      enable_caching: true
+      enable_rate_limiting: false
+      enable_metrics: true
+      enable_debugging: true
+      enable_ab_testing: false
+    
+    rate_limits:
+      requests_per_minute: 50
+      tokens_per_minute: 50000
+    
+    monitoring:
+      log_level: "INFO"
+      metrics_interval: 60
+      enable_performance_tracking: true
+
+  load_test:
+    default_provider: "anthropic"
+    default_chat_model: "claude-3-5-haiku-20241022"
+    default_embedding_model: "text-embedding-3-small"
+    cost_limit: "medium"
+    
+    feature_flags:
+      enable_caching: true
+      enable_rate_limiting: true
+      enable_metrics: true
+      enable_debugging: false
+      enable_ab_testing: false
+    
+    rate_limits:
+      requests_per_minute: 200
+      tokens_per_minute: 200000
+    
+    monitoring:
+      log_level: "WARNING"
+      metrics_interval: 10
+      enable_performance_tracking: true
+
+# 팀별 설정 (옵션)
+team_configs:
+  backend_team:
+    preferred_provider: "anthropic"
+    debug_level: "INFO"
+    experimental_features: true
+    
+  frontend_team:
+    preferred_provider: "openai"
+    debug_level: "WARNING"
+    experimental_features: false
+    
+  data_team:
+    preferred_provider: "gemini"
+    debug_level: "DEBUG"
+    experimental_features: true
+
+# 지역별 설정 (글로벌 배포용)
+regional_configs:
+  us_east:
+    aws_region: "us-east-1"
+    latency_preference: "low"
+    
+  us_west:
+    aws_region: "us-west-2"
+    latency_preference: "low"
+    
+  eu_west:
+    aws_region: "eu-west-1"
+    latency_preference: "medium"
+    
+  asia_pacific:
+    aws_region: "ap-southeast-1"
+    latency_preference: "medium"
+
+# A/B 테스트 설정
+ab_test_configs:
+  summarization_test_2024:
+    enabled: true
+    start_date: "2024-07-01"
+    end_date: "2024-08-01"
+    traffic_split: 50
+    baseline_model:
+      provider: "anthropic"
+      model: "claude-3-5-haiku-20241022"
+    test_model:
+      provider: "gemini"
+      model: "gemini-1.5-flash"
+    metrics:
+      - "response_time"
+      - "quality_score"
+      - "cost_per_request"
+
+# 비용 관리 설정
+cost_management:
+  daily_limits:
+    development: 10.0  # USD
+    staging: 50.0
+    production: 500.0
+  
+  monthly_limits:
+    development: 300.0
+    staging: 1500.0
+    production: 15000.0
+  
+  alert_thresholds:
+    daily_80_percent: true
+    monthly_80_percent: true
+    unusual_spike: true

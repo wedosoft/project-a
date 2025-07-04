@@ -18,7 +18,27 @@ class ConfigManager:
         self.configs = self._load_configs()
     
     def _load_configs(self) -> Dict[str, Any]:
-        """환경변수에서 설정 로드"""
+        """환경변수에서 설정 로드 - 모델 레지스트리 통합"""
+        # 모델 레지스트리에서 환경별 기본값 가져오기
+        try:
+            from ..registry import get_model_registry
+            registry = get_model_registry()
+            environment = os.getenv('ENVIRONMENT', 'development')
+            env_config = registry.get_environment_config(environment)
+        except:
+            env_config = None
+        
+        # 레지스트리 기반 기본값 설정
+        if env_config:
+            default_provider = env_config.default_provider
+            default_chat_model = env_config.default_chat_model
+            default_embedding_model = env_config.default_embedding_model
+        else:
+            # 폴백 기본값
+            default_provider = "gemini"
+            default_chat_model = "gemini-1.5-flash"
+            default_embedding_model = "text-embedding-3-small"
+        
         return {
             "timeouts": {
                 "global": float(os.getenv("LLM_GLOBAL_TIMEOUT", "15.0")),
@@ -27,41 +47,62 @@ class ConfigManager:
                 "openai": float(os.getenv("LLM_OPENAI_TIMEOUT", "15.0")),
             },
             "models": {
-                "light": os.getenv("LLM_LIGHT_MODEL", "gemini-1.5-flash"),
+                "light": os.getenv("LLM_LIGHT_MODEL", default_chat_model),
                 "heavy": os.getenv("LLM_HEAVY_MODEL", "gemini-1.5-pro"),
             },
             "use_cases": {
                 "summarization": {
-                    "provider": os.getenv("SUMMARIZATION_MODEL_PROVIDER", "gemini"),
-                    "model": os.getenv("SUMMARIZATION_MODEL_NAME", "gemini-1.5-flash"),
+                    "provider": os.getenv("SUMMARIZATION_MODEL_PROVIDER", default_provider),
+                    "model": os.getenv("SUMMARIZATION_MODEL_NAME", default_chat_model),
                     "max_tokens": int(os.getenv("SUMMARIZATION_MAX_TOKENS", "1000")),
                     "temperature": float(os.getenv("SUMMARIZATION_TEMPERATURE", "0.1"))
                 },
-                # 🧠 Anthropic 프롬프트 엔지니어링 통합 - 환경변수 우선순위 적용
                 "ticket_view": {
-                    "provider": os.getenv("ANTHROPIC_TICKET_VIEW_MODEL_PROVIDER") or os.getenv("TICKET_VIEW_MODEL_PROVIDER", "gemini"),
-                    "model": os.getenv("ANTHROPIC_TICKET_VIEW_MODEL_NAME") or os.getenv("TICKET_VIEW_MODEL_NAME", "gemini-1.5-flash"),
+                    "provider": os.getenv("TICKET_VIEW_MODEL_PROVIDER", default_provider),
+                    "model": os.getenv("TICKET_VIEW_MODEL_NAME", default_chat_model),
                     "max_tokens": int(os.getenv("TICKET_VIEW_MAX_TOKENS", "1200")),
                     "temperature": float(os.getenv("TICKET_VIEW_TEMPERATURE", "0.05"))
                 },
                 "ticket_similar": {
-                    "provider": os.getenv("TICKET_SIMILAR_MODEL_PROVIDER", "gemini"),
-                    "model": os.getenv("TICKET_SIMILAR_MODEL_NAME", "gemini-1.5-flash"),
+                    "provider": os.getenv("TICKET_SIMILAR_MODEL_PROVIDER", default_provider),
+                    "model": os.getenv("TICKET_SIMILAR_MODEL_NAME", default_chat_model),
                     "max_tokens": int(os.getenv("TICKET_SIMILAR_MAX_TOKENS", "800")),
                     "temperature": float(os.getenv("TICKET_SIMILAR_TEMPERATURE", "0.1"))
                 },
-                # 🧠 Anthropic 전용 사용 사례
-                "anthropic_ticket_view": {
-                    "provider": os.getenv("ANTHROPIC_TICKET_VIEW_MODEL_PROVIDER", "anthropic"),
-                    "model": os.getenv("ANTHROPIC_TICKET_VIEW_MODEL_NAME", "claude-3-5-haiku-20241022"),  # Sonnet → Haiku (속도 최적화)
-                    "max_tokens": int(os.getenv("ANTHROPIC_TICKET_VIEW_MAX_TOKENS", "1200")),  # 1500 → 1200 (약간 줄임)
-                    "temperature": float(os.getenv("ANTHROPIC_TICKET_VIEW_TEMPERATURE", "0.2"))  # 0.3 → 0.2 (더 일관된 출력)
+                "question_answering": {
+                    "provider": os.getenv("QA_MODEL_PROVIDER", default_provider),
+                    "model": os.getenv("QA_MODEL_NAME", default_chat_model),
+                    "max_tokens": int(os.getenv("QA_MAX_TOKENS", "2000")),
+                    "temperature": float(os.getenv("QA_TEMPERATURE", "0.2"))
                 },
-                "realtime_summary": {
-                    "provider": os.getenv("ANTHROPIC_REALTIME_SUMMARY_MODEL_PROVIDER", "anthropic"),
-                    "model": os.getenv("ANTHROPIC_REALTIME_SUMMARY_MODEL_NAME", "claude-3-5-haiku-20241022"),
-                    "max_tokens": int(os.getenv("ANTHROPIC_REALTIME_SUMMARY_MAX_TOKENS", "800")),
-                    "temperature": float(os.getenv("ANTHROPIC_REALTIME_SUMMARY_TEMPERATURE", "0.5"))
+                "chat": {
+                    "provider": os.getenv("CHAT_MODEL_PROVIDER", default_provider),
+                    "model": os.getenv("CHAT_MODEL_NAME", default_chat_model),
+                    "max_tokens": int(os.getenv("CHAT_MAX_TOKENS", "1000")),
+                    "temperature": float(os.getenv("CHAT_TEMPERATURE", "0.3"))
+                },
+                "analysis": {
+                    "provider": os.getenv("ANALYSIS_MODEL_PROVIDER", default_provider),
+                    "model": os.getenv("ANALYSIS_MODEL_NAME", default_chat_model),
+                    "max_tokens": int(os.getenv("ANALYSIS_MAX_TOKENS", "4000")),
+                    "temperature": float(os.getenv("ANALYSIS_TEMPERATURE", "0.1"))
+                },
+                "embedding": {
+                    "provider": os.getenv("EMBEDDING_MODEL_PROVIDER", "openai"),
+                    "model": os.getenv("EMBEDDING_MODEL_NAME", default_embedding_model),
+                    "dimensions": int(os.getenv("EMBEDDING_DIMENSIONS", "1536"))
+                },
+                "realtime": {
+                    "provider": os.getenv("REALTIME_MODEL_PROVIDER", default_provider),
+                    "model": os.getenv("REALTIME_MODEL_NAME", default_chat_model),
+                    "max_tokens": int(os.getenv("REALTIME_MAX_TOKENS", "1000")),
+                    "temperature": float(os.getenv("REALTIME_TEMPERATURE", "0.2"))
+                },
+                "batch": {
+                    "provider": os.getenv("BATCH_MODEL_PROVIDER", default_provider),
+                    "model": os.getenv("BATCH_MODEL_NAME", default_chat_model),
+                    "max_tokens": int(os.getenv("BATCH_MAX_TOKENS", "2000")),
+                    "temperature": float(os.getenv("BATCH_TEMPERATURE", "0.1"))
                 }
             },
             "conversation_filtering": {
@@ -89,7 +130,31 @@ class ConfigManager:
         )
     
     def _get_default_model(self, provider: LLMProvider) -> str:
-        """제공자별 기본 모델 반환"""
+        """제공자별 기본 모델 반환 - 레지스트리 기반"""
+        try:
+            from ..registry import get_model_registry
+            registry = get_model_registry()
+            
+            # 환경별 기본 모델 확인
+            environment = os.getenv('ENVIRONMENT', 'development')
+            env_config = registry.get_environment_config(environment)
+            
+            if env_config:
+                if provider.value == env_config.default_provider:
+                    return env_config.default_chat_model
+                elif provider == LLMProvider.OPENAI and provider.value != env_config.default_provider:
+                    return env_config.default_embedding_model
+            
+            # 레지스트리에서 활성 모델 찾기
+            available_models = registry.get_available_models(provider=provider.value)
+            for model_spec in available_models:
+                if not model_spec.deprecated:
+                    return model_spec.name
+                    
+        except Exception as e:
+            logger.warning(f"레지스트리에서 기본 모델 조회 실패: {e}")
+        
+        # 폴백 기본값
         defaults = {
             LLMProvider.OPENAI: "gpt-3.5-turbo",
             LLMProvider.ANTHROPIC: "claude-3-haiku-20240307", 
