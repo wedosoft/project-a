@@ -149,27 +149,30 @@ def _apply_strict_filtering(
                 relevant_attachments.append(att)
                 logger.info(f"추가 직접 언급 파일 선택: {att.get('name')}")
     
-    # 최고 점수가 높은 관련성 (7-9점)인 경우
+    # 높은 관련성 파일들 선택 (성능 최적화를 위해 더 관대하게)
     elif scored_attachments[0][0] >= thresholds['high_relevance']:
-        first_att = scored_attachments[0][1]
-        
-        # 특정 타입의 파일이고 내용에 관련 키워드가 있는 경우만
-        if (_is_important_file_type(first_att) and 
-            _has_content_relevance(combined_text, config)):
-            relevant_attachments.append(first_att)
-            logger.info(f"높은 관련성 파일 선택: {first_att.get('name')}")
+        for score, att in scored_attachments[:3]:  # 상위 3개까지 고려
+            if (score >= thresholds['high_relevance'] and 
+                _is_important_file_type(att)):
+                relevant_attachments.append(att)
+                logger.info(f"높은 관련성 파일 선택: {att.get('name')} (점수: {score})")
     
-    # 중간 관련성 (5-6점)인 경우는 매우 제한적으로만 허용
+    # 중간 관련성 파일들도 더 관대하게 선택
     elif scored_attachments[0][0] >= thresholds['medium_relevance']:
-        first_att = scored_attachments[0][1]
-        att_name = first_att.get('name', '').lower()
-        
-        # 파일명에 중요한 키워드가 포함되어 있고, 로그나 설정 파일인 경우만
-        if (any(keyword in att_name for keyword in config['important_keywords']) and
-            _is_critical_file_type(first_att) and
-            _has_content_relevance(combined_text, config)):
-            relevant_attachments.append(first_att)
-            logger.info(f"중간 관련성 파일 조건부 선택: {first_att.get('name')}")
+        for score, att in scored_attachments[:2]:  # 상위 2개까지 고려
+            if score >= thresholds['medium_relevance']:
+                if _is_important_file_type(att):
+                    relevant_attachments.append(att)
+                    logger.info(f"중간 관련성 파일 선택: {att.get('name')} (점수: {score})")
+    
+    # 최소 점수를 넘는 파일들도 고려 (LLM 기반과 유사한 선별률을 위해)
+    else:
+        for score, att in scored_attachments[:3]:
+            if (score >= thresholds['minimum_score'] and 
+                _is_important_file_type(att) and
+                len(relevant_attachments) < 2):  # 최대 2개까지만
+                relevant_attachments.append(att)
+                logger.info(f"기본 관련성 파일 선택: {att.get('name')} (점수: {score})")
     
     # 최대 개수 제한
     max_attachments = config['max_selected_attachments']

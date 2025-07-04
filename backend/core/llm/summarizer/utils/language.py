@@ -88,7 +88,8 @@ class LanguageDetector:
             Language code or detailed LanguageProfile
         """
         if not text or len(text.strip()) < 10:
-            return 'en' if not detailed else LanguageProfile('en', 'English', 0.5, 0.0, 0, len(text))
+            # 짧은 텍스트의 경우 한국어를 기본값으로 사용 (UI 언어와 일치)
+            return 'ko' if not detailed else LanguageProfile('ko', 'Korean', 0.5, 0.0, 0, len(text))
         
         profiles = []
         
@@ -127,7 +128,14 @@ class LanguageDetector:
                 char_count += sum(1 for c in text if start_char <= c <= end_char)
             
             character_ratio = char_count / total_chars
-            confidence += character_ratio * 0.6
+            # Give Korean stronger weight when Korean characters are present
+            if lang_code == 'ko' and character_ratio > 0.2:
+                # Korean content with good character ratio gets boosted confidence
+                korean_boost = character_ratio * 0.7  # Increased from 0.6 to 0.7
+                logger.debug(f"Korean content boost: {korean_boost:.2f} (char ratio: {character_ratio:.2f})")
+                confidence += korean_boost
+            else:
+                confidence += character_ratio * 0.6
         
         # Keyword-based analysis
         if 'keywords' in config:
@@ -144,9 +152,23 @@ class LanguageDetector:
         
         # Language-specific adjustments
         if lang_code == 'en' and character_ratio == 0.0:
-            # For English, high ASCII ratio is a good indicator
+            # For English, high ASCII ratio is a good indicator, but be careful with mixed-language content
             ascii_ratio = sum(1 for c in text if ord(c) < 128) / total_chars
-            confidence = max(confidence, ascii_ratio * 0.8)
+            
+            # Check if this might be mixed content with significant Korean characters
+            korean_char_count = sum(1 for c in text if '\uac00' <= c <= '\ud7af')
+            korean_ratio = korean_char_count / total_chars
+            
+            # If Korean characters are significant (>20%), reduce English confidence boost
+            if korean_ratio > 0.2:
+                # Mixed content: reduce English confidence boost
+                ascii_boost = ascii_ratio * 0.4  # Reduced from 0.8 to 0.4
+                logger.debug(f"Mixed content detected (Korean: {korean_ratio:.2f}), reducing English boost to {ascii_boost:.2f}")
+            else:
+                # Pure ASCII content: full confidence boost
+                ascii_boost = ascii_ratio * 0.8
+            
+            confidence = max(confidence, ascii_boost)
         
         return LanguageProfile(
             code=lang_code,
@@ -283,9 +305,104 @@ language_detector = LanguageDetector()
 text_processor = TextProcessor()
 
 
-def detect_content_language(content: str) -> str:
-    """Convenience function for language detection"""
-    return language_detector.detect_language(content)
+async def detect_content_language_llm(content: str, ui_language: str = 'ko') -> str:
+    """
+    LLM 기반 언어 감지 - 정확성과 다국어 지원 향상
+    
+    Args:
+        content: Content to analyze
+        ui_language: UI language preference (used for short/ambiguous content)
+    
+    Returns:
+        Detected or preferred language code
+    """
+    if not content or len(content.strip()) < 20:
+        # 매우 짧은 텍스트는 UI 언어 사용
+        logger.debug(f"짧은 콘텐츠({len(content)}자) - UI 언어 '{ui_language}' 적용")
+        return ui_language
+    
+    try:
+        # LLM을 통한 언어 감지
+        from core.llm.manager import LLMManager
+        
+        # 빠른 모델로 언어 판단 (토큰 절약)
+        truncated_content = content[:800] if len(content) > 800 else content
+        
+        prompt = f"""텍스트의 주요 언어를 판단하세요. 기술용어나 다른 언어 단어가 섞여있어도 전체 맥락에서 주요 언어를 판단하세요.
+
+지원 언어:
+- ko: 한국어
+- en: 영어  
+- ja: 일본어
+- zh: 중국어
+
+텍스트:
+{truncated_content}
+
+응답 형식: 언어코드만 (ko/en/ja/zh)"""
+
+        llm_manager = LLMManager()
+        
+        # 빠른 모델로 언어 감지
+        response = await llm_manager.generate(
+            prompt=prompt,
+            model="gemini-1.5-flash",
+            max_tokens=10,
+            temperature=0.0
+        )
+        
+        detected_lang = response.strip().lower()
+        
+        # 유효한 언어 코드인지 확인
+        valid_languages = ['ko', 'en', 'ja', 'zh']
+        if detected_lang in valid_languages:
+            logger.debug(f"LLM 언어 감지 결과: '{detected_lang}' (콘텐츠 길이: {len(content)}자)")
+            return detected_lang
+        else:
+            logger.warning(f"LLM이 유효하지 않은 언어 코드 반환: '{detected_lang}' - UI 언어 '{ui_language}' 사용")
+            return ui_language
+            
+    except Exception as e:
+        logger.error(f"LLM 언어 감지 실패: {e} - UI 언어 '{ui_language}' 사용")
+        return ui_language
+
+
+def detect_content_language(content: str, ui_language: str = 'ko') -> str:
+    """
+    동기 버전 - 기존 호환성을 위해 유지 (규칙 기반 폴백)
+    
+    Args:
+        content: Content to analyze
+        ui_language: UI language preference (used for short/ambiguous content)
+    
+    Returns:
+        Detected or preferred language code
+    """
+    if not content or len(content.strip()) < 30:
+        # 매우 짧은 텍스트만 UI 언어를 우선 적용
+        logger.debug(f"짧은 콘텐츠({len(content)}자) - UI 언어 '{ui_language}' 적용")
+        return ui_language
+    
+    # 간단한 규칙 기반 감지 (폴백용)
+    korean_chars = sum(1 for c in content if '\uac00' <= c <= '\ud7af')
+    total_chars = len(content)
+    
+    if korean_chars > total_chars * 0.3:  # 30% 이상이 한글이면 한국어
+        logger.debug(f"규칙 기반 한국어 감지: {korean_chars}/{total_chars} ({korean_chars/total_chars:.2f})")
+        return 'ko'
+    
+    # 영어 키워드 체크
+    english_words = ['the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had', 'with', 'this']
+    content_lower = content.lower()
+    english_matches = sum(1 for word in english_words if f' {word} ' in f' {content_lower} ')
+    
+    if english_matches >= 3:  # 영어 키워드 3개 이상
+        logger.debug(f"규칙 기반 영어 감지: {english_matches}개 키워드 매칭")
+        return 'en'
+    
+    # 기본값은 UI 언어
+    logger.debug(f"규칙 기반 감지 실패 - UI 언어 '{ui_language}' 적용")
+    return ui_language
 
 
 def get_section_titles(ui_language: str = 'ko') -> Dict[str, str]:

@@ -1,0 +1,109 @@
+# 티켓 분석용 사용자 프롬프트 템플릿
+version: "2.0"
+last_updated: "2025-06-28"
+content_type: "ticket_similar"
+
+# Jinja2 템플릿 
+template: |
+  {%- if subject %}
+  TICKET SUBJECT: {{ subject }}
+  {% endif -%}
+  
+  {%- if metadata_formatted %}
+  METADATA: {{ metadata_formatted }}
+  {% endif -%}
+  
+  ORIGINAL CONTENT TO ANALYZE:
+  {{ "=" * 50 }}
+  {{ content }}
+  {{ "=" * 50 }}
+  
+  {{ instruction_text }}
+
+# 언어별 분석 지시사항
+instructions:
+  ko: |
+    위 내용을 분석하여 현장 직원이 즉시 활용할 수 있는 실용적 요약을 작성하세요.
+
+    절대 누락하지 말 것:
+    - 모든 회사명, 담당자명, 연락처 정보
+    - 모든 기술적 용어 (MX records, DNS, Postini, Google Apps 등)
+    - 모든 날짜와 시간 (정확한 연도 포함)
+    - 모든 도메인명, URL, 이메일 주소
+    - 고객의 모든 질문과 우려사항
+    - 서비스명과 제품명 (정확한 용어 유지)
+
+    엄격히 금지:
+    - "원문에서 충분한 정보가 제공되지 않아" 같은 fallback 문구 추가
+    - "추가 정보 제공 시" 같은 면책 문구 추가
+    - "해결 과정이 아직 시작되지 않았습니다" 같은 추측 문구 추가
+    - 원문에 없는 괄호 설명 추가
+
+    용어 사용 규칙:
+    - 회사명: 원문에 나타난 정확한 이름 사용
+    - 기술 용어: 원문의 표현 그대로 보존
+    - 제품/서비스명: 원문에 언급된 정확한 이름 사용
+    - 도메인명과 URL: 원문에 나타난 그대로 보존
+    - 지원 회사명: 언급된 모든 지원 회사를 원문 그대로 포함
+
+    작성 원칙:
+    - 간결하되 중요 정보는 절대 누락하지 말 것
+    - 가능한 한 원문 용어 보존
+    - 추측이나 해석 금지
+    - 사실만 정확히 기록
+    - 원문에 명시적으로 언급되지 않은 내용 추가 금지
+    - 원문과 동일한 언어로 응답 (한국어 원문은 한국어로, 영어 원문은 영어로)
+
+    첨부파일 처리:
+    - METADATA에 관련 첨부파일이 제공된 경우, "📚 **참고 자료**" 섹션에 다음 형식으로 표시:
+      📚 **참고 자료**
+      - 📎 파일명1.pdf (문서)
+      - 📎 파일명2.jpg (이미지)
+      - 📎 파일명3.xlsx (스프레드시트)
+    - 최대 3개까지만 포함하며, 주요 문제나 해결책과 직접 관련된 파일만 선택
+    - 관련 첨부파일이 없는 경우:
+      📚 **참고 자료**
+      - 관련 첨부파일 없음
+
+  en: |
+    Analyze the content above and create a practical summary that field staff can use immediately.
+
+    NEVER OMIT:
+    - All company names, contact persons, contact details
+    - All technical terms (MX records, DNS, Postini, Google Apps, etc.)
+    - All dates and times (include exact years)  
+    - All domain names, URLs, email addresses
+    - All customer questions and concerns
+    - Service names and product names (preserve exact terminology)
+
+    STRICTLY FORBIDDEN:
+    - Adding fallback phrases like "insufficient information provided"
+    - Adding disclaimers like "more information needed"
+    - Adding speculative phrases like "resolution process not yet started"
+    - Adding parenthetical explanations not in original text
+
+    TERMINOLOGY RULES:
+    - Company names: Use EXACT names as they appear in original text
+    - Technical terms: Preserve original expressions exactly
+    - Product/service names: Use exact names mentioned in original
+    - Domain names and URLs: Preserve exactly as they appear
+    - Support company names: Include all mentioned support companies exactly as written
+
+    WRITING PRINCIPLES:
+    - Be concise but NEVER omit important information  
+    - Preserve original terminology as much as possible
+    - No speculation or interpretation
+    - Record facts accurately only
+    - Never add content not explicitly stated in original
+    - Respond in the same language as the original content
+
+    ATTACHMENT HANDLING:
+    - If relevant attachments are provided in METADATA, display them in the "📚 **Reference Materials**" section as:
+      📚 **Reference Materials**
+      - 📎 filename1.pdf (Document)
+      - 📎 filename2.jpg (Image)
+      - 📎 filename3.xlsx (Spreadsheet)
+    - Include maximum 3 files, only those directly related to the main issue or solution
+    - If no relevant attachments are provided:
+      📚 **Reference Materials**
+      - No related attachments

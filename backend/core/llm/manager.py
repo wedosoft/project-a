@@ -207,7 +207,7 @@ class LLMManager:
             tenant_metadata = TenantMetadataNormalizer.normalize(raw_tenant_metadata)
             logger.debug(f"메타데이터 정규화 완료: {len(tenant_metadata)}개 필드")
             
-            # 조회티켓(realtime_ticket)은 첨부파일 처리 제외 (속도 최적화)
+            # 조회티켓(ticket_view)은 첨부파일 처리 제외 (속도 최적화)
             metadata = {
                 "status": ticket_data.get("status"),
                 "priority": ticket_data.get("priority"),
@@ -256,7 +256,7 @@ class LLMManager:
     
     async def generate_similar_ticket_summaries(self, similar_tickets: List[Dict[str, Any]], ui_language: str = "ko") -> List[Dict[str, Any]]:
         """
-        유사 티켓들에 대한 요약 생성 (순차 처리)
+        유사 티켓들에 대한 요약 생성 (병렬 처리)
         
         Args:
             similar_tickets: 유사 티켓 목록 [{
@@ -271,13 +271,131 @@ class LLMManager:
         Returns:
             요약이 포함된 유사 티켓 목록
         """
+        import asyncio
+        import os
+        
+        # 병렬 처리 활성화 확인
+        enable_parallel = os.getenv("ENABLE_PARALLEL_PROCESSING", "true").lower() == "true"
+        max_concurrent = int(os.getenv("MAX_CONCURRENT_SUMMARIES", "3"))
+        
+        if not enable_parallel or len(similar_tickets) <= 1:
+            # 순차 처리 (기존 로직)
+            return await self._generate_similar_tickets_sequential(similar_tickets, ui_language)
+        
+        # 병렬 처리
+        logger.info(f"🚀 [병렬 처리] 유사 티켓 {len(similar_tickets)}개 병렬 요약 시작 (최대 동시 실행: {max_concurrent}개)")
+        
+        # 세마포어로 동시 실행 제한
+        semaphore = asyncio.Semaphore(max_concurrent)
+        
+        async def process_ticket_with_semaphore(ticket, index):
+            async with semaphore:
+                return await self._generate_single_ticket_summary(ticket, index, ui_language)
+        
+        # 모든 티켓에 대해 병렬 작업 생성
+        tasks = [
+            process_ticket_with_semaphore(ticket, i)
+            for i, ticket in enumerate(similar_tickets)
+        ]
+        
+        # 병렬 실행 (예외가 발생해도 다른 작업은 계속 진행)
+        import time
+        parallel_start_time = time.time()
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        parallel_time = time.time() - parallel_start_time
+        
+        # 결과 정리 (성공한 것만 반환)
+        summarized_tickets = []
+        success_count = 0
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                logger.error(f"❌ [병렬 처리] 티켓 {similar_tickets[i].get('id')} 요약 실패: {result}")
+                # 실패한 경우 폴백 처리
+                fallback_ticket = self._create_fallback_ticket(similar_tickets[i])
+                summarized_tickets.append(fallback_ticket)
+            else:
+                summarized_tickets.append(result)
+                success_count += 1
+        
+        logger.info(f"⏱️ [병렬 처리] 완료 - 총 {len(similar_tickets)}개 중 {success_count}개 성공, 소요시간: {parallel_time:.2f}초")
+        
+        return summarized_tickets
+
+    async def _generate_similar_tickets_sequential(self, similar_tickets: List[Dict[str, Any]], ui_language: str = "ko") -> List[Dict[str, Any]]:
+        """
+        유사 티켓들에 대한 요약 생성 (순차 처리 - 기존 로직)
+        """
         summarized_tickets = []
         
         for i, ticket in enumerate(similar_tickets):
             try:
-                logger.info(f"🔍 [유사 티켓 요약] {i+1}/{len(similar_tickets)} 요약 생성 중 (ID: {ticket.get('id', 'unknown')})")
+                logger.debug(f"🔍 [유사 티켓 요약] {i+1}/{len(similar_tickets)} 요약 생성 중 (ID: {ticket.get('id', 'unknown')})")
                 
                 # 티켓 데이터 구조 변환 (generate_ticket_summary 형식에 맞춤)
+                # 메타데이터 정제: 첨부파일 정보 요약용으로 가공
+                tenant_metadata = ticket.get("metadata", {}).copy()
+                
+                # 첨부파일 정보를 요약에 포함하기 위해 가공 (LLM 선별된 첨부파일 우선 사용)
+                attachment_summary = []
+                
+                # 1순위: LLM 선별된 첨부파일 (relevant_attachments)
+                relevant_attachments = ticket.get("metadata", {}).get("relevant_attachments", [])
+                if relevant_attachments:
+                    logger.info(f"🎯 [첨부파일] LLM 선별된 첨부파일 사용: {len(relevant_attachments)}개")
+                    for attachment in relevant_attachments:
+                        if isinstance(attachment, dict):
+                            name = attachment.get("name", "unknown")
+                            size = attachment.get("size", 0)
+                            content_type = attachment.get("content_type", "")
+                            
+                            # 파일 타입별 이쁜 이모지 선택
+                            emoji = self._get_file_emoji(name, content_type)
+                            
+                            if size > 0:
+                                size_mb = round(size / (1024*1024), 2)
+                                attachment_summary.append(f"{emoji} {name} ({size_mb}MB)")
+                            else:
+                                attachment_summary.append(f"{emoji} {name}")
+                
+                # 2순위: 모든 첨부파일 (all_attachments) - 폴백용
+                elif ticket.get("metadata", {}).get("all_attachments"):
+                    logger.info(f"📎 [첨부파일] 전체 첨부파일 사용 (폴백)")
+                    attachments = ticket["metadata"]["all_attachments"]
+                    for attachment in attachments:
+                        if isinstance(attachment, dict):
+                            name = attachment.get("name", "unknown")
+                            size = attachment.get("size", 0)
+                            content_type = attachment.get("content_type", "")
+                            
+                            # 파일 타입별 이쁜 이모지 선택
+                            emoji = self._get_file_emoji(name, content_type)
+                            
+                            if size > 0:
+                                size_mb = round(size / (1024*1024), 2)
+                                attachment_summary.append(f"{emoji} {name} ({size_mb}MB)")
+                            else:
+                                attachment_summary.append(f"{emoji} {name}")
+                
+                # 첨부파일 정보 저장 (한 줄씩 표시로 변경)
+                if attachment_summary:
+                    # 각 파일을 한 줄씩 표시 (이쁜 형태로)
+                    formatted_attachments = []
+                    for attachment_info in attachment_summary:
+                        formatted_attachments.append(f"- {attachment_info}")
+                    
+                    tenant_metadata['attachment_summary'] = "\n".join(formatted_attachments)
+                    tenant_metadata['attachment_count'] = len(attachment_summary)
+                    # LLM 선별된 첨부파일도 프롬프트 빌더에서 사용할 수 있도록 보존
+                    if relevant_attachments:
+                        tenant_metadata['relevant_attachments'] = relevant_attachments
+                    logger.info(f"📎 [첨부파일] 요약에 포함됨: {len(attachment_summary)}개 파일")
+                else:
+                    logger.info(f"📎 [첨부파일] 요약에 포함할 첨부파일 없음")
+                
+                # 실제 첨부파일 객체는 제거 (URL 생성 방지)
+                tenant_metadata.pop('attachments', None)
+                tenant_metadata.pop('all_attachments', None)
+                
                 ticket_data_for_summary = {
                     "id": ticket.get("id"),
                     "subject": ticket.get("title", ""),
@@ -286,7 +404,7 @@ class LLMManager:
                     "status": ticket.get("metadata", {}).get("status"),
                     "priority": ticket.get("metadata", {}).get("priority"),
                     "created_at": ticket.get("metadata", {}).get("created_at"),
-                    "tenant_metadata": ticket.get("metadata", {})
+                    "tenant_metadata": tenant_metadata  # 정제된 메타데이터 사용
                 }
                 
                 # YAML 템플릿 기반 유사 티켓 요약 생성
@@ -329,7 +447,7 @@ class LLMManager:
                     )
                     
                     ticket_time = time.time() - ticket_start_time
-                    logger.info(f"⏱️ [유사 티켓 {i+1}] 요약 소요시간: {ticket_time:.2f}초")
+                    logger.debug(f"⏱️ [유사 티켓 {i+1}] 요약 소요시간: {ticket_time:.2f}초")
                     
                     # 요약 결과 검증
                     if summary_result and summary_result.strip():
@@ -339,8 +457,8 @@ class LLMManager:
                         ticket_title = ticket.get("title", "제목 없음")
                         summary_text = f"## 🔍 {ticket_title}\n\n**문제 상황**: 유사 티켓 요약 생성 실패\n\n**🎯 유사도**: {ticket.get('score', 0.0):.3f}"
                     
-                    logger.info(f"✅ [유사 티켓 요약] 티켓 {ticket.get('id')} YAML 템플릿 기반 요약 완료 ({len(summary_text)}자)")
-                    logger.info(f"\n📄 [유사 티켓 {ticket.get('id')}] \n{summary_text}")
+                    logger.debug(f"✅ [유사 티켓 요약] 티켓 {ticket.get('id')} YAML 템플릿 기반 요약 완료 ({len(summary_text)}자)")
+                    # 성능 최적화를 위해 상세 요약 내용 로깅 제거
                     
                 except Exception as e:
                     logger.error(f"❌ [유사 티켓 요약] 티켓 {ticket.get('id')} YAML 템플릿 요약 실패: {e}")
@@ -353,7 +471,7 @@ class LLMManager:
                     summary_parts.append(f"**유사도**: {ticket.get('score', 0.0):.3f}")
                     summary_text = "\n\n".join(summary_parts)
                     logger.warning(f"⚠️ [유사 티켓 요약] 티켓 {ticket.get('id')} 폴백 요약 사용")
-                    logger.info(f"\n📄 [유사 티켓 {ticket.get('id')} - 폴백] \n{summary_text}")
+                    # 성능 최적화를 위해 폴백 요약 내용 로깅 제거
                 
                 # 결과 구성
                 summarized_ticket = {
@@ -380,6 +498,124 @@ class LLMManager:
         
         logger.info(f"🎯 [유사 티켓 요약] 완료: {len(summarized_tickets)}건 처리")
         return summarized_tickets
+
+    async def _generate_single_ticket_summary(self, ticket: Dict[str, Any], index: int, ui_language: str = "ko") -> Dict[str, Any]:
+        """
+        개별 티켓에 대한 요약 생성 (병렬 처리용)
+        
+        Args:
+            ticket: 티켓 정보
+            index: 티켓 인덱스
+            ui_language: UI 언어
+            
+        Returns:
+            요약이 포함된 티켓 정보
+        """
+        import time
+        
+        try:
+            ticket_start_time = time.time()
+            logger.info(f"🔍 [병렬 요약 {index+1}] 티켓 {ticket.get('id', 'unknown')} 요약 시작")
+            
+            # 티켓 데이터 구조 변환
+            # 메타데이터 정제: 첨부파일 정보 제거 (잘못된 URL 생성 방지)
+            tenant_metadata = ticket.get("metadata", {}).copy()
+            tenant_metadata.pop('attachments', None)
+            tenant_metadata.pop('all_attachments', None)
+            tenant_metadata.pop('attachment_count', None)
+            
+            ticket_data_for_summary = {
+                "id": ticket.get("id"),
+                "subject": ticket.get("title", ""),
+                "description_text": ticket.get("content", ""),
+                "description": ticket.get("content", ""),
+                "status": ticket.get("metadata", {}).get("status"),
+                "priority": ticket.get("metadata", {}).get("priority"),
+                "created_at": ticket.get("metadata", {}).get("created_at"),
+                "tenant_metadata": tenant_metadata  # 정제된 메타데이터 사용
+            }
+            
+            # doc_type 확인 - 아티클은 요약하지 않고 스킵
+            metadata = ticket.get("metadata", {})
+            doc_type = metadata.get("doc_type", "ticket")
+            
+            if doc_type == "article":
+                logger.info(f"📚 [병렬 요약 {index+1}] 아티클 ID {ticket.get('id')} - 요약 생성하지 않음")
+                return {
+                    "id": ticket.get("id"),
+                    "title": ticket.get("title", ""),
+                    "content": f"📚 **지식베이스 문서**\n\n**제목**: {ticket.get('title', '')}\n\n원본 링크에서 확인하세요.",
+                    "score": ticket.get("score", 0.0),
+                    "metadata": ticket.get("metadata", {})
+                }
+            
+            # 티켓 요약 생성 (고속 3섹션 버전)
+            from core.llm.summarizer.core.summarizer import core_summarizer
+            
+            summary_result = await core_summarizer.generate_summary(
+                content=ticket_data_for_summary.get("description_text", ""),
+                content_type="ticket_similar",  # 기존 이름 유지 (3섹션 최적화 버전)
+                subject=ticket_data_for_summary.get("subject", ""),
+                metadata=ticket_data_for_summary.get("tenant_metadata", {}),
+                ui_language=ui_language
+            )
+            
+            # 요약 결과 검증 및 포맷팅 (메타데이터 분리)
+            if summary_result and summary_result.strip():
+                summary_text = summary_result  # 유사도 정보 제거 (메타데이터로 처리)
+            else:
+                logger.warning(f"[병렬 요약 {index+1}] Empty summary result for ticket {ticket.get('id')}, using fallback")
+                ticket_title = ticket.get("title", "제목 없음")
+                summary_text = f"🔴 **문제**\n유사 티켓 요약 생성 실패\n\n⚡ **처리결과**\n요약 생성 오류\n\n📚 **참고자료**\n원본 티켓 확인 필요"
+            
+            ticket_time = time.time() - ticket_start_time
+            logger.info(f"⏱️ [병렬 요약 {index+1}] 티켓 {ticket.get('id')} 완료 - 소요시간: {ticket_time:.2f}초")
+            
+            # 메타데이터 강화 (요청자, 담당자, 상태 등)
+            enhanced_metadata = ticket.get("metadata", {}).copy()
+            enhanced_metadata.update({
+                "similarity_score": round(ticket.get("score", 0.0), 3),
+                "ticket_status": enhanced_metadata.get("status", "미확인"),
+                "priority": enhanced_metadata.get("priority", "보통"),
+                "requester": enhanced_metadata.get("requester_name") or enhanced_metadata.get("from_email", "미확인"),
+                "assignee": enhanced_metadata.get("agent_name") or enhanced_metadata.get("assigned_agent", "미지정")
+            })
+            
+            return {
+                "id": ticket.get("id"),
+                "title": ticket.get("title", ""),
+                "content": summary_text,  # 순수 요약 내용만
+                "score": ticket.get("score", 0.0),
+                "metadata": enhanced_metadata  # 강화된 메타데이터
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ [병렬 요약 {index+1}] 티켓 {ticket.get('id')} 요약 실패: {e}")
+            # 예외를 다시 raise하여 gather에서 처리할 수 있도록 함
+            raise e
+
+    def _create_fallback_ticket(self, ticket: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        요약 생성에 실패한 티켓에 대한 폴백 결과 생성
+        
+        Args:
+            ticket: 원본 티켓 정보
+            
+        Returns:
+            폴백 티켓 정보
+        """
+        ticket_title = ticket.get("title", "제목 없음")
+        ticket_content = ticket.get("content", "")
+        
+        fallback_content = f"## 🔍 {ticket_title}\n\n**유사 문제**: {ticket_content[:300] if ticket_content else '내용 없음'}...\n\n**🎯 유사도**: {ticket.get('score', 0.0):.3f}"
+        
+        return {
+            "id": ticket.get("id"),
+            "title": ticket.get("title", ""),
+            "content": fallback_content,
+            "score": ticket.get("score", 0.0),
+            "metadata": ticket.get("metadata", {})
+        }
     
     # KB 문서 요약 함수 제거 - 아티클은 메타데이터만 사용하기로 결정
 
@@ -846,6 +1082,56 @@ class LLMManager:
         except Exception as e:
             logger.error(f"Use case '{use_case}' 스트리밍 생성 오류: {e}")
             yield f"Error: {str(e)}"
+    
+    def _get_file_emoji(self, filename: str, content_type: str = "") -> str:
+        """파일 타입별 이쁜 이모지 반환"""
+        filename_lower = filename.lower()
+        content_type_lower = content_type.lower()
+        
+        # 이미지 파일
+        if any(ext in filename_lower for ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp']) or 'image/' in content_type_lower:
+            if '.gif' in filename_lower or 'gif' in content_type_lower:
+                return '🎞️'  # GIF
+            return '🖼️'  # 일반 이미지
+        
+        # 문서 파일
+        if '.pdf' in filename_lower or 'pdf' in content_type_lower:
+            return '📕'  # PDF
+        if any(ext in filename_lower for ext in ['.doc', '.docx']) or 'msword' in content_type_lower:
+            return '📝'  # Word 문서
+        if any(ext in filename_lower for ext in ['.xls', '.xlsx']) or 'spreadsheet' in content_type_lower:
+            return '📊'  # Excel
+        if any(ext in filename_lower for ext in ['.ppt', '.pptx']) or 'presentation' in content_type_lower:
+            return '📺'  # PowerPoint
+        
+        # 코드/설정 파일
+        if any(ext in filename_lower for ext in ['.json', '.xml', '.yaml', '.yml', '.config']) or 'json' in content_type_lower or 'xml' in content_type_lower:
+            return '🗄️'  # 구조화된 데이터
+        if any(ext in filename_lower for ext in ['.sql', '.db']):
+            return '🗃️'  # 데이터베이스
+        
+        # 로그/텍스트 파일
+        if any(ext in filename_lower for ext in ['.log', '.txt']) or 'text/plain' in content_type_lower:
+            if '.log' in filename_lower or 'log' in filename_lower:
+                return '📋'  # 로그 파일
+            return '📄'  # 일반 텍스트
+        
+        # 압축 파일
+        if any(ext in filename_lower for ext in ['.zip', '.rar', '.7z', '.tar', '.gz']) or 'compressed' in content_type_lower or 'zip' in content_type_lower:
+            return '🗜️'  # 압축 파일
+        
+        # 미디어 파일
+        if any(ext in filename_lower for ext in ['.mp3', '.wav', '.mp4', '.avi']) or 'audio/' in content_type_lower or 'video/' in content_type_lower:
+            if 'audio/' in content_type_lower or any(ext in filename_lower for ext in ['.mp3', '.wav']):
+                return '🎵'  # 오디오
+            return '🎬'  # 비디오
+        
+        # 실행 파일
+        if any(ext in filename_lower for ext in ['.exe', '.app', '.dmg']):
+            return '⚙️'  # 실행 파일
+        
+        # 기본값
+        return '📎'  # 일반 첨부파일
 
 # 전역 싱글톤 인스턴스 (편의성 제공)
 _global_llm_manager = None

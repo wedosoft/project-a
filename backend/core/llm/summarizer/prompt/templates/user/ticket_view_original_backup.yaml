@@ -1,0 +1,151 @@
+# 실시간 티켓 요약 전용 사용자 프롬프트 템플릿 (Premium Quality)
+version: "1.0"
+last_updated: "2025-06-28"
+content_type: "ticket_view"
+quality_level: "premium"  # 유사티켓 대비 최고 품질
+purpose: "실시간 티켓 요약 (상담원이 티켓 열 때 즉시 제공)"
+
+# Jinja2 템플릿 
+template: |
+  {%- if subject %}
+  REAL-TIME TICKET ANALYSIS REQUEST (PREMIUM QUALITY)
+  TICKET SUBJECT: {{ subject }}
+  {% endif -%}
+  
+  {%- if metadata_formatted %}
+  METADATA: {{ metadata_formatted }}
+  {% endif -%}
+  
+  ORIGINAL CONTENT FOR PREMIUM REAL-TIME ANALYSIS:
+  {{ "=" * 60 }}
+  {{ content }}
+  {{ "=" * 60 }}
+  
+  {{ instruction_text }}
+
+# 언어별 분석 지시사항 (실시간 요약 전용 - 최고 품질)
+instructions:
+  ko: |
+    Analyze the content above and create a PREMIUM-QUALITY real-time summary that enables agents to achieve perfect understanding instantly when opening tickets.
+    This summary must be more detailed, accurate, and immediately actionable than similar ticket summaries.
+    
+    **CRITICAL: Respond in the same language as the original content (Korean content → Korean response, English content → English response)**
+
+    🚀 Real-time Summary PREMIUM Requirements (Must exceed similar tickets):
+    - Company names and contact person names ONLY (protect privacy - exclude detailed addresses, phone numbers, emails)
+    - All technical terms and error messages (with exact quotation marks)
+    - All dates, times, deadlines (precise years and timestamps)
+    - All domain names, URLs (when relevant to technical issues)
+    - All customer questions, concerns, and requests
+    - Service and product names (including exact version information)
+    - All attempted solutions and their specific outcomes
+    - Business impact levels and urgency indicators
+    - Conversation flow and problem evolution process
+
+    ⚡ Real-time Analysis Specialization:
+    - Structure for 5-second core comprehension by agents
+    - Include all information needed for escalation
+    - Clearly present next action items
+    - Distinguish roles and responsibilities of all parties
+    - Include both technical and business context
+    - Exclude attachment processing (real-time speed optimization)
+    - Minimize cognitive load for agents
+
+    🎯 Real-time Summary Unique Features:
+    - Instant Escalation Prep: Information ready for immediate handoff to seniors
+    - Zero Ambiguity: Every statement must be crystal clear and unambiguous
+    - Context Completeness: Full information without needing to review original ticket
+    - Urgency Indicators: Highlight time-sensitive elements prominently
+    - Stakeholder Mapping: Clearly identify all parties and their current status
+    - Problem Evolution: Show how issue has developed over time
+    - Resolution Status: Current state of all attempted solutions
+    - Customer Expectations: What customer expects and when
+
+    🚫 Absolutely Forbidden (Real-time quality degradation prevention):
+    - Excuse phrases like "insufficient information provided"
+    - Disclaimer clauses like "more information needed"
+    - Speculative phrases like "resolution process not yet started"
+    - Adding parenthetical explanations or translations not in original
+    - Replacing specific information with generic expressions
+    - Summarizing error messages (exact quotation required)
+    - Omitting technical details to make summary shorter
+    - Using generic terms when specific product/service names are available
+    - Including detailed personal info (addresses, phone numbers, emails)
+
+    💎 Terminology Accuracy (Highest level):
+    - Company names: Exact original notation (including case, spacing)
+    - Technical terms: Industry standard terms exactly as in original (DNS, MX, API, SSL, etc.)
+    - Product/service names: Official names exactly (Google Workspace, Office 365, etc.)
+    - Domain names and URLs: Complete addresses exactly
+    - Error codes and messages: Display with exact quotation marks
+    - Configuration values and parameters: Numbers and strings exactly
+
+    📝 Real-time Writing Principles (Premium standards):
+    - Perfect balance of conciseness and completeness
+    - Harmony of technical accuracy and business context
+    - Logical organization following chronological order
+    - Provide immediately actionable information
+    - Perfect preservation of original language and tone
+    - Optimization for instant agent comprehension
+    
+    **IMPORTANT: Output must be in Korean language only, despite English instructions**
+
+  en: |
+    Analyze the content above and create a PREMIUM-QUALITY real-time summary that enables agents to achieve perfect understanding instantly when opening tickets.
+    This summary must be more detailed, accurate, and immediately actionable than similar ticket summaries.
+
+    🚀 Real-time Summary PREMIUM Requirements (Must exceed similar tickets):
+    - All company names, contact persons, contact details (100% accuracy)
+    - All technical terms and error messages (with exact quotation marks)
+    - All dates, times, deadlines (precise years and timestamps)
+    - All domain names, URLs, email addresses (complete addresses)
+    - All customer questions, concerns, and requests
+    - Service and product names (including exact version information)
+    - All attempted solutions and their specific outcomes
+    - Business impact levels and urgency indicators
+    - Conversation flow and problem evolution process
+
+    ⚡ Real-time Analysis Specialization:
+    - Structure for 5-second core comprehension by agents
+    - Include all information needed for escalation
+    - Clearly present next action items
+    - Distinguish roles and responsibilities of all parties
+    - Include both technical and business context
+    - Exclude attachment processing (real-time speed optimization)
+    - Minimize cognitive load for agents
+
+    🎯 Real-time Summary Unique Features:
+    - Instant Escalation Prep: Information ready for immediate handoff to seniors
+    - Zero Ambiguity: Every statement must be crystal clear and unambiguous
+    - Context Completeness: Full information without needing to review original ticket
+    - Urgency Indicators: Highlight time-sensitive elements prominently
+    - Stakeholder Mapping: Clearly identify all parties and their current status
+    - Problem Evolution: Show how issue has developed over time
+    - Resolution Status: Current state of all attempted solutions
+    - Customer Expectations: What customer expects and when
+
+    🚫 Absolutely Forbidden (Real-time quality degradation prevention):
+    - Excuse phrases like "insufficient information provided"
+    - Disclaimer clauses like "more information needed"
+    - Speculative phrases like "resolution process not yet started"
+    - Adding parenthetical explanations or translations not in original
+    - Replacing specific information with generic expressions
+    - Summarizing error messages (exact quotation required)
+    - Omitting technical details to make summary shorter
+    - Using generic terms when specific product/service names are available
+
+    💎 Terminology Accuracy (Highest level):
+    - Company names: Exact original notation (including case, spacing)
+    - Technical terms: Industry standard terms exactly as in original (DNS, MX, API, SSL, etc.)
+    - Product/service names: Official names exactly (Google Workspace, Office 365, etc.)
+    - Domain names and URLs: Complete addresses exactly
+    - Error codes and messages: Display with exact quotation marks
+    - Configuration values and parameters: Numbers and strings exactly
+
+    📝 Real-time Writing Principles (Premium standards):
+    - Perfect balance of conciseness and completeness
+    - Harmony of technical accuracy and business context
+    - Logical organization following chronological order
+    - Provide immediately actionable information
+    - Perfect preservation of original language and tone
+    - Optimization for instant agent comprehension

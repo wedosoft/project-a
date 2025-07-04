@@ -30,15 +30,18 @@ class CoreSummarizer:
         self.manager = None  # 지연 초기화로 순환 import 방지
         self.use_llm_attachment_selector = use_llm_attachment_selector
         
-        # LLM 기반 첨부파일 선별기 (기본 활성화)
+        # LLM 기반 첨부파일 선별기 (다국어/복잡 시나리오 지원을 위해 기본 활성화)
         if use_llm_attachment_selector:
             try:
                 from ..attachment.llm_selector import LLMAttachmentSelector
                 self.llm_attachment_selector = LLMAttachmentSelector()
-                logger.info("LLM 기반 첨부파일 선별기 활성화됨")
+                logger.info("LLM 기반 첨부파일 선별기 활성화됨 (다국어 및 복잡 시나리오 지원)")
             except Exception as e:
-                logger.warning(f"LLM 첨부파일 선별기 로드 실패: {e}, rule-based 사용")
+                logger.warning(f"LLM 첨부파일 선별기 로드 실패: {e}, rule-based 폴백 사용")
                 self.llm_attachment_selector = None
+        else:
+            self.llm_attachment_selector = None
+            logger.info("규칙 기반 첨부파일 선별기 사용 (단순 시나리오용)")
     
     def _get_manager(self):
         """지연 초기화로 순환 import 방지"""
@@ -107,8 +110,16 @@ class CoreSummarizer:
                 metadata.pop('attachments', None)
                 metadata.pop('all_attachments', None)
             
-            # 3. Detect content language
-            content_language = detect_content_language(content)
+            # 3. Detect content language with LLM (정확성 향상)
+            try:
+                from ..utils.language import detect_content_language_llm
+                content_language = await detect_content_language_llm(content, ui_language)
+                logger.debug(f"LLM 언어 감지 사용: {content_language}")
+            except Exception as e:
+                # LLM 언어 감지 실패 시 폴백
+                from ..utils.language import detect_content_language
+                content_language = detect_content_language(content, ui_language)
+                logger.warning(f"LLM 언어 감지 실패, 규칙 기반 폴백: {content_language} - {e}")
             
             # 4. Build prompts using new builder
             system_prompt = self.prompt_builder.build_system_prompt(
@@ -136,9 +147,9 @@ class CoreSummarizer:
                 korean_sections = "🔍 문제 현황" in system_prompt or "💡 원인 분석" in system_prompt
                 english_sections = "🔍 Problem Overview" in system_prompt or "💡 Root Cause" in system_prompt
                 if korean_sections or english_sections:
-                    logger.info("✅ realtime_ticket 템플릿 구조 확인됨")
+                    logger.info("✅ ticket_view 템플릿 구조 확인됨")
                 else:
-                    logger.warning("⚠️ realtime_ticket 템플릿 구조가 누락됨!")
+                    logger.warning("⚠️ ticket_view 템플릿 구조가 누락됨!")
             
             # 5. Generate summary using LLM
             # 메시지 검증
@@ -179,25 +190,35 @@ class CoreSummarizer:
                 english_structure = any(section in summary for section in ["🔍 Problem Overview", "💡 Root Cause", "⚡ Resolution Progress", "🎯 Key Insights"])
                 has_structure = korean_structure or english_structure
                 if has_structure:
-                    logger.info("✅ [조회 티켓] realtime_ticket 구조화된 요약 생성 성공")
+                    logger.info("✅ [조회 티켓] ticket_view 구조화된 요약 생성 성공")
+                    logger.info(f"\n📄 [조회 티켓 요약본] \n{summary}")
                 else:
                     logger.warning("⚠️ [조회 티켓] 구조화되지 않은 요약 - 재생성 고려 필요")
-                    logger.debug(f"생성된 요약 미리보기: {summary[:500]}...")
+                    logger.info(f"\n📄 [조회 티켓 요약본] \n{summary}")
             
-            # 6. Validate quality
-            validation_result = self.quality_validator.validate_summary_quality(
-                summary=summary,
-                original_content=content,
-                content_language=content_language
-            )
-            
-            if validation_result['quality_score'] < 0.7:
-                logger.warning(f"Low quality summary detected (score: {validation_result['quality_score']:.2f}), attempting regeneration")
-                summary = await self._regenerate_with_quality_focus(
-                    content, content_type, subject, metadata, content_language, ui_language
+            # 6. 품질 검증 (유사 티켓은 속도 우선으로 생략)
+            if content_type == "ticket_view":
+                # 조회 티켓만 품질 검증 수행
+                validation_result = self.quality_validator.validate_summary_quality(
+                    summary=summary,
+                    original_content=content,
+                    content_language=content_language
                 )
+                
+                if validation_result['quality_score'] < 0.7:
+                    logger.warning(f"Low quality summary detected (score: {validation_result['quality_score']:.2f}), attempting regeneration")
+                    summary = await self._regenerate_with_quality_focus(
+                        content, content_type, subject, metadata, content_language, ui_language
+                    )
+                
+                logger.info(f"Summary generation completed - Quality score: {validation_result['quality_score']:.2f}")
+            else:
+                # 유사 티켓은 품질 검증 생략 (속도 우선)
+                logger.debug(f"Summary generation completed (no validation for {content_type})")
+                # 유사 티켓 요약본 로그 출력
+                if content_type == "ticket_similar":
+                    logger.info(f"\n📊 [유사 티켓 요약본] \n{summary}")
             
-            logger.info(f"Summary generation completed - Quality score: {validation_result['quality_score']:.2f}")
             return summary
             
         except Exception as e:

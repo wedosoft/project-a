@@ -336,29 +336,13 @@ def embed_documents(docs: List[str]) -> List[List[float]]:
     return all_embeddings
 
 
-# =============================================================================
-# GPU 최적화 임베딩 통합 인터페이스 (Step 2: GPU 임베딩 최적화)
-# =============================================================================
-
-def embed_documents_optimized(
-    docs: List[str], 
-    mode: str = "hybrid", 
-    use_cache: bool = True,
-    **kwargs
-) -> List[List[float]]:
+def embed_documents_with_model(docs: List[str], model_name: str) -> List[List[float]]:
     """
-    최적화된 문서 임베딩 생성 (새로운 메인 인터페이스)
-    
-    기존 embed_documents() 함수를 90% 재활용하면서 GPU 최적화 추가:
-    - "openai": 기존 OpenAI API 방식 (embed_documents 재활용)
-    - "gpu": GPU 기반 sentence-transformers 사용
-    - "hybrid": 상황에 따라 자동 선택
+    특정 모델을 사용하여 문서 임베딩 생성
     
     Args:
         docs: 문서 텍스트 리스트
-        mode: 임베딩 모드 ("openai", "gpu", "hybrid")
-        use_cache: GPU 모드에서 캐싱 사용 여부
-        **kwargs: GPU 모드 전용 추가 인자들
+        model_name: 사용할 임베딩 모델명 (예: "text-embedding-3-large")
         
     Returns:
         임베딩 벡터 리스트
@@ -366,57 +350,154 @@ def embed_documents_optimized(
     if not docs:
         return []
     
-    if mode == "openai":
-        # 기존 함수 재사용 (90% 코드 재활용)
+    # 모델별 토큰 제한 설정
+    if model_name == "text-embedding-3-large":
+        max_tokens = 8191  # text-embedding-3-large의 실제 제한
+    elif model_name == "text-embedding-3-small":
+        max_tokens = 8191  # text-embedding-3-small의 제한
+    else:
+        max_tokens = 8000  # 안전한 기본값
+    
+    # 입력 데이터 검증 및 정리
+    valid_docs = []
+    for i, doc in enumerate(docs):
+        if doc is None:
+            logger.warning(f"문서 {i}: None 값이 전달됨 - 건너뜀")
+            continue
+            
+        if not isinstance(doc, str):
+            logger.warning(f"문서 {i}: 문자열이 아님 ({type(doc)}) - 문자열로 변환 시도")
+            try:
+                doc = str(doc)
+            except Exception as e:
+                logger.error(f"문서 {i}: 문자열 변환 실패 - 건너뜀: {e}")
+                continue
+        
+        if not doc.strip():
+            logger.warning(f"문서 {i}: 빈 문자열 - 건너뜀")
+            continue
+            
+        valid_docs.append(doc)
+    
+    if not valid_docs:
+        logger.warning("유효한 문서가 없음 - 빈 리스트 반환")
+        return []
+    
+    logger.info(f"유효한 문서 수: {len(valid_docs)}/{len(docs)}")
+    
+    # 각 문서의 토큰 수를 확인하고 필요시 자르기
+    processed_docs = []
+    for i, doc in enumerate(valid_docs):
+        token_count = count_tokens(doc)
+        logger.debug(f"문서 {i} 토큰 수: {token_count}")
+        
+        if token_count > max_tokens:
+            # 토큰 수가 제한을 초과하는 경우 잘라서 처리
+            logger.warning(f"문서 {i}가 토큰 제한을 초과합니다 ({token_count} > {max_tokens}). 텍스트를 잘라서 처리합니다.")
+            if tokenizer is None:
+                # tokenizer가 없는 경우 문자 기반으로 자르기
+                char_limit = max_tokens * 4
+                truncated_text = doc[:char_limit]
+            else:
+                tokens = tokenizer.encode(doc)
+                truncated_tokens = tokens[:max_tokens]
+                truncated_text = tokenizer.decode(truncated_tokens)
+            processed_docs.append(truncated_text)
+        else:
+            processed_docs.append(doc)
+    
+    # 배치 처리 (한 번에 하나씩 처리하여 토큰 제한 확실히 지키기)
+    all_embeddings = []
+    
+    for i, text in enumerate(processed_docs):
+        logger.info(f"문서 {i+1}/{len(processed_docs)} 처리 중...")
+        
+        try:
+            # 최종 안전장치: 임베딩 생성 전 토큰 수 재확인
+            final_token_count = count_tokens(text)
+            if final_token_count > max_tokens:
+                logger.error(f"최종 검사에서 토큰 초과 감지: {final_token_count} 토큰, 추가 절단 실행")
+                if tokenizer is None:
+                    char_limit = max_tokens * 4
+                    text = text[:char_limit]
+                else:
+                    tokens = tokenizer.encode(text)
+                    truncated_tokens = tokens[:max_tokens]
+                    text = tokenizer.decode(truncated_tokens)
+            
+            response = client.embeddings.create(
+                model=model_name,  # 지정된 모델 사용
+                input=text
+            )
+            embedding = response.data[0].embedding
+            all_embeddings.append(embedding)
+            
+        except Exception as e:
+            logger.error(f"임베딩 생성 중 오류 발생 (모델: {model_name}, 문서 {i}): {e}")
+            raise
+        
+    return all_embeddings
+
+
+# =============================================================================
+# GPU 최적화 임베딩 통합 인터페이스 (Step 2: GPU 임베딩 최적화)
+# =============================================================================
+
+def embed_documents_optimized(
+    docs: List[str], 
+    mode: str = "multilingual"
+) -> List[List[float]]:
+    """
+    🌍 다국어 최적화 임베딩 생성
+    
+    Args:
+        docs: 문서 텍스트 리스트
+        mode: 임베딩 모드 ("multilingual", "openai")
+        
+    Returns:
+        임베딩 벡터 리스트
+    """
+    if not docs:
+        return []
+    
+    if mode == "multilingual":
+        # 🌍 다국어 최적화 시스템 (text-embedding-3-large, 3072차원)
+        try:
+            import asyncio
+            from .multilingual import embed_documents_multilingual, EmbeddingQuality
+            
+            logger.info(f"🌍 다국어 최적화 임베딩 생성: {len(docs)}개 문서")
+            
+            # 비동기 함수를 동기 환경에서 실행
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(
+                            asyncio.run,
+                            embed_documents_multilingual(docs, EmbeddingQuality.ULTRA)
+                        )
+                        return future.result()
+                else:
+                    return loop.run_until_complete(
+                        embed_documents_multilingual(docs, EmbeddingQuality.ULTRA)
+                    )
+            except RuntimeError:
+                return asyncio.run(
+                    embed_documents_multilingual(docs, EmbeddingQuality.ULTRA)
+                )
+                
+        except Exception as e:
+            logger.error(f"❌ 다국어 임베딩 실패, OpenAI 기본 모드로 폴백: {e}")
+            return embed_documents(docs)
+    
+    elif mode == "openai":
+        # 기본 OpenAI 방식 (text-embedding-3-small, 1536차원)
         return embed_documents(docs)
     
-    elif mode == "gpu":
-        try:
-            # GPU 모듈 지연 임포트 (optional dependency)
-            from .embedder_gpu import embed_documents_gpu
-            return embed_documents_gpu(docs, use_cache=use_cache, **kwargs)
-        except ImportError as e:
-            logger.warning(f"GPU 임베딩 모듈을 로드할 수 없습니다: {e}. "
-                          "OpenAI API로 폴백합니다.")
-            return embed_documents(docs)
-        except Exception as e:
-            logger.error(f"GPU 임베딩 실패: {e}. OpenAI API로 폴백합니다.")
-            return embed_documents(docs)
-    
-    elif mode == "hybrid":
-        # 하이브리드 모드: 상황에 따라 자동 선택
-        try:
-            from .embedder_gpu import get_gpu_embedder_info, embed_documents_gpu
-            gpu_info = get_gpu_embedder_info()
-            
-            # GPU 사용 가능성 및 문서 크기에 따른 선택
-            use_gpu = False
-            if gpu_info["gpu_available"]:
-                # 대용량 배치의 경우 GPU가 더 효율적
-                if len(docs) >= 50:  # 50개 이상시 GPU 우선
-                    use_gpu = True
-                # 소용량이지만 각 문서가 긴 경우도 GPU 고려
-                elif len(docs) > 0:
-                    avg_length = sum(len(doc) for doc in docs) / len(docs)
-                    if avg_length > 1000:  # 평균 1000자 이상시 GPU 고려
-                        use_gpu = True
-            
-            if use_gpu:
-                logger.info(f"하이브리드 모드: GPU 사용 ({len(docs)}개 문서)")
-                return embed_documents_gpu(docs, use_cache=use_cache, **kwargs)
-            else:
-                logger.info(f"하이브리드 모드: OpenAI API 사용 ({len(docs)}개 문서)")
-                return embed_documents(docs)
-                
-        except ImportError:
-            logger.warning("GPU 임베딩 모듈을 사용할 수 없습니다. OpenAI API를 사용합니다.")
-            return embed_documents(docs)
-        except Exception as e:
-            logger.error(f"하이브리드 모드 실패: {e}. OpenAI API로 폴백합니다.")
-            return embed_documents(docs)
-    
     else:
-        raise ValueError(f"지원되지 않는 임베딩 모드: {mode}")
+        raise ValueError(f"지원되지 않는 임베딩 모드: {mode}. 'multilingual' 또는 'openai'만 지원됩니다.")
 
 
 def get_embedder_info() -> Dict[str, Any]:

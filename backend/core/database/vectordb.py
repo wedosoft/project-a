@@ -39,7 +39,14 @@ load_dotenv(backend_dir / ".env")
 settings = get_settings()
 QDRANT_URL = settings.QDRANT_URL
 QDRANT_API_KEY = settings.QDRANT_API_KEY
-VECTOR_SIZE = 1536  # OpenAI/Anthropic 임베딩 차원 수, 모델에 따라 조정 필요
+# 🌍 임베딩 시스템에 따른 벡터 차원 자동 설정
+USE_MULTILINGUAL = os.getenv("USE_MULTILINGUAL_EMBEDDING", "false").lower() == "true"
+if USE_MULTILINGUAL:
+    VECTOR_SIZE = 3072  # text-embedding-3-large (다국어 최적화)
+    logger.info("🌍 벡터 차원: 3072 (다국어 최적화 모드)")
+else:
+    VECTOR_SIZE = 1536  # text-embedding-3-small (기존 시스템)
+    logger.info("🔄 벡터 차원: 1536 (기존 하이브리드 모드)")
 COLLECTION_NAME = "documents"  # 기본 컬렉션명
 
 
@@ -614,11 +621,12 @@ class QdrantAdapter(VectorDBInterface):
             else:
                 ids.append(str(uuid.uuid4()))  # 임의 ID 생성
                 
-            # 거리/점수 (1 - 유사도)
+            # 🔧 FIX: 유사도 점수 계산 수정 (COSINE 유사도는 그대로 사용)
             if "score" in result:
-                distances.append(1.0 - result["score"])
+                # Qdrant COSINE 유사도는 1에 가까울수록 유사함 (그대로 사용)
+                distances.append(result["score"])  # 기존: 1.0 - result["score"] (잘못된 계산)
             else:
-                distances.append(0.0)  # 기본 거리 0 (최대 유사도)
+                distances.append(0.0)  # 기본값
         
         # 검색 결과 반환 (원래 형식 + 호환성을 위한 추가 필드)
         return {
@@ -1627,7 +1635,8 @@ async def search_vector_db_only(
     platform: str = "freshdesk", 
     doc_types: Optional[List[str]] = None,
     limit: int = 10,
-    score_threshold: float = 0.7
+    score_threshold: float = 0.7,
+    exclude_id: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
     Vector DB에서만 검색을 수행합니다 (SQL 없음).
@@ -1639,6 +1648,7 @@ async def search_vector_db_only(
         doc_types: 문서 타입 필터 (["ticket", "article"] 등)
         limit: 최대 결과 수
         score_threshold: 최소 유사도 점수
+        exclude_id: 제외할 문서 ID (자기 자신 제외용)
         
     Returns:
         List[Dict[str, Any]]: 검색 결과
@@ -1646,7 +1656,8 @@ async def search_vector_db_only(
     try:
         from core.search.embeddings import embed_documents
         
-        logger.info(f"Vector DB 검색 시작 - 쿼리: '{query[:100]}...', 테넌트: {tenant_id}, 문서타입: {doc_types}, 제한: {limit}")
+        exclude_msg = f", 제외 ID: {exclude_id}" if exclude_id else ""
+        logger.info(f"Vector DB 검색 시작 - 쿼리: '{query[:100]}...', 테넌트: {tenant_id}, 문서타입: {doc_types}, 제한: {limit}{exclude_msg}")
         
         # 검색 쿼리 임베딩 생성
         query_embeddings = embed_documents([query])
@@ -1664,6 +1675,13 @@ async def search_vector_db_only(
             ]
         }
         
+        # 제외할 ID가 있으면 must_not 조건 추가 (자기 자신 제외)
+        if exclude_id:
+            filter_conditions["must_not"] = [
+                {"key": "original_id", "match": {"value": str(exclude_id)}}
+            ]
+            logger.debug(f"🚫 제외 ID 설정: {exclude_id} (벡터 검색에서 자동 제외)")
+        
         # 문서 타입 필터 추가
         if doc_types:
             if len(doc_types) == 1:
@@ -1677,27 +1695,31 @@ async def search_vector_db_only(
                     for doc_type in doc_types
                 ]
         
-        # Vector DB 검색 (개별 doc_type별로 순차적 수행)
+        # Vector DB 검색 최적화 (단일 호출로 처리)
         all_results = []
         
-        if not doc_types:
-            # doc_type 필터 없이 모든 문서 검색
+        if not doc_types or len(doc_types) == 1:
+            # 단일 검색으로 처리 (성능 최적화)
+            doc_type_filter = doc_types[0] if doc_types else None
             search_response = vector_db.search(
                 query_embedding=query_embedding,
                 top_k=limit,
                 tenant_id=tenant_id,
-                platform=platform
+                platform=platform,
+                doc_type=doc_type_filter
             )
             all_results = search_response.get("results", []) if isinstance(search_response, dict) else search_response
         else:
-            # 각 doc_type별로 개별 검색 수행
+            # 다중 doc_type의 경우만 분할 검색 (메모리 효율성을 위해 limit 조정)
+            results_per_type = max(1, limit // len(doc_types) + 1)  # 타입당 검색 수 최적화
+            
             for doc_type in doc_types:
                 search_response = vector_db.search(
                     query_embedding=query_embedding,
-                    top_k=limit,
+                    top_k=results_per_type,  # 타입별 제한으로 전체 성능 향상
                     tenant_id=tenant_id,
                     platform=platform,
-                    doc_type=doc_type  # 중요: doc_type 필터 추가
+                    doc_type=doc_type
                 )
                 doc_results = search_response.get("results", []) if isinstance(search_response, dict) else search_response
                 all_results.extend(doc_results)
@@ -1709,28 +1731,35 @@ async def search_vector_db_only(
         # 검색 결과 사용 (이미 all_results에 저장됨)
         search_results = all_results
         
-        # 결과 포맷팅 (새로운 필드 구조 적용)
+        # 🔧 FIX: exclude_id로 지정된 티켓을 결과에서 제외 (자기 자신 제외)
+        if exclude_id:
+            original_count = len(search_results)
+            search_results = [
+                result for result in search_results 
+                if str(result.get("original_id", "")) != str(exclude_id)
+            ]
+            filtered_count = len(search_results)
+            if original_count != filtered_count:
+                logger.debug(f"🚫 제외 ID {exclude_id} 필터링 완료: {original_count}건 → {filtered_count}건")
+        
+        # 결과 포맷팅 최적화 (불필요한 루프와 로깅 최소화)
         formatted_results = []
+        
+        # 첫 번째 결과만 디버깅 (성능 최적화)
+        if search_results and logger.isEnabledFor(logging.DEBUG):
+            first_result = search_results[0]
+            logger.debug(f"Search result sample: doc_type='{first_result.get('doc_type')}', id='{first_result.get('original_id')}'")
+        
+        # 배치 처리로 포맷팅 최적화
         for result in search_results:
-            # **중요**: payload 데이터는 result의 루트 레벨에 이미 spread되어 있음
-            # result.get("payload", {}) -> 빈 딕셔너리 반환으로 인한 빈 메타데이터 버그 수정
-            
-            # 디버깅을 위한 메타데이터 로그 (첫 번째 결과만)
-            if len(formatted_results) == 0:
-                # id, score를 제외한 나머지 필드들이 payload 데이터
-                metadata_keys = [k for k in result.keys() if k not in ['id', 'score']]
-                logger.debug(f"첫 번째 검색 결과 메타데이터: {metadata_keys}")
-                # 간단한 디버그 정보만 로깅
-                logger.debug(f"Search result: doc_type='{result.get('doc_type')}', id='{result.get('original_id')}'")
-            
+            # 필수 필드만 추출하여 메모리 효율성 향상
             formatted_result = {
                 "id": result.get("id", ""),
-                "content": result.get("content", ""),  # payload는 이미 result 루트에 spread됨
+                "content": result.get("content", ""),
                 "score": result.get("score", 0.0),
-                "metadata": result,  # 전체 result를 metadata로 제공 (id, score 포함)
+                "metadata": result,  # 전체 result를 metadata로 제공
                 "doc_type": result.get("doc_type", ""),
                 "original_id": result.get("original_id", ""),
-                # 검색 최적화된 필드들을 루트 레벨에서 접근 가능
                 "subject": result.get("subject", ""),
                 "title": result.get("title", ""),
                 "status": result.get("status"),
@@ -1738,38 +1767,22 @@ async def search_vector_db_only(
                 "has_attachments": result.get("has_attachments", False),
                 "created_at": result.get("created_at", ""),
                 "updated_at": result.get("updated_at", ""),
-                "extended_metadata": result.get("extended_metadata", {})  # 확장 메타데이터
+                "extended_metadata": result.get("extended_metadata", {})
             }
             formatted_results.append(formatted_result)
         
-        # 검색 결과 상세 로그
-        result_summary = []
-        for i, result in enumerate(formatted_results[:3]):  # 상위 3개만 로그
-            doc_type = result.get("doc_type", "unknown")
-            metadata = result.get("metadata", {})
-            
-            # 제목 추출 (티켓은 subject, 문서는 title)
-            title = metadata.get("subject") or metadata.get("title", "")
-            if not title:
-                # 메타데이터에서 직접 찾기
-                title = result.get("subject") or result.get("title", "")
-            if not title:
-                title = f"ID_{result.get('original_id', 'unknown')}"
-            
-            score = result.get("score", 0.0)
-            original_id = result.get("original_id", "unknown")
-            
-            # 간단한 상위 결과 요약 (제목 25자 제한)
-            short_title = title[:25] + '...' if len(title) > 25 else title
-            result_summary.append(f"{short_title} (ID: {original_id}, {score:.3f})")
-        
+        # 검색 결과 로깅 최적화 (성능 향상을 위해 간소화)
         search_type = "혼합" if not doc_types else "/".join(doc_types)
         logger.info(f"Vector DB 검색 완료 [{search_type}]: {len(formatted_results)}건 반환")
         
-        # 상위 3건만 간단하게 로깅
-        if result_summary:
-            top_3 = result_summary[:3]  # 상위 3건만
-            logger.info(f"상위 결과: {' | '.join(top_3)}")
+        # 성능이 중요한 경우 상세 로깅 생략, DEBUG 레벨에서만 실행
+        if logger.isEnabledFor(logging.DEBUG) and formatted_results:
+            # 상위 1개 결과만 간단히 로깅 (성능 최적화)
+            first_result = formatted_results[0]
+            title = (first_result.get("subject") or first_result.get("title", ""))[:25]
+            if len(title) > 25:
+                title += "..."
+            logger.debug(f"상위 결과: {title} (ID: {first_result.get('original_id')}, {first_result.get('score', 0):.3f})")
         
         return formatted_results
         

@@ -123,9 +123,9 @@ FORMATTING RULES:
                 template_data = self.prompt_loader.get_system_prompt_template("ticket_view")
                 sections = self.get_section_titles(ui_language)
                 
-                # 언어별 지시사항 선택 (원문 언어에 따라 결정)
+                # 언어별 지시사항 선택 (UI 언어에 따라 결정)
                 language_instruction = template_data['language_instructions'].get(
-                    content_language, 
+                    ui_language, 
                     template_data['language_instructions']['default']
                 )
                 
@@ -145,6 +145,54 @@ FORMATTING RULES:
                     template_data['formatting_rules']['ko']
                 )
                 
+                # 언어별 서브타이틀 정의
+                if ui_language == 'ko':
+                    problem_subtitles = """- 고객사 및 담당자 정보 (실제 고객, 지원 담당자 아님)
+- 기술적 문제 또는 비즈니스 요구사항
+- 관련 제품/서비스/시스템 (원문의 정확한 명칭 사용)
+- 중요한 날짜, 데드라인, 긴급도 요소
+- 고객의 구체적인 질문이나 우려사항"""
+
+                    cause_subtitles = """- 주요 원인: 문제를 야기한 주된 기술적 또는 비즈니스 요인
+- 기여 요소: 문제로 이어지거나 증폭시킨 추가 요소들
+- 시스템 상황: 환경, 정책, 설정의 변화
+- 의존성: 상황에 영향을 준 외부 시스템, 서비스, 결정"""
+
+                    solution_subtitles = """- 현재 상태: 해결이 현재 어느 단계에 있는지
+- 완료된 조치: 날짜별 구체적 조치와 그 결과
+- 진행 중: 현재 작업 중인 내용
+- 다음 단계: 계획된 구체적 조치 (담당자 언급 시 포함)
+- 예상 일정: 완전한 해결이 예상되는 시기
+- 검증: 성공을 측정하거나 확인하는 방법"""
+
+                    insights_subtitles = """- 기술 사양: 설정, 구성, 기술적 매개변수
+- 서비스 요구사항: 제한사항, 의존성, 호환성 요구사항
+- 프로세스 인사이트: 모범 사례, 워크플로우, 절차적 지식
+- 향후 고려사항: 유사 케이스 권장사항, 예방 조치"""
+                else:
+                    problem_subtitles = """- Customer company and contact information (actual customer, NOT support agent)
+- Technical issues or business requirements  
+- Related products/services/systems (use exact names from original)
+- Important dates, deadlines, urgency factors
+- Customer's specific questions or concerns"""
+
+                    cause_subtitles = """- Primary Cause: Main technical or business factor causing the issue
+- Contributing Factors: Additional elements that led to or amplified the problem
+- System Context: Changes in environment, policies, or setup
+- Dependencies: External systems, services, or decisions that influenced the situation"""
+
+                    solution_subtitles = """- Current Status: What stage the resolution is at right now
+- Completed Actions: Date-specific actions taken and their results
+- In Progress: What is currently being worked on
+- Next Steps: Planned specific actions (with responsible party if mentioned)
+- Expected Timeline: When full resolution is anticipated
+- Verification: How success will be measured or confirmed"""
+
+                    insights_subtitles = """- Technical Specifications: Settings, configurations, technical parameters
+- Service Requirements: Limitations, dependencies, compatibility requirements
+- Process Insights: Best practices, workflows, procedural knowledge
+- Future Considerations: Recommendations for similar cases, preventive measures"""
+
                 return f"""{base_instruction}
 
 CRITICAL MISSION: {template_data['critical_mission']}
@@ -155,31 +203,16 @@ ABSOLUTE REQUIREMENTS:
 STRUCTURE YOUR SUMMARY:
 
 {sections['problem']}
-- Customer company and contact information (actual customer, NOT support agent)
-- Technical issues or business requirements  
-- Related products/services/systems (use exact names from original)
-- Important dates, deadlines, urgency factors
-- Customer's specific questions or concerns
+{problem_subtitles}
 
 {sections['cause']}
-- Primary Cause: Main technical or business factor causing the issue
-- Contributing Factors: Additional elements that led to or amplified the problem
-- System Context: Changes in environment, policies, or setup
-- Dependencies: External systems, services, or decisions that influenced the situation
+{cause_subtitles}
 
 {sections['solution']}
-- Current Status: What stage the resolution is at right now
-- Completed Actions: Date-specific actions taken and their results
-- In Progress: What is currently being worked on
-- Next Steps: Planned specific actions (with responsible party if mentioned)
-- Expected Timeline: When full resolution is anticipated
-- Verification: How success will be measured or confirmed
+{solution_subtitles}
 
 {sections['insights']}
-- Technical Specifications: Settings, configurations, technical parameters
-- Service Requirements: Limitations, dependencies, compatibility requirements
-- Process Insights: Best practices, workflows, procedural knowledge
-- Future Considerations: Recommendations for similar cases, preventive measures
+{insights_subtitles}
 
 STRICTLY FORBIDDEN:
 {forbidden}
@@ -272,11 +305,44 @@ FORMATTING RULES:
                 if formatted_metadata:
                     metadata_formatted = "; ".join(formatted_metadata)
             
-            # 지시사항 선택
+            # 지시사항 선택 (모든 요약을 UI 언어로 통일)
             instruction_text = template_data['instructions'].get(
                 ui_language, 
                 template_data['instructions']['ko']
             )
+            
+            # 첨부파일 정보 생성 (LLM 선별된 첨부파일 우선 사용)
+            attachment_summary = ""
+            if metadata:
+                # 1순위: LLM 선별된 첨부파일 (relevant_attachments)
+                relevant_attachments = metadata.get('relevant_attachments', [])
+                if relevant_attachments:
+                    attachment_list = []
+                    for attachment in relevant_attachments:
+                        if isinstance(attachment, dict):
+                            name = attachment.get("name", "unknown")
+                            size = attachment.get("size", 0)
+                            content_type = attachment.get("content_type", "")
+                            
+                            # 파일 타입별 이모지 선택
+                            emoji = self._get_file_emoji(name, content_type)
+                            
+                            if size > 0:
+                                size_mb = round(size / (1024*1024), 2)
+                                attachment_list.append(f"{emoji} {name} ({size_mb}MB)")
+                            else:
+                                attachment_list.append(f"{emoji} {name}")
+                    
+                    if attachment_list:
+                        # 각 파일을 한 줄씩 표시 (이쁜 형태로)
+                        formatted_attachments = [f"- {attachment}" for attachment in attachment_list]
+                        attachment_summary = "\n".join(formatted_attachments)
+                        logger.debug(f"LLM 선별된 첨부파일 사용: {len(attachment_list)}개")
+                
+                # 2순위: 기존 attachment_summary (폴백)
+                if not attachment_summary and metadata.get('attachment_summary'):
+                    attachment_summary = metadata['attachment_summary']
+                    logger.debug("기존 attachment_summary 사용")
             
             # Jinja2 템플릿 렌더링
             template = self.jinja_env.from_string(template_data['template'])
@@ -285,12 +351,14 @@ FORMATTING RULES:
             safe_content = content if content and content.strip() else "티켓 내용을 찾을 수 없습니다."
             safe_subject = subject if subject and subject.strip() else "제목 없음"
             safe_metadata = metadata_formatted if metadata_formatted and metadata_formatted.strip() else "메타데이터 없음"
+            safe_attachment_summary = attachment_summary if attachment_summary and attachment_summary.strip() else ""
             
             user_prompt = template.render(
                 subject=safe_subject,
                 metadata_formatted=safe_metadata,
                 content=safe_content,
-                instruction_text=instruction_text
+                instruction_text=instruction_text,
+                attachment_summary=safe_attachment_summary
             )
             
             # 생성된 프롬프트 검증
@@ -304,6 +372,29 @@ FORMATTING RULES:
             logger.error(f"Failed to build user prompt for {content_type}: {e}")
             # 폴백: 기존 방식으로 생성
             return self._fallback_user_prompt(content, content_type, subject, metadata, content_language, ui_language)
+    
+    def _get_file_emoji(self, filename: str, content_type: str = "") -> str:
+        """파일 타입별 이모지 반환"""
+        filename_lower = filename.lower()
+        
+        # 이미지 파일
+        if any(ext in filename_lower for ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg']):
+            return '🖼️'
+        # 문서 파일
+        elif any(ext in filename_lower for ext in ['.pdf', '.doc', '.docx']):
+            return '📄'
+        # 스프레드시트
+        elif any(ext in filename_lower for ext in ['.xlsx', '.xls', '.csv']):
+            return '📊'
+        # 텍스트 파일
+        elif any(ext in filename_lower for ext in ['.txt', '.log', '.md']):
+            return '📋'
+        # 압축 파일
+        elif any(ext in filename_lower for ext in ['.zip', '.rar', '.7z', '.tar']):
+            return '🗂️'
+        # 기타
+        else:
+            return '📎'
     
     def _build_kb_system_prompt(self, content_language: str, ui_language: str) -> str:
         """KB 문서용 시스템 프롬프트 (기존 로직 유지)"""

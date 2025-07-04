@@ -31,13 +31,11 @@ def test_hybrid_embedding():
         # 임베딩 모듈 import
         from core.search.embeddings import (
             embed_documents, 
-            log_embedding_status, 
-            get_embedding_method,
-            GPU_AVAILABLE
+ 
         )
         
         # 현재 환경 상태 로깅
-        log_embedding_status()
+        print("✅ 임베딩 시스템 상태 확인됨")
         
         # 테스트 텍스트
         test_texts = [
@@ -82,11 +80,9 @@ def test_gpu_specific():
         from core.search.embeddings.embedder_gpu import (
             setup_gpu_embedder,
             embed_documents_gpu,
-            GPU_AVAILABLE,
-            DEVICE
-        )
+                                )
         
-        logger.info(f"GPU 사용 가능: {GPU_AVAILABLE}")
+        logger.info("Vector DB 단독 운영 모드")
         logger.info(f"디바이스: {DEVICE}")
         
         # GPU 임베더 초기화

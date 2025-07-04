@@ -66,12 +66,12 @@ ATTACHMENT_SELECTION_CONFIG = {
     # 최대 선별 개수
     "max_selected_attachments": 3,
     
-    # 점수 임계값
+    # 점수 임계값 (성능 최적화를 위한 완화)
     "score_thresholds": {
         "direct_mention": 10,  # 직접 언급
-        "high_relevance": 8,   # 높은 관련성 (7→8로 상향)
-        "medium_relevance": 6, # 중간 관련성 (5→6으로 상향)
-        "minimum_score": 4     # 최소 점수 (3→4로 상향)
+        "high_relevance": 6,   # 높은 관련성 (8→6으로 완화)
+        "medium_relevance": 4, # 중간 관련성 (6→4로 완화)
+        "minimum_score": 2     # 최소 점수 (4→2로 완화)
     },
     
     # 파일 확장자별 기본 점수
