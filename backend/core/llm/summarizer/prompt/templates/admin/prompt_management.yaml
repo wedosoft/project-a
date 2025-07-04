@@ -1,0 +1,250 @@
+# 관리자 친화적 프롬프트 관리 설정
+version: "1.0.0"
+last_updated: "2025-07-04"
+description: "관리자가 코드 수정 없이 프롬프트를 관리할 수 있는 설정"
+
+# 프롬프트 관리 인터페이스 설정
+management_interface:
+  enable_web_admin: true          # 웹 관리 인터페이스 활성화
+  enable_api_access: true         # API 기반 관리 활성화
+  enable_hot_reload: true         # 실시간 변경 반영
+  backup_on_change: true          # 변경 시 자동 백업
+  version_control: true           # 버전 관리 활성화
+
+# 편집 가능한 프롬프트 요소들
+editable_elements:
+  constitutional_principles:
+    description: "Constitutional AI 원칙 - 도움되고, 해롭지 않고, 정직한 분석을 위한 기본 원칙"
+    edit_level: "advanced"        # basic, intermediate, advanced
+    requires_approval: true       # 승인 필요
+    
+  role_definition:
+    description: "AI 역할 정의 - 전문가 역할과 성격 특성 설정"
+    edit_level: "intermediate"
+    requires_approval: false
+    
+  response_format:
+    description: "응답 형식 - XML 구조와 섹션 정의"
+    edit_level: "basic"
+    requires_approval: false
+    
+  few_shot_examples:
+    description: "학습 예시 - AI가 참고할 우수 사례들"
+    edit_level: "intermediate"
+    requires_approval: false
+    
+  quality_thresholds:
+    description: "품질 임계값 - 최소 품질 점수 및 재시도 기준"
+    edit_level: "basic"
+    requires_approval: false
+
+# 관리자 권한 레벨
+admin_permission_levels:
+  super_admin:
+    can_edit: ["all"]
+    can_approve: true
+    can_rollback: true
+    can_export: true
+    can_import: true
+    
+  prompt_admin:
+    can_edit: ["role_definition", "response_format", "few_shot_examples", "quality_thresholds"]
+    can_approve: false
+    can_rollback: false
+    can_export: true
+    can_import: false
+    
+  content_admin:
+    can_edit: ["few_shot_examples", "quality_thresholds"]
+    can_approve: false
+    can_rollback: false
+    can_export: false
+    can_import: false
+
+# 프롬프트 템플릿 편집 가이드
+editing_guidelines:
+  constitutional_principles:
+    helpful:
+      description: "상담원에게 도움이 되는 정보를 제공하는 원칙"
+      examples:
+        - "상담원이 5초 내에 상황을 파악할 수 있도록 돕기"
+        - "즉시 실행 가능한 정보와 다음 단계 제공"
+      tips:
+        - "구체적이고 실행 가능한 도움 기준을 명시하세요"
+        - "상담원의 업무 효율성을 높이는 관점에서 작성하세요"
+    
+    harmless:
+      description: "해롭지 않은 안전한 정보 제공 원칙"
+      examples:
+        - "고객 개인정보 절대 노출 금지"
+        - "추측이나 확실하지 않은 정보 제공 금지"
+      tips:
+        - "개인정보 보호는 절대 타협하지 마세요"
+        - "확실하지 않은 정보로 인한 피해를 방지하세요"
+    
+    honest:
+      description: "정직하고 투명한 정보 제공 원칙"
+      examples:
+        - "불확실한 내용은 명확히 표시"
+        - "정보가 부족한 영역 투명하게 명시"
+      tips:
+        - "불확실성을 숨기지 말고 투명하게 표시하세요"
+        - "한계와 제약사항을 명확히 안내하세요"
+
+  role_definition:
+    primary_role:
+      description: "AI의 기본 역할 정의"
+      current_value: "Expert Freshdesk Ticket Analyst"
+      suggestions:
+        - "Senior Customer Support Specialist"
+        - "Technical Support Expert"
+        - "Customer Success Analyst"
+    
+    expertise_areas:
+      description: "전문 지식 영역"
+      current_values:
+        - "customer_service_psychology"
+        - "technical_troubleshooting"
+        - "business_process_optimization"
+      add_new_area:
+        placeholder: "새로운 전문 영역 추가"
+        examples:
+          - "data_analysis"
+          - "project_management"
+          - "quality_assurance"
+
+  response_format:
+    sections:
+      problem_overview:
+        description: "문제 현황 섹션"
+        icon: "🔍"
+        current_title: "문제 현황"
+        editable_fields:
+          - "section_title"
+          - "section_icon"
+          - "required_elements"
+      
+      root_cause:
+        description: "원인 분석 섹션"
+        icon: "💡"
+        current_title: "원인 분석"
+        editable_fields:
+          - "section_title"
+          - "section_icon"
+          - "required_elements"
+      
+      resolution_progress:
+        description: "해결 진행상황 섹션"
+        icon: "⚡"
+        current_title: "해결 진행상황"
+        editable_fields:
+          - "section_title"
+          - "section_icon"
+          - "required_elements"
+      
+      key_insights:
+        description: "중요 인사이트 섹션"
+        icon: "🎯"
+        current_title: "중요 인사이트"
+        editable_fields:
+          - "section_title"
+          - "section_icon"
+          - "required_elements"
+
+# 실시간 미리보기 설정
+preview_settings:
+  enable_live_preview: true       # 실시간 미리보기 활성화
+  test_cases:
+    - name: "기술적 문제 예시"
+      content: "API 연동 오류 발생"
+      subject: "결제 API 연동 실패"
+      metadata: {"priority": "high", "category": "technical"}
+    
+    - name: "고객 서비스 문제 예시"
+      content: "Premium 고객 환불 처리 지연"
+      subject: "환불 처리 지연 문의"
+      metadata: {"priority": "medium", "category": "billing"}
+
+# 변경 이력 관리
+change_history:
+  enable_audit_log: true          # 감사 로그 활성화
+  max_history_entries: 100        # 최대 이력 보관 수
+  backup_frequency: "daily"       # 백업 주기
+  retention_period: "90_days"     # 보관 기간
+
+# 품질 검증 자동화
+quality_automation:
+  auto_validate_changes: true     # 변경사항 자동 검증
+  test_before_apply: true         # 적용 전 테스트
+  rollback_on_failure: true       # 실패 시 자동 롤백
+  
+  validation_rules:
+    - "check_yaml_syntax"
+    - "validate_required_fields"
+    - "test_template_rendering"
+    - "verify_response_format"
+    - "check_constitutional_compliance"
+
+# 알림 설정
+notifications:
+  enable_change_notifications: true
+  notification_channels:
+    - email
+    - slack
+    - webhook
+  
+  notify_on:
+    - "prompt_changes"
+    - "quality_threshold_updates"
+    - "system_errors"
+    - "backup_completion"
+
+# 내보내기/가져오기 설정
+import_export:
+  supported_formats:
+    - "yaml"
+    - "json"
+    - "csv"
+  
+  export_options:
+    - "current_templates"
+    - "change_history"
+    - "quality_metrics"
+    - "usage_statistics"
+  
+  import_validation:
+    - "schema_validation"
+    - "content_safety_check"
+    - "compatibility_check"
+    - "backup_before_import"
+
+# 사용자 인터페이스 설정
+ui_configuration:
+  theme: "professional"
+  language: "ko"
+  timezone: "Asia/Seoul"
+  
+  dashboard_widgets:
+    - "recent_changes"
+    - "quality_metrics"
+    - "usage_statistics"
+    - "system_health"
+  
+  quick_actions:
+    - "edit_constitutional_principles"
+    - "update_response_format"
+    - "add_few_shot_example"
+    - "adjust_quality_thresholds"
+
+# 도움말 및 문서
+help_documentation:
+  enable_inline_help: true
+  help_sections:
+    - "getting_started"
+    - "constitutional_ai_guide"
+    - "response_format_guide"
+    - "quality_management"
+    - "troubleshooting"
+  
+  tutorial_mode: true
+  interactive_guides: true

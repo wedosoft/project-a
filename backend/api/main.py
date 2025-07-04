@@ -1,25 +1,49 @@
 """
-Copilot Canvas 백엔드 서비스
+Freshdesk AI Assistant 백엔드 서비스
 
-Copilot Canvas를 위한 백엔드 서비스입니다.
-RAG(Retrieval-Augmented Generation) 기술을 활용하여 Freshdesk 티켓과 지식베이스를 
-기반으로 AI 기반 응답 생성 기능을 제공합니다.
+🎯 Anthropic 프롬프트 엔지니어링 시스템을 포함한 고품질 AI 백엔드 서비스입니다.
+RAG(Retrieval-Augmented Generation) 기술과 Constitutional AI를 활용하여 
+Freshdesk 티켓과 지식베이스를 기반으로 AI 기반 응답 생성 기능을 제공합니다.
+
+주요 기능:
+- 🧠 Constitutional AI (Helpful, Harmless, Honest)
+- 📝 XML 구조화된 일관된 응답
+- 🛡️ 다차원 품질 검증 시스템
+- ⚡ 실시간 고성능 처리
+- 🎨 관리자 친화적 프롬프트 관리
 
 아키텍처 개선사항:
 - IoC (Inversion of Control) 컨테이너 패턴 적용
 - 의존성 주입 개선
 - 성능 최적화된 캐싱 전략
+- Anthropic 프롬프트 엔지니어링 통합
 """
 
+import sys
 import logging
 import os
+from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
+# 🚀 uvicorn 호환성을 위한 Python 경로 설정
+backend_dir = Path(__file__).parent.parent
+if str(backend_dir) not in sys.path:
+    sys.path.insert(0, str(backend_dir))
+    
+# 환경변수 설정
+os.environ['PYTHONPATH'] = str(backend_dir)
+
 # 환경변수 로드 (애플리케이션 시작 시 최우선 로드)
 load_dotenv()
+
+# 🧠 Anthropic 시스템 상태 확인
+anthropic_enabled = os.getenv('ENABLE_ANTHROPIC_PROMPTS', 'false').lower() == 'true'
+print(f"🧠 Anthropic 프롬프트 엔지니어링: {'✅ 활성화' if anthropic_enabled else '❌ 비활성화'}")
+print(f"📁 Backend 경로: {backend_dir}")
+print(f"🐍 Python 경로 설정 완료")
 
 # 새로운 IoC 컨테이너 사용
 from core.container import get_container

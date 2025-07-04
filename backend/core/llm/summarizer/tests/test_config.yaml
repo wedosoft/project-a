@@ -1,0 +1,255 @@
+# Anthropic 테스트 실행 설정
+version: "1.0.0"
+description: "Anthropic 프롬프트 엔지니어링 시스템 테스트 설정"
+
+# 테스트 스위트 설정
+test_suites:
+  unit_tests:
+    enabled: true
+    path: "test_*.py"
+    timeout: 300
+    parallel: false
+    exclude_patterns:
+      - "test_anthropic_prompts.py"
+      - "integration_test.py"
+  
+  anthropic_tests:
+    enabled: true
+    module: "test_anthropic_prompts"
+    timeout: 300
+    retry_count: 1
+    fail_fast: false
+  
+  integration_tests:
+    enabled: true
+    module: "integration_test"
+    timeout: 600
+    scenarios:
+      - "technical_api_error"
+      - "customer_service_billing"
+      - "multilingual_support"
+      - "security_incident"
+    performance_testing: true
+
+# 코드 커버리지 설정
+coverage:
+  enabled: true
+  min_coverage: 80
+  target_coverage: 90
+  exclude_patterns:
+    - "test_*"
+    - "__pycache__"
+    - "*.pyc"
+    - "*/tests/*"
+  include_modules:
+    - "anthropic_summarizer"
+    - "anthropic_builder"
+    - "anthropic_validator"
+    - "prompt_manager"
+    - "anthropic_config"
+  report_formats:
+    - "term"
+    - "html"
+    - "xml"
+
+# 보고서 설정
+reporting:
+  formats:
+    - "json"
+    - "html"
+    - "console"
+  output_dir: "test_reports"
+  include_performance: true
+  include_coverage: true
+  include_screenshots: false
+  timestamp_format: "%Y%m%d_%H%M%S"
+  
+  # 보고서 상세 설정
+  html_report:
+    template: "default"
+    include_source_code: false
+    include_logs: true
+    theme: "light"
+  
+  json_report:
+    pretty_print: true
+    include_raw_data: true
+  
+  console_report:
+    verbose: true
+    color_output: true
+    show_performance: true
+
+# CI/CD 통합 설정
+ci_cd:
+  fail_fast: false
+  continue_on_error: false
+  parallel_execution: false
+  max_workers: 4
+  
+  # 알림 설정
+  notifications:
+    slack:
+      enabled: false
+      webhook_url: null
+      channel: "#test-results"
+      on_failure: true
+      on_success: false
+    
+    email:
+      enabled: false
+      smtp_server: null
+      recipients: []
+      on_failure: true
+      on_success: false
+  
+  # 아티팩트 관리
+  artifacts:
+    retention_days: 30
+    upload_reports: true
+    upload_logs: true
+    compress_artifacts: true
+
+# 성능 테스트 설정
+performance:
+  benchmark_enabled: true
+  memory_profiling: false
+  response_time_threshold: 2.0
+  memory_threshold_mb: 512
+  cpu_threshold_percent: 80
+  
+  # 부하 테스트
+  load_testing:
+    enabled: false
+    concurrent_users: 10
+    test_duration: 60
+    ramp_up_time: 10
+  
+  # 성능 메트릭
+  metrics:
+    - "response_time"
+    - "memory_usage"
+    - "cpu_usage"
+    - "throughput"
+    - "error_rate"
+
+# 환경별 설정
+environments:
+  development:
+    test_data: "mock"
+    api_calls: "mocked"
+    database: "sqlite_memory"
+    log_level: "DEBUG"
+    fail_fast: false
+  
+  staging:
+    test_data: "staging_db"
+    api_calls: "real"
+    database: "postgresql_test"
+    log_level: "INFO"
+    fail_fast: false
+  
+  production:
+    test_data: "production_subset"
+    api_calls: "real"
+    database: "postgresql_readonly"
+    log_level: "WARNING"
+    fail_fast: true
+
+# 테스트 데이터 설정
+test_data:
+  mock_responses:
+    enabled: true
+    response_delay: 0.1
+    error_rate: 0.05
+  
+  fixtures:
+    ticket_scenarios: "fixtures/ticket_scenarios.json"
+    anthropic_responses: "fixtures/anthropic_responses.json"
+    quality_expectations: "fixtures/quality_expectations.json"
+  
+  generators:
+    random_tickets: true
+    multilingual_content: true
+    edge_cases: true
+
+# 보안 테스트 설정
+security:
+  enabled: true
+  check_personal_info_leakage: true
+  check_injection_attacks: true
+  check_authorization: true
+  
+  # 민감 정보 패턴
+  sensitive_patterns:
+    - "email_addresses"
+    - "phone_numbers"
+    - "credit_cards"
+    - "social_security"
+    - "api_keys"
+
+# 품질 게이트 설정
+quality_gates:
+  test_success_rate:
+    minimum: 0.8
+    target: 0.95
+  
+  code_coverage:
+    minimum: 0.8
+    target: 0.9
+  
+  performance:
+    max_response_time: 2.0
+    max_memory_usage: 512
+  
+  security:
+    no_sensitive_data_exposure: true
+    no_security_vulnerabilities: true
+
+# 로깅 설정
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file_output: true
+  console_output: true
+  
+  # 로그 파일 설정
+  files:
+    main_log: "test_execution.log"
+    error_log: "test_errors.log"
+    performance_log: "test_performance.log"
+  
+  # 로그 보관
+  rotation:
+    max_size: "10MB"
+    backup_count: 5
+    retention_days: 30
+
+# 고급 설정
+advanced:
+  # 재시도 설정
+  retry:
+    max_attempts: 3
+    backoff_factor: 1.5
+    retry_on_errors:
+      - "ConnectionError"
+      - "TimeoutError"
+      - "APIRateLimit"
+  
+  # 캐싱 설정
+  caching:
+    enabled: true
+    ttl: 3600
+    max_size: 1000
+  
+  # 병렬 처리
+  parallelization:
+    enabled: false
+    max_workers: 4
+    chunk_size: 10
+  
+  # 디버깅
+  debugging:
+    breakpoint_on_failure: false
+    detailed_tracebacks: true
+    preserve_temp_files: false

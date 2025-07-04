@@ -37,10 +37,10 @@ class ConfigManager:
                     "max_tokens": int(os.getenv("SUMMARIZATION_MAX_TOKENS", "1000")),
                     "temperature": float(os.getenv("SUMMARIZATION_TEMPERATURE", "0.1"))
                 },
-                # 템플릿 이름과 일치하는 명명 규칙
+                # 🧠 Anthropic 프롬프트 엔지니어링 통합 - 환경변수 우선순위 적용
                 "ticket_view": {
-                    "provider": os.getenv("TICKET_VIEW_MODEL_PROVIDER", "gemini"),
-                    "model": os.getenv("TICKET_VIEW_MODEL_NAME", "gemini-1.5-flash"),
+                    "provider": os.getenv("ANTHROPIC_TICKET_VIEW_MODEL_PROVIDER") or os.getenv("TICKET_VIEW_MODEL_PROVIDER", "gemini"),
+                    "model": os.getenv("ANTHROPIC_TICKET_VIEW_MODEL_NAME") or os.getenv("TICKET_VIEW_MODEL_NAME", "gemini-1.5-flash"),
                     "max_tokens": int(os.getenv("TICKET_VIEW_MAX_TOKENS", "1200")),
                     "temperature": float(os.getenv("TICKET_VIEW_TEMPERATURE", "0.05"))
                 },
@@ -49,6 +49,19 @@ class ConfigManager:
                     "model": os.getenv("TICKET_SIMILAR_MODEL_NAME", "gemini-1.5-flash"),
                     "max_tokens": int(os.getenv("TICKET_SIMILAR_MAX_TOKENS", "800")),
                     "temperature": float(os.getenv("TICKET_SIMILAR_TEMPERATURE", "0.1"))
+                },
+                # 🧠 Anthropic 전용 사용 사례
+                "anthropic_ticket_view": {
+                    "provider": os.getenv("ANTHROPIC_TICKET_VIEW_MODEL_PROVIDER", "anthropic"),
+                    "model": os.getenv("ANTHROPIC_TICKET_VIEW_MODEL_NAME", "claude-3-5-haiku-20241022"),  # Sonnet → Haiku (속도 최적화)
+                    "max_tokens": int(os.getenv("ANTHROPIC_TICKET_VIEW_MAX_TOKENS", "1200")),  # 1500 → 1200 (약간 줄임)
+                    "temperature": float(os.getenv("ANTHROPIC_TICKET_VIEW_TEMPERATURE", "0.2"))  # 0.3 → 0.2 (더 일관된 출력)
+                },
+                "realtime_summary": {
+                    "provider": os.getenv("ANTHROPIC_REALTIME_SUMMARY_MODEL_PROVIDER", "anthropic"),
+                    "model": os.getenv("ANTHROPIC_REALTIME_SUMMARY_MODEL_NAME", "claude-3-5-haiku-20241022"),
+                    "max_tokens": int(os.getenv("ANTHROPIC_REALTIME_SUMMARY_MAX_TOKENS", "800")),
+                    "temperature": float(os.getenv("ANTHROPIC_REALTIME_SUMMARY_TEMPERATURE", "0.5"))
                 }
             },
             "conversation_filtering": {

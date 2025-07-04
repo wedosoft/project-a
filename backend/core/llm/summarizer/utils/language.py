@@ -307,7 +307,7 @@ text_processor = TextProcessor()
 
 async def detect_content_language_llm(content: str, ui_language: str = 'ko') -> str:
     """
-    LLM 기반 언어 감지 - 정확성과 다국어 지원 향상
+    LLM 기반 언어 감지 - 정확성과 다국어 지원 향상 (성능 최적화: 규칙 기반 우선)
     
     Args:
         content: Content to analyze
@@ -316,10 +316,32 @@ async def detect_content_language_llm(content: str, ui_language: str = 'ko') -> 
     Returns:
         Detected or preferred language code
     """
+    # 매우 짧은 텍스트는 UI 언어 사용
     if not content or len(content.strip()) < 20:
-        # 매우 짧은 텍스트는 UI 언어 사용
         logger.debug(f"짧은 콘텐츠({len(content)}자) - UI 언어 '{ui_language}' 적용")
         return ui_language
+    
+    # 🚀 하이브리드 접근: 규칙 기반 먼저 시도, 애매할 때만 LLM 사용
+    try:
+        rule_based_result = detect_content_language(content, ui_language)
+        
+        # 규칙 기반이 명확한 결과를 줄 때는 LLM 호출 생략 (성능 최적화)
+        confidence_indicators = [
+            len([c for c in content if ord(c) > 0x1100 and ord(c) < 0x11FF]),  # 한글
+            len([c for c in content if ord(c) > 0x4E00 and ord(c) < 0x9FFF]),  # 중문
+            len([c for c in content if ord(c) > 0x3040 and ord(c) < 0x309F])   # 일문
+        ]
+        max_confidence = max(confidence_indicators)
+        
+        # 특정 언어 문자가 많으면 (전체의 30% 이상) 규칙 기반 결과 신뢰
+        if max_confidence > len(content) * 0.3:
+            logger.debug(f"고신뢰도 규칙 기반 언어 감지: '{rule_based_result}' (LLM 호출 생략)")
+            return rule_based_result
+            
+    except Exception as e:
+        logger.debug(f"규칙 기반 언어 감지 실패: {e}")
+    
+    # 애매한 경우에만 LLM 사용 (다국어 정확성 보장)
     
     try:
         # LLM을 통한 언어 감지
@@ -341,15 +363,18 @@ async def detect_content_language_llm(content: str, ui_language: str = 'ko') -> 
 
 응답 형식: 언어코드만 (ko/en/ja/zh)"""
 
+        from core.llm.models.base import LLMRequest
         llm_manager = LLMManager()
         
         # 빠른 모델로 언어 감지
-        response = await llm_manager.generate(
-            prompt=prompt,
+        request = LLMRequest(
+            messages=[{"role": "user", "content": prompt}],
             model="gemini-1.5-flash",
             max_tokens=10,
             temperature=0.0
         )
+        response_obj = await llm_manager.generate(request)
+        response = response_obj.content if response_obj.success else ""
         
         detected_lang = response.strip().lower()
         

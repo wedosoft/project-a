@@ -167,7 +167,7 @@ async def fetch_with_retry(client: httpx.AsyncClient, url: str, headers: Dict[st
 
 async def fetch_ticket_conversations(client: httpx.AsyncClient, ticket_id: int, base_url: str, headers: Dict[str, str], auth: Tuple[str, str]) -> List[Dict[str, Any]]:
     """
-    특정 티켓의 대화(conversation) 내역을 가져옵니다.
+    특정 티켓의 대화(conversation) 내역을 모두 가져옵니다 (페이지네이션 지원).
     
     Args:
         client: httpx 클라이언트 객체
@@ -177,17 +177,41 @@ async def fetch_ticket_conversations(client: httpx.AsyncClient, ticket_id: int, 
         auth: 인증 정보
         
     Returns:
-        List[Dict[str, Any]]: 대화 내역 목록
+        List[Dict[str, Any]]: 대화 내역 목록 (모든 페이지 포함)
     """
+    all_conversations = []
+    page = 1
+    max_pages = 50  # 안전 장치: 최대 50페이지 (1500개 대화)
+    
     try:
         logger.info(f"티켓 {ticket_id}의 대화 내역 요청 중...")
-        conversations = await fetch_with_retry(client, f"{base_url}/tickets/{ticket_id}/conversations", headers, auth)
-        if isinstance(conversations, list):
-            logger.info(f"티켓 {ticket_id}의 대화 내역 {len(conversations)}개 수신 완료")
-            return conversations
-        else:
-            logger.warning(f"티켓 {ticket_id}의 대화 내역이 예상된 형식이 아닙니다.")
-            return []
+        
+        while page <= max_pages:
+            params = {"page": page, "per_page": 30}  # Freshdesk 기본값
+            conversations = await fetch_with_retry(
+                client, 
+                f"{base_url}/tickets/{ticket_id}/conversations", 
+                headers, 
+                auth, 
+                params
+            )
+            
+            if isinstance(conversations, list) and len(conversations) > 0:
+                all_conversations.extend(conversations)
+                logger.debug(f"티켓 {ticket_id} 페이지 {page}: {len(conversations)}개 대화 수신")
+                
+                # 30개 미만이면 마지막 페이지
+                if len(conversations) < 30:
+                    break
+                    
+                page += 1
+            else:
+                # 빈 응답이면 더 이상 페이지 없음
+                break
+        
+        logger.info(f"티켓 {ticket_id}의 대화 내역 {len(all_conversations)}개 수신 완료 ({page}페이지)")
+        return all_conversations
+        
     except Exception as e:
         logger.error(f"티켓 {ticket_id}의 대화 내역 가져오기 오류: {e}")
         return []

@@ -20,6 +20,7 @@ from .utils.metrics import MetricsCollector
 from .scalable_key_manager import scalable_key_manager, APIKeyStrategy
 from core.metadata.normalizer import TenantMetadataNormalizer
 from .summarizer.prompt.loader import PromptLoader
+from .summarizer import generate_smart_summary
 
 logger = logging.getLogger(__name__)
 
@@ -182,11 +183,35 @@ class LLMManager:
             summary_start_time = time.time()
             logger.info(f"🎯 [조회 티켓 요약] 시작 - ID: {ticket_data.get('id', 'unknown')}")
             
-            # 새로운 모듈식 요약 시스템 사용
-            from core.llm.summarizer.core.summarizer import core_summarizer
+            # 🧠 스마트 요약 시스템 사용 (Anthropic 활성화 시 Constitutional AI 적용)
             
-            # 순수 텍스트만 사용 (description_text는 필수 필드)
+            # 🎯 티켓 내용 + 대화 내역 통합 처리 (토큰 최적화)
             content = ticket_data.get("description_text", "")
+            
+            # 대화 내역 추가 (중요한 맥락 정보)
+            conversations = ticket_data.get("conversations", [])
+            if conversations:
+                conversation_content = self._extract_conversation_content(conversations, max_conversations=15)  # 20 → 15로 줄임
+                if conversation_content:
+                    content += f"\n\n=== 대화 내역 ===\n{conversation_content}"
+                    logger.info(f"티켓 {ticket_data.get('id')}: 대화 {len(conversations)}개 중 최신 15개 포함")
+            
+            # 🚀 토큰 수 최적화: 너무 긴 콘텐츠 제한
+            if len(content) > 8000:  # 약 2000 토큰 제한
+                content = content[:8000] + "\n\n[내용이 길어 일부 생략됨]"
+                logger.info(f"티켓 {ticket_data.get('id')}: 콘텐츠 길이 최적화 (8000자로 제한)")
+            
+            logger.info(f"📊 최종 콘텐츠 길이: {len(content)}자 (예상 토큰: ~{len(content)//4}개)")
+            
+            # 🚀 캐싱 확인: 동일한 티켓+대화 조합에 대한 캐시 확인
+            import hashlib
+            cache_key = f"ticket_summary_{ticket_data.get('id')}_{hashlib.md5(content.encode()).hexdigest()[:8]}"
+            
+            if hasattr(self, 'cache') and self.cache:
+                cached_result = self.cache.get(cache_key)
+                if cached_result:
+                    logger.info(f"✅ 캐시된 요약 사용 - ID: {ticket_data.get('id')}")
+                    return cached_result
             
             if not content.strip():
                 ticket_id = ticket_data.get('id', 'unknown')
@@ -216,8 +241,8 @@ class LLMManager:
                 "conversation_count": tenant_metadata.get('conversation_count', 0)
             }
             
-            # 새로운 요약 시스템으로 생성 (YAML 템플릿 기반)
-            summary = await core_summarizer.generate_summary(
+            # 🧠 스마트 요약 시스템으로 생성 (Anthropic 활성화 시 Constitutional AI 적용)
+            summary = await generate_smart_summary(
                 content=content,
                 content_type="ticket_view",  # 조회 티켓 전용 YAML 템플릿 사용 (최고 품질)
                 subject=ticket_data.get("subject", ""),
@@ -226,23 +251,33 @@ class LLMManager:
             )
             
             summary_time = time.time() - summary_start_time
-            logger.info(f"⏱️ [조회 티켓 요약] 완료 - ID: {ticket_data.get('id')} - 소요시간: {summary_time:.2f}초")
+            logger.info(f"⚡ [최적화 완료] 티켓 요약 - ID: {ticket_data.get('id')} - 소요시간: {summary_time:.2f}초")
             
-            # AI 처리 정보 업데이트
+            # AI 처리 정보 업데이트  
             updated_metadata = TenantMetadataNormalizer.update_ai_processing_info(
                 tenant_metadata, 
-                model_used="gpt-4o-mini-2024-07-18",
+                model_used="claude-3-5-haiku-20241022",  # 실제 사용된 모델로 업데이트
                 quality_score=4.0  # 기본 품질 점수
             )
             
-            return {
+            result = {
                 "summary": summary,
                 "key_points": ["구조화된 요약"],
-                "sentiment": "중립적",
+                "sentiment": "중립적", 
                 "priority_recommendation": "보통",
                 "urgency_level": "보통",
-                "updated_metadata": updated_metadata  # 업데이트된 메타데이터 포함
+                "updated_metadata": updated_metadata
             }
+            
+            # 🚀 결과 캐싱: 향후 동일 요청 시 빠른 응답
+            if hasattr(self, 'cache') and self.cache:
+                try:
+                    self.cache.set(cache_key, result, timeout=3600)  # 1시간 캐싱
+                    logger.debug(f"💾 요약 결과 캐싱 완료 - ID: {ticket_data.get('id')}")
+                except Exception as e:
+                    logger.warning(f"캐싱 실패: {e}")
+            
+            return result
                 
         except Exception as e:
             logger.error(f"티켓 요약 생성 실패: {e}")
@@ -438,7 +473,7 @@ class LLMManager:
                     content_type = "ticket_similar"
                     logger.info(f"🎫 [티켓] 티켓 ID {ticket.get('id')} - ticket_similar 템플릿 사용")
                     
-                    summary_result = await core_summarizer.generate_summary(
+                    summary_result = await generate_smart_summary(
                         content=ticket_data_for_summary.get("description_text", ""),
                         content_type=content_type,  # doc_type에 따라 올바른 템플릿 사용
                         subject=ticket_data_for_summary.get("subject", ""),
@@ -549,10 +584,8 @@ class LLMManager:
                     "metadata": ticket.get("metadata", {})
                 }
             
-            # 티켓 요약 생성 (고속 3섹션 버전)
-            from core.llm.summarizer.core.summarizer import core_summarizer
-            
-            summary_result = await core_summarizer.generate_summary(
+            # 🧠 스마트 요약 시스템으로 생성 (Anthropic 활성화 시 Constitutional AI 적용)
+            summary_result = await generate_smart_summary(
                 content=ticket_data_for_summary.get("description_text", ""),
                 content_type="ticket_similar",  # 기존 이름 유지 (3섹션 최적화 버전)
                 subject=ticket_data_for_summary.get("subject", ""),
@@ -658,6 +691,44 @@ class LLMManager:
             if field in conv and conv[field]:
                 return str(conv[field])
         return str(conv)[:100]
+    
+    def _extract_conversation_content(self, conversations: List[Dict[str, Any]], max_conversations: int = 10) -> str:
+        """
+        대화 내역에서 중요한 내용 추출 (토큰 제한 고려)
+        
+        Args:
+            conversations: 대화 목록
+            max_conversations: 포함할 최대 대화 수
+            
+        Returns:
+            정리된 대화 내용
+        """
+        if not conversations:
+            return ""
+            
+        # 최신 대화 우선 (중요도 높음)
+        recent_conversations = sorted(conversations, 
+                                    key=lambda x: x.get('created_at', ''), 
+                                    reverse=True)[:max_conversations]
+        
+        conversation_parts = []
+        for i, conv in enumerate(recent_conversations):
+            # 발신자 정보
+            sender = conv.get('from_email', conv.get('user_name', '시스템'))
+            if sender == '시스템':
+                sender = '상담원' if conv.get('private', False) else '고객'
+            
+            # 대화 내용
+            body = self._extract_conversation_body(conv)
+            if body and len(body.strip()) > 10:  # 의미 있는 내용만
+                # 너무 긴 대화는 요약 (토큰 절약)
+                if len(body) > 500:
+                    body = body[:500] + "..."
+                
+                timestamp = conv.get('created_at', '')[:10] if conv.get('created_at') else ''
+                conversation_parts.append(f"[{timestamp}] {sender}: {body}")
+        
+        return "\n".join(conversation_parts)
     
     async def _try_fallback(self, request: LLMRequest, exclude_provider: LLMProvider) -> LLMResponse:
         """폴백 제공자 시도"""

@@ -1,4 +1,36 @@
-# Modular Summarizer System
+# 🎯 Anthropic 프롬프트 엔지니어링 시스템
+
+> **Freshdesk 티켓 요약을 위한 고품질 AI 시스템**
+> 
+> Constitutional AI, XML 구조화, Chain-of-Thought 추론 등 Anthropic의 최첨단 프롬프트 엔지니어링 기법을 적용한 티켓 요약 시스템입니다.
+
+## 📋 목차
+
+- [🎯 시스템 개요](#-시스템-개요)
+- [✨ 핵심 기능](#-핵심-기능)
+- [🏗️ 아키텍처](#️-아키텍처)
+- [🚀 빠른 시작](#-빠른-시작)
+- [⚙️ 설정 관리](#️-설정-관리)
+- [📊 품질 관리](#-품질-관리)
+- [🔧 관리자 도구](#-관리자-도구)
+- [📈 성능 최적화](#-성능-최적화)
+- [🔍 모니터링](#-모니터링)
+- [🛠️ 문제 해결](#️-문제-해결)
+
+## 🎯 시스템 개요
+
+### 핵심 목표
+- **상담원 생산성 향상**: 5초 내 파악 가능한 고품질 요약 제공
+- **정보 보안 강화**: 개인정보 노출 방지 및 Constitutional AI 준수
+- **운영 효율성**: 코드 수정 없는 프롬프트 관리 및 실시간 품질 모니터링
+
+### 주요 특징
+- 🧠 **Constitutional AI**: Helpful, Harmless, Honest 원칙 적용
+- 📝 **XML 구조화**: 일관된 응답 형식 보장
+- 🔗 **Chain-of-Thought**: 논리적 추론 과정 포함
+- ⚡ **실시간 처리**: 2초 이내 응답 시간 목표
+- 🛡️ **품질 검증**: 다차원 품질 평가 및 자동 폴백
+- 🎨 **관리자 친화적**: 웹 인터페이스를 통한 프롬프트 편집
 
 A comprehensive, modular summarization system designed for scalability, maintainability, and high-quality output.
 
