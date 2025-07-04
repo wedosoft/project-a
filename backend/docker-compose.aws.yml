@@ -1,0 +1,43 @@
+# AWS EC2 배포용 Docker Compose 오버라이드
+# 사용법: docker-compose -f docker-compose.yml -f docker-compose.aws.yml up
+
+services:
+  backend:
+    # EC2에서 GPU 감지시 자동으로 nvidia runtime 사용
+    # 감지 불가능시 일반 runtime 사용
+    environment:
+      # AWS EC2 최적화 설정
+      - LOG_LEVEL=INFO
+      - USE_GPU_FIRST=true
+      - GPU_FALLBACK_TO_OPENAI=true
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
+      
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    
+    ports:
+      - "8000:8000"
+    
+    restart: unless-stopped
+    
+    # 헬스체크
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    
+    # EC2 최적화 명령어
+    command: >
+      bash -c "
+        echo '=== AWS EC2 환경 시작 ==='
+        echo 'EC2 메타데이터 확인 중...'
+        curl -s --max-time 3 http://169.254.169.254/latest/meta-data/instance-type || echo '로컬 환경'
+        echo 'GPU 감지 중...'
+        nvidia-smi || echo 'GPU 없음 - CPU 모드'
+        echo '임베딩 시스템 상태 확인...'
+        python -c 'from core.search.embeddings import log_embedding_status; log_embedding_status()' || echo 'embedding status 확인 실패'
+        python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
+      "

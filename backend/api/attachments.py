@@ -10,10 +10,10 @@ pre-signed URL 만료 문제를 해결하기 위해 실시간으로 새로운 UR
 import asyncio
 import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import httpx
-from core.vectordb import vector_db
+from core.database.vectordb import vector_db
 from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -25,10 +25,8 @@ load_dotenv()
 # 로깅 설정
 logger = logging.getLogger(__name__)
 
-# Freshdesk 설정
-FRESHDESK_DOMAIN = os.getenv("FRESHDESK_DOMAIN")
-FRESHDESK_API_KEY = os.getenv("FRESHDESK_API_KEY")
-BASE_URL = f"https://{FRESHDESK_DOMAIN}.freshdesk.com/api/v2"
+# Freshdesk 설정 (동적으로 처리하도록 변경)
+# 환경변수는 fallback으로만 사용하고, 주로 함수 파라미터로 전달받음
 
 router = APIRouter(prefix="/attachments", tags=["attachments"])
 
@@ -58,7 +56,9 @@ class AttachmentMetadata(BaseModel):
 async def get_freshdesk_attachment_url(
     attachment_id: int,
     ticket_id: Optional[int] = None,
-    conversation_id: Optional[int] = None
+    conversation_id: Optional[int] = None,
+    freshdesk_domain: Optional[str] = None,
+    api_key: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Freshdesk API를 통해 첨부파일의 최신 pre-signed URL을 발급받습니다.
@@ -67,6 +67,8 @@ async def get_freshdesk_attachment_url(
         attachment_id: 첨부파일 ID
         ticket_id: 티켓 ID (선택사항)
         conversation_id: 대화 ID (선택사항)
+        freshdesk_domain: Freshdesk 도메인
+        api_key: API 키
         
     Returns:
         Dict: 첨부파일 정보와 다운로드 URL을 포함한 딕셔너리
@@ -74,15 +76,28 @@ async def get_freshdesk_attachment_url(
     Raises:
         HTTPException: API 호출 실패 시
     """
+    # 도메인과 API 키 검증
+    if not freshdesk_domain or not api_key:
+        # 환경변수에서 fallback
+        domain = freshdesk_domain or os.getenv("DOMAIN", "").replace(".freshdesk.com", "")
+        key = api_key or os.getenv("API_KEY")
+        if not domain or not key:
+            raise HTTPException(status_code=400, detail="Freshdesk 도메인과 API 키가 필요합니다")
+    else:
+        domain = freshdesk_domain.replace(".freshdesk.com", "") if ".freshdesk.com" in freshdesk_domain else freshdesk_domain
+        key = api_key
+    
+    base_url = f"https://{domain}.freshdesk.com/api/v2"
+    
     async with httpx.AsyncClient() as client:
         try:
             # Freshdesk API 호출을 위한 Basic Auth 설정
-            auth = (FRESHDESK_API_KEY, "X")
+            auth = (key, "X")
             
             # 첨부파일이 티켓에 직접 연결된 경우
             if ticket_id and not conversation_id:
                 # 티켓 상세 정보에서 첨부파일 URL 찾기
-                ticket_url = f"{BASE_URL}/tickets/{ticket_id}"
+                ticket_url = f"{base_url}/tickets/{ticket_id}"
                 logger.info(f"티켓 {ticket_id}에서 첨부파일 {attachment_id} 정보 조회 중...")
                 
                 response = await client.get(ticket_url, auth=auth, timeout=30.0)
@@ -106,7 +121,7 @@ async def get_freshdesk_attachment_url(
             # 대화에 첨부된 파일인 경우
             elif conversation_id:
                 # 대화 정보에서 첨부파일 URL 찾기
-                conv_url = f"{BASE_URL}/conversations/{conversation_id}"
+                conv_url = f"{base_url}/conversations/{conversation_id}"
                 logger.info(f"대화 {conversation_id}에서 첨부파일 {attachment_id} 정보 조회 중...")
                 
                 response = await client.get(conv_url, auth=auth, timeout=30.0)
@@ -159,8 +174,10 @@ async def get_freshdesk_attachment_url(
 @router.get("/{attachment_id}/download-url", response_model=AttachmentResponse)
 async def get_attachment_download_url(
     attachment_id: int,
-    ticket_id: Optional[int] = Query(None, description="첨부파일이 속한 티켓 ID"),
-    conversation_id: Optional[int] = Query(None, description="첨부파일이 속한 대화 ID")
+    freshdesk_domain: str,
+    api_key: str,
+    ticket_id: Optional[int] = None,
+    conversation_id: Optional[int] = None
 ):
     """
     첨부파일의 최신 다운로드 URL을 발급받습니다.
@@ -170,6 +187,8 @@ async def get_attachment_download_url(
     
     Args:
         attachment_id: 첨부파일 고유 ID
+        freshdesk_domain: Freshdesk 도메인
+        api_key: API 키
         ticket_id: 첨부파일이 속한 티켓 ID (권장)
         conversation_id: 첨부파일이 속한 대화 ID (권장)
         
@@ -186,7 +205,9 @@ async def get_attachment_download_url(
         attachment_data = await get_freshdesk_attachment_url(
             attachment_id=attachment_id,
             ticket_id=ticket_id,
-            conversation_id=conversation_id
+            conversation_id=conversation_id,
+            freshdesk_domain=freshdesk_domain,
+            api_key=api_key
         )
         
         logger.info(f"첨부파일 {attachment_id} URL 발급 완료: {attachment_data['name']}")
@@ -222,8 +243,8 @@ async def get_attachment_metadata(attachment_id: int):
         
         # 먼저 티켓 문서에서 검색
         try:
-            # company_id는 환경변수에서 가져오거나 기본값 사용
-            company_id = os.getenv("COMPANY_ID", "default")
+            # tenant_id는 환경변수에서 가져오거나 기본값 사용
+            tenant_id = os.getenv("TENANT_ID", "default")
             
             # scroll API를 사용하여 모든 문서에서 첨부파일 메타데이터 검색
             # 이는 첨부파일이 어느 티켓/문서에 속하는지 모를 때 사용하는 방법입니다
@@ -241,7 +262,7 @@ async def get_attachment_metadata(attachment_id: int):
                     with_vectors=False,
                     filter=Filter(
                         must=[
-                            FieldCondition(key="company_id", match=MatchValue(value=company_id))
+                            FieldCondition(key="tenant_id", match=MatchValue(value=tenant_id))
                         ]
                     )
                 )
@@ -302,8 +323,10 @@ async def get_attachment_metadata(attachment_id: int):
 
 @router.get("/bulk-urls")
 async def get_bulk_attachment_urls(
-    attachment_ids: str = Query(..., description="쉼표로 구분된 첨부파일 ID 목록"),
-    ticket_id: Optional[int] = Query(None, description="공통 티켓 ID")
+    attachment_ids: List[int],
+    freshdesk_domain: str,
+    api_key: str,
+    ticket_id: Optional[int] = None
 ):
     """
     여러 첨부파일의 다운로드 URL을 한 번에 발급받습니다.
@@ -312,7 +335,9 @@ async def get_bulk_attachment_urls(
     성능 최적화를 위해 동시 요청으로 처리됩니다.
     
     Args:
-        attachment_ids: 쉼표로 구분된 첨부파일 ID 목록 (예: "123,456,789")
+        attachment_ids: 첨부파일 ID 목록
+        freshdesk_domain: Freshdesk 도메인
+        api_key: API 키
         ticket_id: 모든 첨부파일이 속한 공통 티켓 ID (있는 경우)
         
     Returns:
@@ -322,16 +347,16 @@ async def get_bulk_attachment_urls(
         GET /attachments/bulk-urls?attachment_ids=123,456,789&ticket_id=999
     """
     try:
-        # 첨부파일 ID 목록 파싱
-        id_list = [int(id.strip()) for id in attachment_ids.split(",")]
-        logger.info(f"다중 첨부파일 URL 발급 요청: {len(id_list)}개")
+        logger.info(f"다중 첨부파일 URL 발급 요청: {len(attachment_ids)}개")
         
         # 동시 요청으로 성능 최적화
         tasks = []
-        for attachment_id in id_list:
+        for attachment_id in attachment_ids:
             task = get_freshdesk_attachment_url(
                 attachment_id=attachment_id,
-                ticket_id=ticket_id
+                ticket_id=ticket_id,
+                freshdesk_domain=freshdesk_domain,
+                api_key=api_key
             )
             tasks.append(task)
         
@@ -340,7 +365,7 @@ async def get_bulk_attachment_urls(
         
         # 결과 정리
         response = {}
-        for attachment_id, result in zip(id_list, results):
+        for attachment_id, result in zip(attachment_ids, results):
             if isinstance(result, Exception):
                 logger.error(f"첨부파일 {attachment_id} URL 발급 실패: {result}")
                 response[str(attachment_id)] = {
@@ -366,8 +391,10 @@ async def get_bulk_attachment_urls(
 @router.get("/{attachment_id}/download")
 async def download_attachment_proxy(
     attachment_id: int,
-    ticket_id: Optional[int] = Query(None),
-    conversation_id: Optional[int] = Query(None)
+    freshdesk_domain: str,
+    api_key: str,
+    ticket_id: Optional[int] = None,
+    conversation_id: Optional[int] = None
 ):
     """
     첨부파일을 프록시를 통해 다운로드합니다.
@@ -384,7 +411,9 @@ async def download_attachment_proxy(
         attachment_data = await get_freshdesk_attachment_url(
             attachment_id=attachment_id,
             ticket_id=ticket_id,
-            conversation_id=conversation_id
+            conversation_id=conversation_id,
+            freshdesk_domain=freshdesk_domain,
+            api_key=api_key
         )
         
         # 파일 스트리밍 다운로드

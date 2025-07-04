@@ -1,5 +1,5 @@
 # Describe the idea
-The idea is to build a Freshdesk Custom App with a layout that includes a top section to display ticket metadata and a bottom section with tabs for similar tickets, suggested solutions, and a Natural Language Interaction (Copilot) feature.
+The idea is to build Copilot Canvas with a layout that includes a top section to display ticket metadata and a bottom section with tabs for similar tickets, suggested solutions, and a Natural Language Interaction (Copilot) feature.
 
 
 # Describe the app UI

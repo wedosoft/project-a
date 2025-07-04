@@ -63,6 +63,29 @@ local_settings.py
 db.sqlite3
 db.sqlite3-journal
 
+# Database files (SQLite, etc.)
+*.db*
+*.sqlite*
+*.sqlite3*
+**/*.db*
+**/*.sqlite*
+**/*.sqlite3*
+# Database backup files
+*.db.backup*
+*.sqlite.backup*
+*.sqlite3.backup*
+**/*.db.backup*
+**/*.sqlite.backup*
+**/*.sqlite3.backup*
+# Database logs
+*.db-journal
+*.sqlite-journal
+**/*.db-journal
+**/*.sqlite-journal
+# Freshdesk data files
+**/wedosoft_freshdesk_data*.db
+**/wedosoft_freshdesk_data*.sqlite*
+
 # Flask stuff:
 instance/
 .webassets-cache
@@ -102,6 +125,9 @@ celerybeat.pid
 
 # Environments
 .env
+.env.backup
+.env.bak
+.env.*
 .venv
 env/
 venv/
@@ -162,6 +188,11 @@ backend/attachment_cache
 backend/freshdesk_full_data*/
 backend/freshdesk_test_data*/
 
+# Embedding cache files (임베딩 캐시 파일들)
+backend/core/search/data/embedding_cache/
+**/embedding_cache/*.json
+**/embedding_cache/
+
 # Added by Claude Task Master
 # Logs
 logs
@@ -193,3 +224,7 @@ frontend/.report.json
 # OS specific
 tasks.json
 tasks/ 
+backend/core/search/data/embedding_cache/
+
+#SQLite
+backend/core/data/*.db*

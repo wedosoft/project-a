@@ -1,34 +1,66 @@
 # Freshdesk Custom App 백엔드 서비스
 # 프로젝트 규칙 및 가이드라인: /PROJECT_RULES.md 참조
-version: "3.8"
+#version: "3.8"
 services:
   backend:
-    build: .
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    image: backend
     container_name: project-a
     environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      # 로그 레벨 설정 (디버깅을 위해 INFO로 임시 변경)
+      - LOG_LEVEL=INFO
+      # 표준화된 환경변수 사용
+      - TENANT_ID=${TENANT_ID}
       - FRESHDESK_API_KEY=${FRESHDESK_API_KEY}
       - FRESHDESK_DOMAIN=${FRESHDESK_DOMAIN}
-      - QDRANT_HOST=qdrant
-      - QDRANT_PORT=6333
+      #- DEFAULT_TENANT_ID=${DEFAULT_TENANT_ID}
+      # LLM API 키들
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      # LLM 모델 설정 (새로운 명명 규칙)
+      - TICKET_VIEW_MODEL_PROVIDER=${TICKET_VIEW_MODEL_PROVIDER}
+      - TICKET_VIEW_MODEL_NAME=${TICKET_VIEW_MODEL_NAME}
+      - TICKET_VIEW_MAX_TOKENS=${TICKET_VIEW_MAX_TOKENS}
+      - TICKET_VIEW_TEMPERATURE=${TICKET_VIEW_TEMPERATURE}
+      - TICKET_SIMILAR_MODEL_PROVIDER=${TICKET_SIMILAR_MODEL_PROVIDER}
+      - TICKET_SIMILAR_MODEL_NAME=${TICKET_SIMILAR_MODEL_NAME}
+      - TICKET_SIMILAR_MAX_TOKENS=${TICKET_SIMILAR_MAX_TOKENS}
+      - TICKET_SIMILAR_TEMPERATURE=${TICKET_SIMILAR_TEMPERATURE}
+      - ENABLE_LLM_SUMMARY_GENERATION=${ENABLE_LLM_SUMMARY_GENERATION}
+      # Qdrant Cloud 사용 (로컬 Qdrant 서비스 제거됨)
+      - QDRANT_URL=${QDRANT_URL}
+      - QDRANT_API_KEY=${QDRANT_API_KEY}
+      # Redis 설정 (필요시)
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
     ports:
       - "8000:8000"
     volumes:
-      - ./qdrant_data:/app/qdrant_data
       - ./:/app
     env_file:
       - ./.env
     depends_on:
-      - qdrant
+      - redis
 
-  qdrant:
-    image: qdrant/qdrant:latest
-    container_name: project-a-qdrant
+  redis:
+    image: redis:7.2-alpine
+    container_name: project-a-redis
     ports:
-      - "6333:6333"
-      - "6334:6334"
+      - "6379:6379"
     volumes:
-      - ./qdrant_storage:/qdrant/storage
-    environment:
-      - QDRANT_ALLOW_ORIGIN=*
+      - redis_data:/data
+    command: redis-server --appendonly yes
     restart: unless-stopped
+    # Redis 설정 (메모리 정책 등)
+    sysctls:
+      - net.core.somaxconn=1024
+
+volumes:
+  redis_data:
+    driver: local

@@ -35,8 +35,10 @@
  * 4. 렌더링 완료 후 이벤트 핸들러 설정
  */
 
-// 중복 초기화 방지 플래그
-let isAppInitialized = false;
+// 중복 초기화 방지 플래그 (window 레벨에서 관리)
+if (typeof window.APP_INITIALIZED === 'undefined') {
+  window.APP_INITIALIZED = false;
+}
 
 /**
  * 🎯 FDK 네이티브 모달 호출 함수 (백엔드 호출 없는 버전)
@@ -62,14 +64,36 @@ async function showFDKModal(ticketId, hasCachedData = false) {
     let ticket = null;
     
     try {
-      ticketData = await client.data.get('ticket');
-      ticket = ticketData?.ticket;
-      console.log('✅ 티켓 데이터 가져오기 성공');
+      // 모달 컨텍스트인지 확인
+      const context = await client.instance.context();
+      if (context.location === 'modal') {
+        console.log('🎭 모달 컨텍스트에서는 EventAPI 사용 불가 - 캐시된 데이터 사용');
+        
+        // 캐시된 티켓 정보 가져오기
+        if (window.GlobalState) {
+          const globalData = window.GlobalState.getGlobalTicketData();
+          if (globalData.ticket_info) {
+            ticket = globalData.ticket_info;
+            console.log('✅ 캐시된 티켓 데이터 사용:', ticket);
+          }
+        }
+      } else {
+        // 일반 컨텍스트에서는 정상적으로 EventAPI 사용
+        ticketData = await client.data.get('ticket');
+        ticket = ticketData?.ticket;
+        console.log('✅ 티켓 데이터 가져오기 성공');
+      }
     } catch (error) {
-      console.warn('⚠️ 티켓 데이터 가져오기 실패 (EventAPI 관련):', error.message);
-      // EventAPI 오류는 무시하고 계속 진행
-      ticketData = null;
-      ticket = null;
+      console.warn('⚠️ 티켓 데이터 가져오기 실패:', error.message);
+      
+      // EventAPI 실패 시 폴백: 캐시된 데이터 사용
+      if (window.GlobalState) {
+        const globalData = window.GlobalState.getGlobalTicketData();
+        if (globalData.ticket_info) {
+          ticket = globalData.ticket_info;
+          console.log('🔄 폴백: 캐시된 티켓 데이터 사용');
+        }
+      }
     }
     
     // 모달 설정 구성 (백엔드 호출 없이 캐시된 데이터만 전달)
@@ -130,74 +154,160 @@ async function showFDKModal(ticketId, hasCachedData = false) {
 // FDK 모달 컨텍스트 감지 (전역 변수 사용)
 // isFDKModal 변수는 index.html에서 이미 선언됨
 
-// FDK 모달에서는 최소한의 초기화만 수행
+// FDK 모달에서는 EventAPI 오류를 방지하기 위해 앱 초기화 건너뛰기
 if (typeof window.isFDKModal !== 'undefined' && window.isFDKModal) {
-  console.log('🎭 FDK 모달 컨텍스트 감지 - 앱 초기화 건너뛰기');
-  // 모달에서는 app.initialized()를 호출하지 않음
+  console.log('🎭 FDK 모달 컨텍스트 감지 - EventAPI 오류 방지를 위해 앱 초기화 건너뛰기');
+  console.log('📋 모달 데이터 렌더링은 index.html의 handleFDKModalMode()에서 처리됩니다');
+  // 모달에서는 app.initialized()를 호출하지 않음 (EventAPI 오류 방지)
 } else {
   // 표준 앱 모드에서만 전체 초기화 실행
   app
     .initialized()
     .then((c) => {
-      // 중복 초기화 방지
-      if (isAppInitialized) {
-        return;
+      // 중복 초기화 방지 - window 레벨에서 체크
+      if (window.APP_INITIALIZED) {
+        return; // 이미 초기화됨 - 완전히 건너뛰기
       }
       
-      // 모듈 로딩 상태 확인만 (로그 최소화)
-      if (!window.API || !window.GlobalState || !window.Data || !window.UI || !window.Events) {
-        console.error('❌ 필수 모듈이 로드되지 않았습니다');
-        return;
+      console.log('🚀 앱 초기화 시작 (최초 1회)');
+      
+      // 전역 상태 관리 시스템 초기화 (한 번만 실행)
+      if (typeof GlobalState !== 'undefined') {
+        GlobalState.init(); // 내부적으로 중복 체크됨
+        GlobalState.setClient(c);
+        GlobalState.setInitialized(true);
       }
-    
-    // 전역 상태 관리 시스템 초기화 (한 번만 실행)
-    if (typeof GlobalState !== 'undefined' && !GlobalState.getInitialized()) {
-      GlobalState.init();
-    }
-    
-    // 전역 상태 관리 시스템을 통해 클라이언트 설정
-    GlobalState.setClient(c);
-    GlobalState.setInitialized(true);
-    isAppInitialized = true;
+      
+      window.APP_INITIALIZED = true;
+      console.log('✅ 앱 초기화 완료');
 
     const client = GlobalState.getClient();
 
-    // ① 백그라운드 데이터 준비 - 안전한 호출로 변경 (한 번만 실행)
-    // 사용자가 모달을 열기 전에 미리 데이터를 로드하여 응답 속도를 향상시킵니다
-    Data.preloadTicketDataOnPageLoad(client).then((result) => {
-      if (result) {
-        console.log('✅ 페이지 로딩 시 백엔드 호출 성공 완료');
-      } else {
-        console.warn('⚠️ 페이지 로딩 시 백엔드 호출 실패 또는 스킵됨');
-        
-        // 백엔드 호출 실패 시 사용자에게 알림 (토스트 메시지) - 지연 호출
-        setTimeout(() => {
-          if (window.UI && window.UI.showToast) {
-            window.UI.showToast(
-              'AI 데이터 로드에 실패했습니다. 앱 아이콘을 클릭하여 다시 시도할 수 있습니다.',
-              'warning',
-              5000 // 5초간 표시
-            );
-          } else {
-            console.warn('[APP] UI 모듈이 아직 준비되지 않아 토스트 메시지를 표시할 수 없습니다.');
-          }
-        }, 1000); // 1초 지연 후 토스트 표시
-      }
-    }).catch((error) => {
-      console.error('❌ 페이지 로딩 시 백엔드 호출 중 예외 발생:', error);
+    // ① 사이드바 컨텍스트 감지 및 스트리밍 시작
+    // manifest.json의 ticket_sidebar에서 로드된 경우 스트리밍 진행률 표시
+    client.instance.context().then(async (ctx) => {
+      console.log(`📍 현재 컨텍스트: ${ctx.location}`);
       
-      // 예외 발생 시 사용자에게 에러 알림 - 지연 호출
-      setTimeout(() => {
-        if (window.UI && window.UI.showToast) {
-          window.UI.showToast(
-            '서버 연결에 문제가 있습니다. 잠시 후 다시 시도해 주세요.',
-            'error',
-            7000 // 7초간 표시
-          );
-        } else {
-          console.warn('[APP] UI 모듈이 아직 준비되지 않아 에러 토스트를 표시할 수 없습니다.');
+      if (ctx.location === 'ticket_sidebar') {
+        console.log('📊 사이드바 컨텍스트 감지 - 간단한 로딩 표시 시작');
+        
+        // 사이드바 컴포넌트 초기화 (에러 무시)
+        try {
+          if (typeof SidebarProgress !== 'undefined') {
+            SidebarProgress.init();
+          }
+        } catch (sidebarError) {
+          console.warn('⚠️ 사이드바 컴포넌트 초기화 실패 (무시):', sidebarError.message);
         }
-      }, 1000); // 1초 지연 후 토스트 표시
+        
+        // 현재 티켓 ID 가져오기 (안전한 방식)
+        let ticketId = null;
+        try {
+          const ticketData = await client.data.get('ticket');
+          ticketId = ticketData?.ticket?.id;
+          
+          if (ticketId) {
+            console.log(`🎯 티켓 ${ticketId}에 대한 간단한 로딩 표시 시작`);
+            
+            // 간단한 사이드바 로딩 표시
+            if (typeof API !== 'undefined' && API.showSimpleLoadingInSidebar) {
+              const loadingSuccess = await API.showSimpleLoadingInSidebar(client, ticketId);
+              
+              if (!loadingSuccess) {
+                console.warn('⚠️ 사이드바 로딩 표시 실패');
+              }
+            } else {
+              console.warn('⚠️ 간단한 로딩 API가 아직 로드되지 않음 - 기존 방식 사용');
+              await Data.preloadTicketDataOnPageLoad(client);
+            }
+          } else {
+            console.warn('⚠️ 티켓 ID를 가져올 수 없음 - 폴백 시도');
+            
+            // 폴백: 캐시된 데이터에서 티켓 ID 가져오기
+            if (window.GlobalState) {
+              const globalData = window.GlobalState.getGlobalTicketData();
+              ticketId = globalData.cached_ticket_id;
+              if (ticketId) {
+                console.log(`🔄 폴백: 캐시된 티켓 ID 사용 - ${ticketId}`);
+              }
+            }
+          }
+        } catch (error) {
+          console.error('❌ 사이드바에서 티켓 데이터 가져오기 실패:', error);
+          
+          // 폴백: 캐시된 데이터에서 티켓 ID 가져오기
+          if (window.GlobalState) {
+            const globalData = window.GlobalState.getGlobalTicketData();
+            ticketId = globalData.cached_ticket_id;
+            if (ticketId) {
+              console.log(`🔄 폴백: 캐시된 티켓 ID 사용 - ${ticketId}`);
+            } else {
+              // 최후의 폴백: 기존 방식으로 데이터 로드
+              await Data.preloadTicketDataOnPageLoad(client);
+            }
+          }
+        }
+        
+      } else {
+        console.log('📍 사이드바가 아닌 컨텍스트 - 기존 방식으로 백그라운드 로딩');
+        
+        // ② 백그라운드 데이터 준비 - 안전한 호출로 변경 (한 번만 실행)
+        // 사용자가 모달을 열기 전에 미리 데이터를 로드하여 응답 속도를 향상시킵니다
+        Data.preloadTicketDataOnPageLoad(client).then((result) => {
+          if (result) {
+            console.log('✅ 페이지 로딩 시 백엔드 호출 성공 완료');
+          } else {
+            console.warn('⚠️ 페이지 로딩 시 백엔드 호출 실패 또는 스킵됨');
+            
+            // 백엔드 호출 실패 시 사용자에게 알림 (토스트 메시지) - 지연 호출
+            setTimeout(() => {
+              if (window.UI && window.UI.showToast) {
+                window.UI.showToast(
+                  'AI 데이터 로드에 실패했습니다. 앱 아이콘을 클릭하여 다시 시도할 수 있습니다.',
+                  'warning',
+                  5000 // 5초간 표시
+                );
+              } else {
+                console.warn('[APP] UI 모듈이 아직 준비되지 않아 토스트 메시지를 표시할 수 없습니다.');
+              }
+            }, 1000); // 1초 지연 후 토스트 표시
+          }
+        }).catch((error) => {
+          console.error('❌ 페이지 로딩 시 백엔드 호출 중 예외 발생:', error);
+          
+          // 예외 발생 시 사용자에게 에러 알림 - 지연 호출
+          setTimeout(() => {
+            if (window.UI && window.UI.showToast) {
+              window.UI.showToast(
+                '서버 연결에 문제가 있습니다. 잠시 후 다시 시도해 주세요.',
+                'error',
+                7000 // 7초간 표시
+              );
+            } else {
+              console.warn('[APP] UI 모듈이 아직 준비되지 않아 에러 토스트를 표시할 수 없습니다.');
+            }
+          }, 1000); // 1초 지연 후 토스트 표시
+        });
+      }
+    }).catch((contextError) => {
+      console.warn('⚠️ 컨텍스트 가져오기 실패 - 기본 백그라운드 로딩 진행:', contextError.message);
+      
+      // EventAPI 오류가 발생해도 앱이 동작하도록 안전한 폴백 제공
+      if (contextError.message && contextError.message.includes('EventAPI')) {
+        console.log('🔄 EventAPI 오류 감지 - 캐시된 데이터 기반으로 동작');
+        
+        // 캐시된 데이터가 있으면 그것을 사용
+        if (window.GlobalState) {
+          const globalData = window.GlobalState.getGlobalTicketData();
+          if (globalData.summary || globalData.ticket_info) {
+            console.log('✅ 캐시된 데이터 발견 - 정상 동작 가능');
+            return; // 추가 처리 없이 종료
+          }
+        }
+      }
+      
+      // 컨텍스트를 알 수 없는 경우 기본 방식으로 진행
+      Data.preloadTicketDataOnPageLoad(client);
     });
 
     // ② 상단 네비게이션 앱 아이콘 클릭 시 처리 (캐시된 데이터로 즉시 모달 표시)
@@ -273,11 +383,37 @@ if (typeof window.isFDKModal !== 'undefined' && window.isFDKModal) {
           
           // 캐시된 데이터만 사용하여 간단한 UI 업데이트 (백엔드 호출 없음)
           const globalData = GlobalState.getGlobalTicketData();
-          if (globalData.summary) {
-            console.log('📋 모달에서 캐시된 데이터로 UI 업데이트 (백엔드 호출 없음)');
-            UI.updateUIWithCachedData();
+          console.log('📋 모달 렌더링 - 캐시된 데이터 확인:', {
+            hasSummary: !!globalData.summary,
+            hasTicketInfo: !!globalData.ticket_info,
+            hasSimilarTickets: globalData.similar_tickets?.length || 0,
+            hasKbDocuments: globalData.kb_documents?.length || 0
+          });
+          
+          if (globalData.summary || globalData.ticket_info) {
+            console.log('📋 모달에서 캐시된 데이터로 UI 업데이트 시작');
+            
+            // UI 모듈이 있는지 확인 후 데이터 전달
+            if (typeof UI !== 'undefined' && UI.updateUIWithCachedData) {
+              UI.updateUIWithCachedData(globalData);
+            } else {
+              console.error('❌ UI 모듈 또는 updateUIWithCachedData 함수를 찾을 수 없음');
+            }
           } else {
-            console.log('ℹ️ 모달에서 캐시된 데이터 없음 - 기본 상태 유지 (백엔드 호출 없음)');
+            console.log('ℹ️ 모달에서 캐시된 데이터 없음 - 기본 상태 유지');
+            
+            // 데이터가 없으면 백엔드에서 다시 로드 시도
+            if (typeof Data !== 'undefined' && Data.preloadTicketDataOnPageLoad) {
+              console.log('🔄 모달에서 데이터 재로드 시도');
+              Data.preloadTicketDataOnPageLoad(client).then((result) => {
+                if (result) {
+                  const newGlobalData = GlobalState.getGlobalTicketData();
+                  if (typeof UI !== 'undefined' && UI.updateUIWithCachedData) {
+                    UI.updateUIWithCachedData(newGlobalData);
+                  }
+                }
+              });
+            }
           }
 
           // 모달에서는 최소한의 이벤트 설정만 (추가 백엔드 호출 없음)
@@ -334,14 +470,16 @@ if (!window.MODULE_DEPENDENCY_CHECKED) {
       // app 모듈 등록
       ModuleDependencyManager.registerModule('app', 1); // initializeApp 함수 1개
 
-      // 전체 시스템 상태 리포트 생성
-      ModuleDependencyManager.generateStatusReport();
-
-      // 시스템 준비 상태 확인
+      // 시스템 준비 상태 확인 (리포트는 localhost에서만)
       if (ModuleDependencyManager.isSystemReady()) {
-        console.log('✅ 전체 모듈 시스템이 정상적으로 준비되었습니다.');
+        console.log('✅ 모든 모듈 시스템 준비 완료');
       } else {
-        console.warn('⚠️ 일부 모듈에서 의존성 문제가 발견되었습니다.');
+        console.warn('⚠️ 일부 모듈에서 의존성 문제 발견');
+        
+        // 개발 환경에서만 상세 리포트 표시
+        if (window.location.hostname === 'localhost') {
+          ModuleDependencyManager.generateStatusReport();
+        }
       }
       
       window.MODULE_DEPENDENCY_CHECKED = true;

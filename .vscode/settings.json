@@ -8,11 +8,6 @@
     "explorer.fileNesting.patterns": {
         "*.py": "${capture}.cpython-*.pyc"
     },
-    "workbench.colorTheme": "Tomorrow Night Blue",
-    // 프로젝트 규칙 파일을 쉽게 열기 위한 설정
-    "workbench.editorAssociations": {
-        "PROJECT_RULES.md": "vscode.markdown.preview.editor"
-    },
     "python.defaultInterpreterPath": "${workspaceFolder}/backend/venv/bin/python",
     "python.analysis.extraPaths": [
         "${workspaceFolder}/backend"
@@ -25,62 +20,63 @@
         "import os; os.chdir('${workspaceFolder}/backend')"
     ],
     "terminal.integrated.cwd": "${workspaceFolder}",
-    "terminal.integrated.env.osx": {
-        "PYTHONPATH": "${workspaceFolder}/backend",
-        "VIRTUAL_ENV": "${workspaceFolder}/backend/venv",
-        "PATH": "${workspaceFolder}/backend/venv/bin:${env:PATH}"
-    },
-    "files.exclude": {
-        "**/__pycache__": true,
-        "**/*.pyc": true
-    },
-    // 한글 입력 시 파란색 블록 제거를 위한 설정 (기본 유지)
-    "editor.accessibilitySupport": "off",
-    "editor.renderControlCharacters": false,
-    "editor.unicodeHighlight.invisibleCharacters": false,
-    "editor.unicodeHighlight.nonBasicASCII": false,
-    // GitHub Copilot 설정 (프로젝트 특화)
-    "github.copilot.enable": {
-        "*": true,
-        "yaml": true,
-        "plaintext": true,
-        "markdown": true,
-        "python": true,
-        "json": true,
-        "dockerfile": true
-    },
-    "github.copilot.chat.welcomeMessage": "never",
-    "github.copilot.editor.enableAutoCompletions": true,
-    // 파일 연관성 (Docker, ENV 파일)
-    "files.associations": {
-        "*.py": "python",
-        "docker-compose*.yml": "dockercompose",
-        "Dockerfile*": "dockerfile",
-        ".env*": "properties"
-    },
-    // 검색 및 감시 제외 (성능 최적화)
-    "search.exclude": {
-        "**/node_modules": true,
-        "**/.git": true,
-        "**/venv": true,
-        "**/backend/data/chunks": true,
-        "**/backend/logs": true
-    },
-    "files.watcherExclude": {
-        "**/venv/**": true,
-        "**/backend/data/chunks/**": true,
-        "**/backend/logs/**": true
-    },
-    // FastAPI 개발 지원
-    "python.analysis.typeCheckingMode": "basic",
-    "python.analysis.autoImportCompletions": true,
-    "editor.codeActionsOnSave": {
-        "source.organizeImports": "explicit"
-    },
-    // Task Master MCP 서버에서 환경변수 로드
-    "terminal.integrated.env.osx": {
-        "PYTHONPATH": "${workspaceFolder}/backend"
-    },
-    // MCP 설정 추가
-    "chat.mcp.enabled": true
-}
+},
+"files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true
+},
+// 한글 입력 시 파란색 블록 제거를 위한 설정 (기본 유지)
+"editor.accessibilitySupport": "off",
+"editor.renderControlCharacters": false,
+"editor.unicodeHighlight.invisibleCharacters": false,
+"editor.unicodeHighlight.nonBasicASCII": false,
+// GitHub Copilot 설정 (프로젝트 특화)
+"github.copilot.enable": {
+    "*": true,
+    "yaml": true,
+    "plaintext": true,
+    "markdown": true,
+    "python": true,
+    "json": true,
+    "dockerfile": true
+},
+"github.copilot.chat.welcomeMessage": "never",
+"github.copilot.editor.enableAutoCompletions": true,
+// 파일 연관성 (Docker, ENV 파일)
+"files.associations": {
+    "*.py": "python",
+    "docker-compose*.yml": "dockercompose",
+    "Dockerfile*": "dockerfile",
+    ".env*": "properties"
+},
+// 검색 및 감시 제외 (성능 최적화)
+"search.exclude": {
+    "**/node_modules": true,
+    "**/.git": true,
+    "**/venv": true,
+    "**/backend/data/chunks": true,
+    "**/backend/logs": true
+},
+"files.watcherExclude": {
+    "**/venv/**": true,
+    "**/backend/data/chunks/**": true,
+    "**/backend/logs/**": true
+},
+// FastAPI 개발 지원
+"python.analysis.typeCheckingMode": "basic",
+"python.analysis.autoImportCompletions": true,
+"editor.codeActionsOnSave": {
+    "source.organizeImports": "explicit"
+},
+// Task Master MCP 서버에서 환경변수 로드
+"terminal.integrated.env.osx": {
+    "PYTHONPATH": "${workspaceFolder}/backend"
+},
+// MCP 설정 추가
+"chat.mcp.enabled": true,
+//ruff 추가
+"python.linting.enabled": false,
+"ruff.enable": true,
+"ruff.formatOnSave": true,
+"editor.formatOnSave": true,
+"ruff.lsp.enabled": true

@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Backend Streaming Test</title>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    .test-section {
+      border: 1px solid #ddd;
+      padding: 20px;
+      margin-bottom: 20px;
+      border-radius: 8px;
+    }
+    .log-area {
+      background: #f5f5f5;
+      padding: 10px;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 12px;
+      height: 300px;
+      overflow-y: auto;
+    }
+    .status {
+      padding: 5px 10px;
+      border-radius: 4px;
+      display: inline-block;
+      margin: 5px 0;
+    }
+    .status.success { background: #d4edda; color: #155724; }
+    .status.error { background: #f8d7da; color: #721c24; }
+    .status.loading { background: #cce5ff; color: #004085; }
+    button {
+      padding: 10px 20px;
+      background: #007bff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    button:hover { background: #0056b3; }
+    input {
+      padding: 8px;
+      width: 200px;
+      margin-right: 10px;
+    }
+  </style>
+</head>
+<body>
+  <h1>🧪 Backend Streaming Test</h1>
+  
+  <div class="test-section">
+    <h2>1. Backend Connection Test</h2>
+    <div>
+      <input type="text" id="backendUrl" value="http://localhost:8000" placeholder="Backend URL">
+      <button onclick="testConnection()">Test Connection</button>
+    </div>
+    <div id="connectionStatus"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>2. Streaming Endpoint Test</h2>
+    <div>
+      <input type="text" id="ticketId" value="12345" placeholder="Ticket ID">
+      <button onclick="testStreaming()">Test /init/ticket-id Streaming</button>
+    </div>
+    <div id="streamingStatus"></div>
+    <div class="log-area" id="streamingLog"></div>
+  </div>
+
+  <div class="test-section">
+    <h2>3. Data Rendering Test</h2>
+    <button onclick="testDataRendering()">Test Modal Data Rendering</button>
+    <button onclick="clearStreamingData()" style="margin-left: 10px; background: #dc3545;">Clear Streaming Data</button>
+    <div style="margin-top: 10px; font-size: 12px; color: #666;">
+      <span id="dataStatus">No streaming data yet</span>
+    </div>
+    <div id="renderingResult"></div>
+  </div>
+
+  <script>
+    // Global variable to store streaming data
+    let streamingData = {
+      ticket_info: null,
+      summary: null,
+      similar_tickets: [],
+      kb_documents: [],
+      recommended_solutions: []
+    };
+
+    // Test functions
+    async function testConnection() {
+      const url = document.getElementById('backendUrl').value;
+      const statusDiv = document.getElementById('connectionStatus');
+      
+      statusDiv.innerHTML = '<div class="status loading">Testing connection...</div>';
+      
+      try {
+        const response = await fetch(`${url}/health`);
+        const data = await response.json();
+        
+        if (response.ok) {
+          statusDiv.innerHTML = `
+            <div class="status success">✅ Connection successful!</div>
+            <pre>${JSON.stringify(data, null, 2)}</pre>
+          `;
+        } else {
+          statusDiv.innerHTML = `<div class="status error">❌ Connection failed: ${response.status}</div>`;
+        }
+      } catch (error) {
+        statusDiv.innerHTML = `<div class="status error">❌ Connection error: ${error.message}</div>`;
+      }
+    }
+
+    async function testStreaming() {
+      const url = document.getElementById('backendUrl').value;
+      const ticketId = document.getElementById('ticketId').value;
+      const statusDiv = document.getElementById('streamingStatus');
+      const logDiv = document.getElementById('streamingLog');
+      
+      statusDiv.innerHTML = '<div class="status loading">🌊 Starting streaming test...</div>';
+      logDiv.innerHTML = '';
+      
+      try {
+        const response = await fetch(`${url}/init/${ticketId}`, {
+          method: 'GET',
+          headers: {
+            'Accept': 'text/event-stream',
+            'X-Tenant-ID': 'wedosoft',
+            'X-Platform': 'freshdesk',
+            'X-API-Key': 'Ug9H1cKCZZtZ4haamBy',
+            'X-Domain': 'wedosoft'
+          }
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        
+        while (true) {
+          const { done, value } = await reader.read();
+          
+          if (done) {
+            statusDiv.innerHTML = '<div class="status success">✅ Streaming completed!</div>';
+            updateDataStatus();
+            break;
+          }
+          
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+          
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
+              if (data === '[DONE]') {
+                logDiv.innerHTML += '<div style="color: green;">🎉 Stream completed!</div>';
+              } else {
+                try {
+                  const parsed = JSON.parse(data);
+                  
+                  // Log raw parsed data for debugging
+                  console.log('Parsed SSE data:', parsed);
+                  
+                  // Handle different streaming event types
+                  if (parsed.type === 'progress') {
+                    // Progress events - log but don't store
+                    console.log(`Progress: ${parsed.stage} - ${parsed.progress}%`);
+                  } else if (parsed.type === 'complete') {
+                    // Complete event with full data
+                    if (parsed.data) {
+                      streamingData = { ...streamingData, ...parsed.data };
+                      console.log('Complete data received:', parsed.data);
+                    }
+                  } else if (parsed.type === 'ticket_fetch' && parsed.content) {
+                    streamingData.ticket_info = parsed.content;
+                    console.log('Stored ticket_info:', parsed.content);
+                  } else if (parsed.type === 'summary' && parsed.content) {
+                    streamingData.summary = parsed.content;
+                    console.log('Stored summary:', parsed.content);
+                  } else if (parsed.type === 'similar_tickets' && parsed.content) {
+                    streamingData.similar_tickets = parsed.content;
+                    console.log('Stored similar_tickets:', parsed.content);
+                  } else if (parsed.type === 'kb_documents' && parsed.content) {
+                    streamingData.kb_documents = parsed.content;
+                    console.log('Stored kb_documents:', parsed.content);
+                  } else if (parsed.type === 'ticket_fetch' && parsed.data) {
+                    streamingData.ticket_info = parsed.data;
+                    console.log('Stored ticket_info (data):', parsed.data);
+                  } else if (parsed.type === 'similar_summaries' && parsed.data) {
+                    streamingData.summary = parsed.data;
+                    console.log('Stored summary (similar_summaries):', parsed.data);
+                  } else if (parsed.type === 'similar_tickets' && parsed.data) {
+                    streamingData.similar_tickets = parsed.data;
+                    console.log('Stored similar_tickets (data):', parsed.data);
+                  } else if (parsed.type === 'kb_documents' && parsed.data) {
+                    streamingData.kb_documents = parsed.data;
+                    console.log('Stored kb_documents (data):', parsed.data);
+                  } else {
+                    // Direct data format (fallback)
+                    if (parsed.ticket_info) {
+                      streamingData.ticket_info = parsed.ticket_info;
+                      console.log('Stored ticket_info (direct):', parsed.ticket_info);
+                    }
+                    if (parsed.summary) {
+                      streamingData.summary = parsed.summary;
+                      console.log('Stored summary (direct):', parsed.summary);
+                    }
+                    if (parsed.similar_tickets) {
+                      streamingData.similar_tickets = parsed.similar_tickets;
+                      console.log('Stored similar_tickets (direct):', parsed.similar_tickets);
+                    }
+                    if (parsed.kb_documents) {
+                      streamingData.kb_documents = parsed.kb_documents;
+                      console.log('Stored kb_documents (direct):', parsed.kb_documents);
+                    }
+                  }
+                  
+                  // Safe logging
+                  let preview = '';
+                  try {
+                    const dataToShow = parsed.data || parsed;
+                    const dataStr = typeof dataToShow === 'string' ? dataToShow : JSON.stringify(dataToShow);
+                    preview = dataStr && dataStr.length > 100 ? dataStr.substring(0, 100) + '...' : dataStr || 'empty';
+                  } catch (stringifyError) {
+                    preview = 'Unable to stringify data';
+                  }
+                  
+                  const eventType = parsed.type || (parsed.ticket_info ? 'ticket_info' : 'data');
+                  logDiv.innerHTML += `<div>${new Date().toLocaleTimeString()} - ${eventType}: ${preview}</div>`;
+                  logDiv.scrollTop = logDiv.scrollHeight;
+                  
+                  // Update data status after each successful parse
+                  updateDataStatus();
+                } catch (e) {
+                  console.error('Parse error details:', e, 'Data:', data);
+                  logDiv.innerHTML += `<div style="color: orange;">Parse error: ${e.message} (Data: ${data ? data.substring(0, 50) : 'empty'}...)</div>`;
+                }
+              }
+            }
+          }
+        }
+      } catch (error) {
+        statusDiv.innerHTML = `<div class="status error">❌ Streaming error: ${error.message}</div>`;
+        logDiv.innerHTML += `<div style="color: red;">Error: ${error.message}</div>`;
+      }
+    }
+
+    function testDataRendering() {
+      const resultDiv = document.getElementById('renderingResult');
+      
+      // Check if we have any streaming data
+      const hasStreamingData = streamingData.ticket_info || 
+                              streamingData.summary || 
+                              (streamingData.similar_tickets && streamingData.similar_tickets.length > 0) ||
+                              (streamingData.kb_documents && streamingData.kb_documents.length > 0);
+      
+      console.log('Streaming data check:', {
+        hasData: hasStreamingData,
+        streamingData: streamingData
+      });
+      
+      // Use actual streaming data if available, otherwise use mock data
+      const dataToRender = hasStreamingData ? streamingData : {
+        ticket_info: {
+          subject: 'AI 분석 테스트 티켓',
+          status: '분석 중',
+          priority: '평가 중',
+          type: '처리 중'
+        },
+        summary: '이것은 테스트 요약입니다.',
+        similar_tickets: [
+          { id: 1, subject: '유사 티켓 1', score: 0.95 },
+          { id: 2, subject: '유사 티켓 2', score: 0.87 }
+        ],
+        kb_documents: [
+          { title: 'KB 문서 1', score: 0.92 },
+          { title: 'KB 문서 2', score: 0.85 }
+        ]
+      };
+      
+      // Simulate modal rendering
+      let modalHTML = `
+        <div class="status ${hasStreamingData ? 'success' : 'loading'}">
+          ${hasStreamingData ? '✅ Rendering Streaming Data' : '📋 Rendering Mock Data (Run streaming test first)'}
+        </div>
+        <h3>🎫 Ticket Information</h3>
+        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+      `;
+      
+      if (dataToRender.ticket_info) {
+        modalHTML += `
+          <div><strong>Subject:</strong> ${dataToRender.ticket_info.subject || 'No subject'}</div>
+          <div><strong>Status:</strong> ${dataToRender.ticket_info.status || 'Unknown'}</div>
+          <div><strong>Priority:</strong> ${dataToRender.ticket_info.priority || 'Medium'}</div>
+          <div><strong>Type:</strong> ${dataToRender.ticket_info.type || 'General'}</div>
+        `;
+      }
+      
+      modalHTML += `</div>`;
+      
+      if (dataToRender.summary) {
+        modalHTML += `
+          <h3>📋 AI Summary</h3>
+          <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+            ${dataToRender.summary}
+          </div>
+        `;
+      }
+      
+      if (dataToRender.similar_tickets && dataToRender.similar_tickets.length > 0) {
+        modalHTML += `
+          <h3>🔍 Similar Tickets (${dataToRender.similar_tickets.length})</h3>
+          <div style="background: #f5f5f5; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+        `;
+        dataToRender.similar_tickets.forEach(ticket => {
+          modalHTML += `
+            <div style="margin-bottom: 10px; padding: 10px; background: white; border-radius: 4px;">
+              <strong>${ticket.subject || ticket.title || 'No title'}</strong>
+              <span style="float: right; color: green;">${Math.round((ticket.score || 0) * 100)}%</span>
+              <div style="color: #666; font-size: 12px;">ID: ${ticket.id} | Status: ${ticket.status || 'Unknown'}</div>
+            </div>
+          `;
+        });
+        modalHTML += `</div>`;
+      }
+      
+      if (dataToRender.kb_documents && dataToRender.kb_documents.length > 0) {
+        modalHTML += `
+          <h3>📚 KB Documents (${dataToRender.kb_documents.length})</h3>
+          <div style="background: #fff3e0; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+        `;
+        dataToRender.kb_documents.forEach(doc => {
+          modalHTML += `
+            <div style="margin-bottom: 10px; padding: 10px; background: white; border-radius: 4px;">
+              <strong>${doc.title || 'No title'}</strong>
+              <span style="float: right; color: orange;">${Math.round((doc.score || 0) * 100)}%</span>
+              <div style="color: #666; font-size: 12px;">${doc.description || doc.content || 'No description'}</div>
+            </div>
+          `;
+        });
+        modalHTML += `</div>`;
+      }
+      
+      // Show raw data for debugging
+      modalHTML += `
+        <details>
+          <summary style="cursor: pointer; margin-top: 20px;">📊 Raw Data (Debug)</summary>
+          <pre style="background: #f5f5f5; padding: 10px; border-radius: 4px; overflow-x: auto;">
+${JSON.stringify(dataToRender, null, 2)}
+          </pre>
+        </details>
+      `;
+      
+      resultDiv.innerHTML = modalHTML;
+    }
+    
+    function clearStreamingData() {
+      streamingData = {
+        ticket_info: null,
+        summary: null,
+        similar_tickets: [],
+        kb_documents: [],
+        recommended_solutions: []
+      };
+      document.getElementById('dataStatus').textContent = 'Streaming data cleared';
+      document.getElementById('dataStatus').style.color = '#dc3545';
+      console.log('Streaming data cleared');
+    }
+    
+    function updateDataStatus() {
+      const hasData = streamingData.ticket_info || streamingData.summary || 
+                     streamingData.similar_tickets.length > 0 || 
+                     streamingData.kb_documents.length > 0;
+      
+      const statusEl = document.getElementById('dataStatus');
+      if (hasData) {
+        let status = 'Streaming data available: ';
+        const parts = [];
+        if (streamingData.ticket_info) parts.push('Ticket');
+        if (streamingData.summary) parts.push('Summary');
+        if (streamingData.similar_tickets.length > 0) parts.push(`${streamingData.similar_tickets.length} Similar`);
+        if (streamingData.kb_documents.length > 0) parts.push(`${streamingData.kb_documents.length} KB`);
+        
+        statusEl.textContent = status + parts.join(', ');
+        statusEl.style.color = '#28a745';
+      } else {
+        statusEl.textContent = 'No streaming data yet';
+        statusEl.style.color = '#666';
+      }
+    }
+  </script>
+</body>
+</html>

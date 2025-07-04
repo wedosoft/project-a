@@ -1,0 +1,75 @@
+# 조회 티켓 요약용 템플릿 (간소화된 고품질 버전)
+version: "3.0"
+last_updated: "2025-07-03"
+content_type: "ticket_view"
+
+# Jinja2 템플릿 
+template: |
+  {%- if subject %}
+  티켓: {{ subject }}
+  {% endif -%}
+  
+  {%- if metadata_formatted %}
+  메타데이터: {{ metadata_formatted }}
+  {% endif -%}
+  
+  내용:
+  {{ "=" * 40 }}
+  {{ content }}
+  {{ "=" * 40 }}
+  
+  {{ instruction_text }}
+
+# 언어별 분석 지시사항 (간소화)
+instructions:
+  ko: |
+    위 티켓을 다음 4개 섹션으로 팩트 중심 요약하세요:
+
+    🔍 **문제 현황**
+    - 핵심 문제 상황과 증상
+    - 회사명, 기술용어, 오류메시지는 정확히 기록
+
+    💡 **원인 분석** 
+    - 파악된 원인이나 가능성
+    - 기술적 세부사항 포함
+
+    ⚡ **해결 진행상황**
+    - 처리과정을 "누가 무엇을 했다" 형식으로 나열
+    - 시도한 해결책과 결과
+    - 현재 상태 (해결완료/진행중/대기중)
+
+    🎯 **중요 인사이트**
+    - 향후 처리 방향이나 주의사항
+    - 에스컬레이션 필요 여부
+
+    작성 원칙:
+    - 개인정보(이메일, 전화번호, 주소) 제외
+    - 회사명, 기술용어는 원문 그대로
+    - 팩트만 간결하게 나열
+    - 추측이나 해석 금지
+
+  en: |
+    Summarize the above ticket in the following 4 sections with fact-based approach:
+
+    🔍 **Problem Overview**
+    - Core problem situation and symptoms
+    - Record company names, technical terms, error messages exactly
+
+    💡 **Root Cause Analysis**
+    - Identified causes or possibilities  
+    - Include technical details
+
+    ⚡ **Resolution Progress**
+    - List processing steps in "who did what" format
+    - Attempted solutions and results
+    - Current status (resolved/in-progress/pending)
+
+    🎯 **Key Insights**
+    - Future handling direction or cautions
+    - Escalation requirements
+
+    Writing principles:
+    - Exclude personal info (emails, phones, addresses)
+    - Use original company names and technical terms
+    - List facts concisely only
+    - No speculation or interpretation

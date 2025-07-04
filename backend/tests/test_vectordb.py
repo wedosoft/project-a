@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # 벡터 DB 모듈 임포트
 from core import vectordb
-from core.vectordb import QdrantAdapter
+from core.database.vectordb import QdrantAdapter
 
 # 벡터 DB 초기화
 vector_db = vectordb.vector_db
@@ -37,10 +37,10 @@ def test_count():
         total_count = vector_db.count()
         logger.info(f"전체 문서 수: {total_count}")
         
-        # 기본 company_id로 문서 수 확인
-        DEFAULT_COMPANY_ID = "default"
-        company_count = vector_db.count(company_id=DEFAULT_COMPANY_ID)
-        logger.info(f"{DEFAULT_COMPANY_ID} 회사의 문서 수: {company_count}")
+        # 기본 tenant_id로 문서 수 확인
+        DEFAULT_TENANT_ID = "default"
+        company_count = vector_db.count(tenant_id=DEFAULT_TENANT_ID)
+        logger.info(f"{DEFAULT_TENANT_ID} 회사의 문서 수: {company_count}")
         
         return total_count
     except Exception as e:
@@ -63,11 +63,11 @@ def test_search():
         dummy_embedding = [random.random() for _ in range(1536)]
         
         # 검색 수행
-        DEFAULT_COMPANY_ID = "default"
+        DEFAULT_TENANT_ID = "default"
         results = vector_db.search(
             query_embedding=dummy_embedding,
             top_k=3,
-            company_id=DEFAULT_COMPANY_ID
+            tenant_id=DEFAULT_TENANT_ID
         )
         
         # 결과 출력

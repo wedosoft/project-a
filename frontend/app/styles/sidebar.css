@@ -1,0 +1,486 @@
+/**
+ * @fileoverview Sidebar Progress Component Styles
+ * @description 사이드바 진행률 컴포넌트 CSS 스타일
+ * 
+ * Freshdesk Custom App - Prompt Canvas
+ * 티켓 사이드바에서 AI 데이터 로딩 진행률을 표시하는 컴포넌트를 위한 스타일시트
+ * 
+ * 주요 기능:
+ * - 반응형 디자인 (사이드바 크기 적응)
+ * - 현대적이고 깔끔한 UI
+ * - 애니메이션 효과 및 상태 표시
+ * - 접근성 고려 (색상 대비, 포커스 표시)
+ * - 최소화/확장 기능
+ * 
+ * @version 1.0.0
+ * @since 2025-07-03
+ */
+
+/* === 메인 컨테이너 === */
+.sidebar-progress-container {
+  background: #ffffff;
+  border: 1px solid #e0e6ed;
+  border-radius: 8px;
+  margin: 8px 0;
+  padding: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  transition: all 0.3s ease;
+  position: relative;
+  max-width: 280px;
+  min-width: 240px;
+}
+
+/* === 간단한 로딩 컨테이너 === */
+.sidebar-simple-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  position: relative;
+}
+
+.sidebar-simple-loading .loading-icon {
+  font-size: 16px;
+  animation: pulse 2s infinite;
+}
+
+.sidebar-simple-loading .loading-text {
+  flex: 1;
+  font-weight: 500;
+  color: #2c3e50;
+  font-size: 12px;
+}
+
+.sidebar-simple-loading .loading-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #ecf0f1;
+  border-top: 2px solid #3498db;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.sidebar-simple-loading .sidebar-progress-close {
+  position: absolute;
+  top: -4px;
+  right: -8px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: #95a5a6;
+  padding: 4px;
+  border-radius: 3px;
+  transition: all 0.2s ease;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sidebar-simple-loading .sidebar-progress-close:hover {
+  background-color: #e74c3c;
+  color: white;
+}
+
+.sidebar-progress-container:hover {
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.sidebar-progress-container.hidden {
+  display: none;
+}
+
+.sidebar-progress-container.minimized {
+  padding: 8px 12px;
+}
+
+.sidebar-progress-container.minimized .sidebar-progress-bar-container,
+.sidebar-progress-container.minimized .sidebar-progress-stages {
+  display: none;
+}
+
+/* 고정 위치 모드 (사이드바를 찾을 수 없을 때) */
+.sidebar-progress-container.fixed-position {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 10000;
+  max-width: 320px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+}
+
+/* === 헤더 영역 === */
+.sidebar-progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.sidebar-progress-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+}
+
+.sidebar-progress-icon {
+  font-size: 16px;
+  animation: pulse 2s infinite;
+}
+
+.sidebar-progress-text {
+  font-weight: 500;
+  color: #2c3e50;
+  font-size: 12px;
+}
+
+.sidebar-progress-percent {
+  font-weight: 600;
+  color: #3498db;
+  font-size: 14px;
+  min-width: 35px;
+  text-align: right;
+}
+
+/* 헤더 상태별 스타일 */
+.sidebar-progress-header.error .sidebar-progress-text {
+  color: #e74c3c;
+}
+
+.sidebar-progress-header.error .sidebar-progress-percent {
+  color: #e74c3c;
+}
+
+.sidebar-progress-header.completed .sidebar-progress-text {
+  color: #27ae60;
+}
+
+.sidebar-progress-header.completed .sidebar-progress-percent {
+  color: #27ae60;
+}
+
+/* === 진행률 바 === */
+.sidebar-progress-bar-container {
+  margin: 8px 0;
+}
+
+.sidebar-progress-bar {
+  width: 100%;
+  height: 6px;
+  background-color: #ecf0f1;
+  border-radius: 3px;
+  overflow: hidden;
+  position: relative;
+}
+
+.sidebar-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #3498db 0%, #2980b9 100%);
+  border-radius: 3px;
+  width: 0%;
+  transition: width 0.5s ease;
+  position: relative;
+}
+
+.sidebar-progress-fill::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.3),
+    transparent
+  );
+  animation: shimmer 2s infinite;
+}
+
+/* === 단계별 표시 === */
+.sidebar-progress-stages {
+  margin-top: 8px;
+}
+
+.sidebar-progress-stage {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  font-size: 11px;
+  color: #7f8c8d;
+  transition: color 0.3s ease;
+}
+
+.sidebar-progress-stage.in-progress {
+  color: #3498db;
+}
+
+.sidebar-progress-stage.completed {
+  color: #27ae60;
+}
+
+.stage-icon {
+  font-size: 12px;
+  width: 16px;
+  text-align: center;
+}
+
+.stage-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stage-status {
+  font-size: 10px;
+  width: 16px;
+  text-align: center;
+}
+
+.sidebar-progress-stage.in-progress .stage-status {
+  animation: spin 1s linear infinite;
+}
+
+/* === 액션 버튼 === */
+.sidebar-progress-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 4px;
+}
+
+.sidebar-progress-minimize,
+.sidebar-progress-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: #95a5a6;
+  padding: 4px;
+  border-radius: 3px;
+  transition: all 0.2s ease;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sidebar-progress-minimize:hover,
+.sidebar-progress-close:hover {
+  background-color: #ecf0f1;
+  color: #2c3e50;
+}
+
+.sidebar-progress-close:hover {
+  background-color: #e74c3c;
+  color: white;
+}
+
+/* === 애니메이션 === */
+@keyframes pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+  100% { transform: scale(1); }
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* === 반응형 디자인 === */
+@media (max-width: 320px) {
+  .sidebar-progress-container {
+    margin: 4px 0;
+    padding: 8px;
+    min-width: 200px;
+  }
+  
+  .sidebar-progress-text {
+    font-size: 11px;
+  }
+  
+  .sidebar-progress-percent {
+    font-size: 13px;
+  }
+  
+  .sidebar-progress-stage {
+    font-size: 10px;
+  }
+}
+
+/* === 다크 모드 지원 === */
+@media (prefers-color-scheme: dark) {
+  .sidebar-progress-container {
+    background: #2c3e50;
+    border-color: #34495e;
+    color: #ecf0f1;
+  }
+  
+  .sidebar-progress-text {
+    color: #ecf0f1;
+  }
+  
+  .sidebar-progress-bar {
+    background-color: #34495e;
+  }
+  
+  .sidebar-progress-stage {
+    color: #bdc3c7;
+  }
+  
+  .sidebar-progress-stage.in-progress {
+    color: #74b9ff;
+  }
+  
+  .sidebar-progress-stage.completed {
+    color: #00b894;
+  }
+  
+  .sidebar-progress-minimize:hover,
+  .sidebar-progress-close:hover {
+    background-color: #34495e;
+    color: #ecf0f1;
+  }
+}
+
+/* === 접근성 개선 === */
+.sidebar-progress-minimize:focus,
+.sidebar-progress-close:focus {
+  outline: 2px solid #3498db;
+  outline-offset: 1px;
+}
+
+/* === 사이드바별 특화 스타일 === */
+/* Freshdesk 기본 사이드바 */
+.sidebar .sidebar-progress-container {
+  margin: 12px 8px;
+}
+
+/* 좁은 사이드바 */
+.sidebar.narrow .sidebar-progress-container {
+  margin: 8px 4px;
+  padding: 8px;
+}
+
+/* === 오류 상태 스타일 === */
+.sidebar-progress-container.error {
+  border-color: #e74c3c;
+  background-color: #fdf2f2;
+}
+
+.sidebar-progress-container.error .sidebar-progress-bar {
+  background-color: #fadbd8;
+}
+
+.sidebar-progress-container.error .sidebar-progress-fill {
+  background: linear-gradient(90deg, #e74c3c 0%, #c0392b 100%);
+}
+
+/* === 완료 상태 스타일 === */
+.sidebar-progress-container.completed {
+  border-color: #27ae60;
+  background-color: #f8fff8;
+}
+
+.sidebar-progress-container.completed .sidebar-progress-bar {
+  background-color: #d5f4e6;
+}
+
+.sidebar-progress-container.completed .sidebar-progress-fill {
+  background: linear-gradient(90deg, #27ae60 0%, #229954 100%);
+}
+
+/* === 로딩 스켈레톤 === */
+.sidebar-progress-skeleton {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 200% 100%;
+  animation: loading 1.5s infinite;
+}
+
+@keyframes loading {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* === 컴포넌트 상태 표시 === */
+.sidebar-progress-container[data-state="initializing"] .sidebar-progress-icon {
+  animation: pulse 1s ease-in-out infinite;
+}
+
+.sidebar-progress-container[data-state="streaming"] .sidebar-progress-icon {
+  animation: pulse 0.5s ease-in-out infinite;
+}
+
+.sidebar-progress-container[data-state="complete"] .sidebar-progress-icon {
+  animation: none;
+}
+
+.sidebar-progress-container[data-state="error"] .sidebar-progress-icon {
+  animation: shake 0.5s ease-in-out;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+
+/* === 컴팩트 모드 === */
+.sidebar-progress-container.compact {
+  padding: 6px 8px;
+  margin: 4px 0;
+}
+
+.sidebar-progress-container.compact .sidebar-progress-header {
+  margin-bottom: 4px;
+}
+
+.sidebar-progress-container.compact .sidebar-progress-stages {
+  margin-top: 4px;
+}
+
+.sidebar-progress-container.compact .sidebar-progress-stage {
+  padding: 1px 0;
+  font-size: 10px;
+}
+
+/* === 호버 효과 === */
+.sidebar-progress-stage:hover {
+  background-color: rgba(52, 152, 219, 0.1);
+  border-radius: 3px;
+  padding-left: 4px;
+  margin-left: -4px;
+  transition: all 0.2s ease;
+}
+
+/* === 툴팁 스타일 === */
+.sidebar-progress-stage[title] {
+  cursor: help;
+}
+
+/* === 프린트 스타일 === */
+@media print {
+  .sidebar-progress-container {
+    break-inside: avoid;
+    border: 1px solid #ccc;
+    background: white;
+    color: black;
+  }
+}

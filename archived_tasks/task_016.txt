@@ -1,0 +1,72 @@
+# Task ID: 16
+# Title: 추천 솔루션 탭 컴포넌트 개발
+# Status: pending
+# Dependencies: 12, 13
+# Priority: medium
+# Description: Copilot Canvas의 전체 UI/UX 디자인을 확정하고, 주요 화면 및 상호작용에 대한 프로토타입을 제작합니다. PRD 및 프론트엔드 가이드라인에 명시된 레이아웃(티켓 요약 카드, 3-탭 영역)과 사용자 경험 원칙을 준수합니다.
+# Details:
+- UI 디자인 시스템 정의 (색상, 타이포그래피, 아이콘, 컴포넌트 스타일 가이드).
+- 주요 화면 디자인:
+    - 티켓 보기 페이지 내 앱 레이아웃.
+    - 상단: 티켓 요약 카드 (문제/원인/조치/결과 표시).
+    - 하단 3-탭 영역:
+        - 유사 티켓 탭 (목록, 상세 보기).
+        - 추천 솔루션 탭 (목록, 미리보기).
+        - OO와 대화하기 탭 (자연어 입력, 콘텐츠 선택 체크박스, 대화형 결과 표시).
+- 주요 상호작용 프로토타이핑 (Figma, Adobe XD 등 활용 또는 간단한 HTML/CSS 목업):
+    - `/init` 호출 시 초기 데이터 로딩 및 표시 흐름.
+    - 탭 전환 및 콘텐츠 표시.
+    - OO와 대화하기 탭에서의 자연어 입력, 검색 실행, 결과 표시.
+    - 검색 결과(유사 티켓, 솔루션)를 티켓 답변으로 삽입하는 과정.
+- 반응형 디자인 고려 (Freshdesk 환경 내에서의 유연성).
+- 접근성 가이드라인 준수.
+- 모든 디자인 요소 및 프로토타입에 대한 한글 설명 및 문서화.
+
+# Test Strategy:
+- 디자인 검토: PRD 및 가이드라인 부합 여부, 사용성, 일관성 검토.
+- 프로토타입 테스트: 주요 사용자 시나리오 기반 인터랙션 검증.
+- 내부 사용자(상담사 역할) 피드백 수렴 및 반영.
+
+# Subtasks:
+## 16.1. UI 스타일 가이드 정의 [pending]
+### Dependencies: None
+### Description: 색상, 폰트, 아이콘 등 UI 디자인 시스템 정의
+### Details:
+
+
+## 16.2. 티켓 요약 카드 UI 디자인 [pending]
+### Dependencies: None
+### Description: 문제/원인/조치/결과를 표시하는 티켓 요약 카드 디자인
+### Details:
+
+
+## 16.3. 유사 티켓 탭 UI 디자인 [pending]
+### Dependencies: None
+### Description: 유사 티켓 목록 및 상세 보기 UI 디자인
+### Details:
+
+
+## 16.4. 추천 솔루션 탭 UI 디자인 [pending]
+### Dependencies: None
+### Description: 추천 솔루션 목록 및 미리보기 UI 디자인
+### Details:
+
+
+## 16.5. OO와 대화하기 탭 UI 디자인 [pending]
+### Dependencies: None
+### Description: 자연어 입력, 콘텐츠 선택 체크박스, 대화형 결과 표시 UI 디자인
+### Details:
+
+
+## 16.6. 주요 인터랙션 프로토타입 제작 [pending]
+### Dependencies: None
+### Description: Figma 또는 HTML/CSS를 활용한 주요 인터랙션 프로토타입 제작
+### Details:
+
+
+## 16.7. 디자인 검토 및 피드백 반영 [pending]
+### Dependencies: None
+### Description: 완성된 디자인 및 프로토타입에 대한 검토 진행 및 피드백 반영
+### Details:
+
+

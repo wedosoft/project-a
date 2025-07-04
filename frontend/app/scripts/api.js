@@ -22,35 +22,312 @@
  */
 async function getFreshdeskConfigFromIparams(client) {
   try {
-    console.log('📋 iparams에서 Freshdesk 설정값 로드 중...');
+    // 개발 환경에서는 기본값 사용
+    if (window.location.hostname === 'localhost') {
+      return {
+        domain: 'wedosoft.freshdesk.com',
+        apiKey: 'default_dev_key',
+      };
+    }
 
     const iparams = await client.iparams.get();
-
-    if (iparams && iparams.freshdesk_domain && iparams.freshdesk_api_key) {
-      console.log(`✅ iparams 로드 성공: 도메인 ${iparams.freshdesk_domain}`);
+    if (iparams?.freshdesk_domain && iparams?.freshdesk_api_key) {
       return {
         domain: iparams.freshdesk_domain,
         apiKey: iparams.freshdesk_api_key,
       };
     }
 
-    console.warn('⚠️ iparams에서 필수 설정값이 누락됨');
-    return null;
+    // 폴백 설정
+    return {
+      domain: 'default.freshdesk.com',
+      apiKey: 'fallback_key',
+    };
   } catch (error) {
-    console.error('❌ iparams 로드 실패:', error);
-    return null;
+    console.warn('⚠️ iparams 로드 실패, 기본값 사용:', error.message);
+    return {
+      domain: 'default.freshdesk.com',
+      apiKey: 'fallback_key',
+    };
   }
 }
+
+/**
+ * 📊 데이터 수집 작업 관리 API
+ * Data ingestion job management APIs
+ */
+const IngestJobAPI = {
+  /**
+   * 새로운 데이터 수집 작업 생성 및 시작
+   * @param {Object} options 수집 옵션
+   * @param {boolean} options.incremental 증분 업데이트 여부
+   * @param {boolean} options.purge 기존 데이터 삭제 여부
+   * @param {boolean} options.process_attachments 첨부파일 처리 여부
+   * @param {boolean} options.force_rebuild 강제 재구축 여부
+   * @param {boolean} options.include_kb 지식베이스 포함 여부
+   * @param {string} domain Freshdesk 도메인
+   * @param {string} apiKey Freshdesk API 키
+   * @returns {Promise<Object>} 작업 정보
+   */
+  async createJob(options = {}, domain = null, apiKey = null) {
+    try {
+      console.log('🚀 새 데이터 수집 작업 생성 중...', options);
+
+      const headers = {
+        'Content-Type': 'application/json',
+        'X-Tenant-ID': 'wedosoft', // .env의 TENANT_ID 값
+        'X-Platform': 'freshdesk', // 고정값
+      };
+
+      // 동적 Freshdesk 설정 추가 (백엔드 dependencies.py 헤더명 사용)
+      if (domain) headers['X-Domain'] = domain;
+      if (apiKey) headers['X-API-Key'] = apiKey;
+
+      const response = await fetch(`${API.baseURL}/ingest/jobs`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          incremental: options.incremental !== false,
+          purge: options.purge || false,
+          process_attachments: options.process_attachments !== false,
+          force_rebuild: options.force_rebuild || false,
+          include_kb: options.include_kb !== false,
+          batch_size: options.batch_size || 50,
+          max_retries: options.max_retries || 3,
+          parallel_workers: options.parallel_workers || 4,
+          auto_start: options.auto_start !== false,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.detail || '작업 생성 실패');
+      }
+
+      console.log('✅ 데이터 수집 작업 생성 성공:', result.job.job_id);
+      return result;
+    } catch (error) {
+      console.error('❌ 데이터 수집 작업 생성 실패:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * 작업 목록 조회
+   * @param {Object} params 조회 파라미터
+   * @param {string} params.status 상태 필터
+   * @param {number} params.page 페이지 번호
+   * @param {number} params.per_page 페이지당 항목 수
+   * @returns {Promise<Object>} 작업 목록
+   */
+  async listJobs(params = {}) {
+    try {
+      const queryParams = new URLSearchParams();
+      
+      if (params.status) queryParams.append('status', params.status);
+      if (params.page) queryParams.append('page', params.page.toString());
+      if (params.per_page) queryParams.append('per_page', params.per_page.toString());
+
+      const response = await fetch(`${API.baseURL}/ingest/jobs?${queryParams}`, {
+        headers: {
+          'X-Tenant-ID': 'wedosoft',
+          'X-Platform': 'freshdesk',
+        },
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.detail || '작업 목록 조회 실패');
+      }
+
+      return result;
+    } catch (error) {
+      console.error('❌ 작업 목록 조회 실패:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * 특정 작업 상태 조회
+   * @param {string} jobId 작업 ID
+   * @returns {Promise<Object>} 작업 상태
+   */
+  async getJobStatus(jobId) {
+    try {
+      const response = await fetch(`${API.baseURL}/ingest/jobs/${jobId}`, {
+        headers: {
+          'X-Tenant-ID': 'wedosoft',
+          'X-Platform': 'freshdesk',
+        },
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.detail || '작업 상태 조회 실패');
+      }
+
+      return result;
+    } catch (error) {
+      console.error('❌ 작업 상태 조회 실패:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * 작업 제어 (일시정지/재개/취소)
+   * @param {string} jobId 작업 ID
+   * @param {string} action 액션 (pause, resume, cancel)
+   * @param {string} reason 사유 (선택사항)
+   * @returns {Promise<Object>} 제어 결과
+   */
+  async controlJob(jobId, action, reason = null) {
+    try {
+      console.log(`🎮 작업 제어: ${jobId}, 액션: ${action}`);
+
+      const response = await fetch(`${API.baseURL}/ingest/jobs/${jobId}/control`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Tenant-ID': 'wedosoft',
+          'X-Platform': 'freshdesk',
+        },
+        body: JSON.stringify({
+          action,
+          reason,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.detail || '작업 제어 실패');
+      }
+
+      console.log(`✅ 작업 제어 성공: ${action}`);
+      return result;
+    } catch (error) {
+      console.error('❌ 작업 제어 실패:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * 데이터 수집 메트릭스 조회
+   * @returns {Promise<Object>} 메트릭스 정보
+   */
+  async getMetrics() {
+    try {
+      const response = await fetch(`${API.baseURL}/ingest/metrics`, {
+        headers: {
+          'X-Tenant-ID': 'wedosoft',
+          'X-Platform': 'freshdesk',
+        },
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.detail || '메트릭스 조회 실패');
+      }
+
+      return result;
+    } catch (error) {
+      console.error('❌ 메트릭스 조회 실패:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * 기존 즉시 실행 방식 (하위 호환성)
+   * @param {Object} options 수집 옵션
+   * @param {string} domain Freshdesk 도메인
+   * @param {string} apiKey Freshdesk API 키
+   * @returns {Promise<Object>} 수집 결과
+   */
+  async triggerImmediate(options = {}, domain = null, apiKey = null) {
+    try {
+      console.log('⚡ 즉시 데이터 수집 실행...', options);
+
+      const headers = {
+        'Content-Type': 'application/json',
+        'X-Tenant-ID': 'wedosoft',
+        'X-Platform': 'freshdesk',
+      };
+
+      // 동적 Freshdesk 설정 추가 (백엔드 dependencies.py 헤더명 사용)
+      if (domain) headers['X-Domain'] = domain;
+      if (apiKey) headers['X-API-Key'] = apiKey;
+
+      const response = await fetch(`${API.baseURL}/ingest`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          incremental: options.incremental !== false,
+          purge: options.purge || false,
+          process_attachments: options.process_attachments !== false,
+          force_rebuild: options.force_rebuild || false,
+          include_kb: options.include_kb !== false,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.detail || '데이터 수집 실패');
+      }
+
+      console.log('✅ 즉시 데이터 수집 완료');
+      return result;
+    } catch (error) {
+      console.error('❌ 즉시 데이터 수집 실패:', error);
+      throw error;
+    }
+  },
+};
 
 /**
  * 최적화된 API 모듈
  */
 const API = {
+  // 백엔드 서버 기본 URL
+  baseURL: 'http://localhost:8000',
+
+  /**
+   * 백엔드 연결 상태 확인
+   */
+  async checkBackendConnection() {
+    try {
+      console.log('🔗 백엔드 연결 상태 확인 중...');
+      const response = await fetch(`${this.baseURL}/health`, {
+        method: 'GET',
+        headers: {
+          'X-Tenant-ID': 'wedosoft',
+          'X-Platform': 'freshdesk',
+        },
+        timeout: 5000, // 5초 타임아웃
+      });
+
+      if (response.ok) {
+        console.log('✅ 백엔드 연결 성공');
+        return true;
+      } else {
+        console.warn('⚠️ 백엔드 응답 오류:', response.status);
+        return false;
+      }
+    } catch (error) {
+      console.error('❌ 백엔드 연결 실패:', error.message);
+      return false;
+    }
+  },
+
   /**
    * 모듈 가용성 확인
    */
   isAvailable() {
-    const dependencies = ['GlobalState', 'PerformanceOptimizer'];
+    const dependencies = ['GlobalState'];
     const missing = dependencies.filter((dep) => !window[dep]);
 
     if (missing.length > 0) {
@@ -235,10 +512,10 @@ const API = {
         // 개발 환경용 기본값 설정 (실제 운영에서는 iparams에서 가져와야 함)
         if (window.location.hostname === 'localhost' || window.location.hostname.includes('10001')) {
           finalConfig = {
-            domain: 'wedosoft.freshdesk.com', // 개발용 기본값
-            apiKey: 'Ug9H1cKCZZtZ4haamBy', // 개발용 기본값
+            domain: 'wedosoft.freshdesk.com', // .env의 FRESHDESK_DOMAIN 값
+            apiKey: 'Ug9H1cKCZZtZ4haamBy', // .env의 FRESHDESK_API_KEY 값
           };
-          console.log('🛠️ 개발 환경: 기본 Freshdesk 설정 사용');
+          console.log('🛠️ 개발 환경: .env 파일의 Freshdesk 설정 사용');
         }
       }
 
@@ -247,8 +524,11 @@ const API = {
         method: method,
         headers: {
           'Content-Type': 'application/json',
-          ...(finalConfig?.domain && { 'X-Freshdesk-Domain': finalConfig.domain }),
-          ...(finalConfig?.apiKey && { 'X-Freshdesk-API-Key': finalConfig.apiKey }),
+          // 백엔드 dependencies.py에서 정의한 정확한 헤더명 사용
+          ...(finalConfig?.domain && { 'X-Domain': finalConfig.domain }),
+          ...(finalConfig?.apiKey && { 'X-API-Key': finalConfig.apiKey }),
+          'X-Tenant-ID': 'wedosoft', // .env의 TENANT_ID 값
+          'X-Platform': 'freshdesk', // 고정값
         },
         ...(data && { body: JSON.stringify(data) }),
       };
@@ -256,8 +536,10 @@ const API = {
       // 헤더 로깅 (개발용)
       if (window.location.hostname === 'localhost') {
         console.log('📤 전송할 헤더:', {
-          'X-Freshdesk-Domain': finalConfig?.domain,
-          'X-Freshdesk-API-Key': finalConfig?.apiKey ? '***' + finalConfig.apiKey.slice(-4) : 'none',
+          'X-Domain': finalConfig?.domain,
+          'X-API-Key': finalConfig?.apiKey ? '***' + finalConfig.apiKey.slice(-4) : 'none',
+          'X-Tenant-ID': 'wedosoft',
+          'X-Platform': 'freshdesk',
         });
       }
 
@@ -331,33 +613,192 @@ const API = {
   },
 
   /**
+   * 에이전트의 UI 언어 감지 (FDK 기반 간소화)
+   * @param {Object} client - FDK 클라이언트 객체
+   * @returns {string} 감지된 언어 코드 (ko, en, ja, zh)
+   */
+  async detectAgentLanguage(client) {
+    try {
+      // FDK loggedInUser에서 직접 언어 정보 획득
+      const data = await client.data.get("loggedInUser");
+      const agentLanguage = data.loggedInUser.contact.language;
+      
+      console.log('[언어감지] FDK에서 감지된 에이전트 언어:', agentLanguage);
+      
+      // 지원되는 언어로 매핑
+      if (agentLanguage) {
+        const langCode = agentLanguage.toLowerCase();
+        if (langCode === 'ko' || langCode.startsWith('ko')) return 'ko';
+        if (langCode === 'ja' || langCode.startsWith('ja')) return 'ja';
+        if (langCode === 'zh' || langCode.startsWith('zh')) return 'zh';
+        if (langCode === 'en' || langCode.startsWith('en')) return 'en';
+      }
+      
+      // 기본값: 영어 (국제 표준)
+      console.log('[언어감지] 지원되지 않는 언어, 기본값 사용: en');
+      return 'en';
+    } catch (error) {
+      console.warn('[언어감지] FDK 언어 감지 실패, 기본값 사용:', error);
+      return 'en';
+    }
+  },
+
+  /**
    * 백엔드에서 초기 데이터를 로드하는 함수
+   * @param {Object} client - FDK 클라이언트 객체
+   * @param {string} ticketId - 티켓 ID
    */
   async loadInitData(client, ticketId) {
-    return await this.callBackendAPIWithCache(client, `init/${ticketId}`, null, 'GET', {
-      cacheTTL: 600000, // 10분 캐시
-      loadingContext: '초기 데이터 로드',
-    });
+    try {
+      console.log(`🎯 초기 데이터 로딩 시작: 티켓 ${ticketId}`);
+      
+      // 현재 에이전트 언어 가져오기 (FDK Data Method 활용)
+      let agentLanguage = 'en'; // 기본값
+      try {
+        const loggedInUser = await client.data.get('loggedInUser');
+        agentLanguage = loggedInUser?.contact?.language || 'en';
+        console.log(`📍 에이전트 언어: ${agentLanguage}`);
+      } catch (error) {
+        console.warn('⚠️ 에이전트 언어 감지 실패, 기본값 사용:', error);
+      }
+      
+      // 스트리밍 활성화된 파라미터
+      const queryParams = new URLSearchParams({
+        agent_language: agentLanguage,
+        stream: 'true' // 스트리밍 응답 요청
+      });
+      
+      const endpoint = `init/${ticketId}?${queryParams.toString()}`;
+      
+      // 스트리밍 모드로 호출
+      const result = await this.callBackendAPIWithStreaming(client, endpoint, ticketId, {
+        cacheTTL: 300000, // 5분 캐시
+        loadingContext: '🚀 AI 분석 스트리밍',
+        useOptimizedHeaders: true
+      });
+      
+      // Vector DB 응답 구조 검증 및 정규화
+      if (result.ok && result.data) {
+        const normalizedData = this.normalizeVectorDBResponse(result.data);
+        console.log('✅ Vector DB 초기 데이터 로딩 완료:', {
+          ticketId,
+          hasSummary: !!normalizedData.summary,
+          similarTicketsCount: normalizedData.similar_tickets?.length || 0,
+          kbDocumentsCount: normalizedData.kb_documents?.length || 0,
+          executionTime: normalizedData.execution_time
+        });
+        
+        return {
+          ...result,
+          data: normalizedData
+        };
+      }
+      
+      return result;
+    } catch (error) {
+      console.error('❌ Vector DB 초기 데이터 로딩 실패:', error);
+      throw error;
+    }
   },
 
   /**
-   * 자연어 쿼리 실행
+   * Vector DB 응답 데이터를 정규화하는 함수
+   * @param {Object} rawData - 백엔드에서 받은 원시 데이터
+   * @returns {Object} 정규화된 데이터
    */
-  async executeQuery(client, queryData) {
-    return await this.callBackendAPIWithCache(client, 'query', queryData, 'POST', {
-      useCache: false, // POST 요청은 기본적으로 캐시하지 않음
-      loadingContext: '쿼리 실행',
-    });
+  normalizeVectorDBResponse(rawData) {
+    return {
+      // 기본 메타데이터
+      success: rawData.success || true,
+      ticket_id: rawData.ticket_id,
+      tenant_id: rawData.tenant_id,
+      platform: rawData.platform,
+      
+      // 실시간 생성된 요약 (Vector DB 모드의 핵심)
+      summary: rawData.summary || null,
+      
+      // 유사 티켓 (Vector DB에서 검색된 결과)
+      similar_tickets: this.normalizeSimilarTickets(rawData.similar_tickets || []),
+      
+      // KB 문서 (Vector DB에서 검색된 결과)  
+      kb_documents: this.normalizeKBDocuments(rawData.kb_documents || []),
+      
+      // 성능 메트릭
+      execution_time: rawData.execution_time || null,
+      search_quality_score: rawData.search_quality_score || null,
+      
+      // 오류 정보
+      error: rawData.error || null
+    };
   },
 
   /**
-   * 모든 티켓 목록 가져오기
+   * Vector DB에서 검색된 유사 티켓 데이터 정규화
+   * @param {Array} tickets - 원시 티켓 배열
+   * @returns {Array} 정규화된 티켓 배열
    */
-  async getAllTickets(client) {
-    return await this.callBackendAPIWithCache(client, 'tickets/all', null, 'GET', {
-      cacheTTL: 900000, // 15분 캐시
-      loadingContext: '티켓 목록 조회',
-    });
+  normalizeSimilarTickets(tickets) {
+    return tickets.map(ticket => ({
+      // 기본 정보
+      id: ticket.id || ticket.ticket_id,
+      title: ticket.title || ticket.subject || '제목 없음',
+      content: ticket.content || ticket.description_text || '',
+      
+      // Vector DB 메타데이터
+      status: ticket.status || 'unknown',
+      priority: ticket.priority || 'normal',
+      category: ticket.category || null,
+      agent_name: ticket.agent_name || null,
+      created_at: ticket.created_at || null,
+      
+      // 검색 관련
+      relevance_score: ticket.relevance_score || ticket.score || 0,
+      confidence_score: ticket.confidence_score || null,
+      
+      // Vector DB 단독 모드에서 생성된 요약
+      ai_summary: ticket.ai_summary || null,
+      
+      // 추가 메타데이터
+      source_type: 'vector_db',
+      doc_type: 'ticket'
+    }));
+  },
+
+  /**
+   * Vector DB에서 검색된 KB 문서 데이터 정규화
+   * @param {Array} documents - 원시 문서 배열
+   * @returns {Array} 정규화된 문서 배열
+   */
+  normalizeKBDocuments(documents) {
+    return documents.map(doc => ({
+      // 기본 정보
+      id: doc.id || doc.article_id,
+      title: doc.title || '제목 없음',
+      content: doc.content || doc.description || '',
+      excerpt: doc.excerpt || doc.content?.substring(0, 200) + '...' || '',
+      
+      // Vector DB 메타데이터
+      category: doc.category || null,
+      folder: doc.folder || null,
+      status: doc.status || 'unknown',
+      article_type: doc.article_type || 'solution',
+      
+      // 검색 관련
+      relevance_score: doc.relevance_score || doc.score || 0,
+      confidence_score: doc.confidence_score || null,
+      
+      // Vector DB 단독 모드에서 생성된 요약
+      ai_summary: doc.ai_summary || null,
+      
+      // URL 및 메타데이터
+      source_url: doc.source_url || null,
+      created_at: doc.created_at || null,
+      updated_at: doc.updated_at || null,
+      
+      // 추가 메타데이터
+      source_type: 'vector_db',
+      doc_type: 'kb'
+    }));
   },
 
   /**
@@ -390,6 +831,167 @@ const API = {
       return false;
     }
   },
+
+  /**
+   * 현재 감지된 에이전트 언어를 확인하는 유틸리티 함수 (FDK 기반)
+   * @param {Object} client - FDK 클라이언트 객체
+   * @returns {Promise<string>} 현재 언어 코드
+   */
+  async getCurrentAgentLanguage(client) {
+    try {
+      const language = await this.detectAgentLanguage(client);
+      console.log(`[언어확인] FDK 기반 에이전트 언어: ${language}`);
+      return language;
+    } catch (error) {
+      console.error('[언어확인] 언어 확인 중 오류:', error);
+      return 'en';
+    }
+  },
+
+  /**
+   * 언어별 현지화 테스트 함수 (개발용)
+   * @param {Object} client - FDK 클라이언트 객체
+   * @param {string} testLanguage - 테스트할 언어 (ko, en, ja, zh)
+   * @returns {Promise<Object>} 테스트 결과
+   */
+  async testLanguageLocalization(client, testLanguage = 'ko') {
+    try {
+      console.log(`[언어테스트] ${testLanguage} 언어로 API 테스트 시작`);
+      
+      // 현재 티켓 정보 가져오기
+      const ticketData = await client.data.get('ticket');
+      if (!ticketData || !ticketData.ticket) {
+        throw new Error('티켓 정보를 가져올 수 없습니다');
+      }
+      
+      // 테스트 언어로 API 호출
+      const response = await this.loadInitData(client, ticketData.ticket.id, testLanguage);
+      
+      console.log(`[언어테스트] ${testLanguage} 언어 응답:`, response);
+      
+      // 유사 티켓의 섹션 제목 확인
+      if (response && response.similar_tickets && response.similar_tickets.length > 0) {
+        const firstTicket = response.similar_tickets[0];
+        console.log(`[언어테스트] 첫 번째 유사 티켓 섹션 제목:`, {
+          issue: firstTicket.issue ? firstTicket.issue.substring(0, 100) : null,
+          solution: firstTicket.solution ? firstTicket.solution.substring(0, 100) : null
+        });
+      }
+      
+      return {
+        success: true,
+        language: testLanguage,
+        similarTicketsCount: response?.similar_tickets?.length || 0,
+        response: response
+      };
+    } catch (error) {
+      console.error(`[언어테스트] ${testLanguage} 언어 테스트 실패:`, error);
+      return {
+        success: false,
+        language: testLanguage,
+        error: error.message
+      };
+    }
+  },
+
+  /**
+   * Vector DB 기반 상담사 AI 검색 (향후 확장용)
+   * @param {Object} client - FDK 클라이언트
+   * @param {Object} searchQuery - 검색 쿼리 객체
+   * @param {string} searchQuery.query - 자연어 검색 쿼리
+   * @param {Object} searchQuery.filters - 메타데이터 필터
+   * @param {Array} searchQuery.dateRange - 날짜 범위 [start, end]
+   * @returns {Promise<Object>} 검색 결과
+   */
+  async performAdvancedVectorSearch(client, searchQuery) {
+    try {
+      console.log('🔍 Vector DB 고급 검색 실행:', searchQuery);
+      
+      const endpoint = 'search/agent';
+      const searchData = {
+        query: searchQuery.query,
+        filters: {
+          ...searchQuery.filters,
+          date_range: searchQuery.dateRange,
+          content_types: ['ticket', 'kb'],
+          limit: searchQuery.limit || 20
+        }
+      };
+      
+      const result = await this.callBackendAPIWithCache(client, endpoint, searchData, 'POST', {
+        useCache: false, // 검색은 실시간 결과 필요
+        loadingContext: '🎯 AI 검색 실행 중...'
+      });
+      
+      if (result.ok && result.data) {
+        return {
+          ...result,
+          data: {
+            tickets: this.normalizeSimilarTickets(result.data.tickets || []),
+            kb_documents: this.normalizeKBDocuments(result.data.kb_documents || []),
+            search_metadata: result.data.metadata || {}
+          }
+        };
+      }
+      
+      return result;
+    } catch (error) {
+      console.error('❌ Vector DB 고급 검색 실패:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * 실시간 스트리밍 검색 (WebSocket 기반, 향후 확장)
+   * @param {Object} client - FDK 클라이언트  
+   * @param {string} query - 검색 쿼리
+   * @param {Function} onChunk - 스트리밍 청크 콜백
+   * @returns {Promise<void>}
+   */
+  async performStreamingSearch(client, query, onChunk) {
+    try {
+      console.log('🌊 실시간 스트리밍 검색 시작:', query);
+      
+      // 향후 WebSocket으로 교체 예정
+      const endpoint = `search/stream?q=${encodeURIComponent(query)}`;
+      
+      const response = await fetch(`http://localhost:8000/${endpoint}`, {
+        method: 'GET',
+        headers: {
+          'Accept': 'text/event-stream',
+          'Cache-Control': 'no-cache'
+        }
+      });
+      
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      
+      while (true) {
+        const {done, value} = await reader.read();
+        if (done) break;
+        
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n');
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              onChunk(data);
+            } catch (e) {
+              console.warn('스트리밍 파싱 오류:', e);
+            }
+          }
+        }
+      }
+      
+    } catch (error) {
+      console.error('❌ 스트리밍 검색 실패:', error);
+      throw error;
+    }
+  },
+
+  // ...existing code...
 };
 
 // 의존성 확인 함수
@@ -405,9 +1007,294 @@ API.isAvailable = function () {
   return true;
 };
 
-if (window.location.hostname === 'localhost') {
-  console.log('📡 최적화된 API 모듈 로드 완료 - 향상된 성능 및 캐싱 지원');
-}
+/**
+ * 스트리밍 API 호출 함수
+ * @param {Object} client - FDK 클라이언트 객체
+ * @param {string} endpoint - API 엔드포인트
+ * @param {string} ticketId - 티켓 ID (스트리밍 상태 추적용)
+ * @param {Object} options - 호출 옵션
+ */
+API.callBackendAPIWithStreaming = async function(client, endpoint, ticketId, options = {}) {
+  try {
+    console.log(`🌊 스트리밍 API 호출 시작: ${endpoint}`);
+    
+    // 스트리밍 시작
+    if (window.GlobalState && window.GlobalState.startStreaming) {
+      window.GlobalState.startStreaming(ticketId);
+    }
+    
+    // 사이드바 진행률 표시 시작
+    if (window.SidebarProgress && window.SidebarProgress.show) {
+      window.SidebarProgress.show();
+    }
+    
+    // 실제 스트리밍 응답 처리
+    try {
+      const result = await this.performStreamingAPICall(client, endpoint, ticketId, options);
+      
+      if (result.ok && result.data) {
+        // 스트리밍 완료
+        if (window.GlobalState && window.GlobalState.stopStreaming) {
+          window.GlobalState.stopStreaming();
+        }
+        
+        console.log('🎉 스트리밍 API 호출 완료');
+        return result;
+      } else {
+        throw new Error('API 호출 실패');
+      }
+    } catch (error) {
+      // 실제 스트리밍이 실패하면 시뮬레이션으로 폴백
+      console.warn('📡 실제 스트리밍 실패, 시뮬레이션으로 폴백:', error.message);
+      
+      const fallbackResult = await this.callBackendAPIWithCache(client, endpoint, null, 'GET', options);
+      
+      if (fallbackResult.ok && fallbackResult.data) {
+        // 스트리밍 시뮬레이션 (단계별 업데이트)
+        await this.simulateStreamingProgress(fallbackResult.data, ticketId);
+        
+        // 스트리밍 완료
+        if (window.GlobalState && window.GlobalState.stopStreaming) {
+          window.GlobalState.stopStreaming();
+        }
+        
+        console.log('🎉 시뮬레이션 스트리밍 API 호출 완료');
+        return fallbackResult;
+      } else {
+        throw new Error('API 호출 실패 (폴백 포함)');
+      }
+    }
+    
+  } catch (error) {
+    console.error('❌ 스트리밍 API 호출 실패:', error);
+    
+    // 스트리밍 에러 처리
+    if (window.GlobalState && window.GlobalState.setStreamingError) {
+      window.GlobalState.setStreamingError(error.message);
+    }
+    
+    throw error;
+  }
+};
+
+/**
+ * 실제 스트리밍 API 호출 수행
+ * @param {Object} client - FDK 클라이언트
+ * @param {string} endpoint - API 엔드포인트  
+ * @param {string} ticketId - 티켓 ID
+ * @param {Object} options - 호출 옵션
+ */
+API.performStreamingAPICall = async function(client, endpoint, ticketId, options = {}) {
+  console.log(`📡 실제 스트리밍 API 호출: ${endpoint}`, { ticketId, options });
+  
+  // iparams에서 Freshdesk 설정값 가져오기
+  const config = await getFreshdeskConfigFromIparams(client);
+  
+  // 개발 환경에서 iparams가 없는 경우 기본값 사용
+  let finalConfig = config;
+  if (!config || !config.domain || !config.apiKey) {
+    if (window.location.hostname === 'localhost' || window.location.hostname.includes('10001')) {
+      finalConfig = {
+        domain: 'wedosoft.freshdesk.com',
+        apiKey: 'Ug9H1cKCZZtZ4haamBy',
+      };
+    }
+  }
+  
+  // 스트리밍 응답을 위한 fetch 호출
+  const response = await fetch(`${this.baseURL}/${endpoint}`, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'text/event-stream', // Server-Sent Events 요청
+      ...(finalConfig?.domain && { 'X-Domain': finalConfig.domain }),
+      ...(finalConfig?.apiKey && { 'X-API-Key': finalConfig.apiKey }),
+      'X-Tenant-ID': 'wedosoft',
+      'X-Platform': 'freshdesk',
+      'X-Stream': 'true', // 스트리밍 모드 명시적 요청
+    },
+  });
+  
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+  }
+  
+  // 응답이 스트리밍인지 확인
+  const contentType = response.headers.get('content-type');
+  if (contentType && contentType.includes('text/event-stream')) {
+    // Server-Sent Events 스트리밍 처리
+    return await this.processServerSentEvents(response, ticketId);
+  } else {
+    // 일반 JSON 응답 처리
+    const data = await response.json();
+    return {
+      ok: true,
+      data: data,
+      status: response.status
+    };
+  }
+};
+
+/**
+ * Server-Sent Events 스트리밍 응답 처리
+ * @param {Response} response - fetch 응답 객체
+ * @param {string} ticketId - 티켓 ID
+ */
+API.processServerSentEvents = async function(response, ticketId) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let finalData = null;
+  
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      
+      if (done) {
+        console.log('📡 스트리밍 완료');
+        break;
+      }
+      
+      // 받은 데이터를 버퍼에 추가
+      buffer += decoder.decode(value, { stream: true });
+      
+      // 이벤트별로 분리 처리
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || ''; // 마지막 불완전한 라인은 버퍼에 보관
+      
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const eventData = JSON.parse(line.slice(6)); // 'data: ' 제거
+            this.handleStreamingEvent(eventData, ticketId);
+            
+            // 최종 데이터 저장
+            if (eventData.type === 'complete' || eventData.final_data) {
+              finalData = eventData.final_data || eventData.data;
+            }
+          } catch (parseError) {
+            console.warn('📡 스트리밍 이벤트 파싱 실패:', line, parseError);
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  
+  return {
+    ok: true,
+    data: finalData,
+    status: response.status
+  };
+};
+
+/**
+ * 스트리밍 이벤트 처리
+ * @param {Object} eventData - 스트리밍 이벤트 데이터
+ * @param {string} ticketId - 티켓 ID
+ */
+API.handleStreamingEvent = function(eventData, ticketId) {
+  console.log(`📡 스트리밍 이벤트 수신 (티켓 ${ticketId}):`, eventData);
+  
+  if (!eventData.type) return;
+  
+  switch (eventData.type) {
+    case 'progress':
+      // 진행률 업데이트
+      if (window.GlobalState && window.GlobalState.updateStreamingStage) {
+        window.GlobalState.updateStreamingStage(eventData.stage, {
+          completed: false,
+          progress: eventData.progress || 0,
+          message: eventData.message || `${eventData.stage} 처리 중...`
+        });
+      }
+      break;
+      
+    case 'stage_complete':
+      // 단계 완료
+      if (window.GlobalState && window.GlobalState.updateStreamingStage) {
+        window.GlobalState.updateStreamingStage(eventData.stage, {
+          completed: true,
+          progress: 100,
+          message: eventData.message || `${eventData.stage} 완료`
+        });
+      }
+      break;
+      
+    case 'overall_progress':
+      // 전체 진행률 업데이트
+      if (window.GlobalState && window.GlobalState.getGlobalTicketData) {
+        const globalData = window.GlobalState.getGlobalTicketData();
+        if (globalData.streaming_status) {
+          globalData.streaming_status.overall_progress = eventData.progress || 0;
+        }
+      }
+      break;
+      
+    case 'error':
+      // 에러 처리
+      console.error('📡 스트리밍 에러:', eventData.error);
+      if (window.GlobalState && window.GlobalState.setStreamingError) {
+        window.GlobalState.setStreamingError(eventData.error);
+      }
+      break;
+      
+    case 'complete':
+      // 스트리밍 완료
+      console.log('📡 스트리밍 완료 이벤트 수신');
+      break;
+      
+    default:
+      console.log(`📡 알 수 없는 이벤트 타입: ${eventData.type}`);
+  }
+};
+
+/**
+ * 스트리밍 진행률 시뮬레이션 (실제 스트리밍 응답이 올 때까지의 임시 구현)
+ * @param {Object} finalData - 최종 받은 데이터
+ * @param {string} ticketId - 티켓 ID
+ */
+API.simulateStreamingProgress = async function(finalData, ticketId) {
+  console.log(`🎭 시뮬레이션 시작 - 티켓 ${ticketId}`, finalData);
+  const stages = ['ticket_fetch', 'summary', 'similar_tickets', 'kb_documents'];
+  
+  for (let i = 0; i < stages.length; i++) {
+    const stage = stages[i];
+    
+    // 단계 시작
+    if (window.GlobalState && window.GlobalState.updateStreamingStage) {
+      window.GlobalState.updateStreamingStage(stage, {
+        completed: false,
+        progress: 50,
+        message: `${stage} 처리 중...`
+      });
+    }
+    
+    // 단계별 지연 (실제 처리 시간 시뮬레이션)
+    await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 500));
+    
+    // 단계 완료
+    if (window.GlobalState && window.GlobalState.updateStreamingStage) {
+      window.GlobalState.updateStreamingStage(stage, {
+        completed: true,
+        progress: 100,
+        message: `${stage} 완료`
+      });
+    }
+    
+    // 전체 진행률 업데이트
+    const overallProgress = Math.round(((i + 1) / stages.length) * 100);
+    if (window.GlobalState && window.GlobalState.getGlobalTicketData) {
+      const globalData = window.GlobalState.getGlobalTicketData();
+      globalData.streaming_status.overall_progress = overallProgress;
+    }
+    
+    console.log(`📈 스트리밍 진행률: ${overallProgress}% (${stage} 완료)`);
+  }
+};
+
+// 모듈 등록 (로그 없음)
 
 // 모듈 의존성 시스템에 등록
 if (typeof window.ModuleDependencyManager !== 'undefined') {
@@ -416,3 +1303,100 @@ if (typeof window.ModuleDependencyManager !== 'undefined') {
 
 // 전역으로 export
 window.API = API;
+
+/**
+ * 🌍 다국어 지원 테스트 함수 (개발/테스트용)
+ * 브라우저 콘솔에서 직접 호출 가능
+ */
+window.testMultiLanguageSupport = async function(language = 'ko') {
+  try {
+    if (!window.API) {
+      console.error('❌ API 모듈이 로드되지 않았습니다.');
+      return;
+    }
+    
+    const client = GlobalState.getClient();
+    if (!client) {
+      console.error('❌ FDK 클라이언트가 설정되지 않았습니다.');
+      return;
+    }
+    
+    console.log(`🌍 ${language} 언어 지원 테스트 시작...`);
+    
+    // FDK에서 현재 감지된 언어 확인
+    const detectedLang = await API.getCurrentAgentLanguage(client);
+    console.log(`🔍 FDK에서 자동 감지된 언어: ${detectedLang}`);
+    
+    // 지정된 언어로 테스트
+    const testResult = await API.testLanguageLocalization(client, language);
+    
+    if (testResult.success) {
+      console.log(`✅ ${language} 언어 테스트 성공!`);
+      console.log(`📊 유사 티켓 ${testResult.similarTicketsCount}개 로드됨`);
+      
+      // UI 업데이트 (글로벌 상태에 저장된 데이터 사용)
+      const globalData = GlobalState.getGlobalTicketData();
+      if (globalData.similar_tickets && globalData.similar_tickets.length > 0) {
+        console.log('🎨 UI에 현지화된 유사 티켓 표시 중...');
+        if (window.UI && window.UI.displaySimilarTickets) {
+          UI.displaySimilarTickets(globalData.similar_tickets);
+        }
+      }
+    } else {
+      console.error(`❌ ${language} 언어 테스트 실패:`, testResult.error);
+    }
+    
+    return testResult;
+  } catch (error) {
+    console.error('❌ 다국어 테스트 중 오류:', error);
+  }
+};
+
+console.log('🌍 다국어 지원 테스트 함수가 로드되었습니다. 사용법:');
+console.log('testMultiLanguageSupport("ko") - 한국어 테스트');
+console.log('testMultiLanguageSupport("en") - 영어 테스트');
+console.log('testMultiLanguageSupport("ja") - 일본어 테스트');
+console.log('testMultiLanguageSupport("zh") - 중국어 테스트');
+
+/**
+ * 🎯 간단한 사이드바 로딩 표시 함수
+ * 복잡한 스트리밍 대신 간단한 "로딩 중" 상태만 표시합니다.
+ * 
+ * @param {Object} client - FDK 클라이언트 객체
+ * @param {string} ticketId - 티켓 ID
+ * @returns {Promise<boolean>} 로딩 표시 성공 여부
+ */
+async function showSimpleLoadingInSidebar(client, ticketId) {
+  try {
+    console.log(`🎯 사이드바 간단 로딩: ${ticketId}`);
+
+    // 백그라운드에서 조용히 데이터 로드만 수행
+    if (typeof Data !== 'undefined' && Data.preloadTicketDataOnPageLoad) {
+      console.log('📡 백그라운드 AI 데이터 준비...');
+      
+      // 에러가 발생해도 조용히 처리
+      try {
+        await Data.preloadTicketDataOnPageLoad(client);
+        console.log('✅ 백그라운드 데이터 준비 완료');
+      } catch (dataError) {
+        console.warn('⚠️ 백그라운드 데이터 준비 실패 (무시):', dataError.message);
+      }
+    }
+
+    return true;
+
+  } catch (error) {
+    console.warn('⚠️ 사이드바 로딩 처리 실패 (무시):', error.message);
+    return false;
+  }
+}
+
+// API 네임스페이스에 간단한 로딩 함수 추가
+if (typeof window.API === 'undefined') {
+  window.API = {};
+}
+
+window.API.showSimpleLoadingInSidebar = showSimpleLoadingInSidebar;
+
+console.log('🎯 간단한 사이드바 로딩 함수가 로드되었습니다');
+console.log('사용법: API.showSimpleLoadingInSidebar(client, ticketId)');

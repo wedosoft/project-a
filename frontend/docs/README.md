@@ -1,8 +1,8 @@
-# 📚 Freshdesk Custom App - API Documentation
+# 📚 Copilot Canvas - API Documentation
 
 ## 🎯 Overview
 
-This project provides comprehensive API documentation for the Freshdesk Custom App (Prompt Canvas) frontend modules. The documentation is automatically generated using JSDoc and includes both English and Korean descriptions.
+This project provides comprehensive API documentation for Copilot Canvas frontend modules. The documentation is automatically generated using JSDoc and includes both English and Korean descriptions.
 
 ## 🚀 Quick Start
 

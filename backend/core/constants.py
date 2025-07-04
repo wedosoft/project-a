@@ -106,11 +106,11 @@ class ChunkConstants:
 class SystemConfig:
     """시스템 전체 설정"""
     
-    # 기본 company_id
-    DEFAULT_COMPANY_ID = os.getenv("COMPANY_ID", "example-company")
+    # 기본 tenant_id
+    DEFAULT_TENANT_ID = os.getenv("TENANT_ID", "example-company")
     
     # 벡터 DB 컬렉션명 패턴
-    VECTOR_COLLECTION_PATTERN = "{company_id}_documents"
+    VECTOR_COLLECTION_PATTERN = "{tenant_id}_documents"
     
     # 지원하는 문서 타입들
     SUPPORTED_DOC_TYPES = {

@@ -1,0 +1,77 @@
+# EC2 GPU 인스턴스 전용 Docker Compose 설정
+# 사용법: docker-compose -f docker-compose.gpu.yml up
+
+services:
+  backend:
+    build: 
+      context: .
+      dockerfile: Dockerfile.gpu
+      args:
+        - CUDA_VERSION=11.8
+    image: backend-gpu
+    container_name: project-a-gpu
+    
+    # GPU 지원 설정
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    
+    environment:
+      # GPU 관련 환경변수
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - CUDA_VISIBLE_DEVICES=0
+      - USE_GPU_FIRST=true
+      - GPU_FALLBACK_TO_OPENAI=true
+      
+      # 로그 레벨 설정
+      - LOG_LEVEL=INFO
+      
+      # 환경변수 파일에서 로드
+      - TENANT_ID=${TENANT_ID}
+      - FRESHDESK_API_KEY=${FRESHDESK_API_KEY}
+      - FRESHDESK_DOMAIN=${FRESHDESK_DOMAIN}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - QDRANT_URL=${QDRANT_URL}
+      - QDRANT_API_KEY=${QDRANT_API_KEY}
+      
+    ports:
+      - "8000:8000"
+    
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    
+    restart: unless-stopped
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+# GPU 모니터링 (선택사항)
+  gpu-monitor:
+    image: nvidia/cuda:11.8-base-ubuntu20.04
+    container_name: gpu-monitor
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    command: |
+      bash -c "
+        while true; do
+          echo '=== GPU 상태 ==='
+          nvidia-smi --query-gpu=timestamp,name,temperature.gpu,utilization.gpu,memory.used,memory.total --format=csv
+          echo
+          sleep 60
+        done
+      "
+    restart: unless-stopped

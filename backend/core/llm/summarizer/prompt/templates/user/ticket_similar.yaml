@@ -1,0 +1,79 @@
+# 유사 티켓 고속 요약용 템플릿 (3섹션 구조)
+version: "3.0"
+last_updated: "2025-07-03"
+content_type: "ticket_similar"
+
+# Jinja2 템플릿 
+template: |
+  {%- if subject %}
+  티켓 제목: {{ subject }}
+  {% endif -%}
+  
+  {%- if metadata_formatted %}
+  메타데이터: {{ metadata_formatted }}
+  {% endif -%}
+  
+  {%- if attachment_summary %}
+  첨부파일: {{ attachment_summary }}
+  {% endif -%}
+  
+  원본 내용:
+  {{ "=" * 30 }}
+  {{ content }}
+  {{ "=" * 30 }}
+  
+  {{ instruction_text }}
+
+# 언어별 분석 지시사항 (단순화)
+instructions:
+  ko: |
+    위 티켓을 다음 3개 섹션으로 간단명료하게 요약하세요:
+
+    🔴 **문제**
+    - 고객이 제기한 핵심 문제나 요청사항 (고객 관점에서 기술)
+    - 고객의 회사명, 시스템 환경, 발생 상황 포함
+    - 고객의 구체적인 질문이나 해결하고자 하는 사항
+
+    ⚡ **처리결과**  
+    - 상담원이 제공한 해결책이나 조치사항
+    - 현재 처리 상태 (해결완료/진행중/대기중)
+    - 상담원의 답변이나 안내사항
+
+    📚 **참고자료**
+    {%- if attachment_summary and attachment_summary.strip() %}
+    {{ attachment_summary }}
+    {%- else %}
+    관련 자료 없음
+    {%- endif %}
+
+    작성 원칙:
+    - 간결하되 핵심 정보 누락 금지
+    - 원문 용어 그대로 사용
+    - 추측이나 해석 금지
+    - 티켓 URL이나 링크 포함 절대 금지
+
+  en: |
+    Summarize the above ticket in the following 3 sections briefly:
+
+    🔴 **Issue**
+    - Core problem situation in 1-2 lines
+    - Include exact company names, technical terms, dates
+
+    ⚡ **Resolution**
+    - Current processing status or resolution progress  
+    - Show status: resolved/in-progress/pending
+
+    📚 **References**
+    - 📄 Document files (.pdf, .doc, .docx)
+    - 🖼️ Image files (.jpg, .png, .gif)
+    - 📊 Spreadsheet files (.xlsx, .csv)
+    - 📋 Text files (.txt, .log)
+    - 🗂️ Archive files (.zip, .rar)
+    - 📎 Other files
+    - "No related materials" if none
+
+    Writing principles:
+    - Be concise but don't omit key information
+    - Use original terminology exactly
+    - No speculation or interpretation
+    - Absolutely NO ticket URLs or links

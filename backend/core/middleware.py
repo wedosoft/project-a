@@ -162,8 +162,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
 class CompanyIdVerificationMiddleware(BaseHTTPMiddleware):
     """
-    회사 ID의 유효성을 검증하고 격리를 보장하는 미들웨어입니다.
-    API 키와 회사 ID의 매핑을 확인하여 올바른 접근을 보장합니다.
+    테넌트 ID의 유효성을 검증하고 격리를 보장하는 미들웨어입니다.
+    API 키와 테넌트 ID의 매핑을 확인하여 올바른 접근을 보장합니다.
     """
     
     def __init__(
@@ -179,37 +179,37 @@ class CompanyIdVerificationMiddleware(BaseHTTPMiddleware):
         if request.url.path in self.exempt_paths:
             return await call_next(request)
         
-        # API 키와 회사 ID 확인
+        # API 키와 테넌트 ID 확인
         api_key = request.headers.get("X-API-Key")
-        company_id = request.headers.get("X-Company-ID")
+        tenant_id = request.headers.get("X-Tenant-ID") or request.headers.get("X-Tenant-ID")  # 호환성
         
-        # TODO: API 키와 회사 ID 매핑 검증 로직 구현
+        # TODO: API 키와 테넌트 ID 매핑 검증 로직 구현
         # 현재는 간단하게 존재 여부만 확인
-        if not api_key or not company_id:
+        if not api_key or not tenant_id:
             # 필요한 헤더가 없음
             return Response(
                 content=json.dumps({
                     "success": False,
-                    "error": "인증 정보가 누락되었습니다. X-API-Key와 X-Company-ID 헤더가 필요합니다.",
+                    "error": "인증 정보가 누락되었습니다. X-API-Key와 X-Tenant-ID 헤더가 필요합니다.",
                     "error_code": "MISSING_AUTH_INFO"
                 }),
                 status_code=401,
                 media_type="application/json"
             )
         
-        # 요청 본문에 포함된 회사 ID 확인 (POST 요청인 경우)
+        # 요청 본문에 포함된 테넌트 ID 확인 (POST 요청인 경우)
         if request.method == "POST":
             try:
                 body = await request.json()
-                body_company_id = body.get("company_id")
+                body_tenant_id = body.get("tenant_id") or body.get("tenant_id")  # 호환성
                 
-                if body_company_id and body_company_id != company_id:
-                    # 헤더와 본문의 회사 ID가 일치하지 않음
+                if body_tenant_id and body_tenant_id != tenant_id:
+                    # 헤더와 본문의 테넌트 ID가 일치하지 않음
                     return Response(
                         content=json.dumps({
                             "success": False,
-                            "error": "회사 ID가 일치하지 않습니다. 헤더와 요청 본문의 company_id가 달라 권한이 없습니다.",
-                            "error_code": "COMPANY_ID_MISMATCH"
+                            "error": "테넌트 ID가 일치하지 않습니다. 헤더와 요청 본문의 tenant_id가 달라 권한이 없습니다.",
+                            "error_code": "TENANT_ID_MISMATCH"
                         }),
                         status_code=403,
                         media_type="application/json"
@@ -253,5 +253,5 @@ def setup_middlewares(app: FastAPI) -> None:
         calls_per_minute=60  # 분당 최대 60회 요청
     )
     
-    # 회사 ID 검증 미들웨어 설정
+    # 테넌트 ID 검증 미들웨어 설정
     app.add_middleware(CompanyIdVerificationMiddleware)

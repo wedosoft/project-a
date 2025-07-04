@@ -14,6 +14,7 @@ import traceback
 from datetime import datetime, timezone
 from functools import wraps
 from typing import Any, Callable, Dict, Generic, List, Optional, TypeVar, Union
+from urllib.parse import urlparse
 
 from pydantic import BaseModel
 
@@ -273,3 +274,492 @@ def dict_to_model(data: Dict[str, Any], model_class: type) -> BaseModel:
         BaseModel: 변환된 Pydantic 모델 인스턴스
     """
     return model_class(**data)
+
+
+def extract_tenant_id(domain: str) -> str:
+    """
+    도메인에서 tenant_id를 자동으로 추출합니다.
+    
+    지침서에 따른 멀티테넌트 보안 요구사항:
+    - wedosoft.freshdesk.com → "wedosoft"
+    - company.zendesk.com → "company"
+    
+    Args:
+        domain: 플랫폼 도메인 (예: wedosoft.freshdesk.com)
+        
+    Returns:
+        str: 추출된 tenant_id
+        
+    Raises:
+        ValueError: 유효하지 않은 도메인 형식인 경우
+    """
+    if not domain or not isinstance(domain, str):
+        raise ValueError("도메인은 필수이며 문자열이어야 합니다")
+    
+    # URL이 포함된 경우 도메인만 추출
+    if domain.startswith(('http://', 'https://')):
+        parsed = urlparse(domain)
+        domain = parsed.hostname or domain
+    
+    # 도메인 정규화 (소문자 변환, 공백 제거)
+    domain = domain.lower().strip()
+    
+    # 지원되는 플랫폼 패턴
+    platform_patterns = {
+        'freshdesk': r'^([a-zA-Z0-9\-_]+)\.freshdesk\.com$',
+        'zendesk': r'^([a-zA-Z0-9\-_]+)\.zendesk\.com$',
+        # 향후 확장 가능
+    }
+    
+    for platform, pattern in platform_patterns.items():
+        match = re.match(pattern, domain)
+        if match:
+            tenant_id = match.group(1)
+            # tenant_id 유효성 검증
+            if not tenant_id or len(tenant_id) < 2:
+                raise ValueError(f"추출된 tenant_id가 너무 짧습니다: {tenant_id}")
+            logger.info(f"도메인 {domain}에서 tenant_id '{tenant_id}' 추출 완료 (플랫폼: {platform})")
+            return tenant_id
+    
+    # 패턴이 맞지 않는 경우
+    raise ValueError(f"지원되지 않는 도메인 형식입니다: {domain}")
+
+
+def validate_company_platform(tenant_id: str, platform: str) -> bool:
+    """
+    tenant_id와 platform 조합의 유효성을 검증합니다.
+    
+    Args:
+        tenant_id: 회사 식별자
+        platform: 플랫폼 이름 (freshdesk, zendesk 등)
+        
+    Returns:
+        bool: 유효한 조합인지 여부
+    """
+    if not tenant_id or not platform:
+        return False
+    
+    # tenant_id 형식 검증 (영숫자, 하이픈, 언더스코어만 허용)
+    if not re.match(r'^[a-zA-Z0-9\-_]{2,50}$', tenant_id):
+        logger.error(f"유효하지 않은 tenant_id 형식: {tenant_id}")
+        return False
+    
+    # 지원되는 플랫폼 목록
+    supported_platforms = ['freshdesk', 'zendesk']
+    if platform not in supported_platforms:
+        logger.error(f"지원되지 않는 플랫폼: {platform}")
+        return False
+    
+    return True
+
+
+def build_domain_from_tenant_id(tenant_id: str, platform: str) -> str:
+    """
+    tenant_id와 platform으로 도메인을 재구성합니다.
+    
+    Args:
+        tenant_id: 회사 식별자
+        platform: 플랫폼 이름
+        
+    Returns:
+        str: 재구성된 도메인
+        
+    Raises:
+        ValueError: 유효하지 않은 입력인 경우
+    """
+    if not validate_company_platform(tenant_id, platform):
+        raise ValueError(f"유효하지 않은 tenant_id 또는 platform: {tenant_id}, {platform}")
+    
+    domain_templates = {
+        'freshdesk': f"{tenant_id}.freshdesk.com",
+        'zendesk': f"{tenant_id}.zendesk.com",
+    }
+    
+    if platform not in domain_templates:
+        raise ValueError(f"지원되지 않는 플랫폼: {platform}")
+    
+    return domain_templates[platform]
+
+
+# ==================== HTML 파싱 및 인라인 이미지 처리 ====================
+
+try:
+    from bs4 import BeautifulSoup
+    HAS_BEAUTIFULSOUP = True
+except ImportError:
+    HAS_BEAUTIFULSOUP = False
+    logger.warning("BeautifulSoup4가 설치되지 않았습니다. HTML 파싱 기능이 제한됩니다.")
+
+
+def extract_attachment_id_from_url(url: str) -> Optional[int]:
+    """
+    Freshdesk 첨부파일 URL에서 attachment_id를 추출합니다.
+    
+    Args:
+        url: Freshdesk 첨부파일 URL
+        
+    Returns:
+        추출된 attachment_id 또는 None
+        
+    Example:
+        URL: "https://company.freshdesk.com/helpdesk/attachments/12345678901"
+        Returns: 12345678901
+    """
+    try:
+        # URL 디코딩 (인코딩된 URL 처리)
+        from urllib.parse import unquote
+        url = unquote(url)
+        
+        # Freshdesk 첨부파일 URL 패턴들 (확장)
+        patterns = [
+            r'/attachments/(\d+)',                    # 일반적인 패턴
+            r'attachment_id=(\d+)',                   # 쿼리 파라미터
+            r'/helpdesk/attachments/(\d+)',           # 헬프데스크 패턴
+            r'/api/v2/attachments/(\d+)',             # API v2 패턴
+            r'/desk/attachments/(\d+)',               # desk 패턴
+            r'/attachment/(\d+)',                     # 단수형
+            r'files/(\d+)',                           # files 패턴
+            r'/secure/attachment/(\d+)',              # secure 패턴
+            r'download/attachments/(\d+)',            # download 패턴
+            r'/production/(\d+)/',                    # AWS S3 production 패턴
+            r'/original/blob(\d+)',                   # blob 패턴
+        ]
+        
+        # JWT 토큰에서 attachment_id 추출 시도
+        if 'token=' in url and 'attachment.freshdesk.com' in url:
+            try:
+                import base64
+                import json
+                from urllib.parse import parse_qs, urlparse
+                
+                parsed_url = urlparse(url)
+                query_params = parse_qs(parsed_url.query)
+                token = query_params.get('token', [None])[0]
+                
+                if token:
+                    # JWT 토큰의 페이로드 부분 디코드 (두 번째 부분)
+                    token_parts = token.split('.')
+                    if len(token_parts) >= 2:
+                        payload = token_parts[1]
+                        # Base64 패딩 추가
+                        payload += '=' * (4 - len(payload) % 4)
+                        decoded_payload = base64.b64decode(payload)
+                        payload_data = json.loads(decoded_payload.decode('utf-8'))
+                        
+                        if 'id' in payload_data:
+                            attachment_id = int(payload_data['id'])
+                            logger.info(f"JWT 토큰에서 attachment_id {attachment_id} 추출 성공")
+                            return attachment_id
+            except Exception as e:
+                logger.warning(f"JWT 토큰 파싱 실패: {e}")
+        
+        for pattern in patterns:
+            match = re.search(pattern, url, re.IGNORECASE)
+            if match:
+                attachment_id = int(match.group(1))
+                logger.info(f"패턴 '{pattern}'으로 attachment_id {attachment_id} 추출 성공")
+                return attachment_id
+        
+        # URL 파싱으로 쿼리 파라미터 확인
+        from urllib.parse import urlparse, parse_qs
+        parsed = urlparse(url)
+        query_params = parse_qs(parsed.query)
+        
+        # 다양한 쿼리 파라미터 이름 확인
+        param_names = ['attachment_id', 'attachmentId', 'id', 'fileId', 'file_id']
+        for param_name in param_names:
+            if param_name in query_params:
+                attachment_id = int(query_params[param_name][0])
+                logger.info(f"쿼리 파라미터 '{param_name}'으로 attachment_id {attachment_id} 추출 성공")
+                return attachment_id
+                
+        # base64 data URL인 경우 None 반환 (attachment_id 없음)
+        if url.startswith('data:'):
+            logger.info("base64 data URL - attachment_id 없음")
+            return None
+            
+    except (ValueError, IndexError) as e:
+        logger.warning(f"첨부파일 ID 추출 실패: {url} - {e}")
+    except Exception as e:
+        logger.error(f"첨부파일 ID 추출 중 예외 발생: {url} - {e}")
+    
+    logger.warning(f"어떤 패턴으로도 attachment_id를 추출할 수 없음: {url}")
+    return None
+
+
+def extract_inline_images_from_html(html_content: str) -> List[Dict[str, Any]]:
+    """
+    HTML 콘텐츠에서 인라인 이미지 정보를 추출합니다.
+    
+    Args:
+        html_content: HTML 형태의 티켓 본문 또는 대화 내용
+        
+    Returns:
+        인라인 이미지 정보 리스트
+        
+    Example:
+        [
+            {
+                "attachment_id": 12345,
+                "alt_text": "스크린샷",
+                "type": "inline",
+                "src_url": "https://...",
+                "position": 0
+            }
+        ]
+    """
+    if not html_content or not isinstance(html_content, str):
+        return []
+    
+    # HTML 내용 샘플링 (디버깅용)
+    html_sample = html_content[:200].replace('\n', ' ').replace('\r', ' ')
+    logger.info(f"HTML 파싱 시작 - 길이: {len(html_content)}, 샘플: {html_sample}...")
+    
+    inline_images = []
+    
+    if HAS_BEAUTIFULSOUP:
+        # BeautifulSoup을 사용한 정확한 파싱
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            img_tags = soup.find_all('img')
+            logger.info(f"BeautifulSoup으로 {len(img_tags)}개의 img 태그 발견")
+            
+            for position, img in enumerate(img_tags):
+                src = img.get('src', '').strip()
+                alt = img.get('alt', '').strip()
+                
+                logger.info(f"img 태그 #{position}: src='{src}', alt='{alt}'")
+                
+                # 추적 픽셀 제외 패턴
+                is_tracking_pixel = src and (
+                    'confirm.mail.' in src.lower() or
+                    'tracking.' in src.lower() or
+                    'pixel.' in src.lower() or
+                    'beacon.' in src.lower() or
+                    'open.' in src.lower() or
+                    'read.' in src.lower() or
+                    'view.' in src.lower() or
+                    'mail.google.com' in src.lower() or
+                    'outlook.com' in src.lower()
+                )
+                
+                # 실제 콘텐츠 이미지만 수집 (추적 픽셀 제외)
+                is_collectible_image = src and not is_tracking_pixel and (
+                    # Freshdesk 관련 패턴들
+                    'freshdesk.com' in src.lower() or 
+                    'attachments' in src.lower() or
+                    '/helpdesk/' in src.lower() or
+                    'cdn.freshdesk.com' in src.lower() or
+                    '/api/v2/' in src.lower() or
+                    'freshworkscdn.com' in src.lower() or
+                    'freshworks.com' in src.lower() or
+                    's3.amazonaws.com/cdn.freshdesk.com' in src.lower() or
+                    # base64 이미지 (실제 콘텐츠)
+                    src.startswith('data:image/') or
+                    # 일반적인 이미지 확장자를 가진 URL
+                    any(src.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'])
+                )
+                
+                if is_tracking_pixel:
+                    logger.info(f"추적 픽셀 감지하여 제외: {src[:100]}...")
+                else:
+                    logger.info(f"img src URL 패턴 확인: 수집대상={is_collectible_image}")
+                
+                if is_collectible_image:
+                    attachment_id = extract_attachment_id_from_url(src)
+                    
+                    # attachment_id가 없어도 이미지 정보 저장
+                    image_info = {
+                        "attachment_id": attachment_id,  # None일 수 있음
+                        "alt_text": alt,
+                        "type": "inline",
+                        "src_url": src,  # 임시 저장 (나중에 제거됨)
+                        "position": position,
+                        "tag_attributes": dict(img.attrs) if hasattr(img, 'attrs') else {}  # 추가 속성들
+                    }
+                    
+                    if attachment_id:
+                        logger.info(f"attachment_id {attachment_id} 추출 성공")
+                    else:
+                        logger.warning(f"attachment_id 추출 실패했지만 이미지 정보는 저장: {src}")
+                    
+                    inline_images.append(image_info)
+                        
+        except Exception as e:
+            logger.warning(f"BeautifulSoup 파싱 실패, 정규식 사용: {e}")
+            # 실패 시 정규식으로 fallback
+            inline_images = _extract_images_with_regex(html_content)
+    else:
+        # BeautifulSoup이 없는 경우 정규식 사용
+        inline_images = _extract_images_with_regex(html_content)
+    
+    logger.info(f"HTML에서 {len(inline_images)}개의 인라인 이미지 추출됨")
+    return inline_images
+
+
+def _extract_images_with_regex(html_content: str) -> List[Dict[str, Any]]:
+    """
+    정규식을 사용하여 HTML에서 이미지 태그를 추출합니다.
+    
+    Args:
+        html_content: HTML 콘텐츠
+        
+    Returns:
+        인라인 이미지 정보 리스트
+    """
+    inline_images = []
+    
+    # img 태그에서 src 속성 찾기
+    img_tags = re.finditer(r'<img[^>]+>', html_content, re.IGNORECASE | re.DOTALL)
+    
+    for position, img_match in enumerate(img_tags):
+        img_tag = img_match.group(0)
+        
+        # src 속성 추출
+        src_match = re.search(r'src=["\']([^"\']+)["\']', img_tag, re.IGNORECASE)
+        if not src_match:
+            continue
+            
+        src = src_match.group(1).strip()
+        
+        # alt 속성 추출 (옵션)
+        alt_match = re.search(r'alt=["\']([^"\']*)["\']', img_tag, re.IGNORECASE)
+        alt = alt_match.group(1).strip() if alt_match else ""
+        
+        logger.info(f"정규식으로 img 태그 #{position} 발견: src='{src}', alt='{alt}'")
+        
+        # 추적 픽셀 제외 패턴
+        is_tracking_pixel = src and (
+            'confirm.mail.' in src.lower() or
+            'tracking.' in src.lower() or
+            'pixel.' in src.lower() or
+            'beacon.' in src.lower() or
+            'open.' in src.lower() or
+            'read.' in src.lower() or
+            'view.' in src.lower() or
+            'mail.google.com' in src.lower() or
+            'outlook.com' in src.lower()
+        )
+        
+        # 실제 콘텐츠 이미지만 수집 (추적 픽셀 제외)
+        is_collectible_image = src and not is_tracking_pixel and (
+            'freshdesk.com' in src.lower() or 
+            'attachments' in src.lower() or
+            '/helpdesk/' in src.lower() or
+            'cdn.freshdesk.com' in src.lower() or
+            '/api/v2/' in src.lower() or
+            'freshworkscdn.com' in src.lower() or
+            'freshworks.com' in src.lower() or
+            's3.amazonaws.com/cdn.freshdesk.com' in src.lower() or
+            src.startswith('data:image/') or
+            any(src.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'])
+        )
+        
+        if is_tracking_pixel:
+            logger.info(f"추적 픽셀 감지하여 제외: {src[:100]}...")
+        
+        if is_collectible_image:
+            attachment_id = extract_attachment_id_from_url(src)
+            
+            # attachment_id가 없어도 이미지 정보 저장
+            image_info = {
+                "attachment_id": attachment_id,  # None일 수 있음
+                "alt_text": alt,
+                "type": "inline",
+                "src_url": src,  # 임시 저장 (나중에 제거됨)
+                "position": position
+            }
+            
+            if attachment_id:
+                logger.info(f"attachment_id {attachment_id} 추출 성공")
+            else:
+                logger.warning(f"attachment_id 추출 실패했지만 이미지 정보는 저장: {src}")
+                
+            inline_images.append(image_info)
+    
+    return inline_images
+
+
+def sanitize_inline_image_metadata(inline_images: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    인라인 이미지 메타데이터에서 URL을 제거하고 안전한 정보만 보존합니다.
+    
+    Args:
+        inline_images: 원본 인라인 이미지 정보 리스트
+        
+    Returns:
+        URL이 제거된 안전한 메타데이터 리스트
+    """
+    sanitized = []
+    
+    for img in inline_images:
+        # URL 제거하고 안전한 메타데이터만 보존
+        safe_metadata = {
+            "attachment_id": img.get("attachment_id"),
+            "alt_text": img.get("alt_text", ""),
+            "type": "inline",
+            "position": img.get("position", 0),
+            # src_url은 저장하지 않음 (보안상 위험)
+        }
+        
+        # 추가 속성이 있으면 필요한 것만 선별적으로 추가
+        if "tag_attributes" in img:
+            attrs = img["tag_attributes"]
+            # 안전한 속성들만 추가
+            safe_attrs = {}
+            for key in ["width", "height", "title", "class"]:
+                if key in attrs:
+                    safe_attrs[key] = attrs[key]
+            
+            if safe_attrs:
+                safe_metadata["attributes"] = safe_attrs
+        
+        sanitized.append(safe_metadata)
+    
+    return sanitized
+
+
+def extract_text_content_from_html(html_content: str) -> str:
+    """
+    HTML에서 순수 텍스트 내용만 추출합니다.
+    
+    Args:
+        html_content: HTML 콘텐츠
+        
+    Returns:
+        HTML 태그가 제거된 순수 텍스트
+    """
+    if not html_content:
+        return ""
+    
+    if HAS_BEAUTIFULSOUP:
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            return soup.get_text(separator=' ', strip=True)
+        except Exception as e:
+            logger.warning(f"BeautifulSoup 텍스트 추출 실패, 정규식 사용: {e}")
+    
+    # 정규식으로 HTML 태그 제거 (기존 sanitize_html 함수와 유사하지만 개선됨)
+    text = re.sub(r'<[^>]+>', ' ', html_content)
+    # 여러 공백을 하나로 통합
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
+
+
+def count_inline_images_in_html(html_content: str) -> int:
+    """
+    HTML 콘텐츠 내 인라인 이미지 개수를 빠르게 계산합니다.
+    
+    Args:
+        html_content: HTML 콘텐츠
+        
+    Returns:
+        인라인 이미지 개수
+    """
+    if not html_content:
+        return 0
+    
+    # Freshdesk 첨부파일 이미지만 카운트
+    pattern = r'<img[^>]*src=["\'][^"\']*(?:freshdesk\.com|attachments)[^"\']*["\'][^>]*>'
+    return len(re.findall(pattern, html_content, re.IGNORECASE))

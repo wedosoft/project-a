@@ -1,0 +1,29 @@
+# 로컬 개발환경용 Docker Compose 오버라이드
+# 사용법: docker-compose -f docker-compose.yml -f docker-compose.local.yml up
+
+services:
+  backend:
+    environment:
+      # 로컬 개발용 설정
+      - LOG_LEVEL=DEBUG
+      - USE_GPU_FIRST=true  # Apple Silicon MPS 시도
+      - GPU_FALLBACK_TO_OPENAI=true
+      
+    volumes:
+      # 개발용 hot reload
+      - .:/app
+      - ./data:/app/data
+      - ./logs:/app/logs
+    
+    ports:
+      - "8000:8000"
+    
+    # 개발용 명령어 (hot reload)
+    command: >
+      bash -c "
+        echo '=== 로컬 개발환경 시작 ==='
+        echo '플랫폼: macOS Apple Silicon'
+        echo 'GPU 지원: MPS (Metal Performance Shaders)'
+        python -c 'from core.search.embeddings import log_embedding_status; log_embedding_status()' || echo 'embedding status 확인 실패'
+        python -m uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+      "
