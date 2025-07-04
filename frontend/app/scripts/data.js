@@ -286,12 +286,23 @@ window.Data = {
             } else {
               console.log('⚠️ 티켓 정보 없음 → 백그라운드 로드 스킵');
               // 티켓 정보가 없더라도 최소한의 백엔드 호출을 시도해볼 수 있음
-              console.log('🔄 티켓 정보 없음에도 불구하고 기본 백엔드 호출 시도');
+              console.log('🔄 백엔드 연결 상태 확인 및 호출 시도');
               try {
-                // 백엔드 호출은 주석 처리됨 - 필요 시 활성화
-                //const result = await this.loadInitialDataFromBackend(client, { id: 'current' });
-                resolve(true);
+                // 먼저 백엔드 연결 상태 확인
+                if (window.API && window.API.checkBackendConnection) {
+                  const isConnected = await window.API.checkBackendConnection();
+                  if (!isConnected) {
+                    console.warn('⚠️ 백엔드 서버 연결 불가 - 오프라인 모드로 전환');
+                    resolve(false);
+                    return;
+                  }
+                }
+                
+                // 백엔드 연결이 가능한 경우 API 호출
+                const result = await this.loadInitialDataFromBackend(client, { id: 'current' });
+                resolve(result ? true : false);
               } catch (backendError) {
+                console.warn('⚠️ 백엔드 호출 실패:', backendError);
                 resolve(false);
               }
             }
@@ -303,7 +314,7 @@ window.Data = {
         } catch (error) {
           resolve(false);
         }
-      }, 2000); // 2초로 지연 시간 증가하여 FDK 완전 초기화 대기
+      }, 500); // 500ms로 단축 - FDK 기본 초기화 대기
       });
     } catch (error) {
       return false;
@@ -631,7 +642,7 @@ window.Data = {
       }
       
       // 백엔드 /init 엔드포인트 호출 (에이전트 언어 포함)
-      const response = await API.loadInitData(client, ticket.id, agentLanguage);
+      const response = await API.loadInitData(client, ticket.id);
       
       console.log('🔍 백엔드 응답 상세 분석:', {
         response: response,
@@ -1198,9 +1209,7 @@ Data.isAvailable = function () {
   return typeof GlobalState !== 'undefined' && typeof API !== 'undefined';
 };
 
-if (window.location.hostname === 'localhost') {
-  console.log('📊 Data 모듈 로드 완료 - 7개 함수 export됨');
-}
+// 모듈 등록 (로그 없음)
 
 // 모듈 의존성 시스템에 등록
 if (typeof ModuleDependencyManager !== 'undefined') {

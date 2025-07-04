@@ -303,13 +303,8 @@ window.UI = {
       }
 
       // 티켓 정보 표시
-      if (data.ticket) {
-        this.displayTicketInfo(data.ticket);
-      }
-
-      // 관련 문서 표시
-      if (data.related_docs && data.related_docs.length > 0) {
-        this.displayRelatedDocs(data.related_docs);
+      if (data.ticket_info) {
+        this.displayTicketInfo(data.ticket_info);
       }
 
       // 요약 정보 표시
@@ -317,9 +312,130 @@ window.UI = {
         this.displaySummary(data.summary);
       }
 
+      // 유사 티켓 표시
+      if (data.similar_tickets && data.similar_tickets.length > 0) {
+        this.displayRelatedDocs(data.similar_tickets);
+      }
+
+      // KB 문서 표시
+      if (data.kb_documents && data.kb_documents.length > 0) {
+        this.displayRelatedDocs(data.kb_documents);
+      }
+
+      // 관련 문서 표시 (레거시 지원)
+      if (data.related_docs && data.related_docs.length > 0) {
+        this.displayRelatedDocs(data.related_docs);
+      }
+
       console.log('[UI] 캐시된 데이터로 UI 업데이트 완료');
     } catch (error) {
       console.error('[UI] 캐시된 데이터 UI 업데이트 오류:', error);
+    }
+  },
+
+  // 🎯 필수 데이터 표시 함수들 구현
+  
+  /**
+   * 티켓 정보 표시
+   */
+  displayTicketInfo(ticket) {
+    try {
+      console.log('📋 티켓 정보 표시:', ticket);
+      
+      // 티켓 제목 업데이트
+      const titleElement = document.querySelector('#ticket-title, .ticket-title, h1');
+      if (titleElement && ticket.subject) {
+        titleElement.textContent = ticket.subject;
+      }
+      
+      // 티켓 ID 표시
+      const idElement = document.querySelector('#ticket-id, .ticket-id');
+      if (idElement && ticket.id) {
+        idElement.textContent = `티켓 #${ticket.id}`;
+      }
+      
+      // 티켓 상태 표시
+      const statusElement = document.querySelector('#ticket-status, .ticket-status');
+      if (statusElement && ticket.status) {
+        statusElement.textContent = ticket.status;
+      }
+      
+      // 티켓 우선순위 표시
+      const priorityElement = document.querySelector('#ticket-priority, .ticket-priority');
+      if (priorityElement && ticket.priority) {
+        priorityElement.textContent = ticket.priority;
+      }
+      
+    } catch (error) {
+      console.error('❌ 티켓 정보 표시 오류:', error);
+    }
+  },
+
+  /**
+   * AI 요약 정보 표시
+   */
+  displaySummary(summary) {
+    try {
+      console.log('📝 AI 요약 표시:', summary);
+      
+      // 요약 컨테이너 찾기
+      const summaryContainer = document.querySelector('#summary-container, .summary-container, #ai-summary');
+      if (!summaryContainer) {
+        console.warn('⚠️ 요약 컨테이너를 찾을 수 없음');
+        return;
+      }
+      
+      // 요약 내용 업데이트
+      if (typeof summary === 'string') {
+        summaryContainer.innerHTML = `
+          <h3>🤖 AI 요약</h3>
+          <div class="summary-content">${summary}</div>
+        `;
+      } else if (summary && summary.summary) {
+        summaryContainer.innerHTML = `
+          <h3>🤖 AI 요약</h3>
+          <div class="summary-content">${summary.summary}</div>
+        `;
+      }
+      
+    } catch (error) {
+      console.error('❌ AI 요약 표시 오류:', error);
+    }
+  },
+
+  /**
+   * 관련 문서 표시 (유사 티켓, KB 문서)
+   */
+  displayRelatedDocs(docs) {
+    try {
+      console.log('📚 관련 문서 표시:', docs);
+      
+      // 관련 문서 컨테이너 찾기
+      const docsContainer = document.querySelector('#related-docs, .related-docs, #similar-tickets');
+      if (!docsContainer) {
+        console.warn('⚠️ 관련 문서 컨테이너를 찾을 수 없음');
+        return;
+      }
+      
+      if (docs && docs.length > 0) {
+        let docsHtml = '<h3>📚 관련 문서</h3><ul class="docs-list">';
+        
+        docs.forEach(doc => {
+          docsHtml += `
+            <li class="doc-item">
+              <strong>${doc.title || doc.subject || '제목 없음'}</strong>
+              ${doc.content ? `<p class="doc-content">${doc.content.substring(0, 100)}...</p>` : ''}
+              ${doc.score ? `<span class="doc-score">유사도: ${Math.round(doc.score * 100)}%</span>` : ''}
+            </li>
+          `;
+        });
+        
+        docsHtml += '</ul>';
+        docsContainer.innerHTML = docsHtml;
+      }
+      
+    } catch (error) {
+      console.error('❌ 관련 문서 표시 오류:', error);
     }
   },
 
@@ -1093,9 +1209,7 @@ window.hideModal = function() {
   }
 };
 
-if (window.location.hostname === 'localhost') {
-  console.log('🎨 UI 모듈 로드 완료 - FDK 네이티브 방식으로 단순화됨');
-}
+// 모듈 등록 (로그 없음)
 
 // 모듈 의존성 시스템에 등록 (data 의존성 명시)
 if (typeof ModuleDependencyManager !== 'undefined') {

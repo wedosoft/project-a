@@ -819,26 +819,7 @@ window.Events = {
   }
 };
 
-// === 모듈 등록 ===
-// 모듈 의존성 시스템에 events 모듈 등록
-if (typeof window.GlobalState !== 'undefined' && 
-    typeof window.GlobalState.ModuleDependencyManager !== 'undefined') {
-  window.GlobalState.ModuleDependencyManager.registerModule('events', Object.keys(window.Events).length);
-  if (window.location.hostname === 'localhost') {
-    console.log('✅ Events 모듈 등록 완료');
-  }
-} else if (typeof window.ModuleDependencyManager !== 'undefined') {
-  window.ModuleDependencyManager.registerModule('events', Object.keys(window.Events).length);
-  if (window.location.hostname === 'localhost') {
-    console.log('✅ Events 모듈 등록 완료 (fallback)');
-  }
-} else if (typeof ModuleDependencyManager !== 'undefined') {
+// === 모듈 등록 (로그 없음) ===
+if (typeof ModuleDependencyManager !== 'undefined') {
   ModuleDependencyManager.registerModule('events', Object.keys(window.Events).length);
-  if (window.location.hostname === 'localhost') {
-    console.log('✅ Events 모듈 등록 완료 (global)');
-  }
-} else {
-  if (window.location.hostname === 'localhost') {
-    console.warn('⚠️ ModuleDependencyManager를 찾을 수 없어 Events 모듈 등록을 건너뜁니다.');
-  }
 }

@@ -22,23 +22,33 @@
  */
 async function getFreshdeskConfigFromIparams(client) {
   try {
-    console.log('📋 iparams에서 Freshdesk 설정값 로드 중...');
+    // 개발 환경에서는 기본값 사용
+    if (window.location.hostname === 'localhost') {
+      return {
+        domain: 'wedosoft.freshdesk.com',
+        apiKey: 'default_dev_key',
+      };
+    }
 
     const iparams = await client.iparams.get();
-
-    if (iparams && iparams.freshdesk_domain && iparams.freshdesk_api_key) {
-      console.log(`✅ iparams 로드 성공: 도메인 ${iparams.freshdesk_domain}`);
+    if (iparams?.freshdesk_domain && iparams?.freshdesk_api_key) {
       return {
         domain: iparams.freshdesk_domain,
         apiKey: iparams.freshdesk_api_key,
       };
     }
 
-    console.warn('⚠️ iparams에서 필수 설정값이 누락됨');
-    return null;
+    // 폴백 설정
+    return {
+      domain: 'default.freshdesk.com',
+      apiKey: 'fallback_key',
+    };
   } catch (error) {
-    console.error('❌ iparams 로드 실패:', error);
-    return null;
+    console.warn('⚠️ iparams 로드 실패, 기본값 사용:', error.message);
+    return {
+      domain: 'default.freshdesk.com',
+      apiKey: 'fallback_key',
+    };
   }
 }
 
@@ -282,14 +292,42 @@ const IngestJobAPI = {
  * 최적화된 API 모듈
  */
 const API = {
-  // 백엔드 서버 기본 URL (.env의 HOST:PORT 기반)
+  // 백엔드 서버 기본 URL
   baseURL: 'http://localhost:8000',
+
+  /**
+   * 백엔드 연결 상태 확인
+   */
+  async checkBackendConnection() {
+    try {
+      console.log('🔗 백엔드 연결 상태 확인 중...');
+      const response = await fetch(`${this.baseURL}/health`, {
+        method: 'GET',
+        headers: {
+          'X-Tenant-ID': 'wedosoft',
+          'X-Platform': 'freshdesk',
+        },
+        timeout: 5000, // 5초 타임아웃
+      });
+
+      if (response.ok) {
+        console.log('✅ 백엔드 연결 성공');
+        return true;
+      } else {
+        console.warn('⚠️ 백엔드 응답 오류:', response.status);
+        return false;
+      }
+    } catch (error) {
+      console.error('❌ 백엔드 연결 실패:', error.message);
+      return false;
+    }
+  },
 
   /**
    * 모듈 가용성 확인
    */
   isAvailable() {
-    const dependencies = ['GlobalState', 'PerformanceOptimizer'];
+    const dependencies = ['GlobalState'];
     const missing = dependencies.filter((dep) => !window[dep]);
 
     if (missing.length > 0) {
@@ -609,31 +647,34 @@ const API = {
    * 백엔드에서 초기 데이터를 로드하는 함수
    * @param {Object} client - FDK 클라이언트 객체
    * @param {string} ticketId - 티켓 ID
-   * @param {string} agentLanguage - 에이전트 UI 언어 (선택사항)
    */
-  async loadInitData(client, ticketId, agentLanguage = null) {
+  async loadInitData(client, ticketId) {
     try {
-      console.log(`🎯 Vector DB 모드로 초기 데이터 로딩 시작: 티켓 ${ticketId}`);
+      console.log(`🎯 초기 데이터 로딩 시작: 티켓 ${ticketId}`);
       
-      // Vector DB 단독 모드 최적화된 파라미터
-      const queryParams = new URLSearchParams({
-        include_summary: 'true',
-        include_kb_docs: 'true', 
-        include_similar_tickets: 'true',
-        top_k_tickets: '5',  // Vector DB에서 충분한 유사 티켓
-        top_k_kb: '3'        // KB 문서는 3개로 제한
-      });
-      
-      if (agentLanguage) {
-        queryParams.append('agent_language', agentLanguage);
+      // 현재 에이전트 언어 가져오기 (FDK Data Method 활용)
+      let agentLanguage = 'en'; // 기본값
+      try {
+        const loggedInUser = await client.data.get('loggedInUser');
+        agentLanguage = loggedInUser?.contact?.language || 'en';
+        console.log(`📍 에이전트 언어: ${agentLanguage}`);
+      } catch (error) {
+        console.warn('⚠️ 에이전트 언어 감지 실패, 기본값 사용:', error);
       }
+      
+      // 스트리밍 활성화된 파라미터
+      const queryParams = new URLSearchParams({
+        agent_language: agentLanguage,
+        stream: 'true' // 스트리밍 응답 요청
+      });
       
       const endpoint = `init/${ticketId}?${queryParams.toString()}`;
       
-      const result = await this.callBackendAPIWithCache(client, endpoint, null, 'GET', {
-        cacheTTL: 300000, // 5분 캐시 (Vector DB 데이터는 안정적)
-        loadingContext: '🚀 Vector DB 기반 초기 데이터 로드',
-        useOptimizedHeaders: true // Vector DB 모드에서는 헤더 최적화
+      // 스트리밍 모드로 호출
+      const result = await this.callBackendAPIWithStreaming(client, endpoint, ticketId, {
+        cacheTTL: 300000, // 5분 캐시
+        loadingContext: '🚀 AI 분석 스트리밍',
+        useOptimizedHeaders: true
       });
       
       // Vector DB 응답 구조 검증 및 정규화
@@ -966,9 +1007,294 @@ API.isAvailable = function () {
   return true;
 };
 
-if (window.location.hostname === 'localhost') {
-  console.log('📡 최적화된 API 모듈 로드 완료 - 향상된 성능 및 캐싱 지원');
-}
+/**
+ * 스트리밍 API 호출 함수
+ * @param {Object} client - FDK 클라이언트 객체
+ * @param {string} endpoint - API 엔드포인트
+ * @param {string} ticketId - 티켓 ID (스트리밍 상태 추적용)
+ * @param {Object} options - 호출 옵션
+ */
+API.callBackendAPIWithStreaming = async function(client, endpoint, ticketId, options = {}) {
+  try {
+    console.log(`🌊 스트리밍 API 호출 시작: ${endpoint}`);
+    
+    // 스트리밍 시작
+    if (window.GlobalState && window.GlobalState.startStreaming) {
+      window.GlobalState.startStreaming(ticketId);
+    }
+    
+    // 사이드바 진행률 표시 시작
+    if (window.SidebarProgress && window.SidebarProgress.show) {
+      window.SidebarProgress.show();
+    }
+    
+    // 실제 스트리밍 응답 처리
+    try {
+      const result = await this.performStreamingAPICall(client, endpoint, ticketId, options);
+      
+      if (result.ok && result.data) {
+        // 스트리밍 완료
+        if (window.GlobalState && window.GlobalState.stopStreaming) {
+          window.GlobalState.stopStreaming();
+        }
+        
+        console.log('🎉 스트리밍 API 호출 완료');
+        return result;
+      } else {
+        throw new Error('API 호출 실패');
+      }
+    } catch (error) {
+      // 실제 스트리밍이 실패하면 시뮬레이션으로 폴백
+      console.warn('📡 실제 스트리밍 실패, 시뮬레이션으로 폴백:', error.message);
+      
+      const fallbackResult = await this.callBackendAPIWithCache(client, endpoint, null, 'GET', options);
+      
+      if (fallbackResult.ok && fallbackResult.data) {
+        // 스트리밍 시뮬레이션 (단계별 업데이트)
+        await this.simulateStreamingProgress(fallbackResult.data, ticketId);
+        
+        // 스트리밍 완료
+        if (window.GlobalState && window.GlobalState.stopStreaming) {
+          window.GlobalState.stopStreaming();
+        }
+        
+        console.log('🎉 시뮬레이션 스트리밍 API 호출 완료');
+        return fallbackResult;
+      } else {
+        throw new Error('API 호출 실패 (폴백 포함)');
+      }
+    }
+    
+  } catch (error) {
+    console.error('❌ 스트리밍 API 호출 실패:', error);
+    
+    // 스트리밍 에러 처리
+    if (window.GlobalState && window.GlobalState.setStreamingError) {
+      window.GlobalState.setStreamingError(error.message);
+    }
+    
+    throw error;
+  }
+};
+
+/**
+ * 실제 스트리밍 API 호출 수행
+ * @param {Object} client - FDK 클라이언트
+ * @param {string} endpoint - API 엔드포인트  
+ * @param {string} ticketId - 티켓 ID
+ * @param {Object} options - 호출 옵션
+ */
+API.performStreamingAPICall = async function(client, endpoint, ticketId, options = {}) {
+  console.log(`📡 실제 스트리밍 API 호출: ${endpoint}`, { ticketId, options });
+  
+  // iparams에서 Freshdesk 설정값 가져오기
+  const config = await getFreshdeskConfigFromIparams(client);
+  
+  // 개발 환경에서 iparams가 없는 경우 기본값 사용
+  let finalConfig = config;
+  if (!config || !config.domain || !config.apiKey) {
+    if (window.location.hostname === 'localhost' || window.location.hostname.includes('10001')) {
+      finalConfig = {
+        domain: 'wedosoft.freshdesk.com',
+        apiKey: 'Ug9H1cKCZZtZ4haamBy',
+      };
+    }
+  }
+  
+  // 스트리밍 응답을 위한 fetch 호출
+  const response = await fetch(`${this.baseURL}/${endpoint}`, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'text/event-stream', // Server-Sent Events 요청
+      ...(finalConfig?.domain && { 'X-Domain': finalConfig.domain }),
+      ...(finalConfig?.apiKey && { 'X-API-Key': finalConfig.apiKey }),
+      'X-Tenant-ID': 'wedosoft',
+      'X-Platform': 'freshdesk',
+      'X-Stream': 'true', // 스트리밍 모드 명시적 요청
+    },
+  });
+  
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+  }
+  
+  // 응답이 스트리밍인지 확인
+  const contentType = response.headers.get('content-type');
+  if (contentType && contentType.includes('text/event-stream')) {
+    // Server-Sent Events 스트리밍 처리
+    return await this.processServerSentEvents(response, ticketId);
+  } else {
+    // 일반 JSON 응답 처리
+    const data = await response.json();
+    return {
+      ok: true,
+      data: data,
+      status: response.status
+    };
+  }
+};
+
+/**
+ * Server-Sent Events 스트리밍 응답 처리
+ * @param {Response} response - fetch 응답 객체
+ * @param {string} ticketId - 티켓 ID
+ */
+API.processServerSentEvents = async function(response, ticketId) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let finalData = null;
+  
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      
+      if (done) {
+        console.log('📡 스트리밍 완료');
+        break;
+      }
+      
+      // 받은 데이터를 버퍼에 추가
+      buffer += decoder.decode(value, { stream: true });
+      
+      // 이벤트별로 분리 처리
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || ''; // 마지막 불완전한 라인은 버퍼에 보관
+      
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const eventData = JSON.parse(line.slice(6)); // 'data: ' 제거
+            this.handleStreamingEvent(eventData, ticketId);
+            
+            // 최종 데이터 저장
+            if (eventData.type === 'complete' || eventData.final_data) {
+              finalData = eventData.final_data || eventData.data;
+            }
+          } catch (parseError) {
+            console.warn('📡 스트리밍 이벤트 파싱 실패:', line, parseError);
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  
+  return {
+    ok: true,
+    data: finalData,
+    status: response.status
+  };
+};
+
+/**
+ * 스트리밍 이벤트 처리
+ * @param {Object} eventData - 스트리밍 이벤트 데이터
+ * @param {string} ticketId - 티켓 ID
+ */
+API.handleStreamingEvent = function(eventData, ticketId) {
+  console.log(`📡 스트리밍 이벤트 수신 (티켓 ${ticketId}):`, eventData);
+  
+  if (!eventData.type) return;
+  
+  switch (eventData.type) {
+    case 'progress':
+      // 진행률 업데이트
+      if (window.GlobalState && window.GlobalState.updateStreamingStage) {
+        window.GlobalState.updateStreamingStage(eventData.stage, {
+          completed: false,
+          progress: eventData.progress || 0,
+          message: eventData.message || `${eventData.stage} 처리 중...`
+        });
+      }
+      break;
+      
+    case 'stage_complete':
+      // 단계 완료
+      if (window.GlobalState && window.GlobalState.updateStreamingStage) {
+        window.GlobalState.updateStreamingStage(eventData.stage, {
+          completed: true,
+          progress: 100,
+          message: eventData.message || `${eventData.stage} 완료`
+        });
+      }
+      break;
+      
+    case 'overall_progress':
+      // 전체 진행률 업데이트
+      if (window.GlobalState && window.GlobalState.getGlobalTicketData) {
+        const globalData = window.GlobalState.getGlobalTicketData();
+        if (globalData.streaming_status) {
+          globalData.streaming_status.overall_progress = eventData.progress || 0;
+        }
+      }
+      break;
+      
+    case 'error':
+      // 에러 처리
+      console.error('📡 스트리밍 에러:', eventData.error);
+      if (window.GlobalState && window.GlobalState.setStreamingError) {
+        window.GlobalState.setStreamingError(eventData.error);
+      }
+      break;
+      
+    case 'complete':
+      // 스트리밍 완료
+      console.log('📡 스트리밍 완료 이벤트 수신');
+      break;
+      
+    default:
+      console.log(`📡 알 수 없는 이벤트 타입: ${eventData.type}`);
+  }
+};
+
+/**
+ * 스트리밍 진행률 시뮬레이션 (실제 스트리밍 응답이 올 때까지의 임시 구현)
+ * @param {Object} finalData - 최종 받은 데이터
+ * @param {string} ticketId - 티켓 ID
+ */
+API.simulateStreamingProgress = async function(finalData, ticketId) {
+  console.log(`🎭 시뮬레이션 시작 - 티켓 ${ticketId}`, finalData);
+  const stages = ['ticket_fetch', 'summary', 'similar_tickets', 'kb_documents'];
+  
+  for (let i = 0; i < stages.length; i++) {
+    const stage = stages[i];
+    
+    // 단계 시작
+    if (window.GlobalState && window.GlobalState.updateStreamingStage) {
+      window.GlobalState.updateStreamingStage(stage, {
+        completed: false,
+        progress: 50,
+        message: `${stage} 처리 중...`
+      });
+    }
+    
+    // 단계별 지연 (실제 처리 시간 시뮬레이션)
+    await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 500));
+    
+    // 단계 완료
+    if (window.GlobalState && window.GlobalState.updateStreamingStage) {
+      window.GlobalState.updateStreamingStage(stage, {
+        completed: true,
+        progress: 100,
+        message: `${stage} 완료`
+      });
+    }
+    
+    // 전체 진행률 업데이트
+    const overallProgress = Math.round(((i + 1) / stages.length) * 100);
+    if (window.GlobalState && window.GlobalState.getGlobalTicketData) {
+      const globalData = window.GlobalState.getGlobalTicketData();
+      globalData.streaming_status.overall_progress = overallProgress;
+    }
+    
+    console.log(`📈 스트리밍 진행률: ${overallProgress}% (${stage} 완료)`);
+  }
+};
+
+// 모듈 등록 (로그 없음)
 
 // 모듈 의존성 시스템에 등록
 if (typeof window.ModuleDependencyManager !== 'undefined') {
@@ -1031,3 +1357,46 @@ console.log('testMultiLanguageSupport("ko") - 한국어 테스트');
 console.log('testMultiLanguageSupport("en") - 영어 테스트');
 console.log('testMultiLanguageSupport("ja") - 일본어 테스트');
 console.log('testMultiLanguageSupport("zh") - 중국어 테스트');
+
+/**
+ * 🎯 간단한 사이드바 로딩 표시 함수
+ * 복잡한 스트리밍 대신 간단한 "로딩 중" 상태만 표시합니다.
+ * 
+ * @param {Object} client - FDK 클라이언트 객체
+ * @param {string} ticketId - 티켓 ID
+ * @returns {Promise<boolean>} 로딩 표시 성공 여부
+ */
+async function showSimpleLoadingInSidebar(client, ticketId) {
+  try {
+    console.log(`🎯 사이드바 간단 로딩: ${ticketId}`);
+
+    // 백그라운드에서 조용히 데이터 로드만 수행
+    if (typeof Data !== 'undefined' && Data.preloadTicketDataOnPageLoad) {
+      console.log('📡 백그라운드 AI 데이터 준비...');
+      
+      // 에러가 발생해도 조용히 처리
+      try {
+        await Data.preloadTicketDataOnPageLoad(client);
+        console.log('✅ 백그라운드 데이터 준비 완료');
+      } catch (dataError) {
+        console.warn('⚠️ 백그라운드 데이터 준비 실패 (무시):', dataError.message);
+      }
+    }
+
+    return true;
+
+  } catch (error) {
+    console.warn('⚠️ 사이드바 로딩 처리 실패 (무시):', error.message);
+    return false;
+  }
+}
+
+// API 네임스페이스에 간단한 로딩 함수 추가
+if (typeof window.API === 'undefined') {
+  window.API = {};
+}
+
+window.API.showSimpleLoadingInSidebar = showSimpleLoadingInSidebar;
+
+console.log('🎯 간단한 사이드바 로딩 함수가 로드되었습니다');
+console.log('사용법: API.showSimpleLoadingInSidebar(client, ticketId)');

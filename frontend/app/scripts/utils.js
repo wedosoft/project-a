@@ -450,9 +450,7 @@ window.Utils = {
   },
 };
 
-if (window.location.hostname === 'localhost') {
-  console.log('📦 Utils 모듈 로드 완료 - 11개 함수 export됨');
-}
+// 모듈 등록 (로그 없음)
 
 // 모듈 의존성 시스템에 등록
 if (typeof ModuleDependencyManager !== 'undefined') {
