@@ -228,3 +228,11 @@ backend/core/search/data/embedding_cache/
 
 #SQLite
 backend/core/data/*.db*
+
+# Claude 지침 관리 파일들 
+# 집-회사 동기화를 위해 Git으로 관리
+# 단, 개인별 작업 컨텍스트는 제외
+CLAUDE.md.local
+.claude/local/
+**/CLAUDE.md.local
+*.backup.*

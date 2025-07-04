@@ -1,6 +1,0 @@
-# .gitignore 파일의 브랜치별 merge 전략 설정
-.gitignore merge=ours
-
-# Task Master 파일들의 브랜치별 처리
-tasks/ merge=ours
-.taskmasterconfig merge=ours
