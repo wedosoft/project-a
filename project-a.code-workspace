@@ -19,6 +19,9 @@
         {
             "name": "📚 Documentation",
             "path": "docs"
+        },
+        {
+            "path": "../project-a-perf-0703_1032"
         }
     ],
     "settings": {

@@ -1,371 +1,131 @@
-# Backend API & Core - CLAUDE.md
+# Backend API Layer - CLAUDE.md
 
-## 🎯 Context & Purpose
+## 🎯 컨텍스트 & 목적
 
-This is the **Backend API & Core** worktree focused on the FastAPI application layer, routing, middleware, and dependency injection container. This handles all HTTP endpoints and request/response management for Copilot Canvas.
+이 디렉토리는 **Backend API Layer**로 FastAPI 애플리케이션 레이어, 라우팅, 미들웨어, 의존성 주입 컨테이너를 담당합니다. Copilot Canvas의 모든 HTTP 엔드포인트와 요청/응답 관리를 처리합니다.
 
-**Primary Focus Areas:**
-- FastAPI route handlers and middleware
-- IoC container and dependency injection patterns
-- Request validation and response formatting
-- CORS, authentication, and security middleware
-- Health checks and monitoring endpoints
+**주요 영역:**
+- FastAPI 라우트 핸들러 및 미들웨어
+- IoC 컨테이너 및 의존성 주입 패턴
+- 요청 검증 및 응답 포맷팅
+- CORS, 인증, 보안 미들웨어
+- 헬스체크 및 모니터링 엔드포인트
 
-## 🏗️ API Architecture
-
-### System Overview
-```
-Client Request → Middleware → Route Handler → Core Services → Response
-      ↓              ↓             ↓             ↓            ↓
-   CORS/Auth    Validation    Business Logic   Database    JSON/Streaming
-```
-
-### Core Components
-
-1. **Main Application** (`main.py`)
-   - FastAPI app initialization
-   - Middleware registration
-   - Route mounting
-   - Global error handling
-
-2. **Route Handlers** (`routes/`)
-   - **init.py**: Ticket initialization and analysis
-   - **query.py**: Agent query processing
-   - **reply.py**: Reply suggestion generation
-   - **ingest.py**: Data ingestion endpoints
-   - **health.py**: Health check endpoints
-   - **metrics.py**: Performance monitoring
-
-3. **Middleware** (`middleware/`)
-   - CORS configuration
-   - Request/response logging
-   - Performance monitoring
-   - Error handling
-
-4. **Services** (`services/`)
-   - Job management
-   - Background task coordination
-   - Service layer abstractions
-
-### Key Design Patterns
-
-- **Dependency Injection**: IoC container pattern for loose coupling
-- **Middleware Pipeline**: Request/response processing chain
-- **Router Pattern**: Modular endpoint organization
-- **Service Layer**: Business logic abstraction
-- **Error Boundary**: Centralized exception handling
-
-## 🚀 Development Commands
-
-### Environment Setup
-```bash
-# Virtual environment setup (first time only)
-cd backend
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-**⚠️ CRITICAL**: Always run Python commands from the `backend/` directory with the virtual environment activated.
-
-### Running the Application
-```bash
-# Development server with auto-reload
-uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
-
-# Production server
-uvicorn api.main:app --host 0.0.0.0 --port 8000
-
-# With specific workers
-uvicorn api.main:app --workers 4 --host 0.0.0.0 --port 8000
-```
-
-### Testing & Debugging
-```bash
-# Test specific route
-python -c "from api.routes.health import router; print('✅ Health Route OK')"
-
-# Test IoC container
-python -c "from core.container import get_container; print('✅ Container OK')"
-
-# Test specific endpoint (requires running server)
-curl http://localhost:8000/api/health
-curl -X POST http://localhost:8000/api/init/123 -H "X-Tenant-ID: test"
-```
-
-## 🔧 Key Environment Variables
-
-```bash
-# Server Configuration
-HOST=localhost
-PORT=8000
-ENVIRONMENT=development
-DEBUG=false
-
-# Multi-tenant Configuration
-DEFAULT_TENANT_ID=wedosoft
-PLATFORM=freshdesk
-
-# API Performance
-API_RATE_LIMIT_GLOBAL=1000
-CONNECTION_POOL_SIZE=20
-QUERY_TIMEOUT=30
-
-# Security
-JWT_SECRET=your-jwt-secret-key
-SESSION_TIMEOUT_HOURS=24
-```
-
-## 📁 Directory Structure
+## 🏗️ API 구조
 
 ```
 api/
-├── main.py                # FastAPI application entry point
-├── middleware/            # Custom middleware
-│   ├── __init__.py
-│   ├── cors.py           # CORS configuration
-│   ├── logging.py        # Request/response logging
-│   └── error_handler.py  # Global error handling
-├── routes/               # API route handlers
-│   ├── __init__.py       # Route aggregation
-│   ├── init.py          # Ticket initialization endpoints
-│   ├── query.py         # Agent query endpoints
-│   ├── reply.py         # Reply suggestion endpoints
-│   ├── ingest.py        # Data ingestion endpoints
-│   ├── health.py        # Health check endpoints
-│   └── metrics.py       # Performance monitoring
-├── services/            # Service layer
-│   ├── __init__.py
-│   └── job_manager.py   # Background job management
-└── dependencies.py      # Dependency injection helpers
+├── main.py              # FastAPI 애플리케이션 진입점
+├── container.py         # IoC 컨테이너 설정
+├── routers/            # API 라우터들
+│   ├── init.py         # 티켓 초기화 및 분석
+│   ├── query.py        # 에이전트 쿼리 처리
+│   ├── reply.py        # 응답 제안 생성
+│   ├── ingest.py       # 데이터 수집 엔드포인트
+│   ├── health.py       # 헬스체크
+│   └── metrics.py      # 성능 모니터링
+├── middleware/         # 커스텀 미들웨어
+├── models/            # Pydantic 모델들
+└── utils/             # API 유틸리티
 ```
 
-## 🔍 Common Tasks
+## 🚀 주요 엔드포인트
 
-### Adding New Endpoints
+### 1. 티켓 분석 (`/init/{ticket_id}`)
+```bash
+GET /init/12345
+Headers:
+  X-Freshdesk-Domain: company.freshdesk.com
+  X-Freshdesk-API-Key: your_api_key
+```
+
+### 2. 쿼리 처리 (`/query`)
+```bash
+POST /query
+{
+  "query": "로그인 문제 해결 방법",
+  "context": {...},
+  "tenant_id": "company_id"
+}
+```
+
+### 3. 응답 생성 (`/reply`)
+```bash
+POST /reply
+{
+  "conversation": [...],
+  "context": {...},
+  "language": "ko"
+}
+```
+
+## 🔧 핵심 기능
+
+### 의존성 주입 컨테이너
 ```python
-# 1. Create route handler in routes/
-from fastapi import APIRouter, Depends
-from core.container import get_container
+from api.container import Container
 
-router = APIRouter(prefix="/api/new-feature", tags=["new-feature"])
-
-@router.post("/action")
-async def new_action(
-    data: RequestModel,
-    container = Depends(get_container)
+@inject
+async def process_ticket(
+    ticket_id: int,
+    vector_db: VectorDB = Depends(Container.vector_db),
+    llm_manager: LLMManager = Depends(Container.llm_manager)
 ):
-    service = container.get_service("new_service")
-    result = await service.process(data)
-    return {"status": "success", "data": result}
-
-# 2. Register in routes/__init__.py
-from .new_feature import router as new_feature_router
-# Add to routers list
-
-# 3. Test the endpoint
-curl -X POST http://localhost:8000/api/new-feature/action \
-  -H "Content-Type: application/json" \
-  -H "X-Tenant-ID: test" \
-  -d '{"key": "value"}'
+    # 비즈니스 로직 구현
+    pass
 ```
 
-### Dependency Injection Usage
-```python
-# Using container in route handlers
-from core.container import get_container
-
-@router.get("/example")
-async def example_endpoint(container = Depends(get_container)):
-    # Get services from container
-    llm_manager = container.get_service("llm_manager")
-    vector_db = container.get_service("vector_db")
-    
-    # Use services
-    result = await llm_manager.generate_response(query)
-    return result
-
-# Registering new services in container
-from core.container import Container
-
-container = Container()
-container.register_service("my_service", MyService())
+### 미들웨어 체인
+```
+CORS → 인증 검증 → 요청 로깅 → 성능 측정 → 라우트 핸들러 → 응답 포맷팅 → 에러 처리
 ```
 
-### Middleware Development
+### 스트리밍 응답
 ```python
-# Custom middleware example
-from fastapi import Request, Response
-from starlette.middleware.base import BaseHTTPMiddleware
-
-class CustomMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        # Pre-processing
-        start_time = time.time()
-        
-        # Process request
-        response = await call_next(request)
-        
-        # Post-processing
-        process_time = time.time() - start_time
-        response.headers["X-Process-Time"] = str(process_time)
-        
-        return response
-
-# Register in main.py
-app.add_middleware(CustomMiddleware)
-```
-
-## 🎯 API Endpoints Overview
-
-### Core Endpoints
-- **POST `/api/init/{ticket_id}`**: Initialize ticket analysis
-- **POST `/api/query`**: Process agent queries
-- **POST `/api/reply`**: Generate reply suggestions
-- **GET `/api/health`**: Health check
-- **GET `/api/metrics`**: Performance metrics
-
-### Data Management
-- **POST `/api/ingest/start`**: Start data ingestion
-- **GET `/api/ingest/status`**: Check ingestion status
-- **POST `/api/ingest/reset`**: Reset vector database
-
-### Request/Response Format
-```python
-# Standard request headers
-{
-  "X-Tenant-ID": "wedosoft",
-  "X-Platform": "freshdesk",
-  "Content-Type": "application/json"
-}
-
-# Standard response format
-{
-  "status": "success|error",
-  "data": {...},
-  "message": "Optional message",
-  "request_id": "uuid",
-  "timestamp": "2025-07-02T10:00:00Z"
-}
-```
-
-## 🚨 Important Notes
-
-### Security & Authentication
-- All endpoints require `X-Tenant-ID` header
-- JWT authentication for sensitive operations
-- CORS configured for Freshdesk domains
-- Rate limiting applied globally
-
-### Performance Considerations
-- All I/O operations use async/await
-- Connection pooling for database connections
-- Response streaming for large data
-- Request timeout configuration
-
-### Error Handling
-- Global exception handler catches all errors
-- Structured error responses with request IDs
-- Detailed logging with tenant context
-- Graceful degradation patterns
-
-## 🔗 Integration Points
-
-### Core Services Integration
-```python
-# Typical service usage in routes
-from core.llm.manager import LLMManager
-from core.database.vectordb import vector_db
-from core.platforms.factory import PlatformFactory
-
-# Service dependencies are injected via container
-llm_manager = container.get_service("llm_manager")
-vector_db = container.get_service("vector_db")
-platform_adapter = container.get_service("platform_adapter")
-```
-
-### Frontend Integration
-- FDK apps call these endpoints via configured proxy
-- Real-time updates through WebSocket connections
-- Streaming responses for better UX
-- Error propagation to frontend UI
-
-### External Services
-- Platform APIs (Freshdesk) via adapter pattern
-- Vector database through abstraction layer
-- LLM providers through manager service
-- Caching layer through Redis integration
-
-## 📚 Key Files to Know
-
-- `main.py` - Application entry point and configuration
-- `routes/__init__.py` - Central route registration
-- `routes/init.py` - Main ticket analysis endpoint
-- `routes/query.py` - Agent query processing
-- `middleware/error_handler.py` - Global error handling
-- `services/job_manager.py` - Background job coordination
-- `../core/container.py` - IoC container (shared with core)
-
-## 🔄 Development Workflow
-
-1. **Start Development**: `uvicorn api.main:app --reload`
-2. **Add New Feature**: Create route handler + register in `__init__.py`
-3. **Test Endpoint**: Use curl or Postman for API testing
-4. **Check Logs**: Monitor console output for errors
-5. **Performance Check**: Use `/api/metrics` endpoint
-6. **Deploy**: Package with Docker or direct deployment
-
-## 🚀 Advanced Features
-
-### Streaming Responses
-```python
-from fastapi.responses import StreamingResponse
-
-@router.post("/stream")
-async def stream_response(request: RequestModel):
+@router.post("/stream-analysis")
+async def stream_analysis(request: AnalysisRequest):
     async def generate():
-        for chunk in process_data_stream(request):
+        async for chunk in analyze_ticket_stream(request.ticket_id):
             yield f"data: {json.dumps(chunk)}\n\n"
     
-    return StreamingResponse(
-        generate(),
-        media_type="text/plain"
-    )
+    return StreamingResponse(generate(), media_type="text/plain")
 ```
 
-### Background Jobs
-```python
-from api.services.job_manager import job_manager
+## 🚀 개발 명령어
 
-@router.post("/background-task")
-async def start_background_task(request: RequestModel):
-    job_id = await job_manager.start_job("data_processing", request.dict())
-    return {"job_id": job_id, "status": "started"}
+```bash
+# 개발 서버 시작
+cd backend
+source venv/bin/activate
+uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
 
-@router.get("/job/{job_id}/status")
-async def get_job_status(job_id: str):
-    status = await job_manager.get_job_status(job_id)
-    return {"job_id": job_id, "status": status}
+# 엔드포인트 테스트
+curl http://localhost:8000/health
+curl -X GET "http://localhost:8000/init/12345" \
+     -H "X-Freshdesk-Domain: company.freshdesk.com" \
+     -H "X-Freshdesk-API-Key: your_api_key"
 ```
 
-### WebSocket Support
-```python
-from fastapi import WebSocket
+## ⚠️ 중요 사항
 
-@app.websocket("/ws/{tenant_id}")
-async def websocket_endpoint(websocket: WebSocket, tenant_id: str):
-    await websocket.accept()
-    
-    try:
-        while True:
-            data = await websocket.receive_text()
-            # Process real-time data
-            response = await process_realtime_data(data, tenant_id)
-            await websocket.send_text(json.dumps(response))
-    except Exception as e:
-        await websocket.close()
-```
+### 보안
+- API 키 검증 필수
+- 입력 데이터 검증 (Pydantic 모델)
+- CORS 정책 설정
+- 민감 정보 로그 마스킹
+
+### 성능
+- 비동기 처리 (async/await)
+- 응답 캐싱
+- 요청 타임아웃 설정
+- 리소스 풀링
+
+### 모니터링
+- Prometheus 메트릭 수집
+- 구조화된 로깅 (structlog)
+- 헬스체크 엔드포인트
+- 에러 추적 및 알림
 
 ---
 
-*This worktree focuses exclusively on API layer development. For core business logic, use the appropriate specialized worktrees (vector-db, llm-management, data-pipeline, database-orm).*
+*상세한 라우터별 구현은 각 `routers/*.py` 파일을 참조하세요.*

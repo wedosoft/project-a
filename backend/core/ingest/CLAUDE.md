@@ -1,32 +1,217 @@
 # Data Pipeline & Ingestion - CLAUDE.md
 
-## 🎯 Context & Purpose
+## 🎯 컨텍스트 & 목적
 
-This is the **Data Pipeline & Ingestion** worktree focused on data collection, processing, and storage pipeline for Copilot Canvas. This handles all Freshdesk data ingestion, preprocessing, and storage coordination between SQL and Vector databases.
+이 디렉토리는 **Data Pipeline & Ingestion**으로 데이터 수집, 처리, 저장 파이프라인을 담당합니다. Copilot Canvas의 모든 Freshdesk 데이터 수집, 전처리, SQL과 벡터 데이터베이스 간 저장 조정을 처리합니다.
 
-**Primary Focus Areas:**
-- Freshdesk API integration and data collection
-- Multi-modal data processing (tickets, conversations, attachments, KB articles)
-- Vector-only and hybrid (SQL+Vector) processing modes
-- Batch processing with progress tracking and error recovery
-- Platform-agnostic data transformation and normalization
+**주요 영역:**
+- Freshdesk API 통합 및 데이터 수집
+- 다중 모달 데이터 처리 (티켓, 대화, 첨부파일, KB 문서)
+- Vector 전용 및 하이브리드 (SQL+Vector) 처리 모드
+- 진행 상황 추적 및 오류 복구를 통한 배치 처리
+- 플랫폼 독립적 데이터 변환 및 정규화
 
-## 🏗️ Data Pipeline Architecture
+## 🏗️ 데이터 파이프라인 구조
 
-### System Overview
 ```
-Freshdesk API → Data Collection → Processing Pipeline → Storage Coordination
-      ↓              ↓                    ↓                    ↓
-  Rate Limiting   Normalization      Embedding Gen.      Vector + SQL DBs
+core/ingest/
+├── processor.py        # 메인 수집 오케스트레이터
+├── manager.py         # 수집 관리자
+├── freshdesk/         # Freshdesk 플랫폼 통합
+│   ├── collector.py   # Freshdesk API 수집기
+│   ├── transformer.py # 데이터 변환
+│   └── validator.py   # 데이터 검증
+├── processors/        # 데이터 타입별 처리기
+│   ├── ticket.py      # 티켓 처리
+│   ├── conversation.py # 대화 처리
+│   ├── attachment.py  # 첨부파일 처리
+│   └── kb_article.py  # KB 문서 처리
+└── utils/            # 유틸리티 및 헬퍼
 ```
 
-### Core Components
+## 🔧 핵심 기능
 
-1. **Main Processor** (`ingest/processor.py`)
-   - Orchestrates entire ingestion pipeline
-   - Environment-based mode switching (Vector-only vs Hybrid)
-   - Progress tracking and error recovery
-   - Batch processing coordination
+### 1. 메인 프로세서 (`processor.py`)
+전체 수집 파이프라인을 오케스트레이션합니다:
+
+```python
+# 사용 예시
+from core.ingest.processor import MainProcessor
+
+async def run_full_ingestion(tenant_id: str):
+    processor = MainProcessor()
+    
+    # 하이브리드 모드로 전체 수집 실행
+    await processor.process_all_data(
+        tenant_id=tenant_id,
+        platform="freshdesk",
+        mode="hybrid",  # vector_only 또는 hybrid
+        batch_size=100
+    )
+```
+
+### 2. Freshdesk 수집기 (`freshdesk/collector.py`)
+```python
+# Freshdesk 데이터 수집
+from core.ingest.freshdesk.collector import FreshdeskCollector
+
+collector = FreshdeskCollector(
+    domain="company.freshdesk.com",
+    api_key="your_api_key"
+)
+
+# 티켓 수집
+tickets = await collector.collect_tickets(
+    updated_since="2024-01-01",
+    include_conversations=True,
+    include_attachments=True
+)
+
+# KB 문서 수집
+articles = await collector.collect_kb_articles(
+    category_id=123,
+    published_only=True
+)
+```
+
+### 3. 데이터 변환 (`processors/`)
+플랫폼별 데이터를 표준 형식으로 변환:
+
+```python
+# 티켓 데이터 변환
+from core.ingest.processors.ticket import TicketProcessor
+
+processor = TicketProcessor()
+
+# Freshdesk 티켓을 표준 형식으로 변환
+standard_ticket = await processor.transform(
+    raw_data=freshdesk_ticket,
+    tenant_id="company_123",
+    platform="freshdesk"
+)
+
+# 벡터 임베딩 생성
+embeddings = await processor.generate_embeddings(standard_ticket)
+
+# 저장소에 저장
+await processor.store(standard_ticket, embeddings)
+```
+
+### 4. 배치 처리 및 진행 추적
+```python
+# 진행 상황 모니터링을 통한 배치 처리
+from core.ingest.manager import IngestionManager
+
+manager = IngestionManager()
+
+async def monitor_ingestion():
+    job_id = await manager.start_ingestion(
+        tenant_id="company_123",
+        data_types=["tickets", "kb_articles"],
+        batch_size=50
+    )
+    
+    # 진행 상황 모니터링
+    while True:
+        status = await manager.get_job_status(job_id)
+        print(f"진행률: {status.progress}%, 오류: {status.error_count}")
+        
+        if status.completed:
+            break
+        
+        await asyncio.sleep(10)
+```
+
+## 🚀 처리 모드
+
+### 1. Vector-Only 모드
+벡터 데이터베이스에만 저장하는 경량 모드:
+
+```python
+# 환경변수 설정
+PROCESSING_MODE=vector_only
+
+# 벡터 데이터만 저장
+await processor.process_data(
+    data=ticket_data,
+    mode="vector_only",
+    generate_embeddings=True,
+    store_metadata_only=True
+)
+```
+
+### 2. Hybrid 모드
+SQL과 벡터 데이터베이스 모두 활용하는 완전한 모드:
+
+```python
+# 환경변수 설정
+PROCESSING_MODE=hybrid
+
+# 완전한 데이터 저장
+await processor.process_data(
+    data=ticket_data,
+    mode="hybrid",
+    store_full_data=True,
+    generate_embeddings=True,
+    update_relationships=True
+)
+```
+
+## 🔄 데이터 흐름
+
+### 수집 → 처리 → 저장
+```
+1. Freshdesk API 호출
+2. 속도 제한 관리
+3. 데이터 검증 및 정규화
+4. 임베딩 생성
+5. SQL 저장 (Hybrid 모드)
+6. 벡터 DB 저장
+7. 진행 상황 업데이트
+```
+
+### 오류 처리 및 복구
+```python
+# 오류 복구 메커니즘
+class IngestionError(Exception):
+    def __init__(self, message, recoverable=True):
+        self.message = message
+        self.recoverable = recoverable
+
+async def process_with_retry(data, max_retries=3):
+    for attempt in range(max_retries):
+        try:
+            return await process_data(data)
+        except IngestionError as e:
+            if not e.recoverable or attempt == max_retries - 1:
+                raise
+            
+            await asyncio.sleep(2 ** attempt)  # 지수 백오프
+```
+
+## ⚠️ 중요 사항
+
+### 성능 최적화
+- API 속도 제한 준수 (Freshdesk: 분당 200개 요청)
+- 배치 처리로 대량 데이터 효율적 처리
+- 중복 제거 및 증분 업데이트
+- 임베딩 생성 병렬 처리
+
+### 데이터 품질 관리
+- 입력 데이터 검증 및 정제
+- 중복 데이터 감지 및 제거
+- 첨부파일 OCR 처리 (이미지 → 텍스트)
+- 다국어 콘텐츠 처리
+
+### 모니터링 및 로깅
+- 수집 진행 상황 실시간 추적
+- 오류 발생 시 상세 로깅
+- 데이터 품질 메트릭 수집
+- 성능 지표 모니터링
+
+---
+
+*플랫폼별 API 통합 세부사항은 `platforms/*/CLAUDE.md`를 참조하세요.*
 
 2. **Platform Adapters** (`platforms/freshdesk/`)
    - **adapter.py**: Main Freshdesk integration

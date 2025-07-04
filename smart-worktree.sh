@@ -55,13 +55,21 @@ branch_name="feature/${worktree_name}"
 echo -e "${BLUE}📁 워크트리 이름: ${worktree_name}${NC}"
 echo -e "${BLUE}🌿 브랜치 이름: ${branch_name}${NC}"
 
-# 워크트리 생성
-echo -e "${GREEN}⚙️  워크트리 생성 중...${NC}"
-git worktree add "../project-a-${worktree_name}" "$branch_name"
-
-if [ $? -ne 0 ]; then
+# 브랜치와 워크트리를 동시에 생성
+echo -e "${GREEN}⚙️  브랜치와 워크트리 생성 중...${NC}"
+if git worktree add -b "$branch_name" "../project-a-${worktree_name}"; then
+    echo -e "${GREEN}✅ 워크트리와 브랜치 생성 완료${NC}"
+else
     echo -e "${RED}❌ 워크트리 생성 실패${NC}"
-    exit 1
+    echo -e "${YELLOW}💡 브랜치가 이미 존재하는 경우 기존 브랜치를 사용합니다...${NC}"
+    
+    # 브랜치가 이미 존재하는 경우 기존 브랜치로 워크트리 생성
+    if git worktree add "../project-a-${worktree_name}" "$branch_name"; then
+        echo -e "${GREEN}✅ 기존 브랜치로 워크트리 생성 완료${NC}"
+    else
+        echo -e "${RED}❌ 워크트리 생성 최종 실패${NC}"
+        exit 1
+    fi
 fi
 
 worktree_path="../project-a-${worktree_name}"
@@ -101,6 +109,15 @@ create_claude_md() {
 "프로젝트에서 다음 버그를 찾아서 수정해주세요: '${description}'
 먼저 관련 파일 3개만 찾아서 나열하고, 승인받으면 수정 시작하겠습니다."
 
+## 🎯 Claude Code 7-Rule 워크플로우
+1. **계획**: 버그 원인을 먼저 분석하고 수정 계획 수립
+2. **체크리스트**: 아래 완료 체크리스트를 순서대로 확인
+3. **검토**: 각 단계마다 결과를 검토하고 다음 단계 진행
+4. **보안**: 수정이 새로운 취약점을 만들지 않는지 확인
+5. **학습**: 버그의 근본 원인과 예방법을 문서화
+6. **피드백**: 수정 후 동작을 검증하고 개선점 기록
+7. **반복**: 유사한 버그를 예방하기 위한 패턴 정리
+
 ## ✅ 완료 체크리스트
 - [ ] 버그 재현 확인
 - [ ] 원인 파악 완료  
@@ -139,6 +156,15 @@ EOF
 1. 현재 성능 병목 지점 3곳 찾기
 2. 개선 방안 제시 (목표: 30% 향상)
 3. 승인받으면 구현 시작"
+
+## 🎯 Claude Code 7-Rule 워크플로우
+1. **계획**: 성능 병목 지점을 체계적으로 분석하고 우선순위 결정
+2. **체크리스트**: 측정-최적화-검증 사이클을 반복
+3. **검토**: 각 최적화마다 성능 개선 수치를 측정하고 검토
+4. **보안**: 최적화가 보안성이나 데이터 무결성에 영향 없는지 확인
+5. **학습**: 성능 최적화 기법과 측정 방법을 문서화
+6. **피드백**: 최적화 후 전체 시스템 성능을 모니터링
+7. **반복**: 성능 개선 노하우를 다른 영역에 적용
 
 ## ✅ 완료 체크리스트
 - [ ] 현재 성능 측정 완료
@@ -218,6 +244,15 @@ EOF
 2. 구현 계획 설명
 3. 승인받으면 단계별 개발 시작"
 
+## 🎯 Claude Code 7-Rule 워크플로우
+1. **계획**: 기능 명세와 API 설계를 상세히 수립
+2. **체크리스트**: 설계-구현-테스트-문서화 단계를 순차 진행
+3. **검토**: 각 구현 단계마다 설계 의도와 일치하는지 검토
+4. **보안**: 새 기능이 보안 취약점을 만들지 않는지 검증
+5. **학습**: 개발 과정에서 배운 패턴과 기법을 문서화
+6. **피드백**: 기능 완성 후 사용성과 성능을 평가
+7. **반복**: 개발한 패턴을 다른 기능에도 적용
+
 ## ✅ 완료 체크리스트
 - [ ] 기능 명세 확정
 - [ ] API 설계 완료
@@ -257,6 +292,15 @@ EOF
 2. 개선 방안 제시
 3. 단계별 리팩토링 계획 승인받고 시작"
 
+## 🎯 Claude Code 7-Rule 워크플로우
+1. **계획**: 리팩토링 범위와 목표를 명확히 정의
+2. **체크리스트**: 각 단계마다 테스트를 통해 기능 보존 확인
+3. **검토**: 리팩토링된 코드의 가독성과 유지보수성 평가
+4. **보안**: 코드 변경이 보안성에 영향 없는지 검증
+5. **학습**: 리팩토링 패턴과 기법을 문서화
+6. **피드백**: 리팩토링 후 코드 품질 지표 측정
+7. **반복**: 배운 리팩토링 기법을 다른 모듈에 적용
+
 ## ✅ 완료 체크리스트
 - [ ] 리팩토링 계획 수립
 - [ ] 기존 테스트 모두 통과
@@ -294,6 +338,15 @@ EOF
 1. 현재 문서 상태 확인
 2. 부족한 부분 파악
 3. 명확하고 실용적인 문서 작성"
+
+## 🎯 Claude Code 7-Rule 워크플로우
+1. **계획**: 문서화할 내용과 대상 독자를 명확히 정의
+2. **체크리스트**: 구조-내용-예제-검토 단계를 순차 진행
+3. **검토**: 문서의 명확성과 완성도를 다각도로 평가
+4. **보안**: 문서에 민감한 정보가 노출되지 않는지 확인
+5. **학습**: 효과적인 문서화 기법과 구조를 정리
+6. **피드백**: 문서 사용자의 피드백을 수집하고 개선
+7. **반복**: 문서화 패턴을 다른 프로젝트에도 적용
 
 ## ✅ 완료 체크리스트
 - [ ] 문서 구조 계획
@@ -417,11 +470,56 @@ echo -e "${YELLOW}💡 완료 후 정리:${NC}"
 echo -e "${BLUE}git worktree remove ${worktree_path}${NC}"
 echo ""
 
-# 자동으로 디렉토리 이동 여부 묻기
-read -p "지금 바로 워크트리로 이동하시겠습니까? (y/n): " auto_cd
+# 작업 방식 선택
+echo -e "${YELLOW}어떻게 작업을 시작하시겠습니까?${NC}"
+echo "1. 🗂️  VS Code 작업영역에 추가 (추천)"
+echo "2. 📁 새 VS Code 창에서 워크트리 열기"
+echo "3. 💻 터미널에서 바로 작업"
+echo "4. ⏭️  나중에 직접 선택"
 
-if [ "$auto_cd" = "y" ] || [ "$auto_cd" = "Y" ]; then
-    cd "$worktree_path"
-    echo -e "${GREEN}📁 $(pwd) 로 이동했습니다${NC}"
-    echo -e "${YELLOW}이제 'claude-code' 명령어를 실행하세요!${NC}"
+read -p "선택 (1-4): " work_mode
+
+case $work_mode in
+    1)
+        echo -e "${GREEN}🗂️  VS Code 작업영역에 워크트리를 추가합니다...${NC}"
+        if command -v code &> /dev/null; then
+            code --add "$worktree_path"
+            echo -e "${GREEN}✅ 작업영역에 추가 완료${NC}"
+            echo -e "${CYAN}💡 VS Code 탐색기에서 새 워크트리 폴더를 확인하세요${NC}"
+        else
+            echo -e "${YELLOW}⚠️  VS Code가 설치되지 않았습니다${NC}"
+        fi
+        ;;
+    2)
+        echo -e "${GREEN}📁 새 VS Code 창에서 워크트리를 엽니다...${NC}"
+        if command -v code &> /dev/null; then
+            code "$worktree_path"
+            echo -e "${GREEN}✅ 새 창에서 열기 완료${NC}"
+        else
+            echo -e "${YELLOW}⚠️  VS Code가 설치되지 않았습니다${NC}"
+        fi
+        ;;
+    3)
+        echo -e "${GREEN}💻 터미널 세션을 시작합니다...${NC}"
+        echo -e "${CYAN}다음 명령어를 실행하세요:${NC}"
+        echo -e "${BLUE}cd ${worktree_path}${NC}"
+        ;;
+    4)
+        echo -e "${GREEN}⏭️  나중에 선택하세요${NC}"
+        ;;
+esac
+
+# 워크트리 정리 기능 추가
+echo ""
+echo -e "${YELLOW}📋 유용한 명령어들:${NC}"
+echo -e "${BLUE}• 현재 워크트리 목록: git worktree list${NC}"
+echo -e "${BLUE}• 워크트리 제거: git worktree remove ${worktree_path}${NC}"
+echo -e "${BLUE}• 모든 워크트리 상태: git worktree list --porcelain${NC}"
+
+# 기존 워크트리 정리 제안
+existing_worktrees=$(git worktree list --porcelain | grep -c "^worktree")
+if [ "$existing_worktrees" -gt 2 ]; then
+    echo ""
+    echo -e "${YELLOW}⚠️  워크트리가 ${existing_worktrees}개 있습니다. 정리가 필요할 수 있습니다.${NC}"
+    echo -e "${CYAN}git worktree list 명령어로 확인해보세요.${NC}"
 fi

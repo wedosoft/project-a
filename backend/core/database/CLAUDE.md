@@ -1,52 +1,165 @@
-# Database & ORM - CLAUDE.md
+# Database & Vector DB - CLAUDE.md
 
-## 🎯 Context & Purpose
+## 🎯 컨텍스트 & 목적
 
-This is the **Database & ORM** worktree focused on SQL database operations, multi-tenant data management, and repository patterns for Copilot Canvas. This handles all SQLAlchemy models, database connections, and structured data operations.
+이 디렉토리는 **Database & Vector DB**로 SQL 데이터베이스 운영, 멀티테넌트 데이터 관리, 벡터 데이터베이스 통합을 담당합니다. Copilot Canvas의 모든 데이터 저장 및 검색 기능을 처리합니다.
 
-**Primary Focus Areas:**
-- SQLAlchemy ORM models and relationships
-- Multi-tenant database isolation and management
-- Repository pattern implementation
-- Database migrations and schema management
-- PostgreSQL and SQLite database support
+**주요 영역:**
+- SQLAlchemy ORM 모델 및 관계 정의
+- 멀티테넌트 데이터베이스 격리 및 관리
+- 벡터 데이터베이스 (Qdrant) 통합
+- 리포지토리 패턴 구현
+- 데이터베이스 마이그레이션 및 스키마 관리
 
-## 🏗️ Database Architecture
+## 🏗️ 데이터베이스 구조
 
-### System Overview
 ```
-Application → Repository Layer → ORM Models → Database Adapters → SQL Databases
-     ↓              ↓              ↓              ↓               ↓
-  Business       Data Access    Schema Def.   Connection     PostgreSQL
-   Logic         Patterns        & Relations   Management      /SQLite
+core/database/
+├── vectordb.py          # 벡터 DB 추상화 및 Qdrant 어댑터
+├── manager.py           # 데이터베이스 연결 관리
+├── models/             # SQLAlchemy ORM 모델들
+│   ├── base.py         # 기본 모델 (공통 필드)
+│   └── models.py       # 15+ 엔티티 모델
+├── repositories/       # 리포지토리 패턴 구현
+│   ├── base_repository.py
+│   ├── ticket_repository.py
+│   └── integrated_object_repository.py
+└── migrations/         # 데이터베이스 마이그레이션
 ```
 
-### Core Components
+## 🔧 핵심 컴포넌트
 
-1. **ORM Models** (`database/models/`)
-   - **models.py**: 15+ SQLAlchemy models for all entities
-   - **base.py**: Base model with common fields
-   - Relationship definitions and constraints
-   - Multi-tenant field patterns
+### 1. 벡터 데이터베이스 (`vectordb.py`)
+```python
+# 사용 예시
+from core.database.vectordb import get_vector_db
 
-2. **Database Management** (`database/`)
-   - **manager.py**: Database connection management
-   - **factory.py**: Multi-tenant database factory
-   - **database.py**: Legacy SQLite interface
-   - **tenant_config.py**: Tenant configuration management
+async def search_similar_tickets(query: str, tenant_id: str):
+    vector_db = get_vector_db()
+    results = await vector_db.search(
+        collection_name="tickets",
+        query_text=query,
+        filters={"tenant_id": tenant_id},
+        limit=5
+    )
+    return results
 
-3. **Repository Pattern** (`repositories/`)
-   - **base_repository.py**: Generic repository base
-   - **ticket_repository.py**: Ticket-specific operations
-   - **integrated_object_repository.py**: Cross-platform objects
-   - Query abstraction and optimization
+# 문서 추가
+await vector_db.add_documents(
+    collection_name="kb_articles",
+    documents=[{
+        "id": "article_123",
+        "content": "문서 내용",
+        "metadata": {"tenant_id": "company", "type": "kb"}
+    }]
+)
+```
 
-4. **Migration & Config**
-   - **migration_layer.py**: ORM/Legacy transition support
-   - **tenant_config.py**: Multi-tenant settings
-   - Schema versioning and upgrades
+### 2. ORM 모델 (`models/`)
+멀티테넌트 지원을 위한 완전한 데이터 격리:
 
-### Key Design Patterns
+```python
+# 모델 예시
+class Ticket(BaseModel):
+    __tablename__ = "tickets"
+    
+    id = Column(Integer, primary_key=True)
+    tenant_id = Column(String, nullable=False, index=True)
+    platform = Column(String, nullable=False)
+    original_id = Column(String, nullable=False)
+    subject = Column(Text)
+    description = Column(Text)
+    status = Column(String)
+    
+    # 관계 정의
+    conversations = relationship("Conversation", back_populates="ticket")
+    
+    __table_args__ = (
+        UniqueConstraint('tenant_id', 'platform', 'original_id'),
+        Index('idx_tenant_platform', 'tenant_id', 'platform')
+    )
+```
+
+### 3. 리포지토리 패턴 (`repositories/`)
+```python
+# 사용 예시
+from core.database.repositories import TicketRepository
+
+async def get_ticket_with_context(ticket_id: str, tenant_id: str):
+    repo = TicketRepository()
+    
+    # 티켓과 관련 대화 조회
+    ticket = await repo.get_with_conversations(
+        ticket_id=ticket_id,
+        tenant_id=tenant_id
+    )
+    
+    # 유사 티켓 검색
+    similar_tickets = await repo.find_similar(
+        ticket_id=ticket_id,
+        tenant_id=tenant_id,
+        limit=5
+    )
+    
+    return ticket, similar_tickets
+```
+
+### 4. 멀티테넌트 관리
+```python
+# 테넌트별 데이터 격리
+class TenantConfig:
+    def __init__(self, tenant_id: str):
+        self.tenant_id = tenant_id
+        self.db_config = self.load_tenant_config()
+    
+    def get_collection_name(self, base_name: str) -> str:
+        return f"{self.tenant_id}_{base_name}"
+    
+    def apply_tenant_filter(self, query):
+        return query.filter(tenant_id=self.tenant_id)
+```
+
+## 🚀 데이터 흐름
+
+### 1. 데이터 수집 (Ingestion)
+```
+Freshdesk API → Processor → SQLAlchemy ORM → PostgreSQL
+                     ↓
+                Embeddings → Qdrant Vector DB
+```
+
+### 2. 검색 쿼리
+```
+User Query → Vector Search (Qdrant) → Metadata Lookup (SQL) → Combined Results
+```
+
+### 3. 실시간 업데이트
+```
+Webhook → Data Validation → ORM Update → Vector Update → Cache Invalidation
+```
+
+## ⚠️ 중요 사항
+
+### 멀티테넌트 보안
+- 모든 쿼리에 `tenant_id` 필터 적용 필수
+- 데이터 격리 철저히 준수
+- 크로스 테넌트 데이터 접근 방지
+
+### 성능 최적화
+- 인덱스 전략: `(tenant_id, platform, original_id)`
+- 연결 풀링으로 데이터베이스 연결 관리
+- 쿼리 최적화 및 N+1 문제 방지
+- 벡터 검색 결과 캐싱
+
+### 데이터 일관성
+- 트랜잭션을 통한 원자적 연산
+- Foreign Key 제약조건 활용
+- 데이터 검증 및 무결성 체크
+- 마이그레이션 전략 수립
+
+---
+
+*벡터 검색 구현 세부사항은 `core/search/CLAUDE.md`를 참조하세요.*
 
 - **Repository Pattern**: Data access abstraction
 - **Factory Pattern**: Database instance creation

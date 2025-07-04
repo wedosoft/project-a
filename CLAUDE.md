@@ -1,251 +1,202 @@
-# CLAUDE.md
+# CLAUDE.md - 프로젝트별 지침
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+이 파일은 **RAG 기반 Freshdesk Custom App** 프로젝트에서 Claude Code와 작업할 때 적용되는 프로젝트별 지침을 제공합니다.
 
-## Project Overview
+## 🎯 프로젝트 개요
 
-This is a RAG (Retrieval-Augmented Generation) powered Freshdesk Custom App backend service. It provides AI-based response generation using Freshdesk tickets and knowledge base documents.
+이 프로젝트는 RAG (Retrieval-Augmented Generation) 기반의 Freshdesk 커스텀 앱 백엔드 서비스입니다. Freshdesk 티켓과 지식베이스 문서를 활용한 AI 기반 응답 생성을 제공합니다.
 
-**Tech Stack:**
-- FastAPI backend with async/await patterns
-- Qdrant vector database for document storage and similarity search
-- Multiple LLM providers (OpenAI, Anthropic, Gemini) with intelligent routing
-- Docker containerization with docker-compose
+**기술 스택:**
+- FastAPI 백엔드 (async/await 패턴)
+- Qdrant 벡터 데이터베이스 (문서 저장 및 유사도 검색)
+- 다중 LLM 제공자 (OpenAI, Anthropic, Gemini) 지능형 라우팅
+- Docker 컨테이너화 (docker-compose)
 
-## Common Development Commands
+## 📁 프로젝트 구조
 
-### Environment Setup
+```
+🏠 Project Root/
+├─ backend/           # Python FastAPI 백엔드
+│  ├─ api/           # API 엔드포인트 레이어
+│  ├─ core/          # 핵심 비즈니스 로직
+│  │  ├─ database/   # 데이터베이스 추상화
+│  │  ├─ llm/        # LLM 관리 및 통합
+│  │  ├─ ingest/     # 데이터 수집 파이프라인
+│  │  └─ search/     # 검색 엔진 로직
+│  └─ platforms/     # 플랫폼별 통합 (Freshdesk 등)
+├─ frontend/         # FDK JavaScript 프론트엔드
+│  ├─ app/          # 메인 애플리케이션
+│  └─ config/       # FDK 설정
+└─ docs/            # 프로젝트 문서화
+```
+
+## 🚀 개발 환경 설정
+
+### 필수 사전 조건
+- Python 3.10+
+- Node.js 16+ (FDK 개발용)
+- Docker & Docker Compose
+- Git
+
+### 백엔드 개발 환경
 ```bash
-# Virtual environment setup (first time only)
+# 가상환경 설정 (최초 1회)
 cd backend
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
-# Daily development workflow
+# 일일 개발 워크플로우
 cd backend
-source venv/bin/activate  # Always activate before running Python code
+source venv/bin/activate  # Python 명령어 실행 전 항상 활성화
 
-# Alternative activation script (if available)
-cd backend && ./activate.sh
+# 개발 서버 실행
+python -m api.main
 
-# For Code Interpreter/ChatGPT environment
-./setup_codex_env.sh
+# Docker 환경
+docker-compose up -d
 ```
 
-**⚠️ CRITICAL**: Always run Python commands from the `backend/` directory with the virtual environment activated. Never run Python scripts from the project root.
-
-### Running the Application
+### 프론트엔드 개발 환경
 ```bash
-# Development server
-cd backend && python -m api.main
+# FDK 설치 (최초 1회)
+npm install -g @freshworks/fdk
 
-# Docker environment
-cd backend && docker-compose up -d
+# 개발 서버 실행
+cd frontend
+fdk run
 
-# View logs
-docker logs -f project-a
+# 앱 검증
+fdk validate
 ```
 
-### Testing
+**⚠️ 중요**: Python 명령어는 반드시 `backend/` 디렉토리에서 가상환경 활성화 후 실행하세요.
+
+## 🔧 핵심 환경변수
+
 ```bash
-# Run tests with pytest
-pytest backend/tests/
-
-# Specific test examples
-cd backend && python tests/test_vectordb.py
-cd backend && python tests/test_llm_simple.py
-```
-
-### Data Collection
-```bash
-# Freshdesk data collection
-cd backend/platforms/freshdesk && python run_collection.py
-
-# Monitor collection progress
-cd backend/platforms/freshdesk && bash scripts/monitor_collection.sh
-```
-
-## High-Level Architecture
-
-### Core Components
-
-1. **API Layer** (`backend/api/`)
-   - FastAPI application with IoC container for dependency injection
-   - Multiple routers: init, query, reply, ingest, health, metrics
-   - Middleware for CORS, performance monitoring, error handling
-
-2. **Vector Database** (`backend/core/database/vectordb.py`)
-   - Abstract interface with Qdrant adapter implementation
-   - Multi-tenant support with complete data isolation
-   - Platform-neutral 3-tuple ID system: `(tenant_id, platform, original_id)`
-
-3. **LLM Management** (`backend/core/llm/manager.py`)
-   - Centralized management of multiple LLM providers
-   - Use-case based routing (ticket_view, ticket_similar, summary)
-   - Response and embedding caching with TTL
-
-4. **Data Processing** (`backend/core/ingest/`)
-   - Supports vector-only and hybrid (SQL+Vector) modes
-   - Batch processing with progress tracking
-   - Attachment processing with OCR support
-
-### Key Design Patterns
-
-- **Singleton**: LLM Manager for resource efficiency
-- **Factory**: Vector DB adapter creation
-- **Adapter**: Uniform interface for different vector DBs
-- **IoC/DI**: Dependency injection in FastAPI
-- **Strategy**: LLM routing based on use cases
-
-### Data Flow
-
-1. **Ingestion**: Freshdesk → Processor → Embeddings → Vector DB
-2. **Query**: Request → Vector Search → LLM Processing → Response
-3. **Real-time**: Streaming responses for better UX
-
-### Environment Variables
-
-Essential environment variables:
-```bash
-# Platform settings
+# 플랫폼 설정
 FRESHDESK_DOMAIN=yourcompany.freshdesk.com
 FRESHDESK_API_KEY=your_api_key
-QDRANT_URL=https://your-cluster.cloud.qdrant.io
-QDRANT_API_KEY=your_api_key
 COMPANY_ID=your_company_id
 
-# LLM configuration (template-based naming)
-TICKET_VIEW_MODEL_PROVIDER=openai
-TICKET_VIEW_MODEL_NAME=gpt-4-turbo
-TICKET_SIMILAR_MODEL_PROVIDER=anthropic
-TICKET_SIMILAR_MODEL_NAME=claude-3-haiku-20240307
-SUMMARY_LLM_PROVIDER=openai
-SUMMARY_LLM_MODEL=gpt-3.5-turbo
+# 벡터 데이터베이스
+QDRANT_URL=https://your-cluster.cloud.qdrant.io
+QDRANT_API_KEY=your_api_key
 
-# API keys
-ANTHROPIC_API_KEY=your_api_key
-OPENAI_API_KEY=your_api_key
+# LLM API 키
+ANTHROPIC_API_KEY=sk-ant-api03-...
+OPENAI_API_KEY=sk-proj-...
+GOOGLE_API_KEY=AIzaSy...
+
+# 모델 설정 (사용 사례별)
+TICKET_VIEW_MODEL_PROVIDER=gemini
+TICKET_VIEW_MODEL_NAME=gemini-1.5-flash
+TICKET_SIMILAR_MODEL_PROVIDER=gemini
+TICKET_SIMILAR_MODEL_NAME=gemini-1.5-flash
 ```
 
-## Important Conventions
+## 🏗️ 아키텍처 개요
 
-### Multi-tenancy
-- All operations include `tenant_id` for data isolation
-- Use `X-Company-ID` header in API requests
+### 핵심 컴포넌트
 
-### Document Types
-- `ticket`: Support tickets with conversations
-- `kb`: Knowledge base articles
-- `faq`: FAQ documents with separate scoring
+1. **API 레이어** (`backend/api/`)
+   - FastAPI 애플리케이션과 IoC 컨테이너
+   - 다중 라우터: init, query, reply, ingest, health, metrics
+   - CORS, 성능 모니터링, 오류 처리 미들웨어
 
-### Language Requirements
-- All internal documentation and comments must be in Korean (한글)
-- User-facing error messages in Korean
-- API responses can be in English or Korean based on request
+2. **벡터 데이터베이스** (`backend/core/database/`)
+   - Qdrant 어댑터 구현을 통한 추상 인터페이스
+   - 완전한 데이터 격리를 통한 멀티테넌트 지원
+   - 플랫폼 중립적 3-tuple ID 시스템: `(tenant_id, platform, original_id)`
 
-### Performance Considerations
-- Monitor LLM token usage
-- Implement request timeouts and retries
-- Use prometheus metrics for monitoring
-- Optimize vector searches with appropriate top_k values
+3. **LLM 관리** (`backend/core/llm/`)
+   - 다중 LLM 제공자의 중앙화된 관리
+   - 사용 사례 기반 라우팅 (ticket_view, ticket_similar, summary)
+   - TTL을 통한 응답 및 임베딩 캐싱
 
-## Known Issues and Debugging
+4. **데이터 처리** (`backend/core/ingest/`)
+   - Vector 전용 및 하이브리드 (SQL+Vector) 모드 지원
+   - 진행 상황 추적을 통한 배치 처리
+   - OCR 지원을 통한 첨부파일 처리
 
-### Similar Ticket Summarization Issues
+### 핵심 설계 패턴
+- **멀티테넌시**: tenant_id를 통한 완전한 데이터 격리
+- **비동기 처리**: 성능 향상을 위한 모든 I/O 작업의 비동기화
+- **의존성 주입**: 테스트 가능성을 위한 IoC 컨테이너 패턴
+- **어댑터 패턴**: 플랫폼 독립적 통합 (Freshdesk, 향후 플랫폼)
 
-**Language Mixing (Korean → English):**
-- **Location**: `backend/core/llm/summarizer/prompt/builder.py:126-129`
-- **Issue**: Language instruction selection may not properly use `ui_language` parameter
-- **Root Cause**: Check if `ui_language` is correctly passed through the entire chain from API → LLM Manager → Summarizer → Prompt Builder
-- **Template**: `ticket_similar.yaml` has proper language instructions for all languages
-- **Fix**: Verify `ui_language` parameter flow and ensure it reaches the prompt building stage
-- **Test**: `pytest backend/tests/test_summary_quality.py -v`
+## 🔍 일반적인 개발 작업
 
-**Current Template Structure (Post-Refactor):**
-- **Location**: `backend/core/llm/summarizer/prompt/templates/`
-- **Templates**: 
-  - `ticket_view.yaml` - Premium quality for real-time ticket viewing (4-section structure: 🔍 Problem, 💡 Root Cause, ⚡ Resolution, 🎯 Insights)
-  - `ticket_similar.yaml` - Standard quality for similar ticket analysis (simpler structure)
-  - `knowledge_base.yaml` - Dedicated KB article processing
-- **Status**: Migration completed from old `realtime_ticket.yaml` and `ticket.yaml` to new structure
-- **Language Support**: All templates support ko/en/ja/zh with proper language instructions
-
-**LLM Manager Routing:**
-- **Location**: `backend/core/llm/manager.py:220-226`
-- **Ticket View**: Uses `content_type="ticket_view"` with hardcoded `ui_language="ko"`
-- **Similar Tickets**: Uses `content_type="ticket_similar"` with configurable language
-- **Issue**: Ticket view endpoint may have hardcoded Korean language preference
-
-### Debugging Commands
-
-**IMPORTANT**: All Python tests and debugging must be run from the backend directory with the virtual environment activated:
-
+### 테스트 실행
 ```bash
-# Always start with this setup
+# 백엔드 테스트
 cd backend
 source venv/bin/activate
+pytest tests/
 
-# Test specific summarization quality
-python tests/test_summary_quality.py
+# 특정 테스트
+python tests/test_vectordb.py
+python tests/test_llm_simple.py
 
-# Test template structure (verify sections)
-python -c "
-from core.llm.summarizer.prompt.builder import PromptBuilder
-builder = PromptBuilder()
-ticket_view_prompt = builder.build_system_prompt('ticket_view', 'ko', 'ko')
-ticket_similar_prompt = builder.build_system_prompt('ticket_similar', 'ko', 'ko')
-kb_prompt = builder.build_system_prompt('knowledge_base', 'ko', 'ko')
-print('Ticket View sections:', '🔍' in ticket_view_prompt and '🎯' in ticket_view_prompt)
-print('Ticket Similar language:', '한국어로만 응답하세요' in ticket_similar_prompt)
-print('KB sections:', '📚' in kb_prompt and '🔧' in kb_prompt)
-"
-
-# Debug language detection
-python -c "from core.llm.summarizer.utils.language import detect_content_language; print(detect_content_language('한국어 텍스트 예시'))"
-
-# Check template loading
-python -c "from core.llm.summarizer.prompt.loader import get_prompt_loader; loader = get_prompt_loader(); print(loader.get_system_prompt_template('ticket_similar')['language_instructions'])"
-
-# Monitor prompt building process
-python tests/test_realtime_separation.py
-
-# Test language consistency fix
-python -c "
-from core.llm.summarizer.prompt.builder import PromptBuilder
-builder = PromptBuilder()
-prompt_ko = builder.build_system_prompt('ticket_similar', 'ko', 'ko')
-prompt_en = builder.build_system_prompt('ticket_similar', 'en', 'en')
-print('Korean UI language used:', '한국어로만 응답하세요' in prompt_ko)
-print('English UI language used:', '영어로만 응답하세요' in prompt_en)
-print('Template supports multilingual:', prompt_ko != prompt_en)
-"
-
-# Debug specific similar ticket endpoint language flow
-python -c "
-import asyncio
-from core.llm.manager import LLMManager
-async def test_language():
-    manager = LLMManager()
-    # Test Korean content
-    result = await manager.summarize_similar_tickets(
-        [{'content': '한국어 티켓 내용', 'subject': '한국어 제목'}],
-        ui_language='ko'
-    )
-    print('Similar ticket Korean test:', '한국어' in str(result))
-test = asyncio.run(test_language())
-"
+# 프론트엔드 테스트
+cd frontend
+npm test
 ```
 
-### Template Quality Verification
-- **Ticket View**: Use `ticket_view.yaml` template for premium real-time viewing (4-section structure)
-- **Similar Tickets**: Use `ticket_similar.yaml` template for efficient comparison summaries
-- **Knowledge Base**: Use `knowledge_base.yaml` template for KB article processing
-- Content language detection should match UI language instructions
-- Section titles should match UI language preference
-- All templates support ko/en/ja/zh with proper language-specific instructions
+### 데이터 수집
+```bash
+# Freshdesk 데이터 수집
+cd backend/platforms/freshdesk
+python run_collection.py
 
-### Endpoint-Specific Language Issues
-- **Similar Tickets Endpoint**: Check `ui_language` parameter flow from API request to prompt generation
-- **Ticket View Endpoint**: Currently hardcoded to Korean (`ui_language="ko"`) in LLM Manager
-- **Language Detection**: Automatic detection available but may need manual override for UI preferences
+# 수집 진행 상황 모니터링
+bash scripts/monitor_collection.sh
+```
+
+### 디버깅 도구
+```bash
+# LLM 관리자 테스트
+python -c "from core.llm.manager import LLMManager; manager = LLMManager(); print('Available providers:', manager.get_available_providers())"
+
+# 벡터 검색 테스트
+python -c "from core.database.vectordb import get_vector_db; db = get_vector_db(); print('Vector DB 연결 성공')"
+
+# 요약 품질 테스트
+python tests/test_summary_quality.py
+```
+
+## 🚨 주요 컨벤션
+
+### 다국어 지원
+- 내부 문서/주석: 한국어 작성 필수
+- 사용자 대상 오류 메시지: 한국어
+- API 응답: 요청에 따라 한국어/영어
+- 변수/함수명: 영어 (국제 표준)
+
+### 성능 고려사항
+- LLM 토큰 사용량 모니터링
+- 요청 타임아웃 및 재시도 구현
+- 적절한 top_k 값으로 벡터 검색 최적화
+- Prometheus 메트릭을 통한 모니터링
+
+### 문서 타입
+- `ticket`: 대화가 포함된 지원 티켓
+- `kb`: 지식베이스 문서
+- `faq`: 별도 점수 체계를 가진 FAQ 문서
+
+---
+
+## 📚 컴포넌트별 상세 지침
+
+이 프로젝트의 각 컴포넌트에 대한 상세한 지침은 다음 파일들을 참조하세요:
+
+- **Backend API Core**: `backend/CLAUDE.md`
+- **API Layer**: `backend/api/CLAUDE.md`
+- **LLM Management**: `backend/core/llm/CLAUDE.md`
+- **Database & Vector DB**: `backend/core/database/CLAUDE.md`
+- **Vector Search Engine**: `backend/core/search/CLAUDE.md`
+- **Data Pipeline**: `backend/core/ingest/CLAUDE.md`
+- **Frontend FDK**: `frontend/CLAUDE.md`
+
+**전역 개발 원칙은 `/Users/alan/.claude/CLAUDE.md`에서 관리됩니다.**

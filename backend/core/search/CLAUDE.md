@@ -1,32 +1,183 @@
-# Vector DB & Search - CLAUDE.md
+# Vector Search Engine - CLAUDE.md
 
-## 🎯 Context & Purpose
+## 🎯 컨텍스트 & 목적
 
-This is the **Vector DB & Search** worktree focused on vector database operations, similarity search, and embedding generation for Copilot Canvas. This handles all Qdrant interactions, vector operations, and search functionality.
+이 디렉토리는 **Vector Search Engine**으로 벡터 데이터베이스 운영, 유사도 검색, 임베딩 생성을 담당합니다. Copilot Canvas의 모든 Qdrant 상호작용, 벡터 연산, 검색 기능을 처리합니다.
 
-**Primary Focus Areas:**
-- Qdrant vector database integration and management
-- Vector similarity search and retrieval
-- Embedding generation (GPU/CPU/OpenAI)
-- Hybrid search combining vector and traditional search
-- Performance optimization for large-scale vector operations
+**주요 영역:**
+- Qdrant 벡터 데이터베이스 통합 및 관리
+- 벡터 유사도 검색 및 검색 결과 추출
+- 임베딩 생성 (GPU/CPU/OpenAI)
+- 벡터와 기존 검색을 결합한 하이브리드 검색
+- 대규모 벡터 연산 성능 최적화
 
-## 🏗️ Vector Search Architecture
+## 🏗️ 검색 구조
 
-### System Overview
 ```
-Text Input → Embedding Generation → Vector Search → Similarity Results
-     ↓              ↓                    ↓               ↓
-  Preprocessing   GPU/CPU/API         Qdrant DB      Post-processing
+core/search/
+├── engine.py           # 검색 엔진 인터페이스
+├── hybrid.py          # 하이브리드 검색 구현
+├── embeddings/        # 임베딩 생성 모듈
+│   ├── base.py        # 임베딩 인터페이스
+│   ├── openai.py      # OpenAI 임베딩
+│   ├── local.py       # 로컬 모델 (GPU/CPU)
+│   └── cache.py       # 임베딩 캐싱
+├── filters/           # 검색 필터링
+└── utils/            # 검색 유틸리티
 ```
 
-### Core Components
+## 🔧 핵심 기능
 
-1. **Vector Database Interface** (`database/vectordb.py`)
-   - Abstract VectorDBInterface for pluggable backends
-   - QdrantAdapter implementation
-   - Multi-tenant collection management
-   - Metadata filtering and search optimization
+### 1. 벡터 검색 (`engine.py`)
+```python
+# 사용 예시
+from core.search.engine import SearchEngine
+
+async def search_similar_content(query: str, tenant_id: str):
+    engine = SearchEngine()
+    
+    results = await engine.search(
+        query_text=query,
+        collection_name="documents",
+        filters={"tenant_id": tenant_id},
+        limit=10,
+        score_threshold=0.7
+    )
+    
+    return results
+```
+
+### 2. 하이브리드 검색 (`hybrid.py`)
+벡터 검색과 키워드 검색을 결합한 고성능 검색:
+
+```python
+# 사용 예시
+from core.search.hybrid import HybridSearchEngine
+
+async def hybrid_search(query: str, tenant_id: str):
+    engine = HybridSearchEngine()
+    
+    results = await engine.search(
+        query=query,
+        tenant_id=tenant_id,
+        vector_weight=0.7,  # 벡터 검색 가중치
+        keyword_weight=0.3, # 키워드 검색 가중치
+        limit=20
+    )
+    
+    return results
+```
+
+### 3. 임베딩 생성 (`embeddings/`)
+```python
+# OpenAI 임베딩
+from core.search.embeddings.openai import OpenAIEmbeddings
+
+embeddings = OpenAIEmbeddings()
+vector = await embeddings.embed_text("검색할 텍스트")
+
+# 로컬 모델 임베딩 (GPU 가속)
+from core.search.embeddings.local import LocalEmbeddings
+
+local_embeddings = LocalEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+vector = await local_embeddings.embed_text("검색할 텍스트")
+
+# 배치 임베딩 처리
+vectors = await embeddings.embed_batch([
+    "첫 번째 문서",
+    "두 번째 문서",
+    "세 번째 문서"
+])
+```
+
+### 4. 고급 필터링 (`filters/`)
+```python
+# 복합 필터 적용
+search_filters = {
+    "tenant_id": "company_123",
+    "document_type": ["ticket", "kb"],
+    "status": "published",
+    "created_date": {
+        "gte": "2024-01-01",
+        "lte": "2024-12-31"
+    }
+}
+
+results = await engine.search(
+    query_text="로그인 문제",
+    filters=search_filters,
+    limit=15
+)
+```
+
+## 🚀 성능 최적화
+
+### 임베딩 캐싱
+```python
+# 임베딩 결과 캐싱으로 성능 향상
+from core.search.embeddings.cache import CachedEmbeddings
+
+cached_embeddings = CachedEmbeddings(
+    embeddings=OpenAIEmbeddings(),
+    cache_ttl=3600  # 1시간 캐시
+)
+
+# 동일한 텍스트 재요청 시 캐시에서 반환
+vector = await cached_embeddings.embed_text("자주 검색되는 텍스트")
+```
+
+### 배치 처리
+```python
+# 대량 문서 처리 시 배치 최적화
+async def process_documents_batch(documents: List[str], batch_size: int = 100):
+    for i in range(0, len(documents), batch_size):
+        batch = documents[i:i + batch_size]
+        vectors = await embeddings.embed_batch(batch)
+        
+        # 벡터 DB에 배치 삽입
+        await vector_db.add_vectors(vectors)
+```
+
+### 검색 결과 재랭킹
+```python
+# 검색 결과 품질 향상을 위한 재랭킹
+async def rerank_results(query: str, results: List[dict]):
+    # 컨텍스트 유사도 기반 재랭킹
+    reranker = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
+    
+    pairs = [(query, result['content']) for result in results]
+    scores = reranker.predict(pairs)
+    
+    # 점수 기반 재정렬
+    for result, score in zip(results, scores):
+        result['rerank_score'] = score
+    
+    return sorted(results, key=lambda x: x['rerank_score'], reverse=True)
+```
+
+## ⚠️ 중요 사항
+
+### 성능 고려사항
+- GPU 가속 임베딩 모델 우선 사용
+- 임베딩 캐싱으로 중복 계산 방지
+- 배치 처리로 대량 데이터 효율적 처리
+- 적절한 `top_k` 값 설정으로 검색 속도 최적화
+
+### 품질 관리
+- 임베딩 모델 버전 일관성 유지
+- 검색 결과 스코어 임계값 조정
+- A/B 테스트를 통한 하이브리드 가중치 최적화
+- 사용자 피드백 기반 검색 품질 개선
+
+### 확장성
+- 멀티테넌트 컬렉션 분리
+- 수평 확장 가능한 Qdrant 클러스터 구성
+- 임베딩 모델 버전 관리 체계
+- 검색 로그 및 메트릭 수집
+
+---
+
+*벡터 데이터베이스 설정은 `core/database/CLAUDE.md`를 참조하세요.*
 
 2. **Embedding Generation** (`search/embeddings/`)
    - **hybrid.py**: Multi-provider embedding coordination

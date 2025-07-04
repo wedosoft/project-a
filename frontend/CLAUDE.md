@@ -1,52 +1,215 @@
 # Frontend FDK Development - CLAUDE.md
 
-## 🎯 Context & Purpose
+## 🎯 컨텍스트 & 목적
 
-This is the **Frontend FDK** worktree focused on the Freshdesk Development Kit (FDK) JavaScript application for Copilot Canvas. This frontend provides the user interface for AI-powered ticket analysis within the Freshdesk platform.
+이 디렉토리는 **Frontend FDK**로 Copilot Canvas의 Freshdesk Development Kit (FDK) JavaScript 애플리케이션을 담당합니다. Freshdesk 플랫폼 내에서 AI 기반 티켓 분석을 위한 사용자 인터페이스를 제공합니다.
 
-**Primary Focus Areas:**
-- FDK-based Freshdesk application development
-- Modern JavaScript ES6+ with modular architecture
-- Real-time UI updates and user interactions
-- Backend API integration and state management
-- Performance optimization and caching strategies
+**주요 영역:**
+- FDK 기반 Freshdesk 애플리케이션 개발
+- 모듈화된 아키텍처를 활용한 최신 JavaScript ES6+
+- 실시간 UI 업데이트 및 사용자 상호작용
+- 백엔드 API 통합 및 상태 관리
+- 성능 최적화 및 캐싱 전략
 
-## 🏗️ Frontend Architecture
+## 🏗️ 디렉토리 구조
 
-### System Overview
 ```
-Freshdesk Platform → FDK App → Backend API → Vector/LLM Processing
-     ↓                ↓              ↓
-   UI Events     JavaScript     API Responses
+frontend/
+├── app/                   # 메인 애플리케이션
+│   ├── index.html        # 메인 HTML 인터페이스
+│   ├── scripts/          # JavaScript 모듈들
+│   │   ├── globalstate.js    # 중앙화된 상태 관리
+│   │   ├── api.js           # 백엔드 통신 레이어
+│   │   ├── ui.js            # UI 관리 및 DOM 조작
+│   │   ├── events.js        # 이벤트 처리
+│   │   ├── data.js          # 데이터 처리 및 변환
+│   │   ├── utils.js         # 유틸리티 함수들
+│   │   └── debug.js         # 개발/디버깅 도구
+│   └── styles/           # CSS 스타일시트
+├── config/               # FDK 설정
+│   ├── iparams.html     # 설치 매개변수 UI
+│   └── requests.json    # API 엔드포인트 정의
+├── tests/               # 테스트 스위트
+└── coverage/            # 테스트 커버리지 리포트
 ```
 
-### Core Modules
+## 🚀 개발 명령어
 
-1. **Application Core** (`app/`)
-   - Main HTML interface (`index.html`)
-   - Modular JavaScript architecture
-   - CSS styling with modern UI components
+### FDK 개발 환경
+```bash
+# FDK 개발 서버 시작
+fdk run
 
-2. **JavaScript Modules** (`app/scripts/`)
-   - **GlobalState**: Centralized state management system
-   - **API**: Backend communication and caching layer
-   - **UI**: User interface management and DOM manipulation
-   - **Events**: Event handling and user interactions
-   - **Data**: Data processing and transformation
-   - **Utils**: Utility functions and helpers
-   - **DebugTools**: Development and debugging utilities
+# 앱 검증
+fdk validate
 
-3. **Configuration** (`config/`)
-   - **iparams.html**: Installation parameters UI
-   - **requests.json**: API endpoint definitions
+# 앱 패키징
+fdk pack
 
-### Key Design Patterns
+# 로컬 테스트 환경
+fdk run --tunnel
+```
 
-- **Modular Architecture**: Each module has specific responsibilities
-- **Event-Driven**: Clean separation between UI events and business logic
-- **State Management**: Centralized state with reactive updates
-- **Performance First**: Caching, lazy loading, and memory optimization
-- **Error Resilience**: Graceful error handling and user feedback
+### 테스트 및 디버깅
+```bash
+# 테스트 실행
+npm test
+
+# 커버리지 리포트 생성
+npm run coverage
+
+# 코드 린팅
+npm run lint
+
+# 빌드 (프로덕션)
+npm run build
+```
+
+## 🔧 핵심 모듈
+
+### 1. GlobalState (`scripts/globalstate.js`)
+중앙화된 상태 관리 시스템으로 애플리케이션 전반의 데이터를 관리합니다.
+
+```javascript
+// 사용 예시
+import GlobalState from './globalstate.js';
+
+// 상태 업데이트
+GlobalState.setState({
+    currentTicket: ticketData,
+    isLoading: false,
+    analysisResults: results
+});
+
+// 상태 구독
+GlobalState.subscribe('currentTicket', (newTicket) => {
+    UI.updateTicketDisplay(newTicket);
+});
+```
+
+### 2. API (`scripts/api.js`)
+백엔드와의 통신 및 캐싱을 담당합니다.
+
+```javascript
+// 사용 예시
+import API from './api.js';
+
+// 티켓 분석 요청
+const analysis = await API.analyzeTicket(ticketId, {
+    includeRecommendations: true,
+    language: 'ko'
+});
+
+// 캐시된 데이터 확인
+const cachedData = API.getCachedData(`ticket_${ticketId}`);
+```
+
+### 3. UI (`scripts/ui.js`)
+사용자 인터페이스 관리 및 DOM 조작을 처리합니다.
+
+```javascript
+// 사용 예시
+import UI from './ui.js';
+
+// 로딩 상태 표시
+UI.showLoading('티켓 분석 중...');
+
+// 결과 표시
+UI.displayAnalysisResults(analysisData);
+
+// 에러 처리
+UI.showError('분석 중 오류가 발생했습니다.');
+```
+
+### 4. Events (`scripts/events.js`)
+이벤트 처리 및 사용자 상호작용을 관리합니다.
+
+```javascript
+// 사용 예시
+import Events from './events.js';
+
+// 이벤트 리스너 등록
+Events.on('ticketSelected', (ticketData) => {
+    GlobalState.setState({ currentTicket: ticketData });
+});
+
+// Freshdesk 이벤트 처리
+Events.onFreshdeskEvent('ticket.updated', handleTicketUpdate);
+```
+
+## 🎯 FDK 특화 기능
+
+### Freshdesk API 통합
+```javascript
+// Freshdesk 데이터 접근
+const ticketData = await client.data.get('ticket');
+const contactData = await client.data.get('contact');
+const companyData = await client.data.get('company');
+
+// Freshdesk UI 조작
+await client.interface.trigger('showNotify', {
+    type: 'success',
+    message: '분석이 완료되었습니다!'
+});
+```
+
+### 실시간 업데이트
+```javascript
+// 실시간 분석 결과 스트리밍
+async function streamAnalysis(ticketId) {
+    const stream = await API.streamAnalysis(ticketId);
+    
+    for await (const chunk of stream) {
+        UI.updateAnalysisProgress(chunk);
+    }
+}
+```
+
+### 성능 최적화
+```javascript
+// 지연 로딩
+const LazyComponent = {
+    async load() {
+        if (!this.loaded) {
+            await import('./heavy-component.js');
+            this.loaded = true;
+        }
+        return this;
+    }
+};
+
+// 디바운싱
+import { debounce } from './utils.js';
+
+const debouncedSearch = debounce(async (query) => {
+    const results = await API.search(query);
+    UI.displaySearchResults(results);
+}, 300);
+```
+
+## ⚠️ 중요 사항
+
+### FDK 제약사항
+- Content Security Policy (CSP) 준수 필요
+- Freshdesk 플랫폼 내에서만 동작
+- 특정 API 호출 제한 및 권한 관리
+- 메모리 사용량 최적화 필수
+
+### 성능 고려사항
+- 대용량 데이터 처리 시 청킹 및 가상화 적용
+- API 호출 최소화를 위한 효율적인 캐싱 전략
+- DOM 조작 최적화 (DocumentFragment 활용)
+- 이벤트 리스너 정리를 통한 메모리 누수 방지
+
+### 사용자 경험
+- 로딩 상태 및 진행률 표시
+- 오류 상황에 대한 명확한 피드백
+- 키보드 단축키 및 접근성 지원
+- 반응형 디자인 (다양한 화면 크기 지원)
+
+---
+
+*상세한 FDK API 참조는 [Freshdesk Developer Documentation](https://developers.freshdesk.com/)을 확인하세요.*
 
 ## 🚀 Development Commands
 

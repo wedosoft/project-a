@@ -1,53 +1,150 @@
 # Backend API Core - CLAUDE.md
 
-## 🎯 Context & Purpose
+## 🎯 컨텍스트 & 목적
 
-This is the **Backend API Core** worktree focused on the FastAPI-based Python backend for Copilot Canvas. This system provides RAG (Retrieval-Augmented Generation) capabilities for Freshdesk ticket analysis and knowledge base integration.
+이 디렉토리는 **Backend API Core**로 Copilot Canvas의 FastAPI 기반 Python 백엔드를 담당합니다. RAG (Retrieval-Augmented Generation) 기능을 통한 Freshdesk 티켓 분석과 지식베이스 통합을 제공합니다.
 
-**Primary Focus Areas:**
-- FastAPI application with IoC container pattern
-- Vector Database (Qdrant) integration and management
-- LLM orchestration and response generation
-- Multi-tenant data ingestion pipeline
-- Real-time streaming and async processing
+**주요 영역:**
+- IoC 컨테이너 패턴을 활용한 FastAPI 애플리케이션
+- 벡터 데이터베이스 (Qdrant) 통합 및 관리
+- LLM 오케스트레이션 및 응답 생성
+- 멀티테넌트 데이터 수집 파이프라인
+- 실시간 스트리밍 및 비동기 처리
 
-## 🏗️ Core Architecture
+## 🏗️ 디렉토리 구조
 
-### System Overview
 ```
-FastAPI Backend → SQLAlchemy ORM → PostgreSQL/SQLite
-     ↓
-Qdrant (Vector DB) + Redis (Cache) + LLM Providers
+backend/
+├── api/                    # FastAPI 애플리케이션 레이어
+│   ├── main.py            # 메인 애플리케이션 진입점
+│   ├── routers/           # API 라우터들
+│   ├── middleware/        # 커스텀 미들웨어
+│   └── container.py       # IoC 컨테이너 설정
+├── core/                  # 핵심 비즈니스 로직
+│   ├── database/          # 데이터베이스 추상화 레이어
+│   ├── llm/              # LLM 관리 및 통합
+│   ├── ingest/           # 데이터 수집 파이프라인
+│   └── search/           # 검색 엔진 로직
+├── platforms/            # 플랫폼별 통합
+│   └── freshdesk/        # Freshdesk API 통합
+├── tests/               # 테스트 스위트
+└── config/              # 설정 파일들
 ```
 
-### Core Components
+## 🚀 개발 명령어
 
-1. **API Layer** (`api/`)
-   - FastAPI application with IoC container for dependency injection
-   - Multiple routers: init, query, reply, ingest, health, metrics
-   - Middleware for CORS, performance monitoring, error handling
+### 환경 설정
+```bash
+# 가상환경 활성화 (필수)
+source venv/bin/activate
 
-2. **Vector Database** (`core/database/vectordb.py`)
-   - Abstract interface with Qdrant adapter implementation
-   - Multi-tenant support with complete data isolation
-   - Platform-neutral 3-tuple ID system: `(tenant_id, platform, original_id)`
+# 개발 서버 시작
+python -m api.main
 
-3. **LLM Management** (`core/llm/manager.py`)
-   - Centralized management of multiple LLM providers
-   - Use-case based routing (ticket_view, ticket_similar, summary)
-   - Response and embedding caching with TTL
+# Docker 개발 환경
+docker-compose up -d
 
-4. **Data Processing** (`core/ingest/`)
-   - Supports vector-only and hybrid (SQL+Vector) modes
-   - Batch processing with progress tracking
-   - Attachment processing with OCR support
+# 테스트 실행
+pytest tests/
 
-### Key Design Patterns
+# 특정 컴포넌트 테스트
+python tests/test_vectordb.py
+python tests/test_llm_simple.py
+```
 
-- **Multi-tenancy**: Complete data isolation by tenant_id
-- **Async Processing**: All I/O operations are async for better performance  
-- **Dependency Injection**: IoC container pattern for better testability
-- **Adapter Pattern**: Platform-agnostic integrations (Freshdesk, future platforms)
+### API 엔드포인트 테스트
+```bash
+# /init 엔드포인트 테스트
+curl -X GET "http://localhost:8000/init/12345" \
+     -H "X-Freshdesk-Domain: $FRESHDESK_DOMAIN.freshdesk.com" \
+     -H "X-Freshdesk-API-Key: $FRESHDESK_API_KEY"
+
+# 헬스체크
+curl http://localhost:8000/health
+
+# 메트릭 확인
+curl http://localhost:8000/metrics
+```
+
+## 🔧 핵심 컴포넌트
+
+### 1. API 레이어 (`api/`)
+IoC 컨테이너를 활용한 의존성 주입으로 테스트 가능한 구조를 제공합니다.
+
+**주요 라우터:**
+- `/init` - 티켓 초기화 및 분석
+- `/query` - 벡터 검색 쿼리
+- `/reply` - AI 응답 생성
+- `/ingest` - 데이터 수집 관리
+- `/health` - 시스템 상태 확인
+- `/metrics` - 성능 메트릭
+
+### 2. 벡터 데이터베이스 (`core/database/`)
+```python
+# 사용 예시
+from core.database.vectordb import get_vector_db
+
+async def search_documents(query: str, tenant_id: str):
+    vector_db = get_vector_db()
+    results = await vector_db.search(
+        collection_name="documents",
+        query_text=query,
+        filters={"tenant_id": tenant_id},
+        limit=10
+    )
+    return results
+```
+
+### 3. LLM 관리 (`core/llm/`)
+```python
+# 사용 예시
+from core.llm.manager import LLMManager
+
+async def analyze_ticket(ticket_data: dict):
+    llm_manager = LLMManager()
+    analysis = await llm_manager.generate_response(
+        query=f"분석: {ticket_data['subject']}",
+        context=ticket_data['description'],
+        use_case="ticket_view"
+    )
+    return analysis
+```
+
+### 4. 데이터 수집 (`core/ingest/`)
+```python
+# 사용 예시
+from core.ingest.manager import IngestionManager
+
+async def ingest_freshdesk_data(tenant_id: str):
+    manager = IngestionManager()
+    await manager.ingest_platform_data(
+        platform="freshdesk",
+        tenant_id=tenant_id,
+        config={"include_attachments": True}
+    )
+```
+
+## ⚠️ 중요 사항
+
+### 개발 환경
+- **필수**: Python 명령어는 반드시 `backend/` 디렉토리에서 가상환경 활성화 후 실행
+- **디버깅**: VS Code의 Python 디버거 또는 내장 breakpoint() 함수 활용
+- **로깅**: structlog를 통한 구조화된 로깅 사용
+
+### 성능 최적화
+- 모든 I/O 작업은 async/await 패턴 사용
+- LLM API 호출에 타임아웃 및 재시도 로직 구현
+- 벡터 검색 결과 캐싱으로 응답 속도 개선
+- Prometheus 메트릭을 통한 성능 모니터링
+
+### 보안 고려사항
+- API 키 및 민감 정보는 환경변수로 관리
+- 모든 외부 입력에 대한 검증 필수
+- 멀티테넌트 데이터 격리 철저히 준수
+
+---
+
+*상세한 컴포넌트별 가이드는 각 `core/*/CLAUDE.md` 파일을 참조하세요.*
 - **Repository Pattern**: Clean separation between business logic and data access
 
 ## 🚀 Development Commands
