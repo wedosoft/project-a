@@ -18,7 +18,6 @@ from pydantic import BaseModel
 
 from core.llm.manager import get_llm_manager
 from core.database.vectordb import vector_db
-from core.search.hybrid import HybridSearchManager
 from core.search.adapters import InitHybridAdapter
 from ..dependencies import (
     get_tenant_id,
@@ -612,13 +611,11 @@ async def init_legacy_hybrid_mode(
         logger.info(f"🔍 티켓 메타데이터 구조: {list(ticket_metadata.keys())}")
         logger.info(f"🔍 추출된 description_text: {description_text[:100]}...")
         
-        # 순차 실행으로 초기화 처리 - 하이브리드 검색 적용
-        # 기존 execute_init_sequential 대신 하이브리드 검색 어댑터 사용
-        hybrid_manager = HybridSearchManager()
+        # 순차 실행으로 초기화 처리 - 벡터 검색 사용
+        # 벡터 검색 어댑터 사용
         hybrid_adapter = InitHybridAdapter()
         
-        result = await hybrid_adapter.execute_hybrid_init(
-            hybrid_manager=hybrid_manager,
+        result = await hybrid_adapter.execute_vector_init(
             llm_manager=llm_manager,
             ticket_data=structured_ticket_data,
             tenant_id=tenant_id,
@@ -1099,13 +1096,11 @@ async def init_streaming_hybrid_mode(
             logger.info(f"🔍 디버깅 - 구조화된 티켓 제목: {structured_ticket_data['subject']}")
             logger.info(f"🔍 디버깅 - 구조화된 티켓 본문: {structured_ticket_data['description_text'][:100]}...")
             
-            # 스트리밍 하이브리드 검색 실행
+            # 스트리밍 벡터 검색 실행
             llm_manager = get_llm_manager()
-            hybrid_manager = HybridSearchManager()
             adapter = InitHybridAdapter()
             
-            async for chunk in adapter.execute_hybrid_init_streaming(
-                hybrid_manager=hybrid_manager,
+            async for chunk in adapter.execute_vector_init_streaming(
                 llm_manager=llm_manager,
                 ticket_data=structured_ticket_data,
                 tenant_id=tenant_id,

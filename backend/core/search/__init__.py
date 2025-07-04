@@ -6,7 +6,6 @@
 
 from .retriever import *
 from .langchain_retriever import *
-from .hybrid import *
 from .optimizer import *
 from .embeddings import *
 

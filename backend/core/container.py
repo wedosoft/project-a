@@ -12,7 +12,7 @@ import asyncio
 from core.database.vectordb import vector_db
 from core.platforms.freshdesk import fetcher
 from core.llm.manager import get_llm_manager
-from core.search.hybrid import HybridSearchManager
+# 하이브리드 검색 제거됨 - 벡터 DB 단독 사용
 from core.config import get_settings
 from core.cache import CacheManager
 
@@ -108,14 +108,7 @@ class DependencyContainer:
             self._services['vector_search_cache'] = vector_search_cache
             logger.debug("🚀 캐싱 시스템 초기화 완료")
             
-            # 하이브리드 검색 매니저
-            logger.debug("🔍 하이브리드 검색 매니저 초기화 중...")
-            hybrid_search_manager = HybridSearchManager(
-                vector_db=self._services['vector_db'],
-                llm_router=self._services['llm_manager'],
-                fetcher=self._services['fetcher']
-            )
-            self._services['hybrid_search_manager'] = hybrid_search_manager
+            # 하이브리드 검색 제거됨 - 벡터 DB 단독 사용
             logger.debug("🔍 하이브리드 검색 매니저 초기화 완료")
             
             self._initialized = True
@@ -167,9 +160,7 @@ class DependencyContainer:
         """벡터 검색 결과 캐시 반환"""
         return self.get('vector_search_cache')
     
-    def get_hybrid_search_manager(self):
-        """하이브리드 검색 매니저 반환"""
-        return self.get('hybrid_search_manager')
+    # 하이브리드 검색 기능 제거됨
     
     def get_settings(self):
         """설정 반환"""
