@@ -15,7 +15,7 @@
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: #f8f9fa;
             margin: 0;
-            padding: 0;
+            padding: 0 0 10px 0;
             color: #1f2937;
             display: flex;
             justify-content: flex-end;
@@ -51,15 +51,16 @@
         /* 모달 컨테이너 (네이티브 스타일) */
         .modal-container {
             width: 480px;
-            height: 100vh;
+            height: calc(100vh - 10px);
             background: white;
-            border-radius: 0;
+            border-radius: 12px;
             box-shadow: -2px 0 8px rgba(0, 0, 0, 0.1);
             display: flex;
             flex-direction: column;
             overflow-y: auto;
             overflow-x: hidden;
             border-left: 1px solid #e5e7eb;
+            margin-bottom: 10px;
         }
 
         /* 스마트 헤더 (얇은 헤더) */
@@ -70,6 +71,8 @@
             flex-shrink: 0;
             border-bottom: 1px solid rgba(255, 255, 255, 0.1);
             position: relative;
+            border-top-left-radius: 12px;
+            border-top-right-radius: 12px;
         }
 
         .header-content {
@@ -602,6 +605,8 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            border-bottom-left-radius: 12px;
+            border-bottom-right-radius: 12px;
         }
 
         .perf-item {
@@ -699,7 +704,7 @@
                 </div>
                 <div class="header-actions">
                     <button class="action-btn" onclick="toggleSummary()" id="summaryToggleBtn" title="요약 접기/펼기">
-                        🔼
+                        <span style="font-size: 16px;">⌃</span>
                     </button>
                     <button class="action-btn" onclick="refreshData()" title="새로고침">
                         <i class="fas fa-sync-alt"></i>
@@ -1087,8 +1092,49 @@
                     body.classList.add('standalone-mode');
                 }
 
+                // 오류 모드 처리
+                checkErrorMode();
+
                 // 컨테이너 크기 조정
                 adjustContainerSize();
+            }
+
+            // 오류 모드 확인 및 처리
+            function checkErrorMode() {
+                try {
+                    // URL 파라미터나 전역 변수로 오류 모드 확인
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const isErrorMode = urlParams.get('errorMode') === 'true' || window.errorMode === true;
+                    
+                    if (isErrorMode) {
+                        console.log('🚨 오류 모드 감지 - UI에 오류 메시지 표시');
+                        showErrorMessage('벡터 DB 연결 오류가 발생했지만 기본 기능은 사용할 수 있습니다.');
+                    }
+                } catch (error) {
+                    console.warn('오류 모드 확인 중 문제 발생:', error);
+                }
+            }
+
+            // 오류 메시지 표시 함수
+            function showErrorMessage(message) {
+                try {
+                    const errorDisplay = document.getElementById('error-display');
+                    if (errorDisplay) {
+                        errorDisplay.innerHTML = `
+                            <div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 12px; margin: 16px 20px; color: #92400e;">
+                                <div style="display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600;">
+                                    ⚠️ 시스템 알림
+                                </div>
+                                <div style="font-size: 13px; margin-top: 4px;">
+                                    ${message}
+                                </div>
+                            </div>
+                        `;
+                        errorDisplay.style.display = 'block';
+                    }
+                } catch (error) {
+                    console.error('오류 메시지 표시 실패:', error);
+                }
             }
 
             // 컨테이너 크기 조정
@@ -1174,12 +1220,12 @@
             if (section.classList.contains('collapsed')) {
                 // 펴기
                 section.classList.remove('collapsed');
-                toggleBtn.innerHTML = '🔼';
+                toggleBtn.innerHTML = '<span style="font-size: 16px;">⌃</span>';
                 console.log('펼치기 실행');
             } else {
                 // 접기
                 section.classList.add('collapsed');
-                toggleBtn.innerHTML = '🔽';
+                toggleBtn.innerHTML = '<span style="font-size: 16px;">⌄</span>';
                 console.log('접기 실행');
             }
         }

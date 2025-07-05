@@ -121,8 +121,38 @@ async function showFDKModal(ticketId, hasCachedData = false) {
       console.log('✅ FDK 모달 열기 성공');
     } catch (modalError) {
       console.error('❌ FDK 모달 열기 실패:', modalError);
-      // 모달 열기 실패 시에도 사용자에게 알림
-      throw new Error('모달 창을 열 수 없습니다. 페이지를 새로고침 후 다시 시도해주세요.');
+      
+      // 백엔드 오류와 무관하게 모달을 반드시 표시하기 위해 재시도
+      console.log('🔄 모달 재시도 - 백엔드 오류 무시하고 UI만 표시');
+      
+      // 오류 상태로 모달 표시
+      const fallbackConfig = {
+        title: "Copilot Canvas - AI 상담사 지원",
+        template: "index.html",
+        data: {
+          ticketId: ticketId,
+          ticket: ticket,
+          hasCachedData: false,
+          timestamp: new Date().toISOString(),
+          noBackendCall: true,
+          errorMode: true, // 오류 모드 플래그 추가
+          errorMessage: "벡터 DB 연결 오류가 발생했지만 기본 기능은 사용할 수 있습니다."
+        },
+        size: {
+          width: "900px",
+          height: "700px"
+        },
+        noBackdrop: true
+      };
+      
+      try {
+        await client.interface.trigger("showModal", fallbackConfig);
+        console.log('✅ FDK 모달 재시도 성공 (오류 모드)');
+      } catch (retryError) {
+        console.error('❌ FDK 모달 재시도도 실패:', retryError);
+        // 최후의 수단으로 알림만 표시
+        throw new Error('모달 창을 열 수 없습니다. 페이지를 새로고침 후 다시 시도해주세요.');
+      }
     }
     
   } catch (error) {
@@ -428,9 +458,9 @@ if (typeof window.isFDKModal !== 'undefined' && window.isFDKModal) {
           } else {
             console.log('ℹ️ 모달에서 캐시된 데이터 없음 - 백엔드 데이터 로드 시도');
             
-            // 데이터가 없으면 백엔드에서 다시 로드 시도하되, 실패 시 사용자 친화적 메시지 표시
+            // 데이터가 없으면 백엔드에서 다시 로드 시도하되, 실패해도 모달은 계속 표시
             if (typeof Data !== 'undefined' && Data.preloadTicketDataOnPageLoad) {
-              console.log('🔄 모달에서 데이터 재로드 시도');
+              console.log('🔄 모달에서 데이터 재로드 시도 - 실패해도 모달은 계속 표시');
               Data.preloadTicketDataOnPageLoad(client).then((result) => {
                 if (result) {
                   const newGlobalData = GlobalState.getGlobalTicketData();
@@ -438,32 +468,32 @@ if (typeof window.isFDKModal !== 'undefined' && window.isFDKModal) {
                     UI.updateUIWithCachedData(newGlobalData);
                   }
                 } else {
-                  // 백엔드 로드 실패 시 사용자에게 친화적 메시지 표시
-                  console.warn('⚠️ 백엔드 데이터 로드 실패 - 사용자에게 오류 메시지 표시');
+                  // 백엔드 로드 실패 시 오류 메시지 표시하지만 모달은 계속 유지
+                  console.warn('⚠️ 백엔드 데이터 로드 실패 - 모달은 계속 표시');
                   
-                  // UI 모듈에서 에러 상태 표시
+                  // UI 모듈에서 에러 상태 표시 (비차단적)
                   if (typeof UI !== 'undefined' && UI.showBackendError) {
-                    UI.showBackendError('AI 분석 데이터를 불러오는 중 오류가 발생했습니다. 인터넷 연결을 확인하시고 다시 시도해주세요.');
+                    UI.showBackendError('벡터 DB 연결 오류로 AI 분석 데이터를 불러올 수 없습니다. 기본 기능은 계속 사용할 수 있습니다.');
                   } else {
-                    // UI 모듈이 없는 경우 기본 에러 처리
-                    console.error('❌ UI.showBackendError 함수를 찾을 수 없음');
+                    // UI 모듈이 없는 경우 기본 에러 처리 (비차단적)
+                    console.error('❌ UI.showBackendError 함수를 찾을 수 없음 - 모달은 계속 표시');
                   }
                 }
               }).catch((error) => {
-                console.error('❌ 모달 데이터 로드 중 예외 발생:', error);
+                console.error('❌ 모달 데이터 로드 중 예외 발생 - 모달은 계속 표시:', error);
                 
-                // 예외 발생 시에도 사용자에게 친화적 메시지 표시
+                // 예외 발생 시에도 사용자에게 친화적 메시지 표시 (비차단적)
                 if (typeof UI !== 'undefined' && UI.showBackendError) {
-                  UI.showBackendError('AI 분석 서비스에 일시적인 문제가 발생했습니다. 잠시 후 다시 시도해주세요.');
+                  UI.showBackendError('벡터 DB 서비스에 일시적인 문제가 발생했습니다. 기본 기능은 계속 사용할 수 있습니다.');
                 } else {
-                  console.error('❌ UI.showBackendError 함수를 찾을 수 없음');
+                  console.error('❌ UI.showBackendError 함수를 찾을 수 없음 - 모달은 계속 표시');
                 }
               });
             } else {
-              // Data 모듈이 없는 경우 기본 에러 메시지 표시
-              console.error('❌ Data 모듈을 찾을 수 없음');
+              // Data 모듈이 없는 경우 기본 에러 메시지 표시 (비차단적)
+              console.error('❌ Data 모듈을 찾을 수 없음 - 모달은 계속 표시');
               if (typeof UI !== 'undefined' && UI.showBackendError) {
-                UI.showBackendError('AI 분석 기능을 초기화할 수 없습니다. 페이지를 새로고침 후 다시 시도해주세요.');
+                UI.showBackendError('AI 분석 기능을 초기화할 수 없습니다. 기본 기능은 계속 사용할 수 있습니다.');
               }
             }
           }
