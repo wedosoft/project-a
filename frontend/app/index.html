@@ -57,10 +57,10 @@
             box-shadow: -2px 0 8px rgba(0, 0, 0, 0.1);
             display: flex;
             flex-direction: column;
-            overflow-y: auto;
-            overflow-x: hidden;
+            overflow: hidden;
             border-left: 1px solid #e5e7eb;
             margin-bottom: 10px;
+            position: relative;
         }
 
         /* 스마트 헤더 (얇은 헤더) */
@@ -70,7 +70,11 @@
             padding: 8px 20px;
             flex-shrink: 0;
             border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-            position: relative;
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 10;
             border-top-left-radius: 12px;
             border-top-right-radius: 12px;
         }
@@ -134,7 +138,10 @@
         .main-content {
             display: flex;
             flex-direction: column;
-            /* flex: 1과 min-height 제거 - 자연스러운 콘텐츠 흐름 */
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding-top: 60px; /* 헤더 높이만큼 패딩 추가 */
         }
 
         /* AI 요약 영역 (FDK 스타일) - 접기/펴기 처리 */
@@ -782,14 +789,22 @@
             background: #94a3b8;
         }
 
+        /* 통합 하단 영역 */
+        .combined-footer {
+            background: #f8fafc;
+            border-top: 1px solid #e5e7eb;
+            flex-shrink: 0;
+            border-bottom-left-radius: 12px;
+            border-bottom-right-radius: 12px;
+        }
+        
         /* 피드백 영역 */
         .feedback-section {
             padding: 12px 20px;
-            background: #f8fafc;
-            border-top: 1px solid #e5e7eb;
             display: flex;
             justify-content: space-between;
             align-items: center;
+            border-bottom: 1px solid #e5e7eb;
         }
 
         .feedback-question {
@@ -837,14 +852,11 @@
         .performance-footer {
             padding: 8px 20px;
             background: #f1f5f9;
-            border-top: 1px solid #e5e7eb;
             font-size: 10px;
             color: #6b7280;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            border-bottom-left-radius: 12px;
-            border-bottom-right-radius: 12px;
         }
 
         .perf-item {
@@ -853,21 +865,21 @@
             gap: 4px;
         }
 
-        /* 스크롤바 스타일링 - 모달 컨테이너에만 적용 */
-        .modal-container::-webkit-scrollbar {
+        /* 스크롤바 스타일링 - 메인 콘텐츠 영역에 적용 */
+        .main-content::-webkit-scrollbar {
             width: 4px;
         }
 
-        .modal-container::-webkit-scrollbar-track {
+        .main-content::-webkit-scrollbar-track {
             background: #f1f5f9;
         }
 
-        .modal-container::-webkit-scrollbar-thumb {
+        .main-content::-webkit-scrollbar-thumb {
             background: #cbd5e1;
             border-radius: 2px;
         }
 
-        .modal-container::-webkit-scrollbar-thumb:hover {
+        .main-content::-webkit-scrollbar-thumb:hover {
             background: #94a3b8;
         }
 
@@ -1261,29 +1273,32 @@
             </div>
         </main>
 
-        <!-- 피드백 섹션 -->
-        <div class="feedback-section">
-            <div class="feedback-question">이 AI 분석이 도움이 되었나요?</div>
-            <div class="feedback-actions">
-                <button class="feedback-btn thumbs-up" onclick="submitFeedback('positive')">
-                    👍 도움됨
-                </button>
-                <button class="feedback-btn thumbs-down" onclick="submitFeedback('negative')">
-                    👎 개선필요
-                </button>
+        <!-- 통합 하단 영역 -->
+        <div class="combined-footer">
+            <!-- 피드백 섹션 -->
+            <div class="feedback-section">
+                <div class="feedback-question">이 AI 분석이 도움이 되었나요?</div>
+                <div class="feedback-actions">
+                    <button class="feedback-btn thumbs-up" onclick="submitFeedback('positive')">
+                        👍 도움됨
+                    </button>
+                    <button class="feedback-btn thumbs-down" onclick="submitFeedback('negative')">
+                        👎 개선필요
+                    </button>
+                </div>
             </div>
-        </div>
 
-        <!-- 성능 지표 푸터 -->
-        <div class="performance-footer">
-            <div class="perf-item">
-                🕒 처리시간: 3.2초
-            </div>
-            <div class="perf-item">
-                📊 품질점수: 82%
-            </div>
-            <div class="perf-item">
-                🔍 검색결과: 5건
+            <!-- 성능 지표 푸터 -->
+            <div class="performance-footer">
+                <div class="perf-item">
+                    🕒 처리시간: 3.2초
+                </div>
+                <div class="perf-item">
+                    📊 품질점수: 82%
+                </div>
+                <div class="perf-item">
+                    🔍 검색결과: 5건
+                </div>
             </div>
         </div>
     </div>
@@ -1501,7 +1516,7 @@
         // 간단한 스크롤 이벤트 관리 - 부모 창으로의 전파만 차단
         document.addEventListener('DOMContentLoaded', function() {
             const fdkContainer = document.getElementById('fdk-response-container');
-            const modalContainer = document.querySelector('.modal-container');
+            const mainContent = document.querySelector('.main-content');
             
             // FDK 컨테이너에서 부모 창으로의 스크롤 전파 차단
             if (fdkContainer) {
@@ -1510,9 +1525,9 @@
                 }, { passive: false });
             }
             
-            // 모달 컨테이너에서 부모 창으로의 스크롤 전파 차단
-            if (modalContainer) {
-                modalContainer.addEventListener('wheel', function(e) {
+            // 메인 콘텐츠 영역에서 부모 창으로의 스크롤 전파 차단
+            if (mainContent) {
+                mainContent.addEventListener('wheel', function(e) {
                     e.stopPropagation(); // 부모로의 전파만 차단
                 }, { passive: false });
             }
