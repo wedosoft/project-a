@@ -12,9 +12,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional
 import logging
+import os
 
 from ..dependencies import get_tenant_id
-from core.database.database import SQLiteDatabase
+from core.database.manager import DatabaseManager
+from core.database.models.progress_log import ProgressLog
 
 # 라우터 생성 (prefix 제거 - 메인 라우터에서 설정)
 router = APIRouter(tags=["진행 상황 모니터링"])
@@ -38,78 +40,37 @@ async def get_job_progress(
         작업 진행 상황 정보
     """
     try:
-        # 데이터베이스에서 진행 상황 로그 조회
-        db = SQLiteDatabase()
-        cursor = db.connection.cursor()
+        # 환경변수에서 데이터베이스 URL 가져오기
+        database_url = os.getenv("DATABASE_URL", f"sqlite:///backend/core/data/{tenant_id}_data.db")
+        db_manager = DatabaseManager(database_url)
         
-        # 최신 진행 상황 조회
-        cursor.execute("""
-            SELECT 
-                job_id,
-                tenant_id,
-                message,
-                percentage,
-                step,
-                total_steps,
-                created_at
-            FROM progress_logs 
-            WHERE job_id = ? AND tenant_id = ?
-            ORDER BY created_at DESC
-            LIMIT 1
-        """, (job_id, tenant_id))
-        
-        progress_row = cursor.fetchone()
-        
-        if not progress_row:
-            raise HTTPException(status_code=404, detail=f"진행 상황을 찾을 수 없습니다: {job_id}")
-        
-        # 수집 작업 로그도 조회 (전체 상태 정보)
-        cursor.execute("""
-            SELECT 
-                status,
-                start_time,
-                end_time,
-                tickets_collected,
-                conversations_collected,
-                articles_collected,
-                attachments_collected,
-                errors_count,
-                error_message
-            FROM collection_logs
-            WHERE job_id = ? AND tenant_id = ?
-            ORDER BY created_at DESC
-            LIMIT 1
-        """, (job_id, tenant_id))
-        
-        job_row = cursor.fetchone()
-        
-        # 응답 데이터 구성
-        response = {
-            "job_id": job_id,
-            "tenant_id": tenant_id,
-            "current_step": progress_row[4],  # step
-            "total_steps": progress_row[5],   # total_steps
-            "progress_percentage": progress_row[3],  # percentage
-            "current_message": progress_row[2],      # message
-            "last_updated": progress_row[6],         # created_at
-            "status": "in_progress",
-            "details": {}
-        }
-        
-        if job_row:
-            response.update({
-                "status": job_row[0] or "in_progress",  # status
-                "start_time": job_row[1],               # start_time
-                "end_time": job_row[2],                 # end_time
+        with db_manager.get_session() as session:
+            # progress_logs 테이블에서 최신 진행 상황 조회
+            progress_log = session.query(ProgressLog).filter(
+                ProgressLog.job_id == job_id,
+                ProgressLog.tenant_id == tenant_id
+            ).order_by(ProgressLog.created_at.desc()).first()
+            
+            if not progress_log:
+                raise HTTPException(status_code=404, detail=f"진행 상황을 찾을 수 없습니다: {job_id}")
+            
+            # 응답 데이터 구성 (progress_logs 테이블만 사용)
+            response = {
+                "job_id": job_id,
+                "tenant_id": tenant_id,
+                "current_step": progress_log.step,
+                "total_steps": progress_log.total_steps,
+                "progress_percentage": progress_log.percentage,
+                "current_message": progress_log.message,
+                "last_updated": progress_log.created_at.isoformat() if progress_log.created_at else None,
+                "status": "in_progress",
                 "details": {
-                    "tickets_collected": job_row[3] or 0,      # tickets_collected
-                    "conversations_collected": job_row[4] or 0, # conversations_collected
-                    "articles_collected": job_row[5] or 0,      # articles_collected
-                    "attachments_collected": job_row[6] or 0,   # attachments_collected
-                    "errors_count": job_row[7] or 0,           # errors_count
-                    "error_message": job_row[8]                # error_message
+                    "message": progress_log.message,
+                    "step": progress_log.step,
+                    "total_steps": progress_log.total_steps,
+                    "percentage": progress_log.percentage
                 }
-            })
+            }
         
         return response
         

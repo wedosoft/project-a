@@ -17,6 +17,9 @@ from dotenv import load_dotenv
 from .adapter import FreshdeskAdapter
 # 통합 객체 생성을 위한 모듈 추가
 from ...data.merger import PlatformDataMerger, DataStorage
+# 에이전트 저장을 위한 리포지토리 추가
+from ...repositories.agent_repository import AgentRepository
+from ...database.manager import DatabaseManager
 
 # .env 파일 로드
 load_dotenv()
@@ -65,6 +68,7 @@ class FreshdeskCollector:
         (self.raw_data_dir / "conversations").mkdir(exist_ok=True)
         (self.raw_data_dir / "attachments").mkdir(exist_ok=True)
         (self.raw_data_dir / "knowledge_base").mkdir(exist_ok=True)
+        (self.raw_data_dir / "agents").mkdir(exist_ok=True)  # 에이전트 데이터 디렉토리 추가
         
         # 통합 데이터 저장용 디렉토리 추가
         self.merged_data_dir = self.output_dir / "merged_data"
@@ -334,12 +338,78 @@ class FreshdeskCollector:
             logger.error(f"지식베이스 수집 중 오류 발생: {e}")
             raise
     
+    async def collect_agents(self, since_date: Optional[str] = None) -> Dict[str, Any]:
+        """
+        에이전트 데이터 수집 및 저장
+        """
+        if not self.adapter:
+            raise RuntimeError("어댑터가 초기화되지 않았습니다. async with 구문을 사용하세요.")
+        
+        logger.info("에이전트 데이터 수집 시작")
+        start_time = datetime.now()
+        
+        try:
+            # 에이전트 데이터 수집
+            agents = await self.adapter.fetch_agents(since_date=since_date)
+            
+            # 데이터베이스에 저장 - 절대 경로 사용
+            data_dir = Path(__file__).parent.parent.parent / "data"
+            database_url = os.getenv("DATABASE_URL", f"sqlite:///{data_dir}/{self.tenant_id}_data.db")
+            db_manager = DatabaseManager(database_url)
+            saved_count = 0
+            
+            with db_manager.get_session() as session:
+                agent_repo = AgentRepository(session)
+                
+                # 에이전트 데이터 저장 (company_id 불필요)
+                saved_agents = agent_repo.bulk_upsert_agents(agents)
+                saved_count = len(saved_agents)
+            
+            # Raw 데이터도 저장
+            chunk_index = 0
+            chunk_data = []
+            
+            for agent in agents:
+                chunk_data.append(agent)
+                
+                if len(chunk_data) >= self.RAW_DATA_CHUNK_SIZE:
+                    self._save_raw_data_chunk("agents", chunk_data, chunk_index)
+                    chunk_index += 1
+                    chunk_data = []
+            
+            # 마지막 청크 저장
+            if chunk_data:
+                self._save_raw_data_chunk("agents", chunk_data, chunk_index)
+            
+            # 최종 진행상황 저장
+            end_time = datetime.now()
+            final_progress = {
+                "collection_type": "agents",
+                "start_time": start_time.isoformat(),
+                "end_time": end_time.isoformat(),
+                "duration_seconds": (end_time - start_time).total_seconds(),
+                "total_agents": len(agents),
+                "saved_agents": saved_count,
+                "total_chunks": chunk_index + 1 if chunk_data or len(agents) > 0 else chunk_index,
+                "since_date": since_date
+            }
+            
+            self._save_progress(final_progress)
+            
+            logger.info(f"에이전트 수집 완료: {len(agents)}개 수집, {saved_count}개 저장, 소요시간: {final_progress['duration_seconds']:.2f}초")
+            return final_progress
+            
+        except Exception as e:
+            logger.error(f"에이전트 수집 중 오류 발생: {e}")
+            raise
+    
     async def full_collection(self, 
                              since_date: Optional[str] = None,
                              until_date: Optional[str] = None,
-                             include_kb: bool = True) -> Dict[str, Any]:
+                             include_kb: bool = True,
+                             include_agents: bool = True) -> Dict[str, Any]:
         """
-        전체 데이터 수집 (기존 로직 재사용)
+        전체 데이터 수집 (에이전트 수집 추가)
         """
         logger.info("전체 데이터 수집 시작")
         start_time = datetime.now()
@@ -350,7 +420,13 @@ class FreshdeskCollector:
         }
         
         try:
-            # 1. 티켓 데이터 수집
+            # 1. 에이전트 데이터 수집 (먼저 수집하여 멀티테넌트 라이선스 정보 확보)
+            if include_agents:
+                logger.info("=== 에이전트 데이터 수집 시작 ===")
+                agent_result = await self.collect_agents(since_date=since_date)
+                results["collections"]["agents"] = agent_result
+            
+            # 2. 티켓 데이터 수집
             logger.info("=== 티켓 데이터 수집 시작 ===")
             ticket_result = await self.collect_tickets(
                 since_date=since_date,
@@ -361,7 +437,7 @@ class FreshdeskCollector:
             )
             results["collections"]["tickets"] = ticket_result
             
-            # 2. 지식베이스 수집
+            # 3. 지식베이스 수집
             if include_kb:
                 logger.info("=== 지식베이스 수집 시작 ===")
                 kb_result = await self.collect_knowledge_base()
@@ -414,7 +490,8 @@ async def main():
         
         result = await collector.full_collection(
             since_date=since_date,
-            include_kb=True
+            include_kb=True,
+            include_agents=True
         )
         
         print(f"수집 결과: {json.dumps(result, ensure_ascii=False, indent=2)}")

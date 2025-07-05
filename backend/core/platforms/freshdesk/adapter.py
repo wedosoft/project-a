@@ -260,6 +260,51 @@ class FreshdeskAdapter(PlatformAdapter):
         except Exception as e:
             logger.error(f"Freshdesk 지식베이스 수집 실패: {e}")
             raise
+
+    async def fetch_agents(self, since_date: str = None) -> list:
+        """에이전트 데이터 수집"""
+        all_agents = []
+        
+        try:
+            logger.info("Freshdesk 에이전트 수집 시작")
+            
+            # 페이지네이션으로 에이전트 수집
+            page = 1
+            while True:
+                params = {
+                    "page": page,
+                    "per_page": self.per_page
+                }
+                
+                if since_date:
+                    params["updated_since"] = since_date
+                
+                batch_agents = await self.fetch_with_retry(f"{self.base_url}/agents", params)
+                
+                if not batch_agents:
+                    break
+                
+                # 정규화 적용
+                normalized_agents = []
+                for agent in batch_agents:
+                    normalized_agent = self._normalize_agent_data(agent)
+                    normalized_agents.append(normalized_agent)
+                
+                all_agents.extend(normalized_agents)
+                
+                # 이 배치가 불완전하면 마지막 페이지
+                if len(batch_agents) < self.per_page:
+                    break
+                
+                page += 1
+                await asyncio.sleep(self.request_delay)
+            
+            logger.info(f"Freshdesk 에이전트 수집 완료: {len(all_agents)}개")
+            return all_agents
+            
+        except Exception as e:
+            logger.error(f"Freshdesk 에이전트 수집 실패: {e}")
+            raise
     
     async def fetch_ticket_details(self, ticket_id: str) -> Optional[Dict]:
         """
@@ -455,6 +500,41 @@ class FreshdeskAdapter(PlatformAdapter):
             "platform": self.platform,
             "platform_tenant_id": self.tenant_id,
             "raw_data": attachment
+        }
+
+    def _normalize_agent_data(self, agent: Dict) -> Dict:
+        """에이전트 데이터 정규화 - Freshdesk API 원본 구조 그대로 사용"""
+        # contact 정보 추출 (nested object)
+        contact = agent.get("contact", {})
+        
+        return {
+            # Freshdesk API 원본 필드들
+            "id": agent.get("id", 0),  # Freshdesk의 id를 그대로 사용
+            "available": agent.get("available", True),
+            "occasional": agent.get("occasional", False),
+            "signature": agent.get("signature", ""),
+            "ticket_scope": agent.get("ticket_scope", 1),
+            "available_since": agent.get("available_since", ""),
+            "type": agent.get("type", ""),
+            "focus_mode": agent.get("focus_mode", True),
+            
+            # contact 정보 (평면화)
+            "active": contact.get("active", True),
+            "email": contact.get("email", ""),
+            "job_title": contact.get("job_title", ""),
+            "language": contact.get("language", ""),
+            "last_login_at": contact.get("last_login_at", ""),
+            "mobile": contact.get("mobile", ""),
+            "name": contact.get("name", ""),
+            "phone": contact.get("phone", ""),
+            "time_zone": contact.get("time_zone", ""),
+            "contact_created_at": contact.get("created_at", ""),
+            "contact_updated_at": contact.get("updated_at", ""),
+            
+            # 추가 관리 필드
+            "license_active": True,  # 기본값으로 활성화
+            "tenant_id": self.tenant_id,
+            "platform": self.platform
         }
     
     def _normalize_status(self, status: Any) -> str:

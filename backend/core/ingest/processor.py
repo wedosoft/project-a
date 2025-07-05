@@ -272,6 +272,7 @@ async def ingest_vector_only_mode(
     start_time = time.time()
     result = {
         "success": True,
+        "agents_processed": 0,
         "tickets_processed": 0,
         "articles_processed": 0,
         "total_vectors_stored": 0,
@@ -296,6 +297,41 @@ async def ingest_vector_only_mode(
         if purge:
             logger.info("기존 Vector DB 데이터 삭제 중...")
             await purge_vector_db_data(tenant_id, platform)
+        
+        # 0. 에이전트 수집 (먼저 수집하여 멀티테넌트 라이선스 정보 확보)
+        if progress_callback:
+            progress_callback({"stage": "agents", "progress": 0})
+        
+        logger.info("에이전트 수집 시작...")
+        
+        # FreshdeskCollector를 사용하여 에이전트 수집
+        from core.platforms.freshdesk.collector import FreshdeskCollector
+        config = {
+            "domain": domain,
+            "api_key": api_key,
+            "tenant_id": tenant_id,
+            "max_retries": 3,
+            "per_page": 100,
+            "request_delay": 0.3
+        }
+        
+        try:
+            async with FreshdeskCollector(config) as collector:
+                agent_result = await collector.collect_agents()
+                logger.info(f"에이전트 수집 완료: {agent_result.get('total_agents', 0)}개 수집, {agent_result.get('saved_agents', 0)}개 저장")
+                result["agents_processed"] = agent_result.get('saved_agents', 0)
+                
+                # 에이전트 수집 완료 진행상황 업데이트
+                if progress_callback:
+                    progress_callback({"stage": "agents", "progress": 100})
+                    
+        except Exception as e:
+            logger.error(f"에이전트 수집 중 오류: {e}")
+            result["errors"].append(f"에이전트 수집 실패: {str(e)}")
+            
+            # 에이전트 수집 실패시에도 진행상황 업데이트
+            if progress_callback:
+                progress_callback({"stage": "agents", "progress": 100})
         
         # 1. 티켓 수집 및 Vector DB 저장
         if progress_callback:
@@ -322,7 +358,7 @@ async def ingest_vector_only_mode(
                     result["errors"].append(error_msg)
                 
                 if progress_callback:
-                    progress = (i + 1) / len(tickets) * 50  # 티켓은 전체의 50%
+                    progress = (i + 1) / len(tickets) * 100  # 티켓 단계의 100%
                     progress_callback({"stage": "tickets", "progress": progress})
                 
             except Exception as e:
@@ -357,7 +393,7 @@ async def ingest_vector_only_mode(
                     result["errors"].append(error_msg)
                 
                 if progress_callback:
-                    progress = 50 + (i + 1) / len(articles) * 50  # KB는 나머지 50%
+                    progress = (i + 1) / len(articles) * 100  # KB 단계의 100%
                     progress_callback({"stage": "articles", "progress": progress})
                 
             except Exception as e:
@@ -370,6 +406,7 @@ async def ingest_vector_only_mode(
         result["processing_time"] = time.time() - start_time
         
         logger.info("Vector DB 단독 수집 완료:")
+        logger.info(f"  - 에이전트: {result['agents_processed']}개")
         logger.info(f"  - 티켓: {result['tickets_processed']}개")
         logger.info(f"  - KB 문서: {result['articles_processed']}개")
         logger.info(f"  - 총 벡터: {result['total_vectors_stored']}개")
@@ -413,6 +450,7 @@ async def ingest_legacy_hybrid_mode(
         "tenant_id": tenant_id,
         "platform": platform,
         "start_time": get_kst_time(),
+        "agents_processed": 0,
         "tickets_processed": 0,
         "articles_processed": 0,
         "embeddings_created": 0,
@@ -455,6 +493,41 @@ async def ingest_legacy_hybrid_mode(
                 ).delete()
                 session.commit()
                 logger.info(f"기존 데이터 삭제 완료: {deleted_count}개 객체")
+        
+        # 0. 에이전트 수집 (먼저 수집하여 멀티테넌트 라이선스 정보 확보)
+        if progress_callback:
+            progress_callback({"stage": "agents", "progress": 0})
+        
+        logger.info("에이전트 수집 시작...")
+        
+        # FreshdeskCollector를 사용하여 에이전트 수집
+        from core.platforms.freshdesk.collector import FreshdeskCollector
+        config = {
+            "domain": domain,
+            "api_key": api_key,
+            "tenant_id": tenant_id,
+            "max_retries": 3,
+            "per_page": 100,
+            "request_delay": 0.3
+        }
+        
+        try:
+            async with FreshdeskCollector(config) as collector:
+                agent_result = await collector.collect_agents()
+                logger.info(f"에이전트 수집 완료: {agent_result.get('total_agents', 0)}개 수집, {agent_result.get('saved_agents', 0)}개 저장")
+                result["agents_processed"] = agent_result.get('saved_agents', 0)
+                
+                # 에이전트 수집 완료 진행상황 업데이트
+                if progress_callback:
+                    progress_callback({"stage": "agents", "progress": 100})
+                    
+        except Exception as e:
+            logger.error(f"에이전트 수집 중 오류: {e}")
+            result["errors"].append(f"에이전트 수집 실패: {str(e)}")
+            
+            # 에이전트 수집 실패시에도 진행상황 업데이트
+            if progress_callback:
+                progress_callback({"stage": "agents", "progress": 100})
         
         # 1. 티켓 수집
         if progress_callback:
@@ -621,6 +694,7 @@ async def ingest_legacy_hybrid_mode(
         result["end_time"] = get_kst_time()
         
         logger.info("✅ 하이브리드 모드 데이터 수집 완료:")
+        logger.info(f"  - 에이전트 처리: {result['agents_processed']}개")
         logger.info(f"  - 티켓 처리: {result['tickets_processed']}개")
         logger.info(f"  - KB 문서 처리: {result['articles_processed']}개")
         logger.info(f"  - 요약 생성: {result['summaries_created']}개")

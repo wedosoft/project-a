@@ -382,6 +382,7 @@ async def trigger_data_ingestion(
                     
                     # stage를 사용자 친화적 메시지로 변환
                     stage_messages = {
+                        "agents": "에이전트 수집",
                         "tickets": "티켓 수집",
                         "articles": "아티클 수집", 
                         "embeddings": "벡터 임베딩 생성",

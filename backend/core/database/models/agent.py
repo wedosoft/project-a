@@ -11,35 +11,39 @@ from .base import MultiTenantModel
 
 
 class Agent(MultiTenantModel):
-    """상담원 정보"""
+    """상담원 정보 - Freshdesk API 원본 구조 그대로 사용"""
     __tablename__ = 'agents'
     
-    # 기본 정보
+    # Freshdesk API 원본 필드들 (이미지 응답 구조 그대로) - id는 MultiTenantModel에서 상속받음
+    available = Column(Boolean, default=True)
+    occasional = Column(Boolean, default=False) 
+    signature = Column(String(2000))  # 서명이 길 수 있음
+    ticket_scope = Column(Integer, default=1)
+    available_since = Column(String(50))  # 원본은 문자열 형태
+    type = Column(String(50))  # support_agent 등
+    focus_mode = Column(Boolean, default=True)
+    
+    # contact 정보 (nested object를 평면화)
+    active = Column(Boolean, default=True)  # contact.active -> active
     email = Column(String(255), nullable=False)
+    job_title = Column(String(255))
+    language = Column(String(10))
+    last_login_at = Column(String(50))  # 원본은 문자열 형태
+    mobile = Column(String(50))
     name = Column(String(255), nullable=False)
-    external_id = Column(String(100))  # 외부 플랫폼의 상담원 ID
+    phone = Column(String(50))
+    time_zone = Column(String(100))
+    contact_created_at = Column(String(50))  # contact의 created_at
+    contact_updated_at = Column(String(50))  # contact의 updated_at
     
-    # 권한 정보
-    role = Column(String(50))  # admin, agent, viewer
-    department = Column(String(100))
-    permissions = Column(JSON)  # 세부 권한 설정
-    
-    # 상태 정보
-    is_active = Column(Boolean, default=True)
-    last_active_at = Column(DateTime)
-    failed_login_attempts = Column(Integer, default=0)
-    account_locked_until = Column(DateTime)  # 계정 잠금 시간
-    
-    # 관계 필드
-    company_id = Column(Integer, ForeignKey('companies.id'), nullable=False)
-    
-    # 관계 설정 (Company와의 관계만 유지)
-    company = relationship("Company", back_populates="agents")
+    # 라이선스 관리 (추가 필드)
+    license_active = Column(Boolean, default=True)  # 라이선스 활성화/비활성화
     
     # 인덱스 및 제약조건
     __table_args__ = (
-        Index('idx_agent_email_company', 'email', 'company_id', unique=True),
-        Index('idx_agent_external_company', 'external_id', 'company_id', 'platform', unique=True),
-        Index('idx_agent_active_role', 'is_active', 'role'),
+        Index('idx_agent_tenant_id', 'tenant_id', 'id', unique=True),  # 중복 체크 핵심 인덱스
+        Index('idx_agent_email_tenant', 'email', 'tenant_id', unique=True),
         Index('idx_agent_tenant', 'tenant_id', 'platform'),
+        Index('idx_agent_license', 'license_active', 'tenant_id'),  # 라이선스 관리용 인덱스
+        Index('idx_agent_active', 'active', 'available'),  # 활성 상태 조회용
     )
