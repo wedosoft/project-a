@@ -1,0 +1,1999 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Ticket Assistant</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        /* === FDK 호환 기본 설정 === */
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html, body {
+            height: 100%;
+            width: 100%;
+            overflow: auto;
+        }
+
+        /* 모달 내부 스크롤 처리 - 단순화 */
+        .modal-only {
+            height: 100%;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+            margin: 0;
+            padding: 0;
+            font-size: 14px;
+            color: #1f2937;
+            background-color: #ffffff;
+            line-height: 1.5;
+        }
+
+        /* === FDK 응답 컨테이너 (필수) === */
+        #fdk-response-container {
+            width: 100%;
+            height: 100%;
+            min-height: 400px;
+            display: flex;
+            flex-direction: column;
+            animation: slideIn 0.3s ease-out;
+            position: relative;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* === 환경별 컨테이너 감지 === */
+        .app-container {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            background-color: #ffffff;
+            position: relative;
+        }
+
+        /* 모달 환경 감지 - 가로폭 100% 활용 */
+        .modal-mode .app-container {
+            min-height: 600px;
+            overflow: hidden;
+            max-width: 100%;
+            width: 100%;
+        }
+        
+        .modal-mode .iframe-container {
+            max-width: 100%;
+            width: 100%;
+        }
+        
+        /* 모달에서 2열 레이아웃 활용 */
+        .modal-mode .summary-grid {
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+        }
+        
+        .modal-mode .summary-widget {
+            min-height: 120px;
+        }
+        
+        .modal-mode .tab-content-area {
+            padding: 20px;
+        }
+        
+        .modal-mode .content-card {
+            margin-bottom: 20px;
+        }
+
+        /* 사이드바 환경 감지 */
+        .sidebar-mode .app-container {
+            max-width: 400px;
+            height: auto;
+            min-height: 500px;
+        }
+
+        /* === 스마트 헤더 (얇게) === */
+        .smart-header {
+            background: linear-gradient(135deg, #8B5CF6 0%, #3B82F6 100%);
+            color: white;
+            padding: 12px 20px;
+            flex-shrink: 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            position: relative;
+        }
+
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 4px;
+        }
+
+        .ticket-info h2 {
+            font-size: 1.0em;
+            font-weight: 600;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .ticket-meta {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            font-size: 0.85em;
+            flex-wrap: wrap;
+            margin-bottom: 8px;
+        }
+
+        /* === 헤더 인사이트 (컴팩트) === */
+        .header-insights {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+            font-size: 0.8em;
+            flex-wrap: wrap;
+        }
+
+        .emotion-compact {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 4px 8px;
+            border-radius: 8px;
+        }
+
+        .emotion-emoji {
+            font-size: 1.1em;
+        }
+
+        .emotion-text {
+            font-weight: 600;
+        }
+
+        .keywords-compact {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+        }
+
+        .keywords-compact .keyword-tag {
+            background: rgba(255, 255, 255, 0.15);
+            color: white;
+            padding: 2px 6px;
+            border-radius: 6px;
+            font-size: 0.75em;
+            font-weight: 500;
+        }
+
+        .keywords-compact .keyword-tag.primary {
+            background: rgba(255, 255, 255, 0.25);
+            font-weight: 600;
+        }
+
+        .ticket-number,
+        .ticket-status {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 3px 8px;
+            border-radius: 8px;
+            font-weight: 500;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .action-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 0.85em;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .action-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .action-btn.primary {
+            background: rgba(255, 255, 255, 0.9);
+            color: #1f2937;
+        }
+
+        /* === 진행률 표시 === */
+        .progress-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.8em;
+        }
+
+        .progress-bar {
+            flex: 1;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #10b981 0%, #059669 100%);
+            border-radius: 2px;
+            transition: width 0.3s ease;
+            width: 75%;
+        }
+
+        /* === 메인 콘텐츠 영역 === */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        /* === 대시보드 요약 === */
+        .dashboard-summary {
+            background-color: #f8fafc;
+            padding: 16px 20px;
+            border-bottom: 1px solid #e5e7eb;
+            flex-shrink: 0;
+        }
+
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
+        }
+
+        .summary-widget {
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 12px;
+            transition: all 0.2s ease;
+        }
+
+        .summary-widget:hover {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            transform: translateY(-1px);
+        }
+
+        .widget-header {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 8px;
+            font-size: 0.9em;
+            font-weight: 600;
+            color: #374151;
+        }
+
+        .widget-header i {
+            color: #8B5CF6;
+        }
+
+        .widget-content {
+            font-size: 0.8em;
+            color: #6b7280;
+            line-height: 1.4;
+        }
+
+        .widget-value {
+            font-size: 1.2em;
+            font-weight: 700;
+            color: #1f2937;
+            margin-bottom: 4px;
+        }
+
+        /* === 탭 시스템 === */
+        .tab-navigation {
+            background-color: #ffffff;
+            border-bottom: 1px solid #e5e7eb;
+            padding: 0 20px;
+            flex-shrink: 0;
+        }
+
+        .tab-list {
+            display: flex;
+            gap: 0;
+            margin: 0;
+            padding: 0;
+            list-style: none;
+            overflow-x: auto;
+        }
+
+        .tab-button {
+            background: none;
+            border: none;
+            padding: 12px 16px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.9em;
+            color: #6b7280;
+            border-bottom: 2px solid transparent;
+            position: relative;
+            white-space: nowrap;
+        }
+
+        .tab-button:hover {
+            color: #374151;
+            background-color: #f9fafb;
+        }
+
+        .tab-button.active {
+            color: #8B5CF6;
+            border-bottom-color: #8B5CF6;
+            background-color: #faf5ff;
+        }
+
+        .tab-count {
+            background-color: #e5e7eb;
+            color: #6b7280;
+            padding: 2px 6px;
+            border-radius: 8px;
+            font-size: 0.7em;
+            font-weight: 600;
+        }
+
+        .tab-button.active .tab-count {
+            background-color: #8B5CF6;
+            color: white;
+        }
+
+        /* === 탭 콘텐츠 === */
+        .tab-content-area {
+            flex: 1;
+            position: relative;
+            min-height: 0;
+        }
+
+        .tab-panel {
+            display: none;
+            height: 100%;
+            padding: 20px;
+        }
+
+        .tab-panel.active {
+            display: block;
+        }
+
+        /* === 콘텐츠 카드 === */
+        .content-card {
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            overflow: hidden;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+
+        .content-card:hover {
+            border-color: #8B5CF6;
+            box-shadow: 0 4px 12px rgba(139, 92, 246, 0.1);
+            transform: translateY(-1px);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            border-bottom: 1px solid #f3f4f6;
+        }
+
+        .card-id {
+            font-family: 'Courier New', monospace;
+            font-size: 0.8em;
+            color: #6b7280;
+            font-weight: 600;
+        }
+
+        .card-score {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+            padding: 2px 6px;
+            border-radius: 8px;
+            font-size: 0.7em;
+            font-weight: 600;
+        }
+
+        .card-body {
+            padding: 12px 16px;
+        }
+
+        .card-title {
+            font-weight: 600;
+            color: #1f2937;
+            margin-bottom: 6px;
+            line-height: 1.3;
+            font-size: 0.95em;
+        }
+
+        .card-excerpt {
+            color: #6b7280;
+            font-size: 0.85em;
+            line-height: 1.4;
+            margin-bottom: 8px;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            line-clamp: 2;
+            overflow: hidden;
+        }
+
+        .card-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.75em;
+            color: #9ca3af;
+        }
+
+        .card-actions {
+            display: flex;
+            gap: 6px;
+            margin-top: 8px;
+        }
+
+        .card-btn {
+            padding: 4px 8px;
+            border: 1px solid #d1d5db;
+            background: none;
+            color: #6b7280;
+            border-radius: 4px;
+            font-size: 0.75em;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .card-btn:hover {
+            background-color: #f3f4f6;
+            border-color: #8B5CF6;
+            color: #8B5CF6;
+        }
+
+        .card-btn.primary {
+            background: linear-gradient(135deg, #8B5CF6 0%, #3B82F6 100%);
+            color: white;
+            border-color: transparent;
+        }
+
+        .card-btn.primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 6px rgba(139, 92, 246, 0.3);
+        }
+
+        /* === 채팅 인터페이스 === */
+        .chat-container {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            min-height: 300px;
+        }
+
+        .chat-messages {
+            flex: 1;
+            padding: 16px;
+            background-color: #f9fafb;
+            margin-bottom: 16px;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+            min-height: 200px;
+        }
+
+        .chat-message {
+            display: flex;
+            margin-bottom: 16px;
+            gap: 8px;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .chat-message.user {
+            flex-direction: row-reverse;
+        }
+
+        .message-avatar {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75em;
+            flex-shrink: 0;
+        }
+
+        .chat-message.user .message-avatar {
+            background: linear-gradient(135deg, #3B82F6 0%, #1e40af 100%);
+            color: white;
+        }
+
+        .chat-message.assistant .message-avatar {
+            background: linear-gradient(135deg, #8B5CF6 0%, #7c3aed 100%);
+            color: white;
+        }
+
+        .message-content {
+            max-width: 75%;
+        }
+
+        .message-text {
+            background: white;
+            padding: 8px 12px;
+            border-radius: 12px;
+            border: 1px solid #e5e7eb;
+            line-height: 1.4;
+            font-size: 0.85em;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+        }
+
+        .chat-message.user .message-text {
+            background: linear-gradient(135deg, #3B82F6 0%, #1e40af 100%);
+            color: white;
+            border-color: #3B82F6;
+        }
+
+        .message-time {
+            font-size: 0.65em;
+            color: #9ca3af;
+            margin-top: 2px;
+            padding: 0 4px;
+        }
+
+        .chat-input-area {
+            background-color: white;
+            border-top: 1px solid #e5e7eb;
+            padding: 12px 0;
+            flex-shrink: 0;
+        }
+
+        .chat-input-wrapper {
+            display: flex;
+            gap: 8px;
+        }
+
+        .chat-input {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            font-size: 0.85em;
+            resize: none;
+            height: 36px;
+            transition: all 0.2s ease;
+        }
+
+        .chat-input:focus {
+            outline: none;
+            border-color: #8B5CF6;
+            box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.1);
+        }
+
+        .send-btn {
+            background: linear-gradient(135deg, #8B5CF6 0%, #3B82F6 100%);
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .send-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 3px 8px rgba(139, 92, 246, 0.3);
+        }
+
+        /* === 감정 분석 (간단 버전) === */
+        .emotion-analysis {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 8px;
+            flex-wrap: wrap;
+        }
+
+        .emotion-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.8em;
+        }
+
+        .emotion-icon {
+            font-size: 1em;
+        }
+
+        .emotion-value {
+            font-weight: 600;
+            color: #1f2937;
+        }
+
+        /* === 키워드 태그 === */
+        .keyword-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-bottom: 8px;
+        }
+
+        .keyword-tag {
+            background-color: #f3f4f6;
+            color: #6b7280;
+            padding: 2px 6px;
+            border-radius: 8px;
+            font-size: 0.7em;
+            font-weight: 500;
+        }
+
+        .keyword-tag.primary {
+            background: linear-gradient(135deg, #8B5CF6 0%, #3B82F6 100%);
+            color: white;
+        }
+
+        /* === 반응형 대응 === */
+        @media (max-width: 600px) {
+            .header-content {
+                flex-direction: column;
+                gap: 8px;
+                align-items: stretch;
+            }
+            
+            .header-insights {
+                flex-direction: column;
+                gap: 8px;
+                align-items: flex-start;
+            }
+            
+            .keywords-compact {
+                flex-wrap: wrap;
+                gap: 2px;
+            }
+            
+            .keywords-compact .keyword-tag {
+                font-size: 0.7em;
+                padding: 1px 4px;
+            }
+            
+            .tab-list {
+                overflow-x: auto;
+                white-space: nowrap;
+            }
+            
+            .tab-button {
+                flex-shrink: 0;
+                padding: 8px 12px;
+                font-size: 0.8em;
+            }
+        }
+
+        /* === 로딩 스타일 === */
+        .loading-indicator {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            color: #6b7280;
+        }
+
+        .loading-indicator.show {
+            display: flex;
+        }
+
+        .loading-spinner {
+            margin-right: 8px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(8px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* === 사이드바 전용 로딩 스타일 === */
+        .sidebar-only {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+        }
+
+        .sidebar-loading {
+            width: 100%;
+            max-width: 320px;
+            text-align: center;
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .loading-header {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 16px;
+            font-size: 16px;
+            font-weight: 600;
+            color: #1f2937;
+        }
+
+        .loading-header i {
+            font-size: 20px;
+            color: #8B5CF6;
+            animation: pulse 2s infinite;
+        }
+
+        .loading-progress {
+            margin-bottom: 12px;
+        }
+
+        .loading-progress .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e5e7eb;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+
+        .loading-progress .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #8B5CF6 0%, #3B82F6 100%);
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+
+        .loading-progress .progress-text {
+            font-size: 14px;
+            font-weight: 600;
+            color: #6b7280;
+        }
+
+        .loading-status {
+            font-size: 14px;
+            color: #374151;
+            margin-bottom: 8px;
+        }
+
+        .completion-message {
+            font-size: 13px;
+            padding: 8px 12px;
+            background: #ecfdf5;
+            border: 1px solid #d1fae5;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* === AI 분석 요약 섹션 스타일 === */
+        .ai-summary-section {
+            background: #ffffff;
+            border-bottom: 1px solid #e5e7eb;
+            padding: 0;
+            flex-shrink: 0;
+        }
+
+        .ai-summary-section .section-header {
+            background: #f9fafb;
+            border-bottom: 1px solid #e5e7eb;
+            padding: 12px 20px;
+        }
+
+        .ai-summary-section .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .ai-summary-section h3 {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin: 0;
+            font-size: 16px;
+            font-weight: 600;
+            color: #374151;
+        }
+
+        .ai-summary-section h3 i {
+            color: #8B5CF6;
+        }
+
+        /* 메인 요약 텍스트 스타일 */
+        .main-summary {
+            background: #ffffff;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .main-summary .summary-text {
+            font-size: 14px;
+            line-height: 1.2;
+            color: #374151;
+            white-space: pre-line;
+        }
+
+        /* 과도한 줄바꿈 압축 */
+        .main-summary .summary-text br + br {
+            display: none;
+        }
+
+        /* 섹션 간격 조정 */
+        .main-summary .summary-text {
+            word-break: keep-all;
+            overflow-wrap: break-word;
+        }
+
+        /* 마크다운 렌더링 스타일 */
+        .summary-text h1,
+        .summary-text h2,
+        .summary-text h3,
+        .summary-text h4 {
+            color: #1f2937;
+            font-weight: 700;
+            margin: 12px 0 6px 0;
+            line-height: 1.2;
+        }
+
+        .summary-text h2 {
+            font-size: 16px;
+            border-bottom: 1px solid #e5e7eb;
+            padding-bottom: 4px;
+        }
+
+        .summary-text h3 {
+            font-size: 15px;
+        }
+
+        .summary-text strong,
+        .summary-text b {
+            color: #1f2937;
+            font-weight: 700;
+        }
+
+        .summary-text ul,
+        .summary-text ol {
+            margin: 8px 0;
+            padding-left: 20px;
+        }
+
+        .summary-text li {
+            margin: 4px 0;
+            line-height: 1.5;
+        }
+
+        .summary-text p {
+            margin: 4px 0;
+            line-height: 1.2;
+        }
+
+        .summary-text code {
+            background: #f3f4f6;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 13px;
+        }
+
+        .summary-text blockquote {
+            border-left: 3px solid #8B5CF6;
+            margin: 12px 0;
+            padding: 8px 12px;
+            background: #f8fafc;
+            font-style: italic;
+        }
+
+        .btn-collapse {
+            background: none;
+            border: none;
+            padding: 4px;
+            border-radius: 4px;
+            color: #6b7280;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-collapse:hover {
+            background: #e5e7eb;
+            color: #374151;
+        }
+
+        .summary-content {
+            padding: 16px;
+            transition: all 0.3s ease;
+        }
+
+        .ai-summary-section.collapsed {
+            display: none;
+        }
+
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+
+        .summary-card {
+            background: #ffffff;
+            border: 1px solid #e5e7eb;
+            border-radius: 6px;
+            overflow: hidden;
+            transition: box-shadow 0.2s ease;
+        }
+
+        .summary-card:hover {
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        }
+
+        .summary-card .card-header {
+            background: #f8fafc;
+            border-bottom: 1px solid #e5e7eb;
+            padding: 8px 12px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .summary-card .card-header i {
+            color: #8B5CF6;
+            font-size: 13px;
+        }
+
+        .summary-card .card-header h4 {
+            margin: 0;
+            font-size: 13px;
+            font-weight: 600;
+            color: #374151;
+        }
+
+        .summary-card .card-body {
+            padding: 12px;
+        }
+
+        /* 정보 그리드 */
+        .info-grid {
+            display: grid;
+            gap: 6px;
+        }
+
+        .info-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+        }
+
+        .info-item .label {
+            color: #6b7280;
+            font-weight: 500;
+        }
+
+        .info-item .value {
+            color: #374151;
+            font-weight: 600;
+        }
+
+        .status-open { color: #f59e0b; }
+        .priority-high { color: #ef4444; }
+
+        /* 감정 분석 */
+        .emotion-analysis {
+            display: grid;
+            gap: 8px;
+        }
+
+        .emotion-item {
+            display: grid;
+            grid-template-columns: 60px 1fr 40px;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+        }
+
+        .emotion-label {
+            color: #6b7280;
+            font-weight: 500;
+        }
+
+        .emotion-bar {
+            height: 6px;
+            background: #e5e7eb;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .emotion-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.3s ease;
+        }
+
+        .emotion-fill.positive { background: #10b981; }
+        .emotion-fill.neutral { background: #f59e0b; }
+        .emotion-fill.negative { background: #ef4444; }
+
+        .emotion-value {
+            color: #374151;
+            font-weight: 600;
+            text-align: right;
+        }
+
+        /* 핵심 요약 */
+        .summary-text {
+            margin-bottom: 8px;
+        }
+
+        .summary-text p {
+            margin: 0;
+            font-size: 12px;
+            line-height: 1.4;
+            color: #374151;
+        }
+
+        .key-points {
+            display: grid;
+            gap: 4px;
+        }
+
+        .key-point {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: #374151;
+        }
+
+        .key-point i {
+            color: #10b981;
+            font-size: 9px;
+        }
+
+        /* 추천 액션 */
+        .action-items {
+            display: grid;
+            gap: 8px;
+        }
+
+        .action-item {
+            display: flex;
+            gap: 8px;
+            align-items: flex-start;
+        }
+
+        .action-priority {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .action-priority.priority-high { color: #ef4444; }
+        .action-priority.priority-medium { color: #f59e0b; }
+
+        .action-content {
+            flex: 1;
+        }
+
+        .action-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: #374151;
+            margin-bottom: 1px;
+        }
+
+        .action-desc {
+            font-size: 11px;
+            color: #6b7280;
+            line-height: 1.3;
+        }
+
+        /* 원인 분석 스타일 */
+        .cause-analysis {
+            display: grid;
+            gap: 8px;
+        }
+
+        .cause-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            padding: 6px 8px;
+            border-radius: 4px;
+            border-left: 3px solid;
+        }
+
+        .cause-item.confirmed {
+            background: #fef3c7;
+            border-left-color: #f59e0b;
+        }
+
+        .cause-item.contributing {
+            background: #dbeafe;
+            border-left-color: #3b82f6;
+        }
+
+        .cause-item.technical {
+            background: #fecaca;
+            border-left-color: #ef4444;
+        }
+
+        .cause-label {
+            color: #374151;
+            font-weight: 600;
+        }
+
+        .cause-desc {
+            color: #6b7280;
+            font-weight: 500;
+        }
+
+        .certainty-level {
+            margin-top: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: #10b981;
+            font-weight: 600;
+            background: #ecfdf5;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+
+        .action-item.priority-low { 
+            opacity: 0.8; 
+        }
+
+        .action-priority.priority-low { 
+            color: #6b7280; 
+        }
+
+        /* 사이드바 모드에서 AI 분석 요약 섹션 숨기기 */
+        .sidebar-mode .ai-summary-section {
+            display: none;
+        }
+
+        /* === 스크롤바 최적화 === */
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 2px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+
+        /* === 모달 스타일 최적화 === */
+        .modal-mode {
+            overflow: hidden;
+        }
+
+        .modal-mode .app-container {
+            min-height: 600px;
+            max-height: 100vh;
+        }
+
+        /* === 사이드바 스타일 최적화 === */
+        .sidebar-mode {
+            max-width: 400px;
+        }
+
+        .sidebar-mode .summary-grid {
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+        }
+
+        .sidebar-mode .summary-widget {
+            padding: 8px;
+        }
+
+        .sidebar-mode .tab-button {
+            padding: 8px 12px;
+            font-size: 0.8em;
+        }
+
+        /* === 에러 방지 === */
+        .error-boundary {
+            padding: 20px;
+            text-align: center;
+            color: #6b7280;
+        }
+    </style>
+</head>
+<body>
+    <!-- FDK 응답 컨테이너 (필수) -->
+    <div id="fdk-response-container">
+        <!-- 사이드바 전용 로딩 인디케이터 -->
+        <div class="sidebar-only" style="display: none;">
+            <div class="sidebar-loading">
+                <div class="loading-header">
+                    <i class="fas fa-brain"></i>
+                    <span>AI 분석 중...</span>
+                </div>
+                <div class="loading-progress">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="sidebarProgress" style="width: 75%"></div>
+                    </div>
+                    <div class="progress-text" id="sidebarProgressText">75%</div>
+                </div>
+                <div class="loading-status" id="sidebarStatus">티켓 분석 완료</div>
+                <div class="completion-message" style="margin-top: 10px; color: #10b981;">
+                    <i class="fas fa-check-circle"></i>
+                    데이터 준비 완료 - 앱 아이콘 클릭 시 상세 결과 확인
+                </div>
+            </div>
+        </div>
+
+        <!-- 모달 전용 전체 UI -->
+        <div class="modal-only app-container" style="display: none;">
+            <!-- 스마트 헤더 -->
+            <header class="smart-header">
+                <div class="header-content">
+                    <div class="ticket-info">
+                        <h2>
+                            <i class="fas fa-language"></i>
+                            티켓 필드 번역 파일(yml) 적용 오류
+                        </h2>
+                        <div class="ticket-meta">
+                            <span class="ticket-number">#WDS-2024-0125</span>
+                            <span class="ticket-status">해결진행중</span>
+                        </div>
+                        <!-- 컴팩트 감정분석 & 키워드 -->
+                        <div class="header-insights">
+                            <div class="emotion-compact">
+                                <span class="emotion-emoji">😊</span>
+                                <span class="emotion-text">75% 긍정적</span>
+                            </div>
+                            <div class="keywords-compact">
+                                <span class="keyword-tag primary">AI 전략</span>
+                                <span class="keyword-tag">비용 최적화</span>
+                                <span class="keyword-tag">ROI</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="header-actions">
+                        <button class="action-btn primary" title="전문가 연결">
+                            <i class="fas fa-user-tie"></i>
+                            <span class="btn-text">전문가</span>
+                        </button>
+                        <button class="action-btn" title="새로고침" id="refreshBtn">
+                            <i class="fas fa-sync-alt"></i>
+                        </button>
+                        <button class="action-btn" title="요약 토글" id="summaryToggleHeader">
+                            <i class="fas fa-chevron-up"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="progress-indicator">
+                    <div class="progress-bar">
+                        <div class="progress-fill"></div>
+                    </div>
+                    <div class="progress-text">AI 분석 75%</div>
+                </div>
+            </header>
+
+            <!-- 🎫 AI 분석 요약 섹션 -->
+            <section class="ai-summary-section">
+                <div class="section-header">
+                    <div class="header-content">
+                        <h3>
+                            <i class="fas fa-brain"></i>
+                            AI 분석 요약
+                        </h3>
+                    </div>
+                </div>
+                
+                <div class="summary-content" id="summaryContent">
+                    <!-- 메인 요약 텍스트 (백엔드 summary 필드) -->
+                    <div class="main-summary" id="mainSummary">
+                        <div class="summary-text" data-markdown="true">
+🔍 **문제 현황**
+- 핵심 문제와 증상: 아시아홀딩스 라이선스 1명 추가 요청
+- 고객 배경 정보: 아시아지주사 세금계산서 담당자로부터 요청
+- 비즈니스 임팩트: 라이선스 추가로 인한 업무 효율성 향상
+- 감정 상태: 요청은 협조적이며 긍정적으로 보임
+
+💡 **원인 분석**
+- 파악된 근본 원인: 아시아홀딩스 라이선스 추가 요청
+- 기여 요인들: 고객의 업무 확장 또는 새로운 사용자 추가
+- 기술적 세부사항: 라이선스 관련 정보 전달 필요
+- 원인 확실성 수준: 확정
+
+⚡ **해결 진행상황**
+- 현재 상태: 라이선스 추가 작업 진행 중
+- 수행된 조치들: We Do Soft에서 추가 작업 진행 중
+- 시도한 해결책과 결과: 라이선스 추가 작업 진행 중
+- 다음 단계 계획: 아시아홀딩스 재무 담당자 정보 전달 예정
+- 예상 해결 시간: 미정
+
+🎯 **중요 인사이트**
+- 향후 처리 방향: 라이선스 추가 작업 완료 후 고객 확인 요청
+- 에스컬레이션 필요성: 현재 단계에서는 필요 없음
+- 예방 조치 권장사항: 고객 요청에 따라 신속하게 처리
+- 고객 관리 방안: 고객 요청 사항에 대한 신속한 응대
+- 학습 포인트: 유사한 요청 시 빠른 대응 필요
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 메인 콘텐츠 -->
+            <main class="main-content">
+
+                <!-- 탭 네비게이션 -->
+                <nav class="tab-navigation">
+                    <ul class="tab-list">
+                        <li>
+                            <button class="tab-button active" data-tab="similar-tickets">
+                                <i class="fas fa-copy"></i>
+                                <span>유사 티켓</span>
+                                <span class="tab-count">18</span>
+                            </button>
+                        </li>
+                        <li>
+                            <button class="tab-button" data-tab="solutions">
+                                <i class="fas fa-lightbulb"></i>
+                                <span>추천 솔루션</span>
+                                <span class="tab-count">12</span>
+                            </button>
+                        </li>
+                        <li>
+                            <button class="tab-button" data-tab="ai-chat">
+                                <i class="fas fa-robot"></i>
+                                <span>AI 어시스턴트</span>
+                            </button>
+                        </li>
+                    </ul>
+                </nav>
+
+                <!-- 탭 콘텐츠 -->
+                <div class="tab-content-area">
+                    <!-- 유사 티켓 탭 -->
+                    <div class="tab-panel active" id="similar-tickets">
+                        <div class="content-card">
+                            <div class="card-header">
+                                <span class="card-id">#12344</span>
+                                <span class="card-score">98%</span>
+                            </div>
+                            <div class="card-body">
+                                <h4 class="card-title">아시아홀딩스(asiaholdings) 라이센스 1명 추가</h4>
+                                <p class="card-excerpt">
+                                    아시아홀딩스의 메일 시스템 라이센스가 현재 7명까지 있어서, 1명을 추가하고 싶습니다. 즉시 라이센스가 적용될 수 있는지 확인이 필요합니다.
+                                </p>
+                                <div class="card-meta">
+                                    <span>해결 시간: 2.3시간</span>
+                                    <span>2일 전</span>
+                                </div>
+                                <div class="card-actions">
+                                    <button class="card-btn primary">
+                                        <i class="fas fa-eye"></i>
+                                        상세보기
+                                    </button>
+                                    <button class="card-btn">
+                                        <i class="fas fa-copy"></i>
+                                        솔루션 복사
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="content-card">
+                            <div class="card-header">
+                                <span class="card-id">#1089</span>
+                                <span class="card-score">89%</span>
+                            </div>
+                            <div class="card-body">
+                                <h4 class="card-title">데이터 분석 도구 비교 및 추천 요청</h4>
+                                <p class="card-excerpt">
+                                    기업 내 데이터 분석을 위한 최적의 도구 선택과 비용 대비 효과 분석을 위한 문의입니다.
+                                </p>
+                                <div class="card-meta">
+                                    <span>해결 시간: 1.8시간</span>
+                                    <span>1주일 전</span>
+                                </div>
+                                <div class="card-actions">
+                                    <button class="card-btn primary">
+                                        <i class="fas fa-eye"></i>
+                                        상세보기
+                                    </button>
+                                    <button class="card-btn">
+                                        <i class="fas fa-copy"></i>
+                                        솔루션 복사
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="content-card">
+                            <div class="card-header">
+                                <span class="card-id">#1034</span>
+                                <span class="card-score">82%</span>
+                            </div>
+                            <div class="card-body">
+                                <h4 class="card-title">AI 도구 비용 최적화 및 예산 계획 수립</h4>
+                                <p class="card-excerpt">
+                                    AI 도구 도입 시 비용을 최적화하고 효율적인 예산 계획을 수립하는 방법에 대한 문의입니다.
+                                </p>
+                                <div class="card-meta">
+                                    <span>해결 시간: 3.1시간</span>
+                                    <span>2주일 전</span>
+                                </div>
+                                <div class="card-actions">
+                                    <button class="card-btn primary">
+                                        <i class="fas fa-eye"></i>
+                                        상세보기
+                                    </button>
+                                    <button class="card-btn">
+                                        <i class="fas fa-copy"></i>
+                                        솔루션 복사
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 추천 솔루션 탭 -->
+                    <div class="tab-panel" id="solutions">
+                        <div class="content-card">
+                            <div class="card-header">
+                                <span class="card-id">가이드</span>
+                                <span class="card-score">98%</span>
+                            </div>
+                            <div class="card-body">
+                                <h4 class="card-title">AI 전략 수립을 위한 완벽 가이드</h4>
+                                <p class="card-excerpt">
+                                    기업의 AI 도입 전략을 체계적으로 수립하는 방법과 단계별 실행 방안을 상세히 설명합니다. 
+                                    비용 분석, ROI 계산, 리스크 관리까지 포함한 종합 가이드입니다.
+                                </p>
+                                <div class="card-meta">
+                                    <span>조회 1,234회</span>
+                                    <span>도움됨 95%</span>
+                                </div>
+                                <div class="card-actions">
+                                    <button class="card-btn primary">
+                                        <i class="fas fa-eye"></i>
+                                        전문 보기
+                                    </button>
+                                    <button class="card-btn">
+                                        <i class="fas fa-copy"></i>
+                                        고객에게 전달
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="content-card">
+                            <div class="card-header">
+                                <span class="card-id">FAQ</span>
+                                <span class="card-score">94%</span>
+                            </div>
+                            <div class="card-body">
+                                <h4 class="card-title">AI 도구 비용 최적화 자주 묻는 질문</h4>
+                                <p class="card-excerpt">
+                                    AI 도구 도입 시 자주 묻는 비용 관련 질문과 답변을 정리한 FAQ입니다.
+                                </p>
+                                <div class="card-meta">
+                                    <span>조회 892회</span>
+                                    <span>도움됨 91%</span>
+                                </div>
+                                <div class="card-actions">
+                                    <button class="card-btn primary">
+                                        <i class="fas fa-eye"></i>
+                                        전문 보기
+                                    </button>
+                                    <button class="card-btn">
+                                        <i class="fas fa-copy"></i>
+                                        고객에게 전달
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- AI 채팅 탭 -->
+                    <div class="tab-panel" id="ai-chat">
+                        <div class="chat-container">
+                            <div class="chat-messages" id="chatMessages">
+                                <div class="chat-message assistant">
+                                    <div class="message-avatar">
+                                        <i class="fas fa-robot"></i>
+                                    </div>
+                                    <div class="message-content">
+                                        <div class="message-text">
+                                            안녕하세요! 티켓 #1234에 대한 분석을 완료했습니다. 
+                                            AI 전략 수립과 관련하여 궁금한 점이 있으시면 언제든 물어보세요.
+                                        </div>
+                                        <div class="message-time">오후 2:15</div>
+                                    </div>
+                                </div>
+
+                                <div class="chat-message user">
+                                    <div class="message-content">
+                                        <div class="message-text">
+                                            비용 최적화 방안을 자세히 알고 싶습니다.
+                                        </div>
+                                        <div class="message-time">오후 2:16</div>
+                                    </div>
+                                    <div class="message-avatar">
+                                        <i class="fas fa-user"></i>
+                                    </div>
+                                </div>
+
+                                <div class="chat-message assistant">
+                                    <div class="message-avatar">
+                                        <i class="fas fa-robot"></i>
+                                    </div>
+                                    <div class="message-content">
+                                        <div class="message-text">
+                                            AI 비용 최적화를 위한 3가지 핵심 전략을 제안드립니다:<br><br>
+                                            1. 📊 단계적 도입: 핵심 업무부터 시작<br>
+                                            2. 🔄 클라우드 활용: 30-40% 비용 절감<br>
+                                            3. 📈 ROI 측정: 정량적 성과 지표 설정<br><br>
+                                            어떤 부분에 대해 더 자세히 알고 싶으신가요?
+                                        </div>
+                                        <div class="message-time">오후 2:17</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="chat-input-area">
+                                <div class="chat-input-wrapper">
+                                    <textarea class="chat-input" placeholder="메시지를 입력하세요..." rows="1" id="chatInput"></textarea>
+                                    <button class="send-btn" id="sendBtn">
+                                        <i class="fas fa-paper-plane"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- 로딩 인디케이터 -->
+    <div class="loading-indicator" id="loadingIndicator">
+        <div class="loading-spinner">
+            <i class="fas fa-spinner"></i>
+        </div>
+        <span>AI가 분석 중입니다...</span>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- 마크다운 파서 -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
+    
+    <!-- FDK 및 앱 스크립트 로드 -->
+    <script src="https://static.freshdev.io/fdk/2.0/assets/fresh_client.js"></script>
+    
+    <!-- 앱 모듈들 (의존성 순서에 따라 로드) -->
+    <script src="scripts/globals.js"></script>
+    <script src="scripts/utils.js"></script>
+    <script src="scripts/api.js"></script>
+    <script src="scripts/data.js"></script>
+    <script src="scripts/ui.js"></script>
+    <script src="scripts/events.js"></script>
+    <script src="scripts/sidebar-progress.js"></script>
+    <script src="scripts/app.js"></script>
+    
+    <script>
+        // FDK 환경 감지 및 최적화
+        (function() {
+            'use strict';
+
+            // 안전한 DOM 조작을 위한 헬퍼 함수
+            function safeQuerySelector(selector) {
+                try {
+                    return document.querySelector(selector);
+                } catch (e) {
+                    console.warn('Safe query selector failed:', e);
+                    return null;
+                }
+            }
+
+            function safeQuerySelectorAll(selector) {
+                try {
+                    return document.querySelectorAll(selector);
+                } catch (e) {
+                    console.warn('Safe query selector all failed:', e);
+                    return [];
+                }
+            }
+
+            // FDK 환경 감지 및 UI 표시
+            function detectEnvironment() {
+                const container = safeQuerySelector('#fdk-response-container');
+                if (!container) return;
+
+                const body = document.body;
+                const sidebarOnly = safeQuerySelector('.sidebar-only');
+                const modalOnly = safeQuerySelector('.modal-only');
+                
+                // iframe 환경 감지
+                if (window.self !== window.top) {
+                    console.log('🎭 iframe 환경 감지 (width:', window.innerWidth, ', height:', window.innerHeight, ')');
+                    
+                    // 부모 창 크기로 모달/사이드바 구분
+                    if (window.innerWidth > 500 || window.innerHeight > 500) {
+                        console.log('📱 모달 모드 적용 - 전체 UI 표시');
+                        body.classList.add('modal-mode');
+                        body.classList.remove('sidebar-mode');
+                        
+                        // 모달 UI 표시, 사이드바 UI 숨김
+                        if (sidebarOnly) sidebarOnly.style.display = 'none';
+                        if (modalOnly) modalOnly.style.display = 'flex';
+                        
+                        // 모달에서 컨테이너 최대 활용
+                        if (container) {
+                            container.style.width = '100%';
+                            container.style.maxWidth = '100%';
+                        }
+                    } else {
+                        console.log('📱 사이드바 모드 적용 - 로딩 인디케이터만 표시');
+                        body.classList.add('sidebar-mode');
+                        body.classList.remove('modal-mode');
+                        
+                        // 사이드바 UI 표시, 모달 UI 숨김
+                        if (sidebarOnly) sidebarOnly.style.display = 'flex';
+                        if (modalOnly) modalOnly.style.display = 'none';
+                    }
+                } else {
+                    console.log('🖥️ 일반 환경 감지 - 모달 UI 표시');
+                    // 직접 접근 (개발/테스트) - 모달 UI 표시
+                    body.classList.add('standalone-mode');
+                    if (sidebarOnly) sidebarOnly.style.display = 'none';
+                    if (modalOnly) modalOnly.style.display = 'flex';
+                }
+
+                // 컨테이너 크기 조정
+                adjustContainerSize();
+            }
+
+            // 컨테이너 크기 조정
+            function adjustContainerSize() {
+                const container = safeQuerySelector('.app-container');
+                const iframeContainer = safeQuerySelector('.iframe-container');
+                
+                if (!container) return;
+
+                if (document.body.classList.contains('modal-mode')) {
+                    console.log('📐 모달 모드 - 컨테이너 최대 활용');
+                    container.style.width = '100%';
+                    container.style.maxWidth = '100%';
+                    container.style.minHeight = '600px';
+                    container.style.maxHeight = '100vh';
+                    
+                    if (iframeContainer) {
+                        iframeContainer.style.width = '100%';
+                        iframeContainer.style.maxWidth = '100%';
+                    }
+                } else if (document.body.classList.contains('sidebar-mode')) {
+                    console.log('📐 사이드바 모드 - 제한된 폭');
+                    container.style.maxWidth = '400px';
+                    container.style.minHeight = '500px';
+                } else {
+                    console.log('📐 일반 모드 - 기본 설정');
+                    container.style.width = '100%';
+                    container.style.maxWidth = '100%';
+                }
+            }
+
+            // 즉시 환경 감지 실행
+            detectEnvironment();
+
+            // DOM이 준비되면 실행
+            document.addEventListener('DOMContentLoaded', function() {
+                try {
+                    // 환경 감지 재실행 (DOM 요소 접근 가능)
+                    detectEnvironment();
+
+                    // 요약 섹션 토글 기능 (헤더 버튼으로 변경)
+                    const summaryToggleHeader = safeQuerySelector('#summaryToggleHeader');
+                    const summarySection = safeQuerySelector('.ai-summary-section');
+                    
+                    if (summaryToggleHeader && summarySection) {
+                        summaryToggleHeader.addEventListener('click', function() {
+                            summarySection.classList.toggle('collapsed');
+                            const icon = summaryToggleHeader.querySelector('i');
+                            if (icon) {
+                                icon.classList.toggle('fa-chevron-up');
+                                icon.classList.toggle('fa-chevron-down');
+                            }
+                        });
+                    }
+
+                    // 백엔드 데이터로 요약 업데이트 함수 (마크다운 렌더링)
+                    function updateSummaryWithBackendData(data) {
+                        try {
+                            const summaryElement = safeQuerySelector('#mainSummary .summary-text');
+                            if (summaryElement && data.summary) {
+                                // 마크다운을 HTML로 렌더링
+                                if (typeof marked !== 'undefined') {
+                                    // marked.js 설정
+                                    marked.setOptions({
+                                        breaks: true,  // 줄바꿈 유지
+                                        gfm: true,     // GitHub Flavored Markdown
+                                        sanitize: false // HTML 허용
+                                    });
+                                    
+                                    // 마크다운 렌더링
+                                    const renderedHtml = marked.parse(data.summary);
+                                    summaryElement.innerHTML = renderedHtml;
+                                    
+                                    console.log('✅ 마크다운 렌더링 완료');
+                                } else {
+                                    // marked.js가 로드되지 않은 경우 폴백
+                                    console.warn('⚠️ marked.js 미로드 - 기본 텍스트 표시');
+                                    summaryElement.innerHTML = data.summary.replace(/\n/g, '<br>');
+                                }
+                            }
+                        } catch (error) {
+                            console.warn('요약 업데이트 실패:', error);
+                        }
+                    }
+
+                    // 전역에서 접근 가능하도록 설정
+                    window.updateSummaryWithBackendData = updateSummaryWithBackendData;
+
+                    // 스크롤 문제 해결을 위해 복잡한 로직 제거
+                    // 기본 브라우저 스크롤 동작 사용
+
+                    // 페이지 로드 시 마크다운 렌더링
+                    function renderMarkdownOnLoad() {
+                        try {
+                            const summaryElement = safeQuerySelector('#mainSummary .summary-text[data-markdown="true"]');
+                            if (summaryElement) {
+                                console.log('📝 마크다운 렌더링 시작...');
+                                
+                                if (typeof marked !== 'undefined') {
+                                    const originalText = summaryElement.textContent || summaryElement.innerText;
+                                    if (originalText && originalText.trim()) {
+                                        marked.setOptions({
+                                            breaks: true,
+                                            gfm: true,
+                                            sanitize: false
+                                        });
+                                        
+                                        const renderedHtml = marked.parse(originalText.trim());
+                                        summaryElement.innerHTML = renderedHtml;
+                                        summaryElement.removeAttribute('data-markdown');
+                                        
+                                        console.log('✅ 마크다운 렌더링 완료');
+                                    } else {
+                                        console.warn('⚠️ 렌더링할 텍스트가 없음');
+                                    }
+                                } else {
+                                    console.error('❌ marked.js 라이브러리가 로드되지 않음');
+                                }
+                            } else {
+                                console.log('ℹ️ 마크다운 렌더링 대상 없음');
+                            }
+                        } catch (error) {
+                            console.error('❌ 마크다운 렌더링 오류:', error);
+                        }
+                    }
+
+                    // 지연 실행으로 라이브러리 로드 대기
+                    setTimeout(renderMarkdownOnLoad, 200);
+
+                    // 탭 전환 기능
+                    const tabButtons = safeQuerySelectorAll('.tab-button');
+                    const tabPanels = safeQuerySelectorAll('.tab-panel');
+
+                    tabButtons.forEach(button => {
+                        button.addEventListener('click', () => {
+                            const targetTab = button.getAttribute('data-tab');
+                            
+                            // 모든 탭 버튼과 패널에서 active 클래스 제거
+                            tabButtons.forEach(btn => btn.classList.remove('active'));
+                            tabPanels.forEach(panel => panel.classList.remove('active'));
+                            
+                            // 클릭된 탭 버튼과 해당 패널에 active 클래스 추가
+                            button.classList.add('active');
+                            const targetPanel = safeQuerySelector('#' + targetTab);
+                            if (targetPanel) {
+                                targetPanel.classList.add('active');
+                            }
+                        });
+                    });
+
+                    // 채팅 입력 자동 크기 조정
+                    const chatInput = safeQuerySelector('#chatInput');
+                    if (chatInput) {
+                        chatInput.addEventListener('input', function() {
+                            this.style.height = 'auto';
+                            this.style.height = Math.min(this.scrollHeight, 80) + 'px';
+                        });
+                    }
+
+                    // 채팅 메시지 전송
+                    const sendBtn = safeQuerySelector('#sendBtn');
+                    if (sendBtn && chatInput) {
+                        function sendMessage() {
+                            const message = chatInput.value.trim();
+                            if (message) {
+                                // 사용자 메시지 추가
+                                addMessage(message, 'user');
+                                chatInput.value = '';
+                                chatInput.style.height = 'auto';
+                                
+                                // AI 응답 시뮬레이션
+                                setTimeout(() => {
+                                    addMessage('네, 좋은 질문입니다. 해당 내용에 대해 자세히 설명해드리겠습니다.', 'assistant');
+                                }, 1000);
+                            }
+                        }
+
+                        sendBtn.addEventListener('click', sendMessage);
+                        chatInput.addEventListener('keypress', function(e) {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                                e.preventDefault();
+                                sendMessage();
+                            }
+                        });
+                    }
+
+                    // 메시지 추가 함수
+                    function addMessage(text, type) {
+                        const messagesContainer = safeQuerySelector('#chatMessages');
+                        if (!messagesContainer) return;
+
+                        const messageDiv = document.createElement('div');
+                        messageDiv.className = `chat-message ${type}`;
+                        
+                        const time = new Date().toLocaleTimeString('ko-KR', { 
+                            hour: '2-digit', 
+                            minute: '2-digit' 
+                        });
+                        
+                        if (type === 'user') {
+                            messageDiv.innerHTML = `
+                                <div class="message-content">
+                                    <div class="message-text">${text}</div>
+                                    <div class="message-time">${time}</div>
+                                </div>
+                                <div class="message-avatar">
+                                    <i class="fas fa-user"></i>
+                                </div>
+                            `;
+                        } else {
+                            messageDiv.innerHTML = `
+                                <div class="message-avatar">
+                                    <i class="fas fa-robot"></i>
+                                </div>
+                                <div class="message-content">
+                                    <div class="message-text">${text}</div>
+                                    <div class="message-time">${time}</div>
+                                </div>
+                            `;
+                        }
+                        
+                        messagesContainer.appendChild(messageDiv);
+                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    }
+
+                    // 카드 클릭 효과
+                    const contentCards = safeQuerySelectorAll('.content-card');
+                    contentCards.forEach(card => {
+                        card.addEventListener('click', function(e) {
+                            if (!e.target.closest('.card-actions')) {
+                                contentCards.forEach(c => c.classList.remove('selected'));
+                                this.classList.add('selected');
+                            }
+                        });
+                    });
+
+                    // 새로고침 버튼 애니메이션
+                    const refreshBtn = safeQuerySelector('#refreshBtn');
+                    if (refreshBtn) {
+                        refreshBtn.addEventListener('click', function() {
+                            const icon = this.querySelector('i');
+                            if (icon) {
+                                icon.classList.add('fa-spin');
+                                setTimeout(() => {
+                                    icon.classList.remove('fa-spin');
+                                }, 2000);
+                            }
+                        });
+                    }
+
+                    // 로딩 표시 (초기 로드 시뮬레이션)
+                    const loadingIndicator = safeQuerySelector('#loadingIndicator');
+                    if (loadingIndicator) {
+                        loadingIndicator.classList.add('show');
+                        setTimeout(() => {
+                            loadingIndicator.classList.remove('show');
+                        }, 1500);
+                    }
+
+                } catch (error) {
+                    console.error('Initialization error:', error);
+                    // 에러 발생 시에도 기본 기능은 동작하도록 함
+                }
+            });
+
+            // 창 크기 변경 시 재조정
+            window.addEventListener('resize', function() {
+                try {
+                    adjustContainerSize();
+                } catch (error) {
+                    console.warn('Resize handler error:', error);
+                }
+            });
+
+            // 에러 핸들링
+            window.addEventListener('error', function(event) {
+                console.warn('Runtime error caught:', event.error);
+                // 에러가 발생해도 앱이 계속 동작하도록 함
+            });
+
+        })();
+    </script>
+</body>
+</html>
