@@ -35,6 +35,9 @@
             animation: slideIn 0.3s ease-out;
             position: relative;
             overflow: hidden;
+            /* 스크롤 차단을 위한 추가 스타일 */
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
         }
 
         @keyframes slideIn {
@@ -57,6 +60,9 @@
             box-shadow: -2px 0 8px rgba(0, 0, 0, 0.1);
             display: flex;
             flex-direction: column;
+            /* 스크롤 차단을 위한 추가 스타일 */
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
             overflow-y: auto;
             overflow-x: hidden;
             border-left: 1px solid #e5e7eb;
@@ -132,6 +138,9 @@
             display: flex;
             flex-direction: column;
             /* flex: 1과 min-height 제거 - 자연스러운 콘텐츠 흐름 */
+            /* 스크롤 차단을 위한 추가 스타일 */
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
         }
 
         /* AI 요약 영역 (FDK 스타일) - 접기/펴기 처리 */
@@ -1184,24 +1193,84 @@
             }
         }
 
-        // 간단한 스크롤 이벤트 관리 - 부모 창으로의 전파만 차단
+        // 강력한 스크롤 이벤트 관리 - 모달에서 부모 창으로의 스크롤 전파 완전 차단
         document.addEventListener('DOMContentLoaded', function() {
             const fdkContainer = document.getElementById('fdk-response-container');
             const modalContainer = document.querySelector('.modal-container');
             
-            // FDK 컨테이너에서 부모 창으로의 스크롤 전파 차단
-            if (fdkContainer) {
-                fdkContainer.addEventListener('wheel', function(e) {
-                    e.stopPropagation(); // 부모로의 전파만 차단
-                }, { passive: false });
+            // 스크롤 차단 함수
+            function preventParentScroll(e) {
+                const target = e.currentTarget;
+                const atTop = target.scrollTop === 0;
+                const atBottom = target.scrollHeight - target.clientHeight <= target.scrollTop + 1;
+                
+                // 위쪽 끝에서 위로 스크롤하려고 할 때
+                if (atTop && e.deltaY < 0) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return false;
+                }
+                
+                // 아래쪽 끝에서 아래로 스크롤하려고 할 때
+                if (atBottom && e.deltaY > 0) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return false;
+                }
+                
+                // 일반적인 경우에도 부모로의 전파 차단
+                e.stopPropagation();
             }
             
-            // 모달 컨테이너에서 부모 창으로의 스크롤 전파 차단
-            if (modalContainer) {
-                modalContainer.addEventListener('wheel', function(e) {
-                    e.stopPropagation(); // 부모로의 전파만 차단
-                }, { passive: false });
+            // FDK 컨테이너에 스크롤 차단 적용
+            if (fdkContainer) {
+                fdkContainer.addEventListener('wheel', preventParentScroll, { passive: false });
+                fdkContainer.addEventListener('DOMMouseScroll', preventParentScroll, { passive: false }); // Firefox
             }
+            
+            // 모달 컨테이너에도 스크롤 차단 적용
+            if (modalContainer) {
+                modalContainer.addEventListener('wheel', preventParentScroll, { passive: false });
+                modalContainer.addEventListener('DOMMouseScroll', preventParentScroll, { passive: false }); // Firefox
+            }
+            
+            // 탭 영역과 콘텐츠 영역에 더 강력한 차단 적용
+            const tabContents = document.querySelectorAll('.tab-content');
+            const mainContent = document.querySelector('.main-content');
+            
+            // 모든 탭 콘텐츠에 스크롤 차단 적용
+            tabContents.forEach(tabContent => {
+                tabContent.addEventListener('wheel', preventParentScroll, { passive: false });
+                tabContent.addEventListener('DOMMouseScroll', preventParentScroll, { passive: false });
+            });
+            
+            // 메인 콘텐츠에도 스크롤 차단 적용
+            if (mainContent) {
+                mainContent.addEventListener('wheel', preventParentScroll, { passive: false });
+                mainContent.addEventListener('DOMMouseScroll', preventParentScroll, { passive: false });
+            }
+            
+            // 터치 이벤트에 대한 스크롤 차단 (모바일 대응)
+            function preventTouchScroll(e) {
+                if (e.touches.length > 1) return; // 멀티터치는 허용
+                
+                const target = e.currentTarget;
+                const atTop = target.scrollTop === 0;
+                const atBottom = target.scrollHeight - target.clientHeight <= target.scrollTop + 1;
+                
+                // 스크롤 경계에서 더 이상 스크롤할 수 없을 때만 차단
+                if ((atTop && e.deltaY < 0) || (atBottom && e.deltaY > 0)) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+            }
+            
+            // 터치 이벤트 리스너 등록
+            [fdkContainer, modalContainer, mainContent].forEach(element => {
+                if (element) {
+                    element.addEventListener('touchmove', preventTouchScroll, { passive: false });
+                }
+            });
         });
 
         // 액션 버튼 기능들

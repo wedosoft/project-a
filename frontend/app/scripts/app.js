@@ -115,37 +115,63 @@ async function showFDKModal(ticketId, hasCachedData = false) {
       noBackdrop: true
     };
 
-    await client.interface.trigger("showModal", modalConfig);
+    // 모달을 반드시 열어야 하므로 별도 try-catch로 보호
+    try {
+      await client.interface.trigger("showModal", modalConfig);
+      console.log('✅ FDK 모달 열기 성공');
+    } catch (modalError) {
+      console.error('❌ FDK 모달 열기 실패:', modalError);
+      // 모달 열기 실패 시에도 사용자에게 알림
+      throw new Error('모달 창을 열 수 없습니다. 페이지를 새로고침 후 다시 시도해주세요.');
+    }
     
   } catch (error) {
     console.error('❌ FDK 모달 오류:', error);
     
-    // 사용자에게 친화적인 에러 메시지 표시
-    if (window.UI && window.UI.showErrorWithRetry) {
-      // 재시도 콜백 함수 정의
-      const retryCallback = async () => {
-        await showFDKModal(ticketId, hasCachedData);
-      };
-      
-      window.UI.showErrorWithRetry(
-        error, 
-        retryCallback, 
-        'AI 지원 모달 열기'
-      );
-    } else {
-      // UI 모듈이 없는 경우 폴백: 간단한 알림으로 대체
+    // 모달 열기 실패 시 사용자에게 친화적인 에러 메시지 표시
+    const client = GlobalState.getClient();
+    if (client) {
       try {
-        const client = GlobalState.getClient();
-        if (client) {
-          await client.interface.trigger("showNotify", {
-            type: "warning",
-            message: "AI 지원 기능을 불러오는 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."
-          });
-        }
+        await client.interface.trigger("showNotify", {
+          type: "danger",
+          message: `AI 지원 기능 오류: ${error.message || '알 수 없는 오류가 발생했습니다.'} 페이지를 새로고침 후 다시 시도해주세요.`
+        });
       } catch (notifyError) {
         console.error('❌ 알림도 실패:', notifyError);
-        // 최후의 수단: 브라우저 콘솔에 에러 메시지만 기록
+        // 최후의 수단: 콘솔에 오류 기록
         console.error('🚨 UI 초기화 실패: AI 지원 기능을 불러올 수 없습니다.');
+      }
+    } else {
+      // 클라이언트도 없는 경우 최후의 수단
+      console.error('🚨 FDK 클라이언트 초기화 실패: AI 지원 기능을 불러올 수 없습니다.');
+      
+      // 사용자에게 시각적 피드백 제공을 위해 페이지에 오류 메시지 표시
+      try {
+        const errorDiv = document.createElement('div');
+        errorDiv.style.cssText = `
+          position: fixed;
+          top: 20px;
+          right: 20px;
+          background: #dc3545;
+          color: white;
+          padding: 15px;
+          border-radius: 5px;
+          z-index: 10000;
+          max-width: 300px;
+          font-size: 14px;
+          box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+        `;
+        errorDiv.textContent = 'AI 지원 기능을 불러올 수 없습니다. 페이지를 새로고침 후 다시 시도해주세요.';
+        document.body.appendChild(errorDiv);
+        
+        // 5초 후 자동 제거
+        setTimeout(() => {
+          if (errorDiv.parentNode) {
+            errorDiv.parentNode.removeChild(errorDiv);
+          }
+        }, 5000);
+      } catch (domError) {
+        console.error('DOM 조작 실패:', domError);
       }
     }
   }
@@ -400,9 +426,9 @@ if (typeof window.isFDKModal !== 'undefined' && window.isFDKModal) {
               console.error('❌ UI 모듈 또는 updateUIWithCachedData 함수를 찾을 수 없음');
             }
           } else {
-            console.log('ℹ️ 모달에서 캐시된 데이터 없음 - 기본 상태 유지');
+            console.log('ℹ️ 모달에서 캐시된 데이터 없음 - 백엔드 데이터 로드 시도');
             
-            // 데이터가 없으면 백엔드에서 다시 로드 시도
+            // 데이터가 없으면 백엔드에서 다시 로드 시도하되, 실패 시 사용자 친화적 메시지 표시
             if (typeof Data !== 'undefined' && Data.preloadTicketDataOnPageLoad) {
               console.log('🔄 모달에서 데이터 재로드 시도');
               Data.preloadTicketDataOnPageLoad(client).then((result) => {
@@ -411,8 +437,34 @@ if (typeof window.isFDKModal !== 'undefined' && window.isFDKModal) {
                   if (typeof UI !== 'undefined' && UI.updateUIWithCachedData) {
                     UI.updateUIWithCachedData(newGlobalData);
                   }
+                } else {
+                  // 백엔드 로드 실패 시 사용자에게 친화적 메시지 표시
+                  console.warn('⚠️ 백엔드 데이터 로드 실패 - 사용자에게 오류 메시지 표시');
+                  
+                  // UI 모듈에서 에러 상태 표시
+                  if (typeof UI !== 'undefined' && UI.showBackendError) {
+                    UI.showBackendError('AI 분석 데이터를 불러오는 중 오류가 발생했습니다. 인터넷 연결을 확인하시고 다시 시도해주세요.');
+                  } else {
+                    // UI 모듈이 없는 경우 기본 에러 처리
+                    console.error('❌ UI.showBackendError 함수를 찾을 수 없음');
+                  }
+                }
+              }).catch((error) => {
+                console.error('❌ 모달 데이터 로드 중 예외 발생:', error);
+                
+                // 예외 발생 시에도 사용자에게 친화적 메시지 표시
+                if (typeof UI !== 'undefined' && UI.showBackendError) {
+                  UI.showBackendError('AI 분석 서비스에 일시적인 문제가 발생했습니다. 잠시 후 다시 시도해주세요.');
+                } else {
+                  console.error('❌ UI.showBackendError 함수를 찾을 수 없음');
                 }
               });
+            } else {
+              // Data 모듈이 없는 경우 기본 에러 메시지 표시
+              console.error('❌ Data 모듈을 찾을 수 없음');
+              if (typeof UI !== 'undefined' && UI.showBackendError) {
+                UI.showBackendError('AI 분석 기능을 초기화할 수 없습니다. 페이지를 새로고침 후 다시 시도해주세요.');
+              }
             }
           }
 
@@ -426,7 +478,14 @@ if (typeof window.isFDKModal !== 'undefined' && window.isFDKModal) {
           console.log('✅ 모달 렌더링 처리 완료 - 추가 액션 없음');
         }, 100);
       } catch (err) {
-        console.error('template.render 오류', err);
+        console.error('❌ template.render 오류:', err);
+        
+        // 모달 렌더링 중 예외 발생 시 사용자에게 친화적 메시지 표시
+        if (typeof UI !== 'undefined' && UI.showBackendError) {
+          UI.showBackendError('AI 지원 기능을 초기화하는 중 오류가 발생했습니다. 페이지를 새로고침 후 다시 시도해주세요.');
+        } else {
+          console.error('❌ UI.showBackendError 함수를 찾을 수 없음');
+        }
       }
     });
   })
