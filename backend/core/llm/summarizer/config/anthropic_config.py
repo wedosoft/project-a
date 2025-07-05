@@ -161,7 +161,7 @@ class AnthropicConfig:
             # 실험적 기능 설정 로드
             config._load_experimental_features_from_env(prefix)
             
-            logger.info(f"Anthropic 설정 로드 완료 (활성화: {config.enabled})")
+            logger.debug(f"Anthropic 설정 로드 완료 (활성화: {config.enabled})")
             return config
             
         except Exception as e:

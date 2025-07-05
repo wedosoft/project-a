@@ -12,6 +12,12 @@ from typing import Dict, List, Any, Optional
 from pathlib import Path
 import logging
 
+# 이미지 메타데이터 추출 함수 import
+from ..utils.image_metadata_extractor import (
+    extract_ticket_image_metadata,
+    extract_article_image_metadata
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -68,6 +74,16 @@ class PlatformDataMerger:
         
         merged_content = "\n\n".join(merged_content_parts)
         
+        # 이미지/첨부파일 메타데이터 추출
+        ticket_with_conversations = ticket.copy()
+        ticket_with_conversations["conversations"] = conversations
+        ticket_with_conversations["attachments"] = attachments
+        # all_attachments로도 설정 (기존 코드 호환성)
+        ticket_with_conversations["all_attachments"] = attachments
+        
+        image_metadata = extract_ticket_image_metadata(ticket_with_conversations)
+        logger.info(f"티켓 {ticket.get('id')} 이미지 메타데이터 추출: 인라인 {sum(1 for att in image_metadata.get('extended_metadata', {}).get('attachments', []) if att.get('type') == 'inline')}개, 첨부파일 {image_metadata.get('attachment_count', 0)}개")
+        
         # 통합 문서 구조 생성
         merged_document = {
             # 기본 식별 정보
@@ -94,7 +110,7 @@ class PlatformDataMerger:
                 } for att in attachments
             ],
             
-            # 메타데이터
+            # 메타데이터 (기존 + 이미지 정보 통합)
             "metadata": {
                 "status": ticket.get("status"),
                 "priority": ticket.get("priority"),
@@ -107,6 +123,14 @@ class PlatformDataMerger:
                 "source": ticket.get("source"),
                 "type": ticket.get("type")
             },
+            
+            # 검색 최적화를 위한 루트 레벨 필드들 (최소화)
+            "has_attachments": image_metadata.get("has_attachments", False),
+            "has_inline_images": image_metadata.get("has_inline_images", False), 
+            "attachment_count": image_metadata.get("attachment_count", 0),
+            
+            # 통합된 첨부파일 메타데이터
+            "attachments": image_metadata.get("attachments", []),
             
             # 시스템 정보
             "created_at_merged": datetime.now().isoformat(),
@@ -149,6 +173,14 @@ class PlatformDataMerger:
         
         merged_content = "\n\n".join(merged_content_parts)
         
+        # 이미지/첨부파일 메타데이터 추출
+        article_with_attachments = article.copy()
+        article_with_attachments["attachments"] = attachments
+        article_with_attachments["all_attachments"] = attachments
+        
+        image_metadata = extract_article_image_metadata(article_with_attachments)
+        logger.info(f"KB 아티클 {article.get('id')} 이미지 메타데이터 추출: 인라인 {sum(1 for att in image_metadata.get('extended_metadata', {}).get('attachments', []) if att.get('type') == 'inline')}개, 첨부파일 {image_metadata.get('attachment_count', 0)}개")
+        
         # 통합 문서 구조 생성
         merged_document = {
             # 기본 식별 정보
@@ -174,7 +206,7 @@ class PlatformDataMerger:
                 } for att in attachments
             ],
             
-            # 메타데이터
+            # 메타데이터 (중복 필드 제거)
             "metadata": {
                 "status": article.get("status"),
                 "category_id": article.get("category_id"),
@@ -186,7 +218,17 @@ class PlatformDataMerger:
                 "views": article.get("views", 0),
                 "thumbs_up": article.get("thumbs_up", 0),
                 "thumbs_down": article.get("thumbs_down", 0)
+                # 제거된 중복 필드들: inline_image_count, total_image_count, image_count
+                # 이들은 has_inline_images, has_attachments, attachment_count로 대체됨
             },
+            
+            # 검색 최적화를 위한 루트 레벨 필드들 (최소화)
+            "has_attachments": image_metadata.get("has_attachments", False),
+            "has_inline_images": image_metadata.get("has_inline_images", False),
+            "attachment_count": image_metadata.get("attachment_count", 0),
+            
+            # 통합된 첨부파일 메타데이터
+            "attachments": image_metadata.get("attachments", []),
             
             # 시스템 정보
             "created_at_merged": datetime.now().isoformat(),

@@ -44,7 +44,7 @@ class AnthropicQualityValidator:
             'completeness': 0.15
         }
         
-        logger.info("AnthropicQualityValidator 초기화 완료")
+        logger.debug("AnthropicQualityValidator 초기화 완료")
     
     def calculate_anthropic_quality_score(self, 
                                         response: str, 

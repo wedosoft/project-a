@@ -35,13 +35,13 @@ class CoreSummarizer:
             try:
                 from ..attachment.llm_selector import LLMAttachmentSelector
                 self.llm_attachment_selector = LLMAttachmentSelector()
-                logger.info("LLM 기반 첨부파일 선별기 활성화됨 (다국어 및 복잡 시나리오 지원)")
+                logger.debug("LLM 기반 첨부파일 선별기 활성화됨 (다국어 및 복잡 시나리오 지원)")
             except Exception as e:
                 logger.warning(f"LLM 첨부파일 선별기 로드 실패: {e}, rule-based 폴백 사용")
                 self.llm_attachment_selector = None
         else:
             self.llm_attachment_selector = None
-            logger.info("규칙 기반 첨부파일 선별기 사용 (단순 시나리오용)")
+            logger.debug("규칙 기반 첨부파일 선별기 사용 (단순 시나리오용)")
     
     def _get_manager(self):
         """지연 초기화로 순환 import 방지"""

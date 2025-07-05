@@ -73,7 +73,7 @@ class AnthropicPromptBuilder:
                     else:
                         logger.warning(f"Anthropic 템플릿 파일 없음: {full_path}")
             
-            logger.info("Anthropic 최적화 템플릿 로드 완료")
+            logger.debug("Anthropic 최적화 템플릿 로드 완료")
             
         except Exception as e:
             logger.error(f"Anthropic 템플릿 로드 실패: {e}")

@@ -48,7 +48,7 @@ class PlatformFactory:
             logger.warning(f"Freshdesk 전용 팩토리입니다. '{platform_name}' 등록 무시됨")
             return
         cls._adapters[platform_name.lower()] = adapter_class
-        logger.info(f"Freshdesk 어댑터 등록 완료: {platform_name}")
+        logger.debug(f"Freshdesk 어댑터 등록 완료: {platform_name}")
     
     @classmethod
     def create_adapter(cls, platform: str, config: dict) -> PlatformAdapter:

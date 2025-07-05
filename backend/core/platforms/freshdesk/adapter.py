@@ -261,6 +261,111 @@ class FreshdeskAdapter(PlatformAdapter):
             logger.error(f"Freshdesk 지식베이스 수집 실패: {e}")
             raise
     
+    async def fetch_ticket_details(self, ticket_id: str) -> Optional[Dict]:
+        """
+        특정 티켓의 상세 정보를 수집합니다.
+        
+        Args:
+            ticket_id: 티켓 ID
+            
+        Returns:
+            Optional[Dict]: 티켓 상세 정보 (정규화된 형태)
+        """
+        try:
+            response = await self.fetch_with_retry(f"{self.base_url}/tickets/{ticket_id}")
+            await asyncio.sleep(self.request_delay)
+            
+            if response:
+                return self._normalize_ticket_data(response)
+            return None
+            
+        except Exception as e:
+            logger.error(f"티켓 {ticket_id} 상세 정보 수집 실패: {e}")
+            return None
+
+    async def fetch_conversations(self, ticket_id: str) -> List[Dict]:
+        """
+        특정 티켓의 대화(conversation) 내역을 모두 가져옵니다 (페이지네이션 지원).
+        
+        Args:
+            ticket_id: 티켓 ID
+            
+        Returns:
+            List[Dict]: 대화 내역 목록 (모든 페이지 포함)
+        """
+        all_conversations = []
+        page = 1
+        max_pages = 50  # 안전 장치: 최대 50페이지 (1,500개 대화)
+        
+        try:
+            logger.info(f"티켓 {ticket_id}의 대화 내역 페이지네이션 수집 시작...")
+            
+            while page <= max_pages:
+                params = {"page": page, "per_page": 30}  # Freshdesk 기본값
+                conversations = await self.fetch_with_retry(
+                    f"{self.base_url}/tickets/{ticket_id}/conversations", 
+                    params
+                )
+                
+                if isinstance(conversations, list) and len(conversations) > 0:
+                    all_conversations.extend(conversations)
+                    logger.debug(f"티켓 {ticket_id} 페이지 {page}: {len(conversations)}개 대화 수집")
+                    
+                    # 30개 미만이면 마지막 페이지
+                    if len(conversations) < 30:
+                        break
+                        
+                    page += 1
+                    await asyncio.sleep(self.request_delay)
+                else:
+                    # 빈 응답이면 더 이상 페이지 없음
+                    break
+            
+            logger.info(f"티켓 {ticket_id}의 대화 내역 {len(all_conversations)}개 수집 완료 ({page}페이지)")
+            return all_conversations
+            
+        except Exception as e:
+            logger.error(f"티켓 {ticket_id}의 대화 내역 수집 실패: {e}")
+            return []
+
+    async def fetch_attachments(self, ticket_id: str) -> List[Dict]:
+        """
+        특정 티켓의 모든 첨부파일을 수집합니다 (티켓 자체 + 대화 내역).
+        
+        Args:
+            ticket_id: 티켓 ID
+            
+        Returns:
+            List[Dict]: 첨부파일 목록 (정규화된 형태)
+        """
+        all_attachments = []
+        
+        try:
+            # 1. 티켓 자체 첨부파일 수집
+            ticket_detail = await self.fetch_with_retry(f"{self.base_url}/tickets/{ticket_id}")
+            if ticket_detail and "attachments" in ticket_detail:
+                for att in ticket_detail["attachments"]:
+                    normalized_att = self._normalize_attachment_data(att)
+                    normalized_att["source"] = "ticket"
+                    all_attachments.append(normalized_att)
+            
+            # 2. 대화 내역의 첨부파일 수집
+            conversations = await self.fetch_conversations(ticket_id)
+            for conv in conversations:
+                if conv and "attachments" in conv:
+                    for att in conv["attachments"]:
+                        normalized_att = self._normalize_attachment_data(att)
+                        normalized_att["source"] = "conversation"
+                        normalized_att["conversation_id"] = conv.get("id")
+                        all_attachments.append(normalized_att)
+            
+            logger.info(f"티켓 {ticket_id}의 첨부파일 {len(all_attachments)}개 수집 완료")
+            return all_attachments
+            
+        except Exception as e:
+            logger.error(f"티켓 {ticket_id} 첨부파일 수집 실패: {e}")
+            return []
+
     async def get_attachment_url(self, attachment_id: str, **kwargs) -> str:
         """첨부파일 다운로드 URL 생성 (PlatformAdapter 인터페이스 구현)"""
         ticket_id = kwargs.get('ticket_id')

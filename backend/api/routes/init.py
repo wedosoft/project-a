@@ -377,9 +377,12 @@ async def init_vector_only_mode(
             for result in similar_results:
                 raw_similar_tickets.append({
                     "id": result.get("original_id") or result["metadata"].get("original_id"),
-                    "title": result.get("subject") or result["metadata"].get("subject", ""),
+                    "subject": result.get("subject") or result["metadata"].get("subject", ""),
                     "content": result.get("content", ""),
                     "score": result["score"],
+                    "has_attachments": result.get("has_attachments", False),
+                    "has_inline_images": result.get("has_inline_images", False),
+                    "attachment_count": result.get("attachment_count", 0),
                     "metadata": result.get("extended_metadata", result.get("metadata", {}))
                 })
                 
@@ -928,9 +931,12 @@ async def init_streaming_vector_only_mode(
                 for result in similar_results:
                     raw_similar_tickets.append({
                         "id": result.get("original_id") or result["metadata"].get("original_id"),
-                        "title": result.get("subject") or result["metadata"].get("subject", ""),
+                        "subject": result.get("subject") or result["metadata"].get("subject", ""),
                         "content": result.get("content", ""),
                         "score": result["score"],
+                        "has_attachments": result.get("has_attachments", False),
+                        "has_inline_images": result.get("has_inline_images", False),
+                        "attachment_count": result.get("attachment_count", 0),
                         "metadata": result.get("extended_metadata", result.get("metadata", {}))
                     })
                 

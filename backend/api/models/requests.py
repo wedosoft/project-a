@@ -77,6 +77,46 @@ class QueryRequest(BaseModel):
         description="스트리밍 응답 여부 (상담원 모드에서 사용)"
     )
     
+    # 고급 자연어 검색 기능 (새로운 기능)
+    enhanced_search: bool = Field(
+        default=False,
+        description="고급 자연어 검색 활성화 (첨부파일/카테고리/해결책 전문 검색)"
+    )
+    enhanced_search_type: Optional[str] = Field(
+        default=None,
+        description="고급 검색 타입 (auto, attachment, category, solution, general)"
+    )
+    
+    # 첨부파일 검색 옵션
+    file_types: Optional[List[str]] = Field(
+        default=None,
+        description="찾을 파일 타입 (pdf, excel, image, word, text 등)"
+    )
+    max_file_size_mb: Optional[float] = Field(
+        default=None,
+        description="최대 파일 크기 (MB)"
+    )
+    min_file_size_mb: Optional[float] = Field(
+        default=None,
+        description="최소 파일 크기 (MB)"
+    )
+    
+    # 카테고리 검색 옵션
+    categories: Optional[List[str]] = Field(
+        default=None,
+        description="검색할 카테고리 목록 (결제, 로그인, API, 기술지원 등)"
+    )
+    
+    # 문제 해결 검색 옵션
+    solution_type: Optional[str] = Field(
+        default=None,
+        description="해결책 타입 (quick_fix, step_by_step, similar_case)"
+    )
+    include_resolved_only: bool = Field(
+        default=False,
+        description="해결된 케이스만 포함"
+    )
+    
     # /init 엔드포인트에서 사용되는 추가 필드들
     include_summary: bool = True  # 티켓 요약 생성 여부
     include_kb_docs: bool = True  # 관련 지식베이스 문서 포함 여부

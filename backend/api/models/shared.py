@@ -91,18 +91,35 @@ class SimilarTicketItem(BaseModel):
         description="Platform-Neutral 3-Tuple 키 (tenant_id:platform:original_id)"
     )
     
-    title: Optional[str] = Field(default=None, description="유사 티켓의 제목")
+    # 티켓 제목 (프레시데스크 원본 필드명 우선)
+    subject: Optional[str] = Field(default=None, description="유사 티켓의 제목 (프레시데스크)")
+    title: Optional[str] = Field(default=None, description="유사 티켓의 제목 (아티클용, 하위호환성)")
+    
+    # 티켓 내용
+    content: Optional[str] = Field(default=None, description="유사 티켓의 내용")
     issue: Optional[str] = Field(default=None, description="문제 상황 요약")
     solution: Optional[str] = Field(default=None, description="해결책 요약")
+    
+    # 유사도 점수 (백엔드 응답 필드명과 일치)
+    score: Optional[float] = Field(default=None, description="유사도 점수 (0.0 ~ 1.0)")
+    similarity_score: Optional[float] = Field(default=None, description="유사도 점수 (하위호환성)")
+    
+    # 첨부파일 및 이미지 정보 (최적화된 구조)
+    has_attachments: Optional[bool] = Field(default=False, description="첨부파일 존재 여부")
+    has_inline_images: Optional[bool] = Field(default=False, description="인라인 이미지 존재 여부")
+    attachment_count: Optional[int] = Field(default=0, description="첨부파일 수")
+    
+    # 기타 필드
     ticket_url: Optional[str] = Field(default=None, description="원본 티켓 링크")
-    similarity_score: Optional[float] = Field(
-        default=None, description="유사도 점수 (0.0 ~ 1.0)"
-    )
-
+    
     # Platform-Neutral 메타데이터
     platform_metadata: Optional[Dict[str, Any]] = Field(
         default=None,
         description="플랫폼별 추가 메타데이터 (상태, 우선순위 등)"
+    )
+    metadata: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="확장 메타데이터 (백엔드 응답과 일치)"
     )
 
     # 기존 호환성을 위한 필드 (deprecated)

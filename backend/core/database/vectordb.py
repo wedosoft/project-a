@@ -71,9 +71,12 @@ class VectorDBInterface(ABC):
         query_embedding: List[float], 
         top_k: int, 
         tenant_id: str,
-        platform: Optional[str] = None
+        platform: Optional[str] = None,
+        doc_type: Optional[str] = None,
+        has_attachments: Optional[bool] = None,
+        **kwargs
     ) -> Dict[str, Any]:
-        """벡터 검색 (멀티플랫폼/멀티테넌트 지원)"""
+        """벡터 검색 (멀티플랫폼/멀티테넌트 지원, 첨부파일 필터링 포함)"""
         pass
 
     @abstractmethod
@@ -260,17 +263,11 @@ class QdrantAdapter(VectorDBInterface):
                 if metadata.get("updated_at"):
                     searchable_fields["updated_at"] = metadata.get("updated_at")
                 
-                # 이미지/첨부파일 관련 메타데이터 (벡터 DB 검색 최적화)
-                if metadata.get("inline_images"):
-                    searchable_fields["inline_images"] = metadata.get("inline_images")
-                    searchable_fields["inline_image_count"] = len(metadata.get("inline_images", []))
-                if metadata.get("all_images"):
-                    searchable_fields["all_images"] = metadata.get("all_images")
-                    searchable_fields["total_image_count"] = len(metadata.get("all_images", []))
+                # 이미지/첨부파일 관련 메타데이터 (최적화된 구조)
                 if metadata.get("has_inline_images") is not None:
                     searchable_fields["has_inline_images"] = metadata.get("has_inline_images")
-                if metadata.get("image_count") is not None:
-                    searchable_fields["image_count"] = metadata.get("image_count")
+                if metadata.get("attachment_count") is not None:
+                    searchable_fields["attachment_count"] = metadata.get("attachment_count")
                 
                 # 확장 메타데이터: 모든 원본 정보 포함 (첨부파일, 커스텀 필드 등)
                 extended_metadata = {k: v for k, v in metadata.items() 
@@ -461,7 +458,9 @@ class QdrantAdapter(VectorDBInterface):
         top_k: int, 
         tenant_id: str,
         platform: Optional[str] = None,  # 플랫폼 필터링 (freshdesk, zendesk 등)
-        doc_type: str = None  # 문서 타입 필터링 (ticket, article)
+        doc_type: str = None,  # 문서 타입 필터링 (ticket, article)
+        has_attachments: Optional[bool] = None,  # 첨부파일 필터링
+        **kwargs  # 추가 필터 파라미터들
     ) -> Dict[str, Any]:
         """
         벡터 검색 (멀티플랫폼/멀티테넌트 지원) - Qdrant 쿼리 레벨에서 모든 필터링 직접 처리
@@ -472,6 +471,8 @@ class QdrantAdapter(VectorDBInterface):
             tenant_id: 테넌트 ID (필수)
             platform: 플랫폼 필터 (선택사항, "freshdesk", "zendesk" 등)
             doc_type: 문서 타입 필터 (선택사항, "ticket" 또는 "article")
+            has_attachments: 첨부파일 존재 필터 (선택사항, True/False)
+            **kwargs: 추가 필터 파라미터들
             
         Returns:
             검색 결과 딕셔너리
@@ -495,6 +496,26 @@ class QdrantAdapter(VectorDBInterface):
             filter_conditions.append(
                 FieldCondition(key="doc_type", match=MatchValue(value=doc_type))
             )
+        
+        # 첨부파일 필터 추가
+        if has_attachments is not None:
+            filter_conditions.append(
+                FieldCondition(key="has_attachments", match=MatchValue(value=has_attachments))
+            )
+        
+        # 추가 필터 처리 (kwargs)
+        for key, value in kwargs.items():
+            if value is not None and key not in ["tenant_id", "platform", "doc_type", "has_attachments"]:
+                if isinstance(value, list):
+                    # 리스트 값은 MatchAny로 처리
+                    filter_conditions.append(
+                        FieldCondition(key=key, match=MatchAny(any=value))
+                    )
+                else:
+                    # 단일 값은 MatchValue로 처리
+                    filter_conditions.append(
+                        FieldCondition(key=key, match=MatchValue(value=value))
+                    )
         
         logger.debug(f"검색 요청: tenant_id={tenant_id}, top_k={top_k}")
         
@@ -1294,14 +1315,12 @@ async def process_ticket_to_vector_db(
         # 이미지 메타데이터 유효성 검증
         if not validate_image_metadata(image_metadata):
             logger.warning(f"티켓 {ticket_id}: 이미지 메타데이터 유효성 검증 실패")
-            # 기본값으로 설정
+            # 기본값으로 설정 (최적화된 구조)
             image_metadata = {
-                "inline_images": [],
-                "all_images": [],
+                "has_attachments": False,
                 "has_inline_images": False,
-                "inline_image_count": 0,
-                "total_image_count": 0,
-                "image_count": 0
+                "attachment_count": 0,
+                "attachments": []
             }
         
         # Vector DB용 메타데이터 구성 (풍부한 정보 포함)
@@ -1330,17 +1349,12 @@ async def process_ticket_to_vector_db(
             
             # 첨부파일 정보 (상세)
             "attachments": ticket.get('all_attachments', []) or ticket.get('attachments', []),
-            "attachment_count": len(ticket.get('all_attachments', []) or ticket.get('attachments', [])),
             
-            # 🖼️ 인라인 이미지 정보 (자동 추출)
-            "inline_images": image_metadata["inline_images"],
-            "inline_image_count": image_metadata["inline_image_count"],
-            "has_inline_images": image_metadata["has_inline_images"],
-            
-            # 🖼️ 통합 이미지 정보 (첨부파일 + 인라인 이미지)
-            "all_images": image_metadata["all_images"],
-            "total_image_count": image_metadata["total_image_count"],
-            "image_count": image_metadata["image_count"],  # 호환성
+            # 🖼️ 최적화된 이미지/첨부파일 정보
+            "has_attachments": image_metadata.get("has_attachments", False),
+            "has_inline_images": image_metadata.get("has_inline_images", False),
+            "attachment_count": image_metadata.get("attachment_count", 0),
+            "attachments": image_metadata.get("attachments", []),
             
             # 티켓 속성
             "type": ticket.get('type'),
@@ -1365,10 +1379,7 @@ async def process_ticket_to_vector_db(
             "nr_escalated": ticket.get('nr_escalated'),
             "escalated_at": ticket.get('escalated_at'),
             
-            # Vector DB 전용 메타데이터
-            "indexed_at": datetime.utcnow().isoformat(),
-            "vector_version": "1.0",
-            "processing_mode": "vector_only"
+            # Vector DB 전용 메타데이터 (최소화됨)
         }
         
         # None 값 제거
@@ -1453,14 +1464,12 @@ async def process_article_to_vector_db(
         # 이미지 메타데이터 유효성 검증
         if not validate_image_metadata(image_metadata):
             logger.warning(f"KB 문서 {article_id}: 이미지 메타데이터 유효성 검증 실패")
-            # 기본값으로 설정
+            # 기본값으로 설정 (최적화된 구조)
             image_metadata = {
-                "inline_images": [],
-                "all_images": [],
+                "has_attachments": False,
                 "has_inline_images": False,
-                "inline_image_count": 0,
-                "total_image_count": 0,
-                "image_count": 0
+                "attachment_count": 0,
+                "attachments": []
             }
         
         # Vector DB용 메타데이터 구성 (KB 문서의 모든 정보 포함)
@@ -1508,17 +1517,12 @@ async def process_article_to_vector_db(
             
             # 첨부파일 정보
             "attachments": article.get('all_attachments', []) or article.get('attachments', []),
-            "attachment_count": len(article.get('all_attachments', []) or article.get('attachments', [])),
             
-            # 🖼️ 인라인 이미지 정보 (자동 추출)
-            "inline_images": image_metadata["inline_images"],
-            "inline_image_count": image_metadata["inline_image_count"],
-            "has_inline_images": image_metadata["has_inline_images"],
-            
-            # 🖼️ 통합 이미지 정보 (첨부파일 + 인라인 이미지)
-            "all_images": image_metadata["all_images"],
-            "total_image_count": image_metadata["total_image_count"],
-            "image_count": image_metadata["image_count"],
+            # 🖼️ 최적화된 이미지/첨부파일 정보
+            "has_attachments": image_metadata.get("has_attachments", False),
+            "has_inline_images": image_metadata.get("has_inline_images", False),
+            "attachment_count": image_metadata.get("attachment_count", 0),
+            "attachments": image_metadata.get("attachments", []),
             
             # 다국어 지원
             "language": article.get('language', 'ko'),
@@ -1532,12 +1536,7 @@ async def process_article_to_vector_db(
             "publish_date": article.get('publish_date'),
             "scheduled_date": article.get('scheduled_date'),
             
-            # Vector DB 전용 메타데이터  
-            "display_mode": "original",  # 원본 표시 모드
-            "is_summarized": False,  # 요약되지 않음
-            "indexed_at": datetime.utcnow().isoformat(),
-            "vector_version": "1.0",
-            "processing_mode": "vector_only"
+            # Vector DB 전용 메타데이터 (최소화됨)
         }
         
         # None 값 제거

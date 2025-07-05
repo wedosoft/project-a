@@ -32,7 +32,7 @@ tokenizer = None
 try:
     # text-embedding-3-small/large 모델은 cl100k_base 인코딩을 사용
     tokenizer = tiktoken.get_encoding("cl100k_base")
-    logger.info("tiktoken cl100k_base 인코딩 로드 성공")
+    logger.debug("tiktoken cl100k_base 인코딩 로드 성공")
 except Exception as e:
     logger.error(f"tiktoken 인코딩 로드 실패: {e}")
     # 네트워크 문제로 tiktoken을 로드할 수 없는 경우 None으로 설정

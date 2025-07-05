@@ -15,6 +15,7 @@ from pathlib import Path
 from .intent_analyzer import AnthropicIntentAnalyzer, SearchContext
 from core.search.retriever import retrieve_top_k_docs
 from core.search.embeddings.embedder import embed_documents_optimized
+from core.search.enhanced_search import EnhancedSearchEngine
 from core.llm.manager import LLMManager
 from core.llm.models.base import LLMProvider
 
@@ -40,6 +41,7 @@ class AnthropicSearchOrchestrator:
             llm_manager: LLM 매니저 인스턴스
         """
         self.intent_analyzer = AnthropicIntentAnalyzer()
+        self.enhanced_search = EnhancedSearchEngine(vector_db, llm_manager)
         self.vector_db = vector_db
         self.llm_manager = llm_manager
         
@@ -162,7 +164,33 @@ class AnthropicSearchOrchestrator:
                     yield final_result
                 return
             
-            # 2. 벡터 검색 실행
+            # 고급 검색 엔진 활용 가능성 검토
+            enhanced_context = await self.enhanced_search.analyze_enhanced_query(context.clean_query)
+            if enhanced_context.search_type in ["attachment", "category", "solution"]:
+                if stream:
+                    yield {"type": "enhanced_search", "content": f"{enhanced_context.search_type} 전반용 검색을 시작합니다..."}
+                
+                # 고급 검색 실행
+                enhanced_results = await self.enhanced_search.execute_enhanced_search(
+                    context=enhanced_context,
+                    tenant_id=tenant_id,
+                    platform=platform,
+                    top_k=5
+                )
+                
+                if enhanced_results.get("total_results", 0) > 0:
+                    # 고급 검색 결과가 있으면 기본 검색 대신 사용
+                    search_results = enhanced_results
+                    if stream:
+                        yield {"type": "enhanced_complete", "content": f"{enhanced_context.search_type} 전반용 검색 완료: {search_results.get('total_results', 0)}개 결과"}
+                else:
+                    # 고급 검색 결과가 없으면 기본 검색으로 폴백
+                    search_results = await self._perform_vector_search(context, tenant_id, platform)
+            else:
+                # 기본 벡터 검색 수행
+                search_results = await self._perform_vector_search(context, tenant_id, platform)
+            
+            # 2. 벡터 검색 실행 (이미 위에서 처리됨)
             if not self.vector_db:
                 logger.error("VectorDB가 초기화되지 않음")
                 if stream:
@@ -171,14 +199,17 @@ class AnthropicSearchOrchestrator:
             
             logger.info(f"VectorDB 인스턴스 확인: {type(self.vector_db)}")
             
-            if stream:
+            if stream and "search_results" not in locals():
                 yield {"type": "search", "content": "관련 문서를 검색하고 있습니다..."}
             
-            # 벡터 검색 실행
-            logger.info(f"벡터 검색 시작 - 쿠리: '{context.clean_query}', tenant: {tenant_id}, platform: {platform}")
-            search_results = await self._perform_vector_search(context, tenant_id, platform)
-            logger.info(f"벡터 검색 완료: {search_results.get('total_results', 0)}개 결과")
-            logger.info(f"검색 결과 세부: {list(search_results.keys())}")
+            # 벡터 검색 실행 (이미 위에서 처리되지 않은 경우만)
+            if "search_results" not in locals():
+                logger.info(f"벡터 검색 시작 - 쿠리: '{context.clean_query}', tenant: {tenant_id}, platform: {platform}")
+                search_results = await self._perform_vector_search(context, tenant_id, platform)
+                logger.info(f"벡터 검색 완료: {search_results.get('total_results', 0)}개 결과")
+                logger.info(f"검색 결과 세부: {list(search_results.keys())}")
+            else:
+                logger.info(f"고급 검색 결과 사용: {search_results.get('total_results', 0)}개 결과")
             
             # 3. 검색 결과 스트리밍 처리
             if stream and search_results.get('total_results', 0) > 0:

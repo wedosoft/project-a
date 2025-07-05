@@ -47,7 +47,7 @@ class LLMManager:
             logger.debug("LLMManager 이미 초기화됨 (싱글톤)")
             return
             
-        logger.info("LLMManager 초기화 시작...")
+        logger.debug("LLMManager 초기화 시작...")
         
         self.config_manager = ConfigManager()
         self.router = ProviderRouter()
@@ -72,7 +72,7 @@ class LLMManager:
         
         # 초기화 완료 플래그
         LLMManager._initialized = True
-        logger.info("LLMManager 싱글톤 초기화 완료")
+        logger.debug("LLMManager 싱글톤 초기화 완료")
         
         logger.info(f"LLMManager 초기화 완료 - {len(self.providers)}개 제공자 로드됨")
     
@@ -84,7 +84,7 @@ class LLMManager:
         if openai_key:
             try:
                 self.providers[LLMProvider.OPENAI] = OpenAIProvider(openai_key)
-                logger.info("OpenAI Provider 초기화 완료")
+                logger.debug("OpenAI Provider 초기화 완료")
             except Exception as e:
                 logger.error(f"OpenAI Provider 초기화 실패: {e}")
         
@@ -93,7 +93,7 @@ class LLMManager:
         if anthropic_key:
             try:
                 self.providers[LLMProvider.ANTHROPIC] = AnthropicProvider(anthropic_key)
-                logger.info("Anthropic Provider 초기화 완료")
+                logger.debug("Anthropic Provider 초기화 완료")
             except Exception as e:
                 logger.error(f"Anthropic Provider 초기화 실패: {e}")
         
@@ -102,7 +102,7 @@ class LLMManager:
         if gemini_key:
             try:
                 self.providers[LLMProvider.GEMINI] = GeminiProvider(gemini_key)
-                logger.info("Gemini Provider 초기화 완료")
+                logger.debug("Gemini Provider 초기화 완료")
             except Exception as e:
                 logger.error(f"Gemini Provider 초기화 실패: {e}")
     

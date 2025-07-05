@@ -82,8 +82,8 @@ class ScalableAPIKeyManager:
         self._load_configuration(config_path)
         self._initialize_keys()
         
-        logger.info(f"ScalableAPIKeyManager 초기화 완료")
-        logger.info(f"로드된 키: {[(provider, len(keys)) for provider, keys in self.keys.items()]}")
+        logger.debug(f"ScalableAPIKeyManager 초기화 완료")
+        logger.debug(f"로드된 키: {[(provider, len(keys)) for provider, keys in self.keys.items()]}")
     
     def _load_configuration(self, config_path: Optional[str]):
         """설정 파일 로드"""
@@ -116,7 +116,7 @@ class ScalableAPIKeyManager:
         
         if openai_keys:
             self.keys["openai"] = openai_keys
-            logger.info(f"OpenAI 키 {len(openai_keys)}개 로드")
+            logger.debug(f"OpenAI 키 {len(openai_keys)}개 로드")
         
         # Anthropic 키들
         anthropic_keys = []
@@ -134,7 +134,7 @@ class ScalableAPIKeyManager:
         
         if anthropic_keys:
             self.keys["anthropic"] = anthropic_keys
-            logger.info(f"Anthropic 키 {len(anthropic_keys)}개 로드")
+            logger.debug(f"Anthropic 키 {len(anthropic_keys)}개 로드")
         
         # Google 키들
         google_keys = []
@@ -152,7 +152,7 @@ class ScalableAPIKeyManager:
         
         if google_keys:
             self.keys["google"] = google_keys
-            logger.info(f"Google 키 {len(google_keys)}개 로드")
+            logger.debug(f"Google 키 {len(google_keys)}개 로드")
     
     async def get_api_key(
         self, 

@@ -19,7 +19,8 @@ from ..dependencies import (
     get_fetcher,
     get_llm_router
 )
-from core.search.anthropic import AnthropicSearchOrchestrator
+from core.search.anthropic.search_orchestrator import AnthropicSearchOrchestrator
+from core.search.enhanced_search import EnhancedSearchEngine
 from ..models.requests import QueryRequest
 from ..models.responses import QueryResponse
 from ..models.shared import DocumentInfo
@@ -42,6 +43,17 @@ def get_anthropic_orchestrator(
     )
 
 
+def get_enhanced_search_engine(
+    vector_db=Depends(get_vector_db),
+    llm_router=Depends(get_llm_router)
+) -> EnhancedSearchEngine:
+    """EnhancedSearchEngine 의존성 주입"""
+    return EnhancedSearchEngine(
+        vector_db=vector_db,
+        llm_manager=llm_router
+    )
+
+
 @router.post("/query", response_model=QueryResponse)
 # @cached(cache, key=partial(_query_cache_key, "query_endpoint"))  # 캐시는 나중에 추가
 async def query_endpoint(
@@ -51,13 +63,17 @@ async def query_endpoint(
     vector_db = Depends(get_vector_db),
     fetcher = Depends(get_fetcher),
     llm_router = Depends(get_llm_router),
-    anthropic_orchestrator: AnthropicSearchOrchestrator = Depends(get_anthropic_orchestrator)
+    anthropic_orchestrator: AnthropicSearchOrchestrator = Depends(get_anthropic_orchestrator),
+    enhanced_search: EnhancedSearchEngine = Depends(get_enhanced_search_engine)
 ):
     """
     사용자 쿼리에 대한 AI 응답을 생성하는 엔드포인트 (멀티플랫폼 지원)
     
     상담원 모드(agent_mode=True)일 때는 Anthropic Constitutional AI를 적용하여
     안전하고 유용한 검색 결과를 제공합니다.
+    
+    고급 검색 모드(enhanced_search=True)일 때는 첨부파일, 카테고리, 
+    문제 해결 중심의 전문 검색을 제공합니다.
 
     Args:
         req: 쿼리 요청 객체 (QueryRequest)
@@ -67,9 +83,145 @@ async def query_endpoint(
 
     Returns:
         검색 결과와 AI 응답을 포함한 QueryResponse 객체 또는 StreamingResponse
+        
+    고급 검색 사용 예시:
+        POST /api/query
+        {
+            "query": "엑셀 파일이 있는 결제 문제",
+            "enhanced_search": true,
+            "enhanced_search_type": "attachment",
+            "file_types": ["excel"],
+            "categories": ["결제"]
+        }
     """
     # 성능 측정을 시작합니다.
     start_time = time.time()
+    
+    # 고급 자연어 검색 모드 처리
+    if req.enhanced_search:
+        logger.info(f"고급 검색 모드 활성화: '{req.query[:50]}...' (tenant: {tenant_id})")
+        
+        try:
+            # Enhanced Search Context 생성
+            context = await enhanced_search.analyze_enhanced_query(req.query)
+            
+            # 요청에서 지정된 검색 타입이 있으면 우선 적용
+            if req.enhanced_search_type and req.enhanced_search_type != "auto":
+                context.search_type = req.enhanced_search_type
+            
+            # 요청 옵션을 컨텍스트에 반영
+            if req.file_types and context.search_type == "attachment":
+                if not context.attachment_filters:
+                    context.attachment_filters = {}
+                
+                # 파일 타입을 MIME 타입으로 변환
+                content_types = []
+                for file_type in req.file_types:
+                    if file_type.lower() in ["pdf"]:
+                        content_types.append("application/pdf")
+                    elif file_type.lower() in ["excel", "xlsx"]:
+                        content_types.extend([
+                            "application/vnd.ms-excel",
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        ])
+                    elif file_type.lower() in ["image", "png", "jpg", "jpeg"]:
+                        content_types.extend(["image/png", "image/jpeg", "image/gif"])
+                    elif file_type.lower() in ["word", "docx"]:
+                        content_types.extend([
+                            "application/msword",
+                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        ])
+                
+                if content_types:
+                    context.attachment_filters["content_types"] = content_types
+            
+            # 파일 크기 필터
+            if req.max_file_size_mb and context.search_type == "attachment":
+                if not context.attachment_filters:
+                    context.attachment_filters = {}
+                context.attachment_filters["max_size"] = int(req.max_file_size_mb * 1024 * 1024)
+            
+            if req.min_file_size_mb and context.search_type == "attachment":
+                if not context.attachment_filters:
+                    context.attachment_filters = {}
+                context.attachment_filters["min_size"] = int(req.min_file_size_mb * 1024 * 1024)
+            
+            # 카테고리 필터
+            if req.categories and context.search_type == "category":
+                context.category_hints = req.categories
+            
+            # 해결책 필터
+            if req.solution_type and context.search_type == "solution":
+                if not context.solution_requirements:
+                    context.solution_requirements = {}
+                
+                if req.solution_type == "quick_fix":
+                    context.solution_requirements["해결책"] = True
+                elif req.solution_type == "step_by_step":
+                    context.solution_requirements["단계별"] = True
+                elif req.solution_type == "similar_case":
+                    context.solution_requirements["유사사례"] = True
+            
+            if req.include_resolved_only:
+                context.filters["status"] = ["solved", "closed"]
+            
+            # 고급 검색 실행
+            search_results = await enhanced_search.execute_enhanced_search(
+                context=context,
+                tenant_id=tenant_id,
+                platform=platform,
+                top_k=req.top_k
+            )
+            
+            # AI 요약 생성
+            ai_summary = ""
+            if search_results.get("total_results", 0) > 0:
+                ai_summary = await enhanced_search.generate_enhanced_response(search_results, context)
+            
+            # 결과 매핑 (QueryResponse 형식에 맞춰서)
+            processing_time = (time.time() - start_time) * 1000
+            
+            # DocumentInfo 목록 생성
+            from ..models.shared import DocumentInfo
+            document_infos = []
+            
+            documents = search_results.get("documents", [])
+            metadatas = search_results.get("metadatas", [])
+            ids = search_results.get("ids", [])
+            distances = search_results.get("distances", [])
+            
+            for i, (doc, meta, doc_id, distance) in enumerate(zip(documents, metadatas, ids, distances)):
+                doc_info = DocumentInfo(
+                    id=doc_id,
+                    content=doc[:500] + "..." if len(doc) > 500 else doc,
+                    metadata=meta,
+                    score=round((1 - distance/2) * 100, 1) if distance else None,
+                    source=meta.get("doc_type", "unknown")
+                )
+                document_infos.append(doc_info)
+            
+            return QueryResponse(
+                query=req.query,
+                response=ai_summary or "검색 결과를 확인해주세요.",
+                documents=document_infos,
+                search_metadata={
+                    "search_type": context.search_type,
+                    "intent": context.intent,
+                    "keywords": context.keywords,
+                    "filters_applied": context.filters,
+                    "attachment_filters": context.attachment_filters,
+                    "category_hints": context.category_hints,
+                    "solution_requirements": context.solution_requirements,
+                    "enhanced_search": True
+                },
+                processing_time_ms=processing_time,
+                total_results=search_results.get("total_results", 0)
+            )
+            
+        except Exception as e:
+            logger.error(f"고급 검색 실패: {e}")
+            # 고급 검색 실패 시 기본 검색으로 폴백
+            logger.info("고급 검색 실패, 기본 모드로 폴백")
     
     # 상담원 모드 처리
     if req.agent_mode:
@@ -424,11 +576,11 @@ async def query_endpoint(
         if metadata_item.get("updated_at"):
             platform_metadata["updated_at"] = metadata_item.get("updated_at")
         
-        # 첨부파일 정보 추가
+        # 첨부파일 정보 추가 (최적화된 구조)
         if metadata_item.get("has_attachments"):
             platform_metadata["has_attachments"] = metadata_item.get("has_attachments")
-        if metadata_item.get("image_count"):
-            platform_metadata["image_count"] = metadata_item.get("image_count")
+        if metadata_item.get("attachment_count"):
+            platform_metadata["attachment_count"] = metadata_item.get("attachment_count")
         if metadata_item.get("has_inline_images"):
             platform_metadata["has_inline_images"] = metadata_item.get("has_inline_images")
         

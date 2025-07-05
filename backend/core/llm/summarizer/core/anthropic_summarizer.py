@@ -48,7 +48,7 @@ class AnthropicSummarizer(CoreSummarizer):
             'success_rate': 0.0
         }
         
-        logger.info(f"AnthropicSummarizer 초기화 완료 (활성화: {self.config.enabled})")
+        logger.debug(f"AnthropicSummarizer 초기화 완료 (활성화: {self.config.enabled})")
     
     async def generate_anthropic_summary(self,
                                        content: str,

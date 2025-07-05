@@ -305,21 +305,47 @@ class OptimizedFreshdeskFetcher:
     
     async def fetch_conversations_raw(self, ticket_id: str) -> List[Dict]:
         """
-        티켓 대화내역을 raw 형태로 수집
+        티켓 대화내역을 raw 형태로 수집 (페이지네이션 지원)
         
         Args:
             ticket_id: 티켓 ID
             
         Returns:
-            List[Dict]: 대화내역 목록
+            List[Dict]: 대화내역 목록 (모든 페이지 포함)
         """
+        all_conversations = []
+        page = 1
+        max_pages = 50  # 안전 장치: 최대 50페이지 (1,500개 대화)
+        
         try:
-            conversations = await self.fetch_with_retry(f"{self.base_url}/tickets/{ticket_id}/conversations")
-            await asyncio.sleep(self.REQUEST_DELAY)
-            # API 응답이 dict인 경우 빈 리스트 반환, list인 경우 그대로 반환
-            if isinstance(conversations, dict):
-                return []
-            return conversations if conversations else []
+            logger.info(f"티켓 {ticket_id}의 대화 내역 페이지네이션 수집 시작...")
+            
+            while page <= max_pages:
+                # 페이지네이션 파라미터 추가
+                url = f"{self.base_url}/tickets/{ticket_id}/conversations?page={page}&per_page=30"
+                conversations = await self.fetch_with_retry(url)
+                await asyncio.sleep(self.REQUEST_DELAY)
+                
+                # API 응답이 dict인 경우 빈 리스트로 처리
+                if isinstance(conversations, dict):
+                    break
+                    
+                if isinstance(conversations, list) and len(conversations) > 0:
+                    all_conversations.extend(conversations)
+                    logger.debug(f"티켓 {ticket_id} 페이지 {page}: {len(conversations)}개 대화 수집")
+                    
+                    # 30개 미만이면 마지막 페이지
+                    if len(conversations) < 30:
+                        break
+                        
+                    page += 1
+                else:
+                    # 빈 응답이면 더 이상 페이지 없음
+                    break
+            
+            logger.info(f"티켓 {ticket_id}의 대화 내역 {len(all_conversations)}개 수집 완료 ({page}페이지)")
+            return all_conversations
+            
         except Exception as e:
             logger.error(f"티켓 {ticket_id} 대화내역 수집 실패: {e}")
             return []
