@@ -387,13 +387,62 @@ async def query_endpoint(
         # 코사인 거리 (0~2)를 백분율로 변환
         relevance_score = round(((2 - distance_or_score_metric) / 2) * 100, 1)
 
+        # Platform-Neutral 메타데이터 구성
+        platform_metadata = {}
+        
+        # 티켓 상태 정보 추가 - 원본 값 그대로 사용
+        platform_metadata["ticket_status"] = metadata_item.get("status")
+        
+        # 우선순위 정보 추가 - 원본 값 그대로 사용
+        platform_metadata["priority"] = metadata_item.get("priority")
+        
+        # 요청자 정보 추가 - 원본 값 그대로 사용
+        requester = (metadata_item.get("requester_id") or 
+                    metadata_item.get("customer_email") or 
+                    metadata_item.get("extended_metadata", {}).get("requester_id"))
+        platform_metadata["requester"] = requester
+        
+        # 담당자 정보 추가 - 원본 값 그대로 사용
+        assignee = (metadata_item.get("agent_name") or 
+                   metadata_item.get("extended_metadata", {}).get("responder_id") or 
+                   metadata_item.get("extended_metadata", {}).get("agent_id"))
+        platform_metadata["assignee"] = assignee
+        
+        # 기타 유용한 메타데이터 추가
+        if metadata_item.get("company_name"):
+            platform_metadata["company_name"] = metadata_item.get("company_name")
+        elif metadata_item.get("extended_metadata", {}).get("company_id"):
+            platform_metadata["company_id"] = metadata_item.get("extended_metadata", {}).get("company_id")
+        
+        if metadata_item.get("ticket_category"):
+            platform_metadata["category"] = metadata_item.get("ticket_category")
+        elif metadata_item.get("extended_metadata", {}).get("custom_fields", {}).get("category"):
+            platform_metadata["category"] = metadata_item.get("extended_metadata", {}).get("custom_fields", {}).get("category")
+        
+        if metadata_item.get("created_at"):
+            platform_metadata["created_at"] = metadata_item.get("created_at")
+        if metadata_item.get("updated_at"):
+            platform_metadata["updated_at"] = metadata_item.get("updated_at")
+        
+        # 첨부파일 정보 추가
+        if metadata_item.get("has_attachments"):
+            platform_metadata["has_attachments"] = metadata_item.get("has_attachments")
+        if metadata_item.get("image_count"):
+            platform_metadata["image_count"] = metadata_item.get("image_count")
+        if metadata_item.get("has_inline_images"):
+            platform_metadata["has_inline_images"] = metadata_item.get("has_inline_images")
+        
         doc_info = DocumentInfo(
             title=title,
             content=content,
             source_id=metadata_item.get("source_id", metadata_item.get("id", "")),
+            tenant_id=metadata_item.get("tenant_id"),
+            platform=metadata_item.get("platform"),
+            platform_neutral_key=metadata_item.get("platform_neutral_key"),
             source_url=metadata_item.get("source_url", ""),
             relevance_score=relevance_score,
-            doc_type=doc_type
+            doc_type=doc_type,
+            platform_metadata=platform_metadata if platform_metadata else None
         )
         structured_docs.append(doc_info)
     

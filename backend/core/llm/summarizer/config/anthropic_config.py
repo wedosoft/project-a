@@ -21,11 +21,11 @@ class AnthropicConfig:
     # 기본 활성화 설정
     enabled: bool = True
     
-    # 품질 관리 설정
-    quality_threshold: float = 0.8
-    max_retries: int = 2
-    retry_threshold: float = 0.6
-    fallback_threshold: float = 0.4
+    # 품질 관리 설정 (실시간 성능 최적화)
+    quality_threshold: float = 0.5  # 0.8 → 0.5로 대폭 완화
+    max_retries: int = 1  # 2 → 1로 재시도 감소
+    retry_threshold: float = 0.3  # 0.6 → 0.3로 완화
+    fallback_threshold: float = 0.2  # 0.4 → 0.2로 완화
     
     # LLM 호출 설정
     temperature: float = 0.1
