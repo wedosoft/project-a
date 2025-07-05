@@ -74,7 +74,6 @@ class FreshdeskCollector:
         self.merged_data_dir = self.output_dir / "merged_data"
         self.merged_data_dir.mkdir(exist_ok=True)
         
-        self.progress_file = self.output_dir / "progress.json"
         
         # Freshdesk 어댑터 인스턴스
         self.adapter: Optional[FreshdeskAdapter] = None
@@ -106,24 +105,6 @@ class FreshdeskCollector:
         if self.adapter:
             await self.adapter.__aexit__(exc_type, exc_val, exc_tb)
     
-    def _save_progress(self, data: Dict):
-        """진행상황 저장 (기존 로직 재사용)"""
-        try:
-            with open(self.progress_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logger.error(f"진행상황 저장 실패: {e}")
-    
-    def _load_progress(self) -> Dict:
-        """진행상황 로드 (기존 로직 재사용)"""
-        try:
-            if self.progress_file.exists():
-                with open(self.progress_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-        except Exception as e:
-            logger.error(f"진행상황 로드 실패: {e}")
-        
-        return {}
     
     def _save_raw_data_chunk(self, data_type: str, data: List[Dict], chunk_index: int):
         """Raw 데이터 청크 저장 (기존 로직 재사용)"""
@@ -154,7 +135,6 @@ class FreshdeskCollector:
         logger.info("티켓 데이터 수집 시작")
         start_time = datetime.now()
         
-        progress = self._load_progress()
         collected_tickets = []
         total_processed = 0
         chunk_index = 0
@@ -236,15 +216,8 @@ class FreshdeskCollector:
                         chunk_index += 1
                         collected_tickets = []
                     
-                    # 진행상황 업데이트
+                    # 진행상황 로깅
                     if total_processed % self.SAVE_INTERVAL == 0:
-                        progress.update({
-                            "last_processed_ticket": ticket_id,
-                            "processed_count": total_processed,
-                            "merged_documents_count": len(merged_documents),
-                            "last_update": datetime.now().isoformat()
-                        })
-                        self._save_progress(progress)
                         logger.info(f"티켓 처리 진행: {total_processed}/{len(tickets)} (통합객체: {len(merged_documents)}개)")
                     
                 except Exception as e:
@@ -271,7 +244,6 @@ class FreshdeskCollector:
                 "until_date": until_date
             }
             
-            self._save_progress(final_progress)
             
             logger.info(f"티켓 수집 완료: {total_processed}개 처리, 소요시간: {final_progress['duration_seconds']:.2f}초")
             return final_progress
@@ -329,7 +301,6 @@ class FreshdeskCollector:
                 "max_articles": max_articles
             }
             
-            self._save_progress(final_progress)
             
             logger.info(f"지식베이스 수집 완료: {len(articles)}개 처리, 소요시간: {final_progress['duration_seconds']:.2f}초")
             return final_progress
@@ -394,7 +365,6 @@ class FreshdeskCollector:
                 "since_date": since_date
             }
             
-            self._save_progress(final_progress)
             
             logger.info(f"에이전트 수집 완료: {len(agents)}개 수집, {saved_count}개 저장, 소요시간: {final_progress['duration_seconds']:.2f}초")
             return final_progress
@@ -452,8 +422,7 @@ class FreshdeskCollector:
             })
             
             # 최종 진행상황 저장
-            self._save_progress(results)
-            
+                
             logger.info(f"전체 데이터 수집 완료: 소요시간 {results['total_duration_seconds']:.2f}초")
             return results
             
@@ -464,8 +433,7 @@ class FreshdeskCollector:
                 "error": str(e),
                 "success": False
             })
-            self._save_progress(results)
-            raise
+                raise
 
 
 async def main():

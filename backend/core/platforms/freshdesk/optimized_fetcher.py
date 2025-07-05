@@ -132,7 +132,7 @@ class OptimizedFreshdeskFetcher:
         (self.raw_data_dir / "attachments").mkdir(exist_ok=True)
         (self.raw_data_dir / "knowledge_base").mkdir(exist_ok=True)
         
-        self.progress_file = self.output_dir / "progress.json"
+        # self.progress_file = self.output_dir / "progress.json"  # DEPRECATED: DB 기반 진행상황 추적으로 대체됨
         self.client = None
         
         # 설정값 인스턴스 변수 초기화 (large_scale_config.py 연동 용이하게)

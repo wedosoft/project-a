@@ -369,14 +369,18 @@ async def resume_collection():
     
     OUTPUT_DIR = "freshdesk_full_data"
     
-    # 진행 상황 확인
-    progress_file = Path(OUTPUT_DIR) / "progress.json"
-    if not progress_file.exists():
-        logger.error("진행 상황 파일을 찾을 수 없습니다. 새로운 수집을 시작하세요.")
-        return
+    # DEPRECATED: progress.json 기반 진행상황 추적은 DB 기반으로 대체됨
+    logger.error("이 스크립트는 구식 progress.json 방식을 사용합니다. 새로운 API 기반 수집을 사용하세요.")
+    return
     
-    import json
-    with open(progress_file) as f:
+    # # 진행 상황 확인
+    # progress_file = Path(OUTPUT_DIR) / "progress.json"
+    # if not progress_file.exists():
+    #     logger.error("진행 상황 파일을 찾을 수 없습니다. 새로운 수집을 시작하세요.")
+    #     return
+    # 
+    # import json
+    # with open(progress_file) as f:
         progress = json.load(f)
     
     logger.info(f"이전 진행 상황:")

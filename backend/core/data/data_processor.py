@@ -185,11 +185,7 @@ def cleanup_temp_files(data_dir: str, keep_chunks: bool = False):
             chunk_file.unlink()
         logger.info(f"{len(chunk_files)}개 청크 파일 삭제")
     
-    # 진행 상황 파일 삭제
-    progress_file = data_path / "progress.json"
-    if progress_file.exists():
-        progress_file.unlink()
-        logger.info("진행 상황 파일 삭제")
+    # 진행 상황 파일은 더 이상 사용하지 않음 (DB 기반으로 변경됨)
 
 
 async def process_collected_data(data_dir: str):
