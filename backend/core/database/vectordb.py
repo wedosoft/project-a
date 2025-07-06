@@ -525,10 +525,8 @@ class QdrantAdapter(VectorDBInterface):
         try:
             logger.debug(f"Qdrant 검색 시도: {top_k}개 문서")
             
-            # 최신 API 사용: query_points (search는 deprecated)
+            # 최신 API 사용: query_points 먼저 시도
             try:
-                from qdrant_client.models import PointRequest
-                
                 search_results = self.client.query_points(
                     collection_name=self.collection_name,
                     query=query_embedding,
@@ -538,41 +536,52 @@ class QdrantAdapter(VectorDBInterface):
                     with_vectors=False
                 ).points
                 logger.debug(f"query_points 검색 성공: {len(search_results)}개")
-            except (ImportError, AttributeError) as api_error:
-                logger.info(f"query_points API 미지원, search API 사용: {api_error}")
-                # 이전 API 방식 (search) 사용
-                search_results = self.client.search(
-                    collection_name=self.collection_name,
-                    query_vector=query_embedding,
-                    query_filter=search_filter,  # 최신 API: query_filter 사용
-                    limit=top_k,  # 정확한 top_k만 요청 (메모리 필터링 불필요)
-                    with_payload=True,
-                    with_vectors=False  # 성능 최적화: 벡터 반환 비활성화
-                )
-                logger.debug(f"search 검색 성공: {len(search_results)}개")
+            except Exception as query_error:
+                logger.debug(f"query_points 실패: {query_error}, search 방식 시도...")
+                # search API 시도 (query_filter 사용)
+                try:
+                    search_results = self.client.search(
+                        collection_name=self.collection_name,
+                        query_vector=query_embedding,
+                        query_filter=search_filter,
+                        limit=top_k,
+                        with_payload=True,
+                        with_vectors=False
+                    )
+                    logger.debug(f"search (query_filter) 검색 성공: {len(search_results)}개")
+                except Exception as search_error:
+                    logger.debug(f"search (query_filter) 실패: {search_error}, filter 방식 시도...")
+                    # 마지막 시도: filter 파라미터 사용
+                    try:
+                        search_results = self.client.search(
+                            collection_name=self.collection_name,
+                            query_vector=query_embedding,
+                            filter=search_filter,
+                            limit=top_k,
+                            with_payload=True,
+                            with_vectors=False
+                        )
+                        logger.debug(f"search (filter) 검색 성공: {len(search_results)}개")
+                    except Exception as final_error:
+                        # 필터 없이 검색 시도 (최후의 수단)
+                        logger.warning(f"모든 필터 방식 실패, 필터 없이 검색 시도: {final_error}")
+                        search_results = self.client.search(
+                            collection_name=self.collection_name,
+                            query_vector=query_embedding,
+                            limit=top_k,
+                            with_payload=True,
+                            with_vectors=False
+                        )
+                        logger.debug(f"필터 없는 검색 성공: {len(search_results)}개")
                 
         except Exception as e:
-            logger.warning(f"최신 API 검색 실패: {e}, 이전 API로 재시도...")
-            
-            try:
-                # 이전 API 방식 (filter)으로 재시도
-                search_results = self.client.search(
-                    collection_name=self.collection_name,
-                    query_vector=query_embedding,
-                    filter=search_filter,  # 이전 API: filter 사용
-                    limit=top_k,
-                    with_payload=True,
-                    with_vectors=False
-                )
-                logger.debug(f"filter 방식 검색 성공: {len(search_results)}개")
-            except Exception as filter_error:
-                logger.error(f"검색 실패: {filter_error}")
-                # 오류 발생 시 빈 결과 반환
-                return {
-                    "results": [],
-                    "total": 0,
-                    "error": str(filter_error)
-                }
+            logger.error(f"모든 검색 방식 실패: {e}")
+            # 오류 발생 시 빈 결과 반환
+            return {
+                "results": [],
+                "total": 0,
+                "error": str(e)
+            }
         
         # Qdrant에서 이미 필터링된 결과 처리 (메모리 필터링 불필요)
         filtered_results = []

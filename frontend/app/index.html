@@ -1911,19 +1911,48 @@
                 return;
             }
             
-            // 사용자 메시지 추가
-            addMessage('user', message);
-            input.value = '';
-            adjustTextareaHeight(input);
-            
-            // 실제 API 호출
-            try {
-                await sendChatToBackend(message);
-            } catch (error) {
-                console.error('채팅 전송 실패:', error);
-                addMessage('assistant', '죄송합니다. 일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
+            // Events 모듈의 채팅 시스템 사용
+            if (window.Events && window.Events.performCopilotSearch) {
+                try {
+                    // 기본 검색 타입 설정 (사용자가 선택하지 않은 경우)
+                    const selectedTypes = getSelectedContentTypes() || ['tickets', 'solutions'];
+                    
+                    // 버튼 비활성화
+                    sendButton.disabled = true;
+                    
+                    // Events 모듈을 통한 채팅 처리
+                    const client = window.GlobalState?.getClient();
+                    if (client) {
+                        await window.Events.performCopilotSearch(client, message, selectedTypes);
+                        input.value = '';
+                        adjustTextareaHeight(input);
+                    } else {
+                        throw new Error('FDK 클라이언트가 초기화되지 않았습니다.');
+                    }
+                } catch (error) {
+                    console.error('채팅 전송 실패:', error);
+                    // 🚫 중복 메시지 렌더링 제거: Events 모듈에서 이미 처리됨
+                } finally {
+                    sendButton.disabled = false;
+                    isTyping = false;
+                }
+            } else {
+                // 🚫 폴백 로직 제거: Events 모듈만 사용
+                console.error('❌ Events 모듈이 로드되지 않았습니다.');
+                addMessage('assistant', '채팅 시스템을 초기화할 수 없습니다. 페이지를 새로고침해 주세요.');
+                sendButton.disabled = false;
                 isTyping = false;
             }
+        }
+        
+        // 선택된 컨텐츠 타입 가져오기
+        function getSelectedContentTypes() {
+            const types = [];
+            if (document.getElementById('search-tickets')?.checked) types.push('tickets');
+            if (document.getElementById('search-solutions')?.checked) types.push('solutions');
+            if (document.getElementById('search-images')?.checked) types.push('images');
+            if (document.getElementById('search-attachments')?.checked) types.push('attachments');
+            return types.length > 0 ? types : null;
         }
         
         // 백엔드로 채팅 메시지 전송

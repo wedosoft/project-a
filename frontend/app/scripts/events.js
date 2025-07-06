@@ -414,63 +414,44 @@ window.Events = {
 
   // 코파일럿 이벤트 설정 함수
   setupCopilotEvents(client) {
-    const searchButton = document.getElementById('chat-search-button');
-    const searchInput = document.getElementById('chat-input');
-    const clearChatButton = document.getElementById('clear-chat');
+    console.log('🤖 코파일럿 이벤트 설정 - HTML의 기존 이벤트와 통합');
+    
+    // HTML에서 이미 onclick="sendMessage()" 이벤트가 설정되어 있으므로
+    // 여기서는 추가 설정만 수행
+    
+    const searchInput = document.getElementById('chatInput');
+    const clearChatButton = document.getElementById('clearChatBtn');
 
-    if (searchButton) {
-      searchButton.addEventListener('click', async function () {
-        const query = searchInput.value.trim();
-
-        // 선택된 콘텐츠 타입 가져오기
-        const selectedTypes = [];
-        if (document.getElementById('search-tickets')?.checked) selectedTypes.push('tickets');
-        if (document.getElementById('search-solutions')?.checked) selectedTypes.push('solutions');
-        if (document.getElementById('search-images')?.checked) selectedTypes.push('images');
-        if (document.getElementById('search-attachments')?.checked)
-          selectedTypes.push('attachments');
-
-        if (query) {
-          console.log('🤖 코파일럿 검색 실행:', query, '타입:', selectedTypes);
-          await performCopilotSearch(client, query, selectedTypes);
-
-          // 입력 필드 초기화
-          searchInput.value = '';
-        } else {
-          showErrorInResultsInResults('질문을 입력해주세요.', 'chat-messages');
-        }
-      });
-    }
-
-    // Enter 키 지원
+    // 입력 필드 활성화 확인
     if (searchInput) {
-      searchInput.addEventListener('keypress', function (e) {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          searchButton.click();
-        }
-      });
+      searchInput.disabled = false;
+      searchInput.readOnly = false;
+      searchInput.style.pointerEvents = 'auto';
+      searchInput.style.opacity = '1';
+      console.log('✅ 채팅 입력 필드 활성화');
+    } else {
+      console.warn('⚠️ 채팅 입력 필드를 찾을 수 없습니다');
     }
 
-    // 채팅 초기화 버튼
+    // 채팅 초기화 버튼 (있는 경우에만)
     if (clearChatButton) {
       clearChatButton.addEventListener('click', function () {
-        const chatMessages = document.getElementById('chat-messages');
+        const chatMessages = document.getElementById('chatMessages');
         if (chatMessages) {
           chatMessages.innerHTML = `
             <div class="chat-message assistant">
               <strong>AI:</strong> 안녕하세요! 이 티켓에 대해 어떤 도움이 필요하신가요?
             </div>
           `;
+          console.log('🧹 채팅 기록 초기화');
         }
-        console.log('🧹 채팅 기록 초기화');
       });
     }
   },
 
   // 코파일럿 검색 실행 함수
   async performCopilotSearch(client, query, contentTypes) {
-    const resultsElement = document.getElementById('chat-messages');
+    const resultsElement = document.getElementById('chatMessages');
     if (!resultsElement) return;
 
     // 사용자 메시지 추가
@@ -486,51 +467,69 @@ window.Events = {
       '<div class="loading"><div class="spinner"></div><span>AI가 답변을 생성하는 중입니다...</span></div>';
     resultsElement.appendChild(loadingMessage);
 
-    // 스크롤을 맨 아래로
-    resultsElement.scrollTop = resultsElement.scrollHeight;
+    // 스크롤을 맨 아래로 (강제 스크롤)
+    this.scrollToBottom(resultsElement);
 
     try {
       // 현재 티켓 정보 가져오기
       const ticketData = await client.data.get('ticket');
 
-      const requestData = {
-        intent: 'search',
-        type: contentTypes,
+      // 스마트 모드 vs 자유 모드 구분
+      // 스마트 모드: 티켓 선택 시 → 현재 티켓 컨텍스트 기반 답변
+      // 자유 모드: KB/솔루션/이미지/첨부파일만 선택 시 → 일반 검색 기반 답변
+      const hasTicketSearch = contentTypes && contentTypes.includes('tickets');
+      const hasOtherSearch = contentTypes && (
+        contentTypes.includes('solutions') || 
+        contentTypes.includes('images') || 
+        contentTypes.includes('attachments')
+      );
+      
+      // 스마트 모드: 티켓 검색이 포함된 경우
+      // 자유 모드: 티켓 검색이 없고 다른 검색만 있는 경우
+      const isSmartMode = hasTicketSearch;
+      
+      console.log('🎯 채팅 모드 결정:', {
+        contentTypes,
+        hasTicketSearch,
+        hasOtherSearch,
+        isSmartMode: isSmartMode ? '스마트 모드 (티켓 컨텍스트)' : '자유 모드 (일반 검색)'
+      });
+      
+      const queryData = {
         query: query,
+        agent_mode: isSmartMode, // 스마트 모드 (티켓 컨텍스트 기반)
+        stream_response: true, // 스트리밍 응답
         ticket_id: ticketData?.ticket?.id || null,
+        search_types: contentTypes || [], // 검색 대상 타입
+        context_hint: isSmartMode ? 
+          `현재 티켓(${ticketData?.ticket?.id})과 관련된 질문입니다.` : 
+          '일반적인 질문입니다.'
       };
 
-      // FDK를 통한 백엔드 /query API 호출 (POST 메서드로 데이터 전송)
-      const response = await callBackendAPI(client, 'query', requestData, 'POST');
+      // 새로운 sendChatQuery API 사용
+      const response = await API.sendChatQuery(client, queryData, {
+        onStream: (eventData) => {
+          this.handleStreamingResponse(eventData, resultsElement, loadingMessage);
+        },
+        fallbackToNormal: true
+      });
 
-      // 로딩 메시지 제거
-      resultsElement.removeChild(loadingMessage);
-
-      if (response.ok) {
-        const data = response.data;
-        displayCopilotResults(data, resultsElement);
-      } else {
-        console.error('❌ 코파일럿 API 응답 오류:', response.status);
-        const errorMessage = document.createElement('div');
-        errorMessage.className = 'chat-message assistant';
-        errorMessage.innerHTML = '<strong>오류:</strong> AI 응답을 가져올 수 없습니다.';
-        resultsElement.appendChild(errorMessage);
+      // 스트리밍이 아닌 경우 일반 응답 처리
+      if (response.ok && !response.streaming) {
+        this.removeLoadingMessage(resultsElement, loadingMessage);
+        this.displayCopilotResults(response.data, resultsElement);
       }
     } catch (error) {
       console.error('❌ 코파일럿 연결 오류:', error);
-      // 로딩 메시지 제거
-      if (resultsElement.contains(loadingMessage)) {
-        resultsElement.removeChild(loadingMessage);
-      }
+      this.removeLoadingMessage(resultsElement, loadingMessage);
 
       const errorMessage = document.createElement('div');
       errorMessage.className = 'chat-message assistant';
-      errorMessage.innerHTML = '<strong>오류:</strong> AI 서비스에 연결할 수 없습니다.';
+      errorMessage.innerHTML = `<strong>오류:</strong> ${error.userMessage || 'AI 서비스에 연결할 수 없습니다.'}`;
       resultsElement.appendChild(errorMessage);
+      
+      this.scrollToBottom(resultsElement);
     }
-
-    // 스크롤을 맨 아래로
-    resultsElement.scrollTop = resultsElement.scrollHeight;
   },
 
   // 코파일럿 컨텍스트 가져오기 함수
@@ -549,18 +548,18 @@ window.Events = {
 
   // 코파일럿 결과 표시 함수
   displayCopilotResults(data, resultsElement) {
-    if (!resultsElement) resultsElement = document.getElementById('chat-messages');
+    if (!resultsElement) resultsElement = document.getElementById('chatMessages');
     if (!resultsElement) return;
 
     const assistantMessage = document.createElement('div');
     assistantMessage.className = 'chat-message assistant';
 
     if (data.answer || data.response) {
-      let content = `<strong>AI 답변:</strong><br>${data.answer || data.response}`;
+      let content = `<strong>AI 답변:</strong><div class="markdown-content">${this.formatMarkdown(data.answer || data.response)}</div>`;
 
       // 검색 결과가 있는 경우 추가 표시
       if (data.results && data.results.length > 0) {
-        content += '<br><br><strong>관련 정보:</strong><ul>';
+        content += '<br><strong>관련 정보:</strong><ul>';
         data.results.forEach((result, index) => {
           if (index < 3) {
             // 상위 3개만 표시
@@ -588,11 +587,92 @@ window.Events = {
     }
 
     resultsElement.appendChild(assistantMessage);
-
-    // 스크롤을 맨 아래로
-    resultsElement.scrollTop = resultsElement.scrollHeight;
+    this.scrollToBottom(resultsElement);
 
     console.log('✅ 코파일럿 결과 표시 완료');
+  },
+
+  // 스트리밍 응답 처리
+  handleStreamingResponse(eventData, resultsElement, loadingMessage) {
+    if (!eventData || !resultsElement) return;
+
+    switch (eventData.type) {
+      case 'token':
+        // 실시간 토큰 스트리밍
+        this.updateStreamingMessage(resultsElement, loadingMessage, eventData.content);
+        break;
+        
+      case 'complete':
+        // 스트리밍 완료
+        this.removeLoadingMessage(resultsElement, loadingMessage);
+        if (eventData.final_response) {
+          this.displayCopilotResults(eventData.final_response, resultsElement);
+        }
+        break;
+        
+      case 'error':
+        // 스트리밍 에러
+        this.removeLoadingMessage(resultsElement, loadingMessage);
+        const errorDiv = document.createElement('div');
+        errorDiv.className = 'chat-message assistant';
+        errorDiv.innerHTML = `<strong>오류:</strong> ${eventData.error || '스트리밍 처리 중 오류가 발생했습니다.'}`;
+        resultsElement.appendChild(errorDiv);
+        this.scrollToBottom(resultsElement);
+        break;
+    }
+  },
+
+  // 스트리밍 메시지 업데이트
+  updateStreamingMessage(resultsElement, loadingMessage, newContent) {
+    if (!loadingMessage || !loadingMessage.parentNode) {
+      // 로딩 메시지가 없으면 새로 생성
+      const streamingMessage = document.createElement('div');
+      streamingMessage.className = 'chat-message assistant streaming';
+      streamingMessage.innerHTML = `<strong>AI:</strong> <span class="streaming-content">${newContent}</span>`;
+      resultsElement.appendChild(streamingMessage);
+    } else {
+      // 기존 로딩 메시지를 스트리밍 메시지로 교체
+      loadingMessage.className = 'chat-message assistant streaming';
+      loadingMessage.innerHTML = `<strong>AI:</strong> <span class="streaming-content">${newContent}</span>`;
+    }
+    this.scrollToBottom(resultsElement);
+  },
+
+  // 로딩 메시지 제거
+  removeLoadingMessage(resultsElement, loadingMessage) {
+    if (loadingMessage && resultsElement.contains(loadingMessage)) {
+      resultsElement.removeChild(loadingMessage);
+    }
+  },
+
+  // 강제 스크롤
+  scrollToBottom(element) {
+    if (!element) return;
+    
+    // 즉시 스크롤
+    element.scrollTop = element.scrollHeight;
+    
+    // 약간의 지연 후 다시 스크롤 (DOM 업데이트 대기)
+    setTimeout(() => {
+      element.scrollTop = element.scrollHeight;
+    }, 10);
+    
+    // 애니메이션과 함께 스크롤
+    element.scrollTo({
+      top: element.scrollHeight,
+      behavior: 'smooth'
+    });
+  },
+
+  // 간단한 마크다운 렌더링
+  formatMarkdown(text) {
+    if (!text) return '';
+    
+    return text
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // **bold**
+      .replace(/\*(.*?)\*/g, '<em>$1</em>') // *italic*
+      .replace(/`(.*?)`/g, '<code>$1</code>') // `code`
+      .replace(/\n/g, '<br>'); // 줄바꿈
   },
 
   /**
@@ -816,6 +896,30 @@ window.Events = {
         }
       );
     }
+  },
+
+  // 간단한 마크다운 렌더링
+  formatMarkdown(text) {
+    if (!text) return '';
+    
+    return text
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // **bold**
+      .replace(/\*(.*?)\*/g, '<em>$1</em>') // *italic*
+      .replace(/`(.*?)`/g, '<code>$1</code>') // `code`
+      .replace(/\n/g, '<br>'); // 줄바꿈
+  },
+
+  // 채팅 에러 표시
+  showChatError(message) {
+    const resultsElement = document.getElementById('chatMessages');
+    if (!resultsElement) return;
+
+    const errorMessage = document.createElement('div');
+    errorMessage.className = 'chat-message assistant error';
+    errorMessage.innerHTML = `<strong>알림:</strong> ${message}`;
+    resultsElement.appendChild(errorMessage);
+    
+    this.scrollToBottom(resultsElement);
   }
 };
 

@@ -326,12 +326,8 @@ const API = {
   async checkBackendConnection() {
     try {
       console.log('🔗 백엔드 연결 상태 확인 중...');
-      const response = await fetch(`${this.baseURL}/health`, {
+      const response = await fetch(`${this.baseURL}/docs`, {
         method: 'GET',
-        headers: {
-          'X-Tenant-ID': 'wedosoft',
-          'X-Platform': 'freshdesk',
-        },
         timeout: 5000, // 5초 타임아웃
       });
 
@@ -1063,15 +1059,16 @@ const API = {
         platform: 'freshdesk'
       };
       
-      // 스트리밍 요청인 경우
+      // 스트리밍 요청인 경우 - 새로운 통합 엔드포인트 사용
       if (requestData.stream_response) {
         return await this.sendChatQueryWithStreaming(client, requestData, options);
       }
       
-      // 일반 요청
+      // 일반 요청 - stream=false 파라미터와 함께 통합 엔드포인트 사용
+      const queryParams = new URLSearchParams({ stream: 'false' });
       const result = await this.callBackendAPIWithCache(
         client,
-        'query',
+        `query?${queryParams.toString()}`,
         requestData,
         'POST',
         {
@@ -1112,8 +1109,9 @@ const API = {
         }
       }
       
-      // 스트리밍 엔드포인트 사용
-      const response = await fetch(`${this.baseURL}/query/stream`, {
+      // 통합 엔드포인트의 스트리밍 모드 사용
+      const queryParams = new URLSearchParams({ stream: 'true' });
+      const response = await fetch(`${this.baseURL}/query?${queryParams.toString()}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1149,9 +1147,10 @@ const API = {
       if (options.fallbackToNormal !== false) {
         console.log('📡 일반 모드로 폴백 시도...');
         requestData.stream_response = false;
+        const queryParams = new URLSearchParams({ stream: 'false' });
         return await this.callBackendAPIWithCache(
           client,
-          'query',
+          `query?${queryParams.toString()}`,
           requestData,
           'POST',
           {

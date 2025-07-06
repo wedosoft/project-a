@@ -437,16 +437,22 @@ if (typeof window.isFDKModal !== 'undefined' && window.isFDKModal) {
           // 로딩 중이면 진행률을 보여주고, 완료되면 데이터를 보여줌
           await showFDKModal(currentTicketId, true);
 
-          // 모달 표시 후 이벤트 설정 (한 번만)
-          if (!Events.isInitialized) {
-            Events.setupTabEvents(client);
-            Events.isInitialized = true;
-          }
+          // 모달 표시 후 이벤트 설정 (한 번만) - 새로운 중복 방지 시스템 사용
+          await window.ModuleInitializationManager.safeInitialize(
+            'events',
+            () => Events.setupTabEvents(client)
+          );
         } else {
           // 예상치 못한 위치에서의 호출
           if (!GlobalState.isInitialized()) {
             await Data.loadTicketDetails(client);
-            Events.setupTabEvents(client);
+            
+            // 중복 방지 시스템을 사용한 이벤트 설정
+            await window.ModuleInitializationManager.safeInitialize(
+              'events',
+              () => Events.setupTabEvents(client)
+            );
+            
             GlobalState.setInitialized(true);
           }
         }
@@ -496,7 +502,13 @@ if (typeof window.isFDKModal !== 'undefined' && window.isFDKModal) {
           // 모달에서는 최소한의 이벤트 설정만 (추가 백엔드 호출 없음)
           if (!GlobalState.isInitialized()) {
             console.log('🔧 모달에서 최소 이벤트 설정 (백엔드 호출 없음)');
-            Events.setupTabEvents(client);
+            
+            // 중복 방지 시스템을 사용한 이벤트 설정
+            await window.ModuleInitializationManager.safeInitialize(
+              'modal_events',
+              () => Events.setupTabEvents(client)
+            );
+            
             GlobalState.setInitialized(true);
           }
           

@@ -38,7 +38,8 @@ async def health_check(
     domain: Optional[str] = Depends(get_domain),
     api_key: Optional[str] = Depends(get_api_key),
     cache_manager = Depends(get_cache_manager),
-    container = Depends(get_container)
+    container = Depends(get_container),
+    llm_manager = Depends(get_llm_manager)
 ):
     """
     향상된 애플리케이션 헬스 체크 엔드포인트
@@ -90,7 +91,6 @@ async def health_check(
         
         # LLM 서비스 상태 확인
         try:
-            llm_manager = await get_llm_manager()
             if hasattr(llm_manager, 'health_check'):
                 llm_status = llm_manager.health_check()
             else:

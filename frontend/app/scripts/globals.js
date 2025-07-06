@@ -43,10 +43,106 @@ let isInitialized = false;
 
 /**
  * 전역 초기화 완료 플래그 (중복 방지) - window 레벨에서 관리
+ * 🚨 모듈별 중복 초기화 방지 시스템
  */
 if (typeof window.GLOBAL_SYSTEM_INITIALIZED === 'undefined') {
   window.GLOBAL_SYSTEM_INITIALIZED = false;
 }
+
+/**
+ * 🎯 모듈별 초기화 상태 추적 (중복 방지)
+ * 각 모듈이 정확히 한 번만 초기화되도록 보장하는 시스템
+ */
+if (typeof window.MODULE_INITIALIZATION_FLAGS === 'undefined') {
+  window.MODULE_INITIALIZATION_FLAGS = {
+    app: false,           // app.js 초기화 상태
+    events: false,        // Events.setupTabEvents 초기화 상태  
+    ui: false,           // UI 모듈 초기화 상태
+    data: false,         // Data 모듈 초기화 상태
+    api: false,          // API 모듈 초기화 상태
+    globals: false,      // GlobalState 초기화 상태
+    chat_system: false,  // 채팅 시스템 초기화 상태
+    modal_events: false  // 모달 이벤트 핸들러 초기화 상태
+  };
+}
+
+/**
+ * 🛡️ 모듈 초기화 상태 관리 함수들
+ */
+window.ModuleInitializationManager = {
+  /**
+   * 모듈이 이미 초기화되었는지 확인
+   * @param {string} moduleName - 모듈 이름
+   * @returns {boolean} 초기화 상태
+   */
+  isInitialized(moduleName) {
+    return window.MODULE_INITIALIZATION_FLAGS[moduleName] || false;
+  },
+
+  /**
+   * 모듈을 초기화됨으로 표시
+   * @param {string} moduleName - 모듈 이름
+   * @returns {boolean} 성공 여부 (이미 초기화된 경우 false)
+   */
+  markAsInitialized(moduleName) {
+    if (this.isInitialized(moduleName)) {
+      console.warn(`⚠️ 모듈 '${moduleName}'가 이미 초기화되어 있습니다. 중복 초기화 방지됨.`);
+      return false;
+    }
+    
+    window.MODULE_INITIALIZATION_FLAGS[moduleName] = true;
+    console.log(`✅ 모듈 '${moduleName}' 초기화 완료`);
+    return true;
+  },
+
+  /**
+   * 모듈 초기화 상태 초기화 (테스트/디버깅용)
+   * @param {string} moduleName - 모듈 이름 (없으면 전체 초기화)
+   */
+  reset(moduleName = null) {
+    if (moduleName) {
+      window.MODULE_INITIALIZATION_FLAGS[moduleName] = false;
+      console.log(`🔄 모듈 '${moduleName}' 초기화 상태 리셋`);
+    } else {
+      for (const key in window.MODULE_INITIALIZATION_FLAGS) {
+        window.MODULE_INITIALIZATION_FLAGS[key] = false;
+      }
+      console.log('🔄 모든 모듈 초기화 상태 리셋');
+    }
+  },
+
+  /**
+   * 현재 초기화 상태 조회
+   * @returns {Object} 모든 모듈의 초기화 상태
+   */
+  getStatus() {
+    return { ...window.MODULE_INITIALIZATION_FLAGS };
+  },
+
+  /**
+   * 안전한 모듈 초기화 래퍼
+   * @param {string} moduleName - 모듈 이름
+   * @param {Function} initFunction - 초기화 함수
+   * @param {...any} args - 초기화 함수 인자들
+   * @returns {Promise<boolean>} 초기화 성공 여부
+   */
+  async safeInitialize(moduleName, initFunction, ...args) {
+    if (this.isInitialized(moduleName)) {
+      console.log(`🔒 모듈 '${moduleName}' 이미 초기화됨 - 건너뛰기`);
+      return false;
+    }
+
+    try {
+      console.log(`🚀 모듈 '${moduleName}' 초기화 시작...`);
+      await initFunction(...args);
+      this.markAsInitialized(moduleName);
+      return true;
+    } catch (error) {
+      console.error(`❌ 모듈 '${moduleName}' 초기화 실패:`, error);
+      throw error;
+    }
+  }
+};
 
 /**
  * 전역 티켓 데이터 캐시

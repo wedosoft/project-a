@@ -15,9 +15,9 @@ class QueryRequest(BaseModel):
     top_k: int = 3
     answer_instructions: Optional[str] = None  # 사용자가 제공하는 답변 지침
     
-    # Platform-Neutral 3-Tuple 필수 필드
-    tenant_id: str = Field(description="테넌트 ID (테넌트 격리 필수)")
-    platform: str = Field(default="freshdesk", description="플랫폼 ID (멀티플랫폼 지원)")
+    # Platform-Neutral 3-Tuple 필수 필드 (헤더에서 추출되므로 선택적)
+    tenant_id: Optional[str] = Field(default=None, description="테넌트 ID (헤더에서 자동 추출)")
+    platform: Optional[str] = Field(default=None, description="플랫폼 ID (헤더에서 자동 추출)")
     
     # 현재 처리 중인 티켓 ID (platform-neutral original_id)
     ticket_id: Optional[str] = Field(default=None, description="플랫폼 원본 티켓 ID")

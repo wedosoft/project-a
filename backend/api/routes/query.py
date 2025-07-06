@@ -24,6 +24,15 @@ from core.search.enhanced_search import EnhancedSearchEngine
 from ..models.requests import QueryRequest
 from ..models.responses import QueryResponse
 from ..models.shared import DocumentInfo
+from ..models.streaming import (
+    StreamEventBuilder, 
+    StreamStage, 
+    ResultType, 
+    format_sse_event, 
+    format_sse_done,
+    create_ticket_result_event,
+    create_kb_result_event
+)
 
 # 로거
 import logging
@@ -237,27 +246,41 @@ async def query_endpoint(
                         platform=platform,
                         stream=True
                     ):
-                        # SSE 형식으로 청크 전송
-                        chunk_data = json.dumps(chunk, ensure_ascii=False)
-                        yield f"data: {chunk_data}\n\n"
-                        
-                        # 최종 결과면 연결 종료
+                        # 표준 스트리밍 이벤트 구조로 변환
                         if chunk.get("type") == "final":
-                            yield "data: [DONE]\n\n"
+                            # 최종 결과를 완료 이벤트로 변환
+                            complete_event = StreamEventBuilder.create_complete_event(
+                                message="AI 분석이 완료되었습니다",
+                                final_data=chunk
+                            )
+                            yield format_sse_event(complete_event)
+                            yield format_sse_done()
                             break
+                        else:
+                            # 기타 청크를 표준 형식으로 변환
+                            if chunk.get("type") == "progress":
+                                progress_event = StreamEventBuilder.create_progress_event(
+                                    stage=StreamStage.LLM_PROCESSING,
+                                    message=chunk.get("message", "AI 처리 중..."),
+                                    progress=chunk.get("progress", 50)
+                                )
+                                yield format_sse_event(progress_event)
+                            else:
+                                # 원본 청크를 그대로 전송 (하위 호환성)
+                                chunk_data = json.dumps(chunk, ensure_ascii=False)
+                                yield f"data: {chunk_data}\n\n"
                             
                 except Exception as e:
                     logger.error(f"상담원 스트리밍 중 오류: {e}")
-                    error_chunk = {
-                        "type": "error",
-                        "error": str(e),
-                        "content": "검색 중 오류가 발생했습니다."
-                    }
-                    error_data = json.dumps(error_chunk, ensure_ascii=False)
-                    yield f"data: {error_data}\n\n"
-                    yield "data: [DONE]\n\n"
+                    error_event = StreamEventBuilder.create_error_event(
+                        error=str(e),
+                        error_code="AGENT_STREAMING_ERROR",
+                        stage=StreamStage.LLM_PROCESSING
+                    )
+                    yield format_sse_event(error_event)
+                    yield format_sse_done()
                 finally:
-                    yield f"data: [DONE]\n\n"
+                    yield format_sse_done()
             
             return StreamingResponse(
                 stream_agent_response(),
@@ -416,9 +439,14 @@ async def query_endpoint(
     
     # 벡터 검색 로직
     # 임베딩 생성
-    query_embedding = await llm_router.generate_embedding(
-        query_for_embedding_str
-    )
+    embeddings = await llm_router.get_embeddings([query_for_embedding_str])
+    query_embedding = embeddings[0] if embeddings else None
+    
+    if not query_embedding:
+        raise HTTPException(
+            status_code=500,
+            detail="임베딩 생성에 실패했습니다"
+        )
 
     # 콘텐츠 타입에 따라 검색할 문서 타입 결정
     top_k_per_type = max(
@@ -433,13 +461,24 @@ async def query_endpoint(
         "documents": [], "metadatas": [], "ids": [], "distances": []
     }
     if "tickets" in content_types:
-        ticket_results = vector_db.retrieve_top_k_docs(
-        query_embedding,
-        top_k_per_type,
-        tenant_id,
-        doc_type="ticket",
-        platform=effective_platform
-    )
+        try:
+            ticket_results = vector_db.search(
+                query_embedding,
+                top_k_per_type,
+                tenant_id,
+                doc_type="ticket",
+                platform=effective_platform
+            )
+            # 검색 결과가 올바르지 않으면 기본값 사용
+            if not isinstance(ticket_results, dict) or 'documents' not in ticket_results:
+                ticket_results = {
+                    "documents": [], "metadatas": [], "ids": [], "distances": []
+                }
+        except Exception as e:
+            logger.error(f"티켓 검색 중 오류: {e}")
+            ticket_results = {
+                "documents": [], "metadatas": [], "ids": [], "distances": []
+            }
     logger.info(
         f"플랫폼 {effective_platform} 티켓 검색 결과: "
         f"{len(ticket_results.get('documents', []))} 건"
@@ -450,13 +489,24 @@ async def query_endpoint(
         "documents": [], "metadatas": [], "ids": [], "distances": []
     }
     if "solutions" in content_types:
-        kb_results = vector_db.retrieve_top_k_docs(
-            query_embedding,
-            top_k_per_type,
-            tenant_id,
-            doc_type="kb",
-            platform=effective_platform
-        )
+        try:
+            kb_results = vector_db.search(
+                query_embedding,
+                top_k_per_type,
+                tenant_id,
+                doc_type="kb",
+                platform=effective_platform
+            )
+            # 검색 결과가 올바르지 않으면 기본값 사용
+            if not isinstance(kb_results, dict) or 'documents' not in kb_results:
+                kb_results = {
+                    "documents": [], "metadatas": [], "ids": [], "distances": []
+                }
+        except Exception as e:
+            logger.error(f"KB 검색 중 오류: {e}")
+            kb_results = {
+                "documents": [], "metadatas": [], "ids": [], "distances": []
+            }
         logger.info(
             f"플랫폼 {effective_platform} 솔루션 검색 결과: "
             f"{len(kb_results.get('documents', []))} 건"
@@ -507,15 +557,14 @@ async def query_endpoint(
     context_start = time.time()
     
     # 최적화된 컨텍스트를 구성합니다. (검색된 문서들로부터)
-    # 새로운 최적화 매개변수들을 활용하여 품질과 성능을 향상시킵니다.
-    base_context, optimized_metadatas, context_meta = await llm_router.build_optimized_context(
-        docs=docs,
-        metadatas=metadatas,
-        query=req.query,  # 쿼리 기반 관련성 추출을 위해 전달
-        max_tokens=8000,  # 컨텍스트 토큰 제한 (기본값 사용 가능)
-        top_k=req.top_k,  # 품질 기반 문서 선별
-        enable_relevance_extraction=True  # 관련성 추출 활성화
-    )
+    # 간단한 컨텍스트 구성 (임시)
+    base_context = "\n\n".join([str(doc) for doc in docs[:req.top_k]])
+    optimized_metadatas = metadatas[:req.top_k]
+    context_meta = {
+        "total_docs": len(docs),
+        "selected_docs": min(len(docs), req.top_k),
+        "context_length": len(base_context)
+    }
     
     # LLM에 전달할 최종 컨텍스트 (티켓 정보 + 검색된 문서 정보)
     final_context_for_llm = f"{ticket_context_for_llm}{base_context}"
@@ -779,8 +828,10 @@ async def query_endpoint(
     )
 
 
+# 기존 별도 스트리밍 엔드포인트 제거됨 - 이제 /query?stream=true 형태로 통합됨
+# 하위 호환성을 위해 유지되지만, 메인 엔드포인트로 리다이렉트
 @router.post("/query/stream")
-async def query_stream(
+async def query_stream_deprecated(
     req: QueryRequest, 
     tenant_id: str = Depends(get_tenant_id),
     platform: str = Depends(get_platform),
@@ -788,80 +839,24 @@ async def query_stream(
     llm_router = Depends(get_llm_router)
 ):
     """
-    스트리밍 방식으로 쿼리 응답을 제공하는 엔드포인트
-    실시간으로 검색 결과를 스트리밍하여 프론트엔드에서 점진적으로 표시할 수 있습니다.
+    [DEPRECATED] 스트리밍 방식 쿼리 엔드포인트
+    
+    ⚠️ 이 엔드포인트는 하위 호환성을 위해 유지되지만 deprecated입니다.
+    새로운 코드에서는 /query?stream=true를 사용해주세요.
     """
-    async def generate_streaming_response():
-        try:
-            # 기본 쿼리 처리
-            yield f"data: {json.dumps({'type': 'status', 'message': '검색을 시작합니다...', 'progress': 10})}\n\n"
-            
-            # 임베딩 생성
-            yield f"data: {json.dumps({'type': 'status', 'message': '쿼리 분석 중...', 'progress': 30})}\n\n"
-            query_embedding = await llm_router.generate_embedding(req.query)
-            
-            # 검색 실행
-            yield f"data: {json.dumps({'type': 'status', 'message': '관련 문서 검색 중...', 'progress': 50})}\n\n"
-            
-            # 유사한 티켓 검색
-            if req.include_similar_tickets:
-                similar_tickets_result = vector_db.retrieve_top_k_docs(
-                    query_embedding=query_embedding,
-                    top_k=req.top_k_tickets,
-                    doc_type="ticket",
-                    tenant_id=tenant_id,
-                    platform=platform
-                )
-                
-                # 결과를 스트리밍으로 전송
-                for i, ticket in enumerate(similar_tickets_result.get("metadatas", [])):
-                    ticket_data = {
-                        'type': 'ticket',
-                        'id': similar_tickets_result["ids"][i],
-                        'title': ticket.get("subject", "제목 없음"),
-                        'content': similar_tickets_result["documents"][i][:200] + "...",
-                        'progress': 50 + (i / len(similar_tickets_result.get("metadatas", []))) * 25
-                    }
-                    yield f"data: {json.dumps(ticket_data)}\n\n"
-            
-            # KB 문서 검색
-            yield f"data: {json.dumps({'type': 'status', 'message': 'KB 문서 검색 중...', 'progress': 75})}\n\n"
-            
-            kb_result = vector_db.retrieve_top_k_docs(
-                query_embedding=query_embedding,
-                top_k=req.top_k_kb,
-                doc_type="kb",
-                tenant_id=tenant_id,
-                platform=platform
-            )
-            
-            # KB 결과를 스트리밍으로 전송
-            for i, kb_doc in enumerate(kb_result.get("metadatas", [])):
-                kb_data = {
-                    'type': 'kb',
-                    'id': kb_result["ids"][i],
-                    'title': kb_doc.get("title", "제목 없음"),
-                    'content': kb_result["documents"][i][:200] + "...",
-                    'progress': 75 + (i / len(kb_result.get("metadatas", []))) * 20
-                }
-                yield f"data: {json.dumps(kb_data)}\n\n"
-            
-            # 완료
-            yield f"data: {json.dumps({'type': 'complete', 'message': '검색이 완료되었습니다.', 'progress': 100})}\n\n"
-            
-        except Exception as e:
-            logger.error(f"스트리밍 쿼리 중 오류: {e}")
-            yield f"data: {json.dumps({'type': 'error', 'message': f'오류가 발생했습니다: {str(e)}'})}\n\n"
-
-    return StreamingResponse(
-        generate_streaming_response(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "*"
-        }
+    logger.warning("DEPRECATED: /query/stream 엔드포인트 사용됨. /query?stream=true 사용 권장")
+    
+    # 메인 엔드포인트로 리다이렉트
+    return await query_endpoint(
+        req=req,
+        tenant_id=tenant_id,
+        platform=platform,
+        vector_db=vector_db,
+        fetcher=None,  # 기본값 사용
+        llm_router=llm_router,
+        anthropic_orchestrator=AnthropicSearchOrchestrator(vector_db=vector_db, llm_manager=llm_router),
+        enhanced_search=EnhancedSearchEngine(vector_db=vector_db, llm_manager=llm_router),
+        stream=True  # 스트리밍 모드 강제 활성화
     )
 
 

@@ -683,6 +683,45 @@ class LLMManager:
         """통계 정보 반환"""
         return self.metrics.get_stats()
     
+    def build_prompt(self, context: str, query: str, agent_mode: bool = False) -> str:
+        """
+        컨텍스트와 쿼리를 기반으로 프롬프트를 구성합니다.
+        
+        Args:
+            context: 검색된 컨텍스트 정보
+            query: 사용자 질문
+            agent_mode: 에이전트 모드 여부
+            
+        Returns:
+            구성된 프롬프트
+        """
+        if agent_mode:
+            # 스마트 대화 모드 - 구체적인 답변 요구
+            system_prompt = """당신은 고객 서비스 전문가입니다. 제공된 컨텍스트를 바탕으로 정확하고 도움이 되는 답변을 제공하세요.
+
+컨텍스트 정보:
+{context}
+
+지침:
+1. 컨텍스트에서 관련 정보를 찾아 구체적으로 답변하세요
+2. 확실하지 않은 정보는 추측하지 마세요
+3. 한국어로 친절하고 명확하게 답변하세요
+4. 필요시 단계별로 설명하세요"""
+        else:
+            # 자유 대화 모드 - 일반적인 AI 어시스턴트
+            system_prompt = """당신은 도움이 되는 AI 어시스턴트입니다. 사용자의 질문에 친절하고 정확하게 답변하세요.
+
+참고 컨텍스트:
+{context}
+
+지침:
+1. 질문에 대해 도움이 되는 답변을 제공하세요
+2. 모르는 것은 모른다고 솔직히 말하세요
+3. 한국어로 자연스럽게 대화하세요"""
+        
+        formatted_prompt = system_prompt.format(context=context)
+        return f"{formatted_prompt}\n\n사용자 질문: {query}\n\n답변:"
+    
     def _get_cache_key(self, request: LLMRequest) -> str:
         """캐시 키 생성"""
         import hashlib
