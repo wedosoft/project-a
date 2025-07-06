@@ -41,14 +41,14 @@ if (typeof window.APP_INITIALIZED === 'undefined') {
 }
 
 /**
- * 🎯 FDK 네이티브 모달 호출 함수 (백엔드 호출 없는 버전)
+ * 🎯 즉시 모달 표시 함수 (Progressive Enhancement)
  * 
- * 복잡한 DOM 조작이나 백엔드 API 호출 없이 FDK 내장 기능만 활용하여 모달을 표시합니다.
- * index.html을 템플릿으로 사용하여 안정적인 모달 표시를 보장합니다.
+ * 로딩 상태와 관계없이 즉시 모달을 표시하고, 로딩 중인 경우 진행률을 실시간으로 업데이트합니다.
+ * 사용자는 대기 시간 없이 즉시 모달을 볼 수 있으며, 데이터는 점진적으로 표시됩니다.
  * 
- * ✅ 페이지 로딩 시: 1회만 백엔드 호출 (백그라운드에서)
- * 🚫 모달 띄울 때: 별도 백엔드 호출 금지 (캐시된 데이터만 사용)
- * 🚫 모달 이후: 불필요한 액션 제거
+ * ✅ 즉시 모달 표시 (0초 대기)
+ * ✅ 로딩 중: 실시간 진행률 표시
+ * ✅ 오류 시: 명확한 에러 메시지와 재시도 옵션
  */
 async function showFDKModal(ticketId, hasCachedData = false) {
   try {
@@ -96,17 +96,48 @@ async function showFDKModal(ticketId, hasCachedData = false) {
       }
     }
     
-    // 모달 설정 구성 (백엔드 호출 없이 캐시된 데이터만 전달)
+    // 현재 로딩 상태 가져오기
+    const loadingStatus = window.GlobalState ? window.GlobalState.getLoadingStatus() : null;
+    const globalData = window.GlobalState ? window.GlobalState.getGlobalTicketData() : {};
+    const errorState = window.GlobalState ? window.GlobalState.getGlobalError() : {};
+    const streamingStatus = window.GlobalState ? window.GlobalState.getStreamingStatus() : {};
+    
+    // 로딩 상태 판단 개선
+    const isCurrentlyLoading = loadingStatus?.status === 'loading' || 
+                              streamingStatus.is_streaming || 
+                              globalData.isLoading;
+    const isDataReady = loadingStatus?.status === 'ready' || 
+                       (globalData.summary && globalData.cached_ticket_id);
+    
+    console.log('📊 모달 열기 시 상태:', {
+      loadingStatus: loadingStatus?.status,
+      isStreaming: streamingStatus.is_streaming,
+      hasData: !!globalData.summary,
+      hasError: errorState.hasError,
+      isCurrentlyLoading,
+      isDataReady
+    });
+    
+    // 모달 설정 구성 (현재 상태를 모두 전달)
     const modalConfig = {
       title: "Copilot Canvas - AI 상담사 지원",
-      template: "index.html", // 기본 index.html 사용
+      template: "index.html",
       data: {
         ticketId: ticketId,
         ticket: ticket,
         hasCachedData: hasCachedData,
         timestamp: new Date().toISOString(),
-        // 백엔드 호출 금지 플래그 추가
-        noBackendCall: true
+        noBackendCall: true,
+        // 로딩 상태 정보 추가
+        loadingStatus: loadingStatus,
+        globalData: globalData,
+        streamingStatus: streamingStatus,
+        hasError: errorState.hasError && !isCurrentlyLoading, // 로딩 중이면 에러 표시 안함
+        errorMessage: errorState.errorMessage,
+        // 상태별 플래그
+        isLoading: isCurrentlyLoading,
+        isReady: isDataReady,
+        isPartiallyLoaded: globalData.summary && !globalData.similar_tickets
       },
       size: {
         width: "900px",
@@ -115,100 +146,225 @@ async function showFDKModal(ticketId, hasCachedData = false) {
       noBackdrop: true
     };
 
-    // 모달을 반드시 열어야 하므로 별도 try-catch로 보호
-    try {
-      await client.interface.trigger("showModal", modalConfig);
-      console.log('✅ FDK 모달 열기 성공');
-    } catch (modalError) {
-      console.error('❌ FDK 모달 열기 실패:', modalError);
-      
-      // 백엔드 오류와 무관하게 모달을 반드시 표시하기 위해 재시도
-      console.log('🔄 모달 재시도 - 백엔드 오류 무시하고 UI만 표시');
-      
-      // 오류 상태로 모달 표시
-      const fallbackConfig = {
-        title: "Copilot Canvas - AI 상담사 지원",
-        template: "index.html",
-        data: {
-          ticketId: ticketId,
-          ticket: ticket,
-          hasCachedData: false,
-          timestamp: new Date().toISOString(),
-          noBackendCall: true,
-          errorMode: true, // 오류 모드 플래그 추가
-          errorMessage: "벡터 DB 연결 오류가 발생했지만 기본 기능은 사용할 수 있습니다."
-        },
-        size: {
-          width: "900px",
-          height: "700px"
-        },
-        noBackdrop: true
-      };
+    // 🔥 모달을 반드시 열어야 하므로 강화된 에러 처리
+    let modalOpenSuccess = false;
+    let attemptCount = 0;
+    const maxAttempts = 3;
+    
+    while (!modalOpenSuccess && attemptCount < maxAttempts) {
+      attemptCount++;
+      console.log(`🎭 모달 열기 시도 ${attemptCount}/${maxAttempts}`);
       
       try {
-        await client.interface.trigger("showModal", fallbackConfig);
-        console.log('✅ FDK 모달 재시도 성공 (오류 모드)');
-      } catch (retryError) {
-        console.error('❌ FDK 모달 재시도도 실패:', retryError);
-        // 최후의 수단으로 알림만 표시
-        throw new Error('모달 창을 열 수 없습니다. 페이지를 새로고침 후 다시 시도해주세요.');
+        await client.interface.trigger("showModal", modalConfig);
+        console.log('✅ FDK 모달 열기 성공');
+        modalOpenSuccess = true;
+      } catch (modalError) {
+        console.error(`❌ FDK 모달 열기 실패 (시도 ${attemptCount}):`, modalError);
+        
+        if (attemptCount < maxAttempts) {
+          // 재시도 전 잠시 대기
+          await new Promise(resolve => setTimeout(resolve, 500));
+          console.log('🔄 모달 열기 재시도 준비 중...');
+        } else {
+          // 최종 시도 - 오류 모드로 강제 표시
+          console.log('🚨 최종 시도: 오류 모드로 모달 강제 표시');
+          
+          const emergencyConfig = {
+            title: "Copilot Canvas - 연결 오류",
+            template: "index.html",
+            data: {
+              ticketId: ticketId || 'unknown',
+              ticket: ticket || { id: 'unknown', subject: '연결 오류' },
+              hasCachedData: false,
+              timestamp: new Date().toISOString(),
+              noBackendCall: true,
+              errorMode: true,
+              serverDown: true, // 서버 다운 플래그
+              errorMessage: "서버 연결에 실패했습니다. 새로고침 버튼을 클릭하여 다시 시도해주세요.",
+              // 에러 상태에서도 로딩 상태 정보 전달
+              hasError: true,
+              isLoading: false,
+              isReady: false
+            },
+            size: {
+              width: "900px", 
+              height: "700px"
+            },
+            noBackdrop: true
+          };
+          
+          try {
+            await client.interface.trigger("showModal", emergencyConfig);
+            console.log('✅ 응급 모달 표시 성공');
+            modalOpenSuccess = true;
+          } catch (emergencyError) {
+            console.error('❌ 응급 모달도 실패:', emergencyError);
+            // 이 경우에도 오류를 던지지 않고 계속 진행
+            modalOpenSuccess = true; // 더 이상 시도하지 않음
+          }
+        }
       }
     }
     
   } catch (error) {
-    console.error('❌ FDK 모달 오류:', error);
+    console.error('❌ FDK 모달 전체 오류:', error);
     
-    // 모달 열기 실패 시 사용자에게 친화적인 에러 메시지 표시
-    const client = GlobalState.getClient();
-    if (client) {
-      try {
-        await client.interface.trigger("showNotify", {
-          type: "danger",
-          message: `AI 지원 기능 오류: ${error.message || '알 수 없는 오류가 발생했습니다.'} 페이지를 새로고침 후 다시 시도해주세요.`
-        });
-      } catch (notifyError) {
-        console.error('❌ 알림도 실패:', notifyError);
-        // 최후의 수단: 콘솔에 오류 기록
-        console.error('🚨 UI 초기화 실패: AI 지원 기능을 불러올 수 없습니다.');
-      }
-    } else {
-      // 클라이언트도 없는 경우 최후의 수단
-      console.error('🚨 FDK 클라이언트 초기화 실패: AI 지원 기능을 불러올 수 없습니다.');
+    // 🚨 어떤 상황에서도 사용자에게 상황을 알려야 함
+    console.log('🚨 최후의 수단: 사용자에게 오류 상황 알림');
+    
+    // 최후의 수단으로 DOM에 직접 오류 알림 표시
+    try {
+      const emergencyAlert = document.createElement('div');
+      emergencyAlert.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: #fee2e2;
+        border: 2px solid #f87171;
+        color: #991b1b;
+        padding: 20px;
+        border-radius: 8px;
+        z-index: 99999;
+        max-width: 400px;
+        font-size: 14px;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+        text-align: center;
+      `;
       
-      // 사용자에게 시각적 피드백 제공을 위해 페이지에 오류 메시지 표시
-      try {
-        const errorDiv = document.createElement('div');
-        errorDiv.style.cssText = `
-          position: fixed;
-          top: 20px;
-          right: 20px;
-          background: #dc3545;
-          color: white;
-          padding: 15px;
-          border-radius: 5px;
-          z-index: 10000;
-          max-width: 300px;
-          font-size: 14px;
-          box-shadow: 0 2px 10px rgba(0,0,0,0.3);
-        `;
-        errorDiv.textContent = 'AI 지원 기능을 불러올 수 없습니다. 페이지를 새로고침 후 다시 시도해주세요.';
-        document.body.appendChild(errorDiv);
-        
-        // 5초 후 자동 제거
-        setTimeout(() => {
-          if (errorDiv.parentNode) {
-            errorDiv.parentNode.removeChild(errorDiv);
-          }
-        }, 5000);
-      } catch (domError) {
-        console.error('DOM 조작 실패:', domError);
-      }
+      emergencyAlert.innerHTML = `
+        <div style="font-size: 24px; margin-bottom: 12px;">🚨</div>
+        <div style="font-weight: 600; margin-bottom: 8px;">AI 지원 기능 오류</div>
+        <div style="margin-bottom: 12px;">
+          서버 연결에 문제가 있어 AI 기능을 사용할 수 없습니다.
+        </div>
+        <div style="font-size: 12px; opacity: 0.8; margin-bottom: 16px;">
+          오류: ${error.message || '알 수 없는 오류'}
+        </div>
+        <button onclick="this.parentElement.remove(); location.reload();" 
+                style="background: #dc2626; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">
+          페이지 새로고침
+        </button>
+        <button onclick="this.parentElement.remove();" 
+                style="background: transparent; color: #991b1b; border: 1px solid #f87171; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-left: 8px;">
+          닫기
+        </button>
+      `;
+      
+      document.body.appendChild(emergencyAlert);
+      console.log('🚨 응급 오류 알림 표시됨');
+      
+      // 10초 후 자동 제거
+      setTimeout(() => {
+        if (emergencyAlert.parentNode) {
+          emergencyAlert.parentNode.removeChild(emergencyAlert);
+        }
+      }, 10000);
+      
+    } catch (domError) {
+      console.error('❌ 응급 DOM 조작마저 실패:', domError);
+      // 정말 마지막 수단
+      console.error('🆘 모든 UI 표시 방법 실패 - 콘솔 로그만 남김');
     }
   }
 }
 
 // FDK 모달 컨텍스트 감지 (전역 변수 사용)
 // isFDKModal 변수는 index.html에서 이미 선언됨
+
+/**
+ * 🚀 백그라운드 데이터 로딩 시작
+ * 페이지 로드 즉시 실행되어 사용자가 아이콘을 클릭하기 전에 데이터를 준비합니다.
+ * 20초의 로딩 시간을 백그라운드에서 처리하여 사용자 대기 시간을 최소화합니다.
+ */
+async function startBackgroundDataLoading(client) {
+  try {
+    console.log('🚀 백그라운드 데이터 로딩 시작 - 사용자 인터랙션 없이 자동 실행');
+    
+    // 로딩 상태 설정
+    if (window.GlobalState) {
+      window.GlobalState.setLoadingStatus({
+        status: 'loading',
+        startTime: Date.now(),
+        estimatedTime: 20000 // 20초 예상
+      });
+    }
+    
+    // 아이콘 상태 업데이트 (로딩 중 표시)
+    updateAppIconStatus('loading');
+    
+    // 티켓 ID 가져오기
+    let ticketId = null;
+    try {
+      const ticketData = await client.data.get('ticket');
+      ticketId = ticketData?.ticket?.id;
+      
+      if (ticketId) {
+        console.log(`🎯 티켓 ${ticketId}에 대한 백그라운드 로딩 시작`);
+        
+        // 백엔드 데이터 로드 (스트리밍 지원)
+        const result = await Data.preloadTicketDataOnPageLoad(client);
+        
+        if (result) {
+          console.log('✅ 백그라운드 데이터 로딩 성공');
+          updateAppIconStatus('ready');
+          
+          // 로딩 상태를 성공으로 업데이트
+          if (window.GlobalState) {
+            window.GlobalState.setLoadingStatus({
+              status: 'ready',
+              completedTime: Date.now()
+            });
+          }
+        } else {
+          console.warn('⚠️ 백그라운드 데이터 로딩 실패');
+          updateAppIconStatus('error');
+          
+          // 로딩 상태를 에러로 업데이트
+          if (window.GlobalState) {
+            window.GlobalState.setLoadingStatus({
+              status: 'error',
+              completedTime: Date.now()
+            });
+          }
+        }
+      }
+    } catch (error) {
+      console.error('❌ 백그라운드 로딩 중 오류:', error);
+      updateAppIconStatus('error');
+      
+      if (window.GlobalState) {
+        window.GlobalState.setGlobalError(true, '백그라운드 데이터 로딩 실패');
+        window.GlobalState.setLoadingStatus({
+          status: 'error',
+          completedTime: Date.now()
+        });
+      }
+    }
+  } catch (error) {
+    console.error('❌ 백그라운드 로딩 전체 오류:', error);
+  }
+}
+
+/**
+ * 🎨 앱 아이콘 상태 업데이트
+ * 상단 네비게이션의 아이콘에 시각적 상태를 표시합니다.
+ */
+function updateAppIconStatus(status) {
+  try {
+    // FDK API를 통한 아이콘 상태 업데이트 (가능한 경우)
+    // 실제 구현은 FDK 지원 여부에 따라 달라질 수 있음
+    console.log(`🎨 앱 아이콘 상태 업데이트: ${status}`);
+    
+    // 로컬 상태 저장
+    if (window.GlobalState) {
+      window.GlobalState.setAppIconStatus(status);
+    }
+  } catch (error) {
+    console.warn('⚠️ 아이콘 상태 업데이트 실패:', error);
+  }
+}
 
 // FDK 모달에서는 EventAPI 오류를 방지하기 위해 앱 초기화 건너뛰기
 if (typeof window.isFDKModal !== 'undefined' && window.isFDKModal) {
@@ -239,135 +395,12 @@ if (typeof window.isFDKModal !== 'undefined' && window.isFDKModal) {
 
     const client = GlobalState.getClient();
 
-    // ① 사이드바 컨텍스트 감지 및 스트리밍 시작
-    // manifest.json의 ticket_sidebar에서 로드된 경우 스트리밍 진행률 표시
-    client.instance.context().then(async (ctx) => {
-      console.log(`📍 현재 컨텍스트: ${ctx.location}`);
-      
-      if (ctx.location === 'ticket_sidebar') {
-        console.log('📊 사이드바 컨텍스트 감지 - 간단한 로딩 표시 시작');
-        
-        // 사이드바 컴포넌트 초기화 (에러 무시)
-        try {
-          if (typeof SidebarProgress !== 'undefined') {
-            SidebarProgress.init();
-          }
-        } catch (sidebarError) {
-          console.warn('⚠️ 사이드바 컴포넌트 초기화 실패 (무시):', sidebarError.message);
-        }
-        
-        // 현재 티켓 ID 가져오기 (안전한 방식)
-        let ticketId = null;
-        try {
-          const ticketData = await client.data.get('ticket');
-          ticketId = ticketData?.ticket?.id;
-          
-          if (ticketId) {
-            console.log(`🎯 티켓 ${ticketId}에 대한 간단한 로딩 표시 시작`);
-            
-            // 간단한 사이드바 로딩 표시
-            if (typeof API !== 'undefined' && API.showSimpleLoadingInSidebar) {
-              const loadingSuccess = await API.showSimpleLoadingInSidebar(client, ticketId);
-              
-              if (!loadingSuccess) {
-                console.warn('⚠️ 사이드바 로딩 표시 실패');
-              }
-            } else {
-              console.warn('⚠️ 간단한 로딩 API가 아직 로드되지 않음 - 기존 방식 사용');
-              await Data.preloadTicketDataOnPageLoad(client);
-            }
-          } else {
-            console.warn('⚠️ 티켓 ID를 가져올 수 없음 - 폴백 시도');
-            
-            // 폴백: 캐시된 데이터에서 티켓 ID 가져오기
-            if (window.GlobalState) {
-              const globalData = window.GlobalState.getGlobalTicketData();
-              ticketId = globalData.cached_ticket_id;
-              if (ticketId) {
-                console.log(`🔄 폴백: 캐시된 티켓 ID 사용 - ${ticketId}`);
-              }
-            }
-          }
-        } catch (error) {
-          console.error('❌ 사이드바에서 티켓 데이터 가져오기 실패:', error);
-          
-          // 폴백: 캐시된 데이터에서 티켓 ID 가져오기
-          if (window.GlobalState) {
-            const globalData = window.GlobalState.getGlobalTicketData();
-            ticketId = globalData.cached_ticket_id;
-            if (ticketId) {
-              console.log(`🔄 폴백: 캐시된 티켓 ID 사용 - ${ticketId}`);
-            } else {
-              // 최후의 폴백: 기존 방식으로 데이터 로드
-              await Data.preloadTicketDataOnPageLoad(client);
-            }
-          }
-        }
-        
-      } else {
-        console.log('📍 사이드바가 아닌 컨텍스트 - 기존 방식으로 백그라운드 로딩');
-        
-        // ② 백그라운드 데이터 준비 - 안전한 호출로 변경 (한 번만 실행)
-        // 사용자가 모달을 열기 전에 미리 데이터를 로드하여 응답 속도를 향상시킵니다
-        Data.preloadTicketDataOnPageLoad(client).then((result) => {
-          if (result) {
-            console.log('✅ 페이지 로딩 시 백엔드 호출 성공 완료');
-          } else {
-            console.warn('⚠️ 페이지 로딩 시 백엔드 호출 실패 또는 스킵됨');
-            
-            // 백엔드 호출 실패 시 사용자에게 알림 (토스트 메시지) - 지연 호출
-            setTimeout(() => {
-              if (window.UI && window.UI.showToast) {
-                window.UI.showToast(
-                  'AI 데이터 로드에 실패했습니다. 앱 아이콘을 클릭하여 다시 시도할 수 있습니다.',
-                  'warning',
-                  5000 // 5초간 표시
-                );
-              } else {
-                console.warn('[APP] UI 모듈이 아직 준비되지 않아 토스트 메시지를 표시할 수 없습니다.');
-              }
-            }, 1000); // 1초 지연 후 토스트 표시
-          }
-        }).catch((error) => {
-          console.error('❌ 페이지 로딩 시 백엔드 호출 중 예외 발생:', error);
-          
-          // 예외 발생 시 사용자에게 에러 알림 - 지연 호출
-          setTimeout(() => {
-            if (window.UI && window.UI.showToast) {
-              window.UI.showToast(
-                '서버 연결에 문제가 있습니다. 잠시 후 다시 시도해 주세요.',
-                'error',
-                7000 // 7초간 표시
-              );
-            } else {
-              console.warn('[APP] UI 모듈이 아직 준비되지 않아 에러 토스트를 표시할 수 없습니다.');
-            }
-          }, 1000); // 1초 지연 후 토스트 표시
-        });
-      }
-    }).catch((contextError) => {
-      console.warn('⚠️ 컨텍스트 가져오기 실패 - 기본 백그라운드 로딩 진행:', contextError.message);
-      
-      // EventAPI 오류가 발생해도 앱이 동작하도록 안전한 폴백 제공
-      if (contextError.message && contextError.message.includes('EventAPI')) {
-        console.log('🔄 EventAPI 오류 감지 - 캐시된 데이터 기반으로 동작');
-        
-        // 캐시된 데이터가 있으면 그것을 사용
-        if (window.GlobalState) {
-          const globalData = window.GlobalState.getGlobalTicketData();
-          if (globalData.summary || globalData.ticket_info) {
-            console.log('✅ 캐시된 데이터 발견 - 정상 동작 가능');
-            return; // 추가 처리 없이 종료
-          }
-        }
-      }
-      
-      // 컨텍스트를 알 수 없는 경우 기본 방식으로 진행
-      Data.preloadTicketDataOnPageLoad(client);
-    });
+    // 🚀 백그라운드 데이터 로딩 시작 (페이지 로드 즉시)
+    // 사용자가 아이콘을 클릭하기 전에 미리 데이터를 로드하여 대기 시간 최소화
+    startBackgroundDataLoading(client);
 
-    // ② 상단 네비게이션 앱 아이콘 클릭 시 처리 (캐시된 데이터로 즉시 모달 표시)
-    // Freshdesk 상단 네비게이션의 앱 아이콘을 클릭했을 때 실행되는 이벤트 핸들러
+    // 🎯 상단 네비게이션 앱 아이콘 클릭 시 처리
+    // 로딩 상태와 관계없이 항상 모달을 즉시 표시하고, 상태에 따라 적절한 UI 제공
     client.events.on('app.activated', async () => {
       try {
         // FDK context 가져오기 (안전한 호출)
@@ -380,7 +413,7 @@ if (typeof window.isFDKModal !== 'undefined' && window.isFDKModal) {
           ctx = { location: 'unknown' };
         }
 
-        // 상단 네비게이션에서의 동작: 스마트 캐싱 전략 적용
+        // 상단 네비게이션에서의 동작: 로딩 상태와 관계없이 즉시 모달 표시
         if (ctx.location === 'ticket_top_navigation') {
           // 현재 티켓 정보 가져오기 (안전한 FDK API 호출)
           let ticketData = null;
@@ -396,19 +429,13 @@ if (typeof window.isFDKModal !== 'undefined' && window.isFDKModal) {
             currentTicketId = 'unknown';
           }
 
-          // 전역 상태에서 캐시된 데이터 확인
-          const globalData = GlobalState.getGlobalTicketData();
-
-          // 캐시된 데이터가 현재 티켓과 일치하는지 확인
-          if (
-            globalData.cached_ticket_id === currentTicketId &&
-            globalData.summary &&
-            GlobalState.isGlobalDataValid()
-          ) {
-            await showFDKModal(currentTicketId, true);
-          } else {
-            await showFDKModal(currentTicketId, false);
-          }
+          // 로딩 상태 확인
+          const loadingStatus = GlobalState.getLoadingStatus();
+          console.log('📊 현재 로딩 상태:', loadingStatus);
+          
+          // 로딩 상태와 관계없이 즉시 모달 표시
+          // 로딩 중이면 진행률을 보여주고, 완료되면 데이터를 보여줌
+          await showFDKModal(currentTicketId, true);
 
           // 모달 표시 후 이벤트 설정 (한 번만)
           if (!Events.isInitialized) {
@@ -456,45 +483,13 @@ if (typeof window.isFDKModal !== 'undefined' && window.isFDKModal) {
               console.error('❌ UI 모듈 또는 updateUIWithCachedData 함수를 찾을 수 없음');
             }
           } else {
-            console.log('ℹ️ 모달에서 캐시된 데이터 없음 - 백엔드 데이터 로드 시도');
+            console.log('ℹ️ 모달에서 캐시된 데이터 없음 - 새로고침 안내');
             
-            // 데이터가 없으면 백엔드에서 다시 로드 시도하되, 실패해도 모달은 계속 표시
-            if (typeof Data !== 'undefined' && Data.preloadTicketDataOnPageLoad) {
-              console.log('🔄 모달에서 데이터 재로드 시도 - 실패해도 모달은 계속 표시');
-              Data.preloadTicketDataOnPageLoad(client).then((result) => {
-                if (result) {
-                  const newGlobalData = GlobalState.getGlobalTicketData();
-                  if (typeof UI !== 'undefined' && UI.updateUIWithCachedData) {
-                    UI.updateUIWithCachedData(newGlobalData);
-                  }
-                } else {
-                  // 백엔드 로드 실패 시 오류 메시지 표시하지만 모달은 계속 유지
-                  console.warn('⚠️ 백엔드 데이터 로드 실패 - 모달은 계속 표시');
-                  
-                  // UI 모듈에서 에러 상태 표시 (비차단적)
-                  if (typeof UI !== 'undefined' && UI.showBackendError) {
-                    UI.showBackendError('벡터 DB 연결 오류로 AI 분석 데이터를 불러올 수 없습니다. 기본 기능은 계속 사용할 수 있습니다.');
-                  } else {
-                    // UI 모듈이 없는 경우 기본 에러 처리 (비차단적)
-                    console.error('❌ UI.showBackendError 함수를 찾을 수 없음 - 모달은 계속 표시');
-                  }
-                }
-              }).catch((error) => {
-                console.error('❌ 모달 데이터 로드 중 예외 발생 - 모달은 계속 표시:', error);
-                
-                // 예외 발생 시에도 사용자에게 친화적 메시지 표시 (비차단적)
-                if (typeof UI !== 'undefined' && UI.showBackendError) {
-                  UI.showBackendError('벡터 DB 서비스에 일시적인 문제가 발생했습니다. 기본 기능은 계속 사용할 수 있습니다.');
-                } else {
-                  console.error('❌ UI.showBackendError 함수를 찾을 수 없음 - 모달은 계속 표시');
-                }
-              });
+            // 🚫 모달에서는 백엔드 호출 안함 - 사용자에게 새로고침 안내
+            if (typeof UI !== 'undefined' && UI.showBackendError) {
+              UI.showBackendError('AI 데이터를 불러오지 못했습니다. 페이지를 새로고침(F5) 해주세요.');
             } else {
-              // Data 모듈이 없는 경우 기본 에러 메시지 표시 (비차단적)
-              console.error('❌ Data 모듈을 찾을 수 없음 - 모달은 계속 표시');
-              if (typeof UI !== 'undefined' && UI.showBackendError) {
-                UI.showBackendError('AI 분석 기능을 초기화할 수 없습니다. 기본 기능은 계속 사용할 수 있습니다.');
-              }
+              console.error('❌ UI.showBackendError 함수를 찾을 수 없음');
             }
           }
 
@@ -523,34 +518,7 @@ if (typeof window.isFDKModal !== 'undefined' && window.isFDKModal) {
     console.error('앱 초기화 실패:', error);
   });
 
-// 전역 상태는 app.initialized() 콜백에서 한 번만 초기화됨
-// 중복 초기화 방지를 위해 여기서의 GlobalState.init() 호출 제거됨
 
-/**
- * 🎯 메인 앱 초기화 함수
- *
- * 모듈 의존성 검증이 완료된 후 실행되는 실제 앱 초기화 로직입니다.
- * 이 함수는 앱의 핵심 기능들을 순차적으로 초기화하여 사용자가 이용할 수 있는
- * 상태로 만드는 역할을 담당합니다.
- *
- * 주요 초기화 작업:
- * - FDK 클라이언트 설정 및 상태 관리
- * - 전역 에러 핸들러 등록
- * - UI 컴포넌트 초기화
- * - 이벤트 리스너 설정
- * - 백그라운드 데이터 로딩 시작
- *
- * @returns {Promise<void>} 초기화 완료를 나타내는 Promise
- * @throws {Error} 초기화 과정에서 오류 발생 시
- */
-/**
- * 📅 FDK 기반 앱 초기화 완료
- *
- * DOM 로드 이벤트 핸들러는 제거되었습니다.
- * 모든 초기화는 app.initialized() 이벤트를 통해 수행됩니다.
- * 
- * 이는 Freshdesk FDK의 표준 패턴입니다.
- */
 
 // 모든 모듈이 로드된 후 시스템 검증 (초기화 시 한 번만)
 if (!window.MODULE_DEPENDENCY_CHECKED) {
@@ -576,77 +544,6 @@ if (!window.MODULE_DEPENDENCY_CHECKED) {
   }, 500); // 모든 모듈 로드 후 실행
 }
 
-// 레거시 init() 함수는 제거됨 (메인 초기화는 app.initialized()로 통합)
-
-// loadTicketDetails 함수는 data.js로 분리됨
-
-// preloadTicketDataOnPageLoad 함수는 data.js로 분리됨
-
-// 캐시된 데이터로 UI를 즉시 업데이트하는 함수는 ui.js로 분리됨
-
-// 티켓 정보 UI 업데이트 함수는 ui.js로 분리됨
-
-// 탭 이벤트 설정 함수는 events.js로 분리됨
-
-// 유사 티켓 탭 처리 함수는 events.js로 분리됨
-
-// 유사 티켓 이벤트 설정 함수는 events.js로 분리됨
-
-// 유사 티켓 리스트 뷰 표시 함수는 ui.js로 분리됨
-
-// 유사 티켓 상세 뷰 표시 함수는 ui.js로 분리됨
-
-// loadSimilarTicketsFromBackend 함수는 api-client.js로 분리됨
-
-// loadSimilarTicketsFromFreshdesk 함수는 api-client.js로 분리됨
-
-// 유사 티켓 관련 코드는 events.js와 ui.js로 분리됨
-
-// 유사 티켓 결과 표시 함수는 ui.js로 분리됨
-
-// 검색 기능은 백엔드 지침서에 따라 /query 엔드포인트로 통합되었습니다.
-// 별도의 검색 함수는 더 이상 사용되지 않습니다.
-
-// 추천 해결책 탭 처리 함수는 events.js로 분리됨
-
-// 추천 솔루션 이벤트 설정 함수는 events.js로 분리됨
-
-// 추천 솔루션 리스트 뷰 표시 함수는 ui.js로 분리됨
-
-// 추천 솔루션 상세 뷰 표시 함수는 ui.js로 분리됨
-
-// loadSuggestedSolutions 함수는 data.js로 분리됨
-
-// 추천 솔루션 표시 함수는 ui.js로 분리됨
-
-// 코파일럿 탭 처리 함수는 events.js로 분리됨
-
-// 코파일럿 이벤트 설정 함수는 events.js로 분리됨
-
-// 코파일럿 검색 실행 함수는 events.js로 분리됨
-
-// 코파일럿 컨텍스트 가져오기 함수는 events.js로 분리됨
-
-// 코파일럿 결과 표시 함수는 events.js로 분리됨
-
-// loadInitialDataFromBackend 함수는 api-client.js로 분리됨
-
-// 티켓 요약 표시 함수는 ui.js로 분리됨
-
-// resetGlobalTicketCache 함수는 data.js로 분리됨
-
-// attemptMultipleBackgroundLoads 및 attemptSingleBackgroundLoad 함수는 data.js로 분리됨
-
-// API 클라이언트 함수들은 api-client.js로 분리됨
-
-// 에러 메시지 표시 함수는 ui.js로 분리됨
-
-// 로딩 메시지 표시 함수는 ui.js로 분리됨
-// 모달 표시 함수는 ui.js로 분리됨
-
-// getFreshdeskConfigFromIparams 함수는 api-client.js로 분리됨
-
-// smartDomainParsingFrontend 및 extractCompanyIdFromDomain 함수들은 api-client.js로 분리됨
 
 // App 객체 정의 (네임스페이스 컨테이너로만 사용)
 window.App = window.App || {

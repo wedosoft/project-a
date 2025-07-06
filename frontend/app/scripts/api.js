@@ -16,6 +16,31 @@
  * @namespace API
  */
 
+// 활성 EventSource 연결 관리
+const activeEventSources = new Map();
+
+// EventSource 정리 함수
+function cleanupEventSource(key) {
+  const eventSource = activeEventSources.get(key);
+  if (eventSource) {
+    console.log(`🔌 EventSource 연결 종료: ${key}`);
+    eventSource.close();
+    activeEventSources.delete(key);
+  }
+}
+
+// 모든 EventSource 정리
+function cleanupAllEventSources() {
+  console.log(`🔌 모든 EventSource 연결 종료 (${activeEventSources.size}개)`);
+  activeEventSources.forEach((eventSource) => {
+    eventSource.close();
+  });
+  activeEventSources.clear();
+}
+
+// 페이지 언로드 시 정리
+window.addEventListener('beforeunload', cleanupAllEventSources);
+
 /**
  * 🔗 iparams에서 Freshdesk 설정값을 가져오는 함수
  * 고객사별로 다른 도메인과 API 키를 동적으로 로드하여 멀티테넌트 환경 지원
@@ -649,6 +674,10 @@ const API = {
    * @param {string} ticketId - 티켓 ID
    */
   async loadInitData(client, ticketId) {
+    // 기존 연결이 있으면 정리
+    const connectionKey = `init_${ticketId}`;
+    cleanupEventSource(connectionKey);
+    
     try {
       console.log(`🎯 초기 데이터 로딩 시작: 티켓 ${ticketId}`);
       
@@ -1006,6 +1035,235 @@ const API = {
     }
   },
 
+  /**
+   * 🤖 Query 엔드포인트 전용 메서드 - 채팅 및 검색 기능
+   * @param {Object} client - FDK 클라이언트
+   * @param {Object} queryData - 쿼리 데이터
+   * @param {string} queryData.query - 사용자 질문/검색어
+   * @param {boolean} queryData.agent_mode - 스마트 모드 (true) / 자유 모드 (false)
+   * @param {boolean} queryData.stream_response - 스트리밍 응답 여부
+   * @param {string} queryData.ticket_id - 현재 티켓 ID
+   * @param {Object} options - 추가 옵션
+   * @returns {Promise<Object>} API 응답
+   */
+  async sendChatQuery(client, queryData, options = {}) {
+    try {
+      console.log('💬 채팅 쿼리 전송:', queryData);
+      
+      // 기본값 설정
+      const requestData = {
+        query: queryData.query,
+        agent_mode: queryData.agent_mode !== false, // 기본값 true (스마트 모드)
+        enhanced_search: !queryData.agent_mode, // agent_mode와 반대
+        stream_response: queryData.stream_response !== false, // 기본값 true
+        ticket_id: queryData.ticket_id,
+        top_k: queryData.top_k || 5,
+        answer_instructions: queryData.answer_instructions || null,
+        tenant_id: 'wedosoft',
+        platform: 'freshdesk'
+      };
+      
+      // 스트리밍 요청인 경우
+      if (requestData.stream_response) {
+        return await this.sendChatQueryWithStreaming(client, requestData, options);
+      }
+      
+      // 일반 요청
+      const result = await this.callBackendAPIWithCache(
+        client,
+        'query',
+        requestData,
+        'POST',
+        {
+          useCache: false, // 채팅은 항상 실시간 응답
+          showLoading: options.showLoading !== false,
+          loadingContext: '💬 AI 응답 생성 중...'
+        }
+      );
+      
+      return result;
+    } catch (error) {
+      console.error('❌ 채팅 쿼리 전송 실패:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * 🌊 스트리밍 채팅 쿼리 전용 메서드
+   * @param {Object} client - FDK 클라이언트
+   * @param {Object} requestData - 요청 데이터
+   * @param {Object} options - 추가 옵션
+   * @returns {Promise<Object>} 스트리밍 응답
+   */
+  async sendChatQueryWithStreaming(client, requestData, options = {}) {
+    try {
+      console.log('🌊 스트리밍 채팅 시작:', requestData);
+      
+      // iparams에서 Freshdesk 설정값 가져오기
+      const config = await getFreshdeskConfigFromIparams(client);
+      let finalConfig = config;
+      
+      if (!config || !config.domain || !config.apiKey) {
+        if (window.location.hostname === 'localhost' || window.location.hostname.includes('10001')) {
+          finalConfig = {
+            domain: 'wedosoft.freshdesk.com',
+            apiKey: 'Ug9H1cKCZZtZ4haamBy',
+          };
+        }
+      }
+      
+      // 스트리밍 엔드포인트 사용
+      const response = await fetch(`${this.baseURL}/query/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'text/event-stream',
+          ...(finalConfig?.domain && { 'X-Domain': finalConfig.domain }),
+          ...(finalConfig?.apiKey && { 'X-API-Key': finalConfig.apiKey }),
+          'X-Tenant-ID': 'wedosoft',
+          'X-Platform': 'freshdesk',
+        },
+        body: JSON.stringify(requestData)
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`스트리밍 요청 실패: ${response.status} - ${errorText}`);
+      }
+      
+      // 스트리밍 응답 처리
+      if (options.onStream) {
+        await this.processStreamingChatResponse(response, options.onStream);
+      }
+      
+      return {
+        ok: true,
+        streaming: true,
+        status: response.status
+      };
+      
+    } catch (error) {
+      console.error('❌ 스트리밍 채팅 실패:', error);
+      
+      // 스트리밍 실패 시 일반 모드로 폴백
+      if (options.fallbackToNormal !== false) {
+        console.log('📡 일반 모드로 폴백 시도...');
+        requestData.stream_response = false;
+        return await this.callBackendAPIWithCache(
+          client,
+          'query',
+          requestData,
+          'POST',
+          {
+            useCache: false,
+            showLoading: false
+          }
+        );
+      }
+      
+      throw error;
+    }
+  },
+
+  /**
+   * 📡 스트리밍 채팅 응답 처리
+   * @param {Response} response - fetch 응답 객체
+   * @param {Function} onStream - 스트림 이벤트 콜백
+   */
+  async processStreamingChatResponse(response, onStream) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        
+        if (done) {
+          console.log('📡 채팅 스트리밍 완료');
+          break;
+        }
+        
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const eventData = JSON.parse(line.slice(6));
+              
+              // 스트림 이벤트 전달
+              if (onStream) {
+                onStream(eventData);
+              }
+              
+              // 콘솔 로그
+              if (eventData.type === 'token') {
+                // 토큰 단위 스트리밍
+                console.log('📝 토큰:', eventData.content);
+              } else if (eventData.type === 'complete') {
+                console.log('✅ 응답 완료:', eventData);
+              } else if (eventData.type === 'error') {
+                console.error('❌ 스트림 에러:', eventData.error);
+              }
+              
+            } catch (parseError) {
+              console.warn('📡 이벤트 파싱 실패:', line, parseError);
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  },
+
+  /**
+   * 🔍 향상된 검색 쿼리 (자유 모드용)
+   * @param {Object} client - FDK 클라이언트
+   * @param {Object} searchQuery - 검색 쿼리
+   * @param {string} searchQuery.query - 자연어 검색어
+   * @param {Array} searchQuery.file_types - 파일 타입 필터
+   * @param {Array} searchQuery.categories - 카테고리 필터
+   * @param {string} searchQuery.solution_type - 솔루션 타입
+   * @returns {Promise<Object>} 검색 결과
+   */
+  async performEnhancedSearch(client, searchQuery) {
+    try {
+      console.log('🔍 향상된 검색 실행:', searchQuery);
+      
+      const requestData = {
+        query: searchQuery.query,
+        enhanced_search: true,
+        agent_mode: false,
+        file_types: searchQuery.file_types || [],
+        categories: searchQuery.categories || [],
+        solution_type: searchQuery.solution_type || null,
+        top_k: searchQuery.top_k || 10,
+        ticket_id: searchQuery.ticket_id || null
+      };
+      
+      const result = await this.callBackendAPIWithCache(
+        client,
+        'query',
+        requestData,
+        'POST',
+        {
+          useCache: true, // 검색은 캐싱 가능
+          cacheTTL: 60000, // 1분 캐시
+          showLoading: true,
+          loadingContext: '🔍 검색 중...'
+        }
+      );
+      
+      return result;
+    } catch (error) {
+      console.error('❌ 향상된 검색 실패:', error);
+      throw error;
+    }
+  },
+
   // ...existing code...
 };
 
@@ -1180,7 +1438,20 @@ API.processServerSentEvents = async function(response, ticketId) {
       for (const line of lines) {
         if (line.startsWith('data: ')) {
           try {
-            const eventData = JSON.parse(line.slice(6)); // 'data: ' 제거
+            const dataStr = line.slice(6).trim(); // 'data: ' 제거
+            
+            // 빈 문자열이나 특수 값 체크
+            if (!dataStr || dataStr === '[DONE]' || dataStr === 'done') {
+              continue;
+            }
+            
+            // JSON 파싱 전 유효성 검사
+            if (!dataStr.startsWith('{') && !dataStr.startsWith('[')) {
+              console.warn('📡 JSON이 아닌 데이터 수신:', dataStr);
+              continue;
+            }
+            
+            const eventData = JSON.parse(dataStr);
             this.handleStreamingEvent(eventData, ticketId);
             
             // 최종 데이터 저장

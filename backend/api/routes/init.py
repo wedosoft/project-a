@@ -197,15 +197,29 @@ async def init_vector_only_mode(
         
         logger.info(f"티켓 {ticket_id} 실시간 조회 시작 (도메인: {domain})")
         
-        # 실시간 Freshdesk API 호출
-        ticket_data = await fetch_ticket_details(
-            ticket_id=int(ticket_id),
-            domain=domain,
-            api_key=api_key
-        )
+        # 실시간 Freshdesk API 호출 (에러 처리 개선)
+        ticket_data = None
+        try:
+            ticket_data = await fetch_ticket_details(
+                ticket_id=int(ticket_id),
+                domain=domain,
+                api_key=api_key
+            )
+        except Exception as e:
+            logger.warning(f"Freshdesk API 호출 실패, 기본 티켓 데이터로 진행: {str(e)}")
+            # Freshdesk API 실패 시 기본 티켓 데이터 생성
+            ticket_data = {
+                "id": int(ticket_id),
+                "subject": f"티켓 #{ticket_id}",
+                "description_text": "Freshdesk 연결 오류로 인해 상세 정보를 가져올 수 없습니다.",
+                "status": "open",
+                "priority": "medium",
+                "conversations": [],
+                "attachments": []
+            }
         
         if not ticket_data:
-            raise HTTPException(status_code=404, detail=f"티켓 ID {ticket_id}를 Freshdesk에서 찾을 수 없습니다.")
+            raise HTTPException(status_code=404, detail=f"티켓 ID {ticket_id} 데이터를 처리할 수 없습니다.")
         
         logger.info(f"티켓 {ticket_id} 실시간 조회 완료 - 제목: {ticket_data.get('subject', 'N/A')}")
         
@@ -831,15 +845,32 @@ async def init_streaming_vector_only_mode(
             
             from core.platforms.freshdesk.fetcher import fetch_ticket_details
             
-            # 실시간 Freshdesk API 호출
-            ticket_data = await fetch_ticket_details(
-                ticket_id=int(ticket_id),
-                domain=domain,
-                api_key=api_key
-            )
+            # 실시간 Freshdesk API 호출 (에러 처리 개선)
+            ticket_data = None
+            try:
+                ticket_data = await fetch_ticket_details(
+                    ticket_id=int(ticket_id),
+                    domain=domain,
+                    api_key=api_key
+                )
+            except Exception as e:
+                logger.warning(f"Freshdesk API 호출 실패, 기본 티켓 데이터로 진행: {str(e)}")
+                # Freshdesk API 실패 시 기본 티켓 데이터 생성
+                ticket_data = {
+                    "id": int(ticket_id),
+                    "subject": f"티켓 #{ticket_id}",
+                    "description_text": "Freshdesk 연결 오류로 인해 상세 정보를 가져올 수 없습니다.",
+                    "status": "open",
+                    "priority": "medium",
+                    "conversations": [],
+                    "attachments": []
+                }
+                
+                # 사용자에게 상황 알림
+                yield f"data: {json.dumps(send_progress('ticket_fetch', 25, 'Freshdesk 연결 오류 - 기본 데이터로 진행'))}\n\n"
             
             if not ticket_data:
-                error_chunk = {"type": "error", "message": f"티켓 ID {ticket_id}를 Freshdesk에서 찾을 수 없습니다."}
+                error_chunk = {"type": "error", "message": f"티켓 ID {ticket_id} 데이터를 처리할 수 없습니다."}
                 yield f"data: {json.dumps(error_chunk)}\n\n"
                 return
             
@@ -1019,11 +1050,12 @@ async def init_streaming_vector_only_mode(
     
     return StreamingResponse(
         generate_stream(),
-        media_type="text/plain",
+        media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "Content-Type": "text/event-stream"
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Cache-Control"
         }
     )
 
@@ -1130,10 +1162,11 @@ async def init_streaming_hybrid_mode(
     
     return StreamingResponse(
         generate_stream(),
-        media_type="text/plain",
+        media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "Content-Type": "text/event-stream"
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Cache-Control"
         }
     )

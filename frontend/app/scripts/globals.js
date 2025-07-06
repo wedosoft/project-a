@@ -77,6 +77,15 @@ let globalTicketData = {
       kb_documents: { completed: false, progress: 0, message: null }
     },
     error: null // 스트리밍 중 발생한 에러
+  },
+  
+  // 앱 로딩 상태 관리 (Progressive Enhancement)
+  app_loading_status: {
+    status: 'idle', // idle, loading, ready, error, partial
+    startTime: null,
+    estimatedTime: 20000, // 기본 20초
+    completedTime: null,
+    iconStatus: 'default' // default, loading, ready, error
   }
 };
 
@@ -471,6 +480,54 @@ function getGlobalError() {
   };
 }
 
+// === 앱 로딩 상태 관리 함수 (Progressive Enhancement) ===
+
+/**
+ * 로딩 상태 설정
+ * @param {Object} status - 로딩 상태 정보
+ */
+function setLoadingStatus(status) {
+  if (status.status) {
+    globalTicketData.app_loading_status.status = status.status;
+  }
+  if (status.startTime) {
+    globalTicketData.app_loading_status.startTime = status.startTime;
+  }
+  if (status.estimatedTime) {
+    globalTicketData.app_loading_status.estimatedTime = status.estimatedTime;
+  }
+  if (status.completedTime) {
+    globalTicketData.app_loading_status.completedTime = status.completedTime;
+  }
+  
+  console.log('📊 로딩 상태 업데이트:', globalTicketData.app_loading_status);
+}
+
+/**
+ * 로딩 상태 조회
+ * @returns {Object} 현재 로딩 상태
+ */
+function getLoadingStatus() {
+  return {
+    ...globalTicketData.app_loading_status,
+    elapsedTime: globalTicketData.app_loading_status.startTime 
+      ? Date.now() - globalTicketData.app_loading_status.startTime 
+      : 0,
+    remainingTime: globalTicketData.app_loading_status.estimatedTime && globalTicketData.app_loading_status.startTime
+      ? Math.max(0, globalTicketData.app_loading_status.estimatedTime - (Date.now() - globalTicketData.app_loading_status.startTime))
+      : null
+  };
+}
+
+/**
+ * 앱 아이콘 상태 설정
+ * @param {string} status - 아이콘 상태 (default, loading, ready, error)
+ */
+function setAppIconStatus(status) {
+  globalTicketData.app_loading_status.iconStatus = status;
+  console.log(`🎨 앱 아이콘 상태 변경: ${status}`);
+}
+
 // === 디버깅 및 개발 지원 함수 ===
 
 /**
@@ -607,6 +664,11 @@ window.GlobalState = {
   getStreamingProgress,
   isStageCompleted,
   setStreamingError,
+  
+  // 앱 로딩 상태 관리 (Progressive Enhancement)
+  setLoadingStatus,
+  getLoadingStatus,
+  setAppIconStatus,
 
   // 디버깅 및 검증
   debugGlobalState,

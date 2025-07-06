@@ -171,153 +171,253 @@ window.Data = {
     }
   },
 
-  // 티켓 페이지 로드 시 백그라운드에서 데이터 미리 준비하는 함수
+  // 전역 호출 플래그 - 앱 전체에서 딱 한 번만 호출되도록 보장
+  _hasCalledBackendInit: false,
+  
+  // 티켓별 호출 상태 관리
+  _ticketCallStatus: new Map(),
+  
+  // 현재 진행 중인 호출
+  _currentInitCall: null,
+
+  // 백엔드 호출 플래그 리셋 (모달 새로고침용)
+  resetBackendCallFlag() {
+    this._hasCalledBackendInit = false;
+    console.log('🔄 백엔드 호출 플래그 리셋 - 모달 새로고침을 위한 재호출 허용');
+    
+    // 에러 상태도 초기화
+    if (window.GlobalState) {
+      window.GlobalState.setGlobalError(false, null);
+      console.log('🔄 글로벌 에러 상태도 초기화됨');
+    }
+  },
+
+  // 모달에서 새로고침 버튼 클릭 시 데이터 재로드
+  async refreshModalData(client) {
+    console.log('🔄 모달 데이터 새로고침 시작');
+    
+    // 플래그 리셋하여 재호출 허용
+    this.resetBackendCallFlag();
+    
+    // 캐시 클리어
+    if (window.GlobalState) {
+      window.GlobalState.resetGlobalTicketCache();
+    }
+    
+    // 로딩 UI 표시
+    if (window.UI && window.UI.showLoadingState) {
+      window.UI.showLoadingState('데이터 새로고침 중...');
+    }
+    
+    try {
+      // 백엔드 재호출
+      const result = await this.preloadTicketDataOnPageLoad(client);
+      
+      if (result) {
+        console.log('✅ 모달 데이터 새로고침 성공');
+        
+        // UI 업데이트
+        if (window.UI && window.UI.updateUIWithCachedData) {
+          const globalData = window.GlobalState.getGlobalTicketData();
+          window.UI.updateUIWithCachedData(globalData);
+        }
+        
+        // 성공 토스트
+        if (window.UI && window.UI.showToast) {
+          window.UI.showToast('데이터가 성공적으로 새로고침되었습니다.', 'success');
+        }
+      } else {
+        throw new Error('데이터 새로고침 실패');
+      }
+    } catch (error) {
+      console.error('❌ 모달 데이터 새로고침 실패:', error);
+      
+      // 실패 토스트
+      if (window.UI && window.UI.showToast) {
+        window.UI.showToast('데이터 새로고침에 실패했습니다. 다시 시도해 주세요.', 'error');
+      }
+    } finally {
+      // 로딩 UI 숨기기
+      if (window.UI && window.UI.hideLoadingState) {
+        window.UI.hideLoadingState();
+      }
+    }
+  },
+
+  // 티켓 페이지 로드 시 백그라운드에서 데이터 미리 준비하는 함수 (딱 1번만 호출)
   async preloadTicketDataOnPageLoad(client) {
+    // 🚨 절대적 중복 호출 방지 - 이미 호출되었으면 즉시 종료
+    if (this._hasCalledBackendInit) {
+      console.log('🚫 백엔드 호출 이미 완료됨 - 중복 호출 차단');
+      return false;
+    }
+    
+    // 🔒 이미 진행 중인 호출이 있으면 그것을 반환
+    if (this._currentInitCall) {
+      console.log('🔄 백엔드 호출이 이미 진행 중 - 기존 호출 대기');
+      return this._currentInitCall;
+    }
+    
+    // 🔒 호출 플래그 즉시 설정 (동시 호출 방지)
+    this._hasCalledBackendInit = true;
+    console.log('🔐 백엔드 초기화 호출 플래그 설정 - 이후 모든 호출 차단');
+
     try {
       // FDK 모달 컨텍스트 감지 - 모달에서는 백그라운드 데이터 로딩 완전 금지
       if (typeof window.isFDKModal !== 'undefined' && window.isFDKModal) {
-        return false; // 모달에서는 어떤 백엔드 호출도 하지 않음
+        console.log('🎭 FDK 모달에서는 백엔드 호출 안함');
+        return false;
       }
       
-      // 모듈 로딩 상태 확인 - 초기 시점
+      // API 모듈 확인 - 없으면 즉시 실패
       if (!window.API) {
-        // API 모듈 로딩을 위한 추가 대기 시간
-        return new Promise((resolve) => {
-          setTimeout(async () => {
-            if (window.API) {
-              const result = await this.preloadTicketDataOnPageLoad(client);
-              resolve(result);
-            } else {
-              console.error('❌ API 모듈이 여전히 로드되지 않음');
-              resolve(false);
-            }
-          }, 1000);
-        });
+        console.error('❌ API 모듈이 로드되지 않음 - 사용자가 새로고침 필요');
+        return false;
       }
 
-      // 더 안전한 FDK API 접근을 위한 지연 시간 증가 및 단계적 검증
-      return await new Promise((resolve) => {
-        setTimeout(async () => {
-          try {
-            // 1단계: FDK 클라이언트가 준비되었는지 확인
-            if (!client || typeof client.instance === 'undefined') {
-              console.warn('⚠️ FDK 클라이언트가 아직 준비되지 않음');
-              resolve(false);
-              return;
-            }
-
-            // 2단계: 컨텍스트 확인 (안전한 방법)
-            let ctx;
-            try {
-              ctx = await client.instance.context();
-              console.log('🔍 페이지 컨텍스트 확인 성공:', ctx);
-            } catch (contextError) {
-              console.warn('⚠️ 컨텍스트 확인 실패, 기본적으로 티켓 페이지로 가정하고 진행:', contextError);
-              // 컨텍스트 확인 실패 시에도 티켓 페이지로 가정하고 계속 진행
-              ctx = { location: 'ticket_details' }; // 기본값으로 설정
-            }
-
-          // 3단계: 티켓 페이지인지 확인 (더 관대한 조건)
-          const isTicketPage =
-            !ctx || // 컨텍스트가 없으면 티켓 페이지로 가정
-            !ctx.location || // location이 없으면 티켓 페이지로 가정
-            ctx.location.includes('ticket') || 
-            ctx.location === 'ticket_top_navigation' ||
-            ctx.location === 'ticket_details' ||
-            ctx.location === 'cti_global_sidebar'; // 다양한 티켓 관련 위치 포함
-
-          if (isTicketPage) {
-            console.log('📋 티켓 페이지로 판단됨 → 데이터 로드 시작');
-
-            // 4단계: 티켓 데이터 안전하게 가져오기
-            let ticketData;
-            try {
-              ticketData = await client.data.get('ticket');
-            } catch (dataError) {
-              console.warn('⚠️ 티켓 데이터 접근 실패 - 재시도 또는 기본값 사용:', dataError);
-              // 티켓 데이터 접근 실패 시에도 진행을 시도 (백엔드에서 티켓 정보를 다시 가져올 수 있음)
-              ticketData = { ticket: { id: 'unknown' } };
-            }
-
-            if (ticketData && ticketData.ticket && ticketData.ticket.id !== 'unknown') {
-              const currentTicketId = ticketData.ticket.id;
-
-              // 5단계: 캐시 확인 및 백엔드 호출
-              const globalData = GlobalState.getGlobalTicketData();
-              if (
-                globalData.cached_ticket_id === currentTicketId &&
-                globalData.summary &&
-                !this.isDataStale()
-              ) {
-                console.log('✅ 이미 캐시된 데이터 존재 → 백그라운드 로드 스킵');
-                resolve(true);
-                return;
-              }
-
-              // 중복 호출 방지
-              if (GlobalState.getGlobalLoading()) {
-                console.log('⚠️ 이미 로딩 중이므로 백그라운드 로드 스킵');
-                resolve(true);
-                return;
-              }
-
-              console.log('🚀 백그라운드에서 새로운 티켓 데이터 로드 중...', currentTicketId);
-
-              // 6단계: 백엔드 호출 (FDK와 독립적)
-              try {
-                GlobalState.resetGlobalTicketCache();
-                const result = await this.loadInitialDataFromBackend(client, ticketData.ticket);
-                
-                // 백엔드 호출 결과 확인 후 적절한 메시지 표시
-                const errorState = GlobalState.getGlobalError();
-                if (result && !errorState.hasError) {
-                  console.log(
-                    '✅ 백그라운드 데이터 로드 완료 → 앱 아이콘 클릭 시 즉시 모달 표시 가능'
-                  );
-                  resolve(true);
-                } else {
-                  console.warn('⚠️ 백엔드 데이터 로드 실패 → 모달에서 재시도 가능');
-                  resolve(false);
-                }
-              } catch (backendError) {
-                console.warn('⚠️ 백엔드 호출 실패:', backendError);
-                resolve(false);
-              }
-            } else {
-              console.log('⚠️ 티켓 정보 없음 → 백그라운드 로드 스킵');
-              // 티켓 정보가 없더라도 최소한의 백엔드 호출을 시도해볼 수 있음
-              console.log('🔄 백엔드 연결 상태 확인 및 호출 시도');
-              try {
-                // 먼저 백엔드 연결 상태 확인
-                if (window.API && window.API.checkBackendConnection) {
-                  const isConnected = await window.API.checkBackendConnection();
-                  if (!isConnected) {
-                    console.warn('⚠️ 백엔드 서버 연결 불가 - 오프라인 모드로 전환');
-                    resolve(false);
-                    return;
-                  }
-                }
-                
-                // 백엔드 연결이 가능한 경우 API 호출
-                const result = await this.loadInitialDataFromBackend(client, { id: 'current' });
-                resolve(result ? true : false);
-              } catch (backendError) {
-                console.warn('⚠️ 백엔드 호출 실패:', backendError);
-                resolve(false);
-              }
-            }
-          } else {
-            // 티켓 페이지가 아닌 경우 백그라운드 로드 스킵
-            resolve(false);
-          }
-          resolve(true);
-        } catch (error) {
-          resolve(false);
+      // 🎯 단순화된 백엔드 호출 - 복잡한 로직 제거
+      console.log('🚀 백엔드 초기화 시작 (딱 1회 호출)');
+      
+      // 현재 티켓 ID 가져오기 (실패해도 진행)
+      let ticketId = null;
+      try {
+        const ticketData = await client.data.get('ticket');
+        ticketId = ticketData?.ticket?.id || '12345'; // 기본값
+      } catch (error) {
+        console.warn('⚠️ 티켓 ID를 가져올 수 없음, 기본값 사용');
+        ticketId = '12345';
+      }
+      
+      // 백엔드 호출 시도 (딱 1번)
+      try {
+        console.log(`🔥 백엔드 /init/${ticketId} 호출 시도 (최초 1회)`);
+        
+        // 현재 호출을 저장
+        this._currentInitCall = this.loadInitialDataFromBackend(client, { id: ticketId });
+        const result = await this._currentInitCall;
+        
+        // 호출 완료 후 초기화
+        this._currentInitCall = null;
+        
+        if (result) {
+          console.log('✅ 백엔드 초기화 성공 완료');
+          return true;
+        } else {
+          console.error('❌ 백엔드 초기화 실패 - 사용자가 페이지 새로고침 필요');
+          this.showUserRefreshMessage();
+          return false;
         }
-      }, 500); // 500ms로 단축 - FDK 기본 초기화 대기
-      });
+      } catch (error) {
+        console.error('❌ 백엔드 호출 중 오류 발생:', error);
+        this._currentInitCall = null;
+        this.showUserRefreshMessage();
+        return false;
+      }
     } catch (error) {
+      console.error('❌ preloadTicketDataOnPageLoad 전체 오류:', error);
+      this.showUserRefreshMessage();
       return false;
+    }
+  },
+
+  // 사용자에게 새로고침 메시지 표시
+  showUserRefreshMessage() {
+    console.log('🔄 사용자에게 새로고침 안내 메시지 표시');
+    
+    // UI 토스트가 있으면 사용
+    if (window.UI && window.UI.showToast) {
+      window.UI.showToast(
+        'AI 데이터 로드에 실패했습니다. 모달 우상단의 새로고침 버튼(🔄)을 클릭해주세요.',
+        'error',
+        10000 // 10초간 표시
+      );
+    } 
+    
+    // 🚨 항상 DOM 기반 경고 표시 (UI 토스트 보완)
+    this.showServerDownWarning();
+  },
+
+  // 🚨 서버 다운 경고 표시 (DOM 기반 - 항상 표시됨)
+  showServerDownWarning() {
+    try {
+      // 기존 경고 제거
+      const existingWarning = document.getElementById('server-down-warning');
+      if (existingWarning) {
+        existingWarning.remove();
+      }
+
+      // 새 경고 메시지 생성
+      const warningElement = document.createElement('div');
+      warningElement.id = 'server-down-warning';
+      warningElement.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        z-index: 99999;
+        background: #fee2e2;
+        border: 2px solid #f87171;
+        color: #991b1b;
+        padding: 16px 20px;
+        border-radius: 8px;
+        max-width: 350px;
+        font-size: 14px;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+        animation: slideInFromRight 0.3s ease-out;
+      `;
+
+      warningElement.innerHTML = `
+        <div style="display: flex; align-items: flex-start; gap: 12px;">
+          <div style="font-size: 20px; flex-shrink: 0;">⚠️</div>
+          <div style="flex: 1;">
+            <div style="font-weight: 600; margin-bottom: 6px;">서버 연결 오류</div>
+            <div style="margin-bottom: 12px; line-height: 1.4;">
+              AI 지원 서비스에 연결할 수 없습니다.<br>
+              모달을 열어 새로고침 버튼을 클릭해주세요.
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button onclick="this.parentElement.parentElement.parentElement.parentElement.remove();" 
+                      style="background: #dc2626; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                확인
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      // CSS 애니메이션 추가
+      if (!document.querySelector('#server-warning-styles')) {
+        const style = document.createElement('style');
+        style.id = 'server-warning-styles';
+        style.textContent = `
+          @keyframes slideInFromRight {
+            from {
+              transform: translateX(100%);
+              opacity: 0;
+            }
+            to {
+              transform: translateX(0);
+              opacity: 1;
+            }
+          }
+        `;
+        document.head.appendChild(style);
+      }
+
+      document.body.appendChild(warningElement);
+      console.log('🚨 서버 다운 경고 표시됨');
+
+      // 15초 후 자동 제거
+      setTimeout(() => {
+        if (warningElement.parentNode) {
+          warningElement.parentNode.removeChild(warningElement);
+        }
+      }, 15000);
+
+    } catch (error) {
+      console.error('❌ 서버 다운 경고 표시 실패:', error);
+      // 최후의 수단으로 콘솔에 명시적 경고
+      console.error('🆘 서버 연결 실패 - 사용자에게 알림 표시 불가');
     }
   },
 
