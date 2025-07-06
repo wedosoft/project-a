@@ -7,8 +7,10 @@
       "path": "/${context.path}",
       "headers": {
         "Content-Type": "application/json",
-        "X-Freshdesk-Domain": "wedosoft",
-        "X-Freshdesk-API-Key": "Ug9H1cKCZZtZ4haamBy",
+        "X-Domain": "wedosoft.freshdesk.com",
+        "X-API-Key": "Ug9H1cKCZZtZ4haamBy",
+        "X-Tenant-ID": "wedosoft",
+        "X-Platform": "freshdesk",
         "ngrok-skip-browser-warning": "true"
       }
     }
@@ -21,8 +23,10 @@
       "path": "/${context.path}",
       "headers": {
         "Content-Type": "application/json",
-        "X-Freshdesk-Domain": "#{freshdesk_domain}",
-        "X-Freshdesk-API-Key": "#{freshdesk_api_key}",
+        "X-Domain": "#{freshdesk_domain}",
+        "X-API-Key": "#{freshdesk_api_key}",
+        "X-Tenant-ID": "wedosoft",
+        "X-Platform": "freshdesk",
         "ngrok-skip-browser-warning": "true"
       }
     }

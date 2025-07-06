@@ -290,7 +290,7 @@ window.Data = {
               try {
                 // 먼저 백엔드 연결 상태 확인
                 if (window.API && window.API.checkBackendConnection) {
-                  const isConnected = await window.API.checkBackendConnection();
+                  const isConnected = await window.API.checkBackendConnection(client);
                   if (!isConnected) {
                     console.warn('⚠️ 백엔드 서버 연결 불가 - 오프라인 모드로 전환');
                     resolve(false);

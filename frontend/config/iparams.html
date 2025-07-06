@@ -395,9 +395,10 @@
                 const response = await fetch(`${backendUrl}/health`, {
                     method: 'GET',
                     headers: {
-                        'X-Freshdesk-Domain': domain,
-                        'X-Freshdesk-API-Key': apiKey,
-                        'X-Company-ID': companyId
+                        'X-Domain': domain,
+                        'X-API-Key': apiKey,
+                        'X-Tenant-ID': companyId,
+                        'X-Platform': 'freshdesk'
                     }
                 });
                 
@@ -444,9 +445,10 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-Freshdesk-Domain': domain,
-                        'X-Freshdesk-API-Key': apiKey,
-                        'X-Company-ID': companyId
+                        'X-Domain': domain,
+                        'X-API-Key': apiKey,
+                        'X-Tenant-ID': companyId,
+                        'X-Platform': 'freshdesk'
                     },
                     body: JSON.stringify({
                         start_date: startDate || null,

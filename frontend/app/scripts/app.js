@@ -178,6 +178,19 @@ if (typeof window.isFDKModal !== 'undefined' && window.isFDKModal) {
         GlobalState.setInitialized(true);
       }
       
+      // API 모듈 초기화 (백엔드 연결 설정)
+      if (typeof API !== 'undefined' && API.initialize) {
+        API.initialize(c).then((isConnected) => {
+          if (isConnected) {
+            console.log('✅ API 모듈 초기화 완료 - 백엔드 연결 정상');
+          } else {
+            console.warn('⚠️ API 모듈 초기화 완료 - 백엔드 연결 실패 (폴백 모드)');
+          }
+        }).catch((error) => {
+          console.error('❌ API 모듈 초기화 실패:', error);
+        });
+      }
+      
       window.APP_INITIALIZED = true;
       console.log('✅ 앱 초기화 완료');
 

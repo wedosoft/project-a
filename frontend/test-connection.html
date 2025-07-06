@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Frontend API Connection Test</title>
+    <meta charset="utf-8">
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ddd; }
+        .success { color: green; }
+        .error { color: red; }
+        .warning { color: orange; }
+        pre { background: #f5f5f5; padding: 10px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>Frontend API Connection Test</h1>
+    
+    <div class="test-section">
+        <h3>Backend URL Configuration</h3>
+        <div id="backend-url-test"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>iparams Mock Test</h3>
+        <div id="iparams-test"></div>
+    </div>
+    
+    <div class="test-section">
+        <h3>Backend Connection Test</h3>
+        <div id="connection-test"></div>
+        <button onclick="testBackendConnection()">Test Connection</button>
+    </div>
+    
+    <div class="test-section">
+        <h3>API Headers Test</h3>
+        <div id="headers-test"></div>
+        <button onclick="testAPIHeaders()">Test Headers</button>
+    </div>
+
+    <!-- Include the updated API scripts -->
+    <script src="scripts/api.js"></script>
+    
+    <script>
+        // Mock client object for testing
+        const mockClient = {
+            iparams: {
+                get: async () => {
+                    console.log('Mock iparams.get() called');
+                    return {
+                        freshdesk_domain: 'test.freshdesk.com',
+                        freshdesk_api_key: 'test-api-key-12345',
+                        backend_url: 'http://localhost:8000'
+                    };
+                }
+            }
+        };
+
+        // Test backend URL configuration
+        function testBackendURL() {
+            const urlDiv = document.getElementById('backend-url-test');
+            
+            try {
+                // Test default URL
+                const defaultURL = API.baseURL;
+                console.log('Default base URL:', defaultURL);
+                
+                urlDiv.innerHTML = `
+                    <p class="success">✅ Default base URL: ${defaultURL}</p>
+                    <p>Testing dynamic URL initialization...</p>
+                `;
+                
+                // Test dynamic URL initialization
+                API.initializeBackendURL(mockClient).then(url => {
+                    urlDiv.innerHTML += `<p class="success">✅ Initialized URL: ${url}</p>`;
+                }).catch(error => {
+                    urlDiv.innerHTML += `<p class="error">❌ URL initialization failed: ${error.message}</p>`;
+                });
+                
+            } catch (error) {
+                urlDiv.innerHTML = `<p class="error">❌ URL test failed: ${error.message}</p>`;
+            }
+        }
+
+        // Test iparams configuration
+        function testIparams() {
+            const iparamsDiv = document.getElementById('iparams-test');
+            
+            getFreshdeskConfigFromIparams(mockClient).then(config => {
+                iparamsDiv.innerHTML = `
+                    <p class="success">✅ iparams config loaded:</p>
+                    <pre>${JSON.stringify(config, null, 2)}</pre>
+                `;
+            }).catch(error => {
+                iparamsDiv.innerHTML = `<p class="error">❌ iparams test failed: ${error.message}</p>`;
+            });
+        }
+
+        // Test backend connection
+        async function testBackendConnection() {
+            const connectionDiv = document.getElementById('connection-test');
+            connectionDiv.innerHTML = '<p>🔄 Testing backend connection...</p>';
+            
+            try {
+                const isConnected = await API.checkBackendConnection(mockClient);
+                
+                if (isConnected) {
+                    connectionDiv.innerHTML = '<p class="success">✅ Backend connection successful!</p>';
+                } else {
+                    connectionDiv.innerHTML = '<p class="warning">⚠️ Backend connection failed (server may not be running)</p>';
+                }
+            } catch (error) {
+                connectionDiv.innerHTML = `<p class="error">❌ Connection test error: ${error.message}</p>`;
+            }
+        }
+
+        // Test API headers
+        async function testAPIHeaders() {
+            const headersDiv = document.getElementById('headers-test');
+            headersDiv.innerHTML = '<p>🔄 Testing API headers generation...</p>';
+            
+            try {
+                // Get Freshdesk config
+                const config = await getFreshdeskConfigFromIparams(mockClient);
+                
+                // Generate headers as the API would
+                const headers = {
+                    'Content-Type': 'application/json',
+                    'X-Tenant-ID': 'wedosoft',
+                    'X-Platform': 'freshdesk',
+                };
+                
+                if (config?.domain) headers['X-Domain'] = config.domain;
+                if (config?.apiKey) headers['X-API-Key'] = config.apiKey;
+                
+                headersDiv.innerHTML = `
+                    <p class="success">✅ Headers generated:</p>
+                    <pre>${JSON.stringify(headers, null, 2)}</pre>
+                `;
+            } catch (error) {
+                headersDiv.innerHTML = `<p class="error">❌ Headers test failed: ${error.message}</p>`;
+            }
+        }
+
+        // Run tests on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            testBackendURL();
+            testIparams();
+        });
+    </script>
+</body>
+</html>

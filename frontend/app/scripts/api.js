@@ -65,11 +65,12 @@ const IngestJobAPI = {
    * @param {boolean} options.process_attachments 첨부파일 처리 여부
    * @param {boolean} options.force_rebuild 강제 재구축 여부
    * @param {boolean} options.include_kb 지식베이스 포함 여부
-   * @param {string} domain Freshdesk 도메인
-   * @param {string} apiKey Freshdesk API 키
+   * @param {Object} client FDK 클라이언트 객체
+   * @param {string} domain Freshdesk 도메인 (선택사항, iparams에서 자동 가져옴)
+   * @param {string} apiKey Freshdesk API 키 (선택사항, iparams에서 자동 가져옴)
    * @returns {Promise<Object>} 작업 정보
    */
-  async createJob(options = {}, domain = null, apiKey = null) {
+  async createJob(options = {}, client = null, domain = null, apiKey = null) {
     try {
       console.log('🚀 새 데이터 수집 작업 생성 중...', options);
 
@@ -79,7 +80,18 @@ const IngestJobAPI = {
         'X-Platform': 'freshdesk', // 고정값
       };
 
-      // 동적 Freshdesk 설정 추가 (백엔드 dependencies.py 헤더명 사용)
+      // iparams에서 Freshdesk 설정 가져오기 (우선순위)
+      if (client) {
+        try {
+          const config = await getFreshdeskConfigFromIparams(client);
+          if (config?.domain) headers['X-Domain'] = config.domain;
+          if (config?.apiKey) headers['X-API-Key'] = config.apiKey;
+        } catch (error) {
+          console.warn('⚠️ iparams 설정 로드 실패, 매개변수 사용:', error.message);
+        }
+      }
+
+      // 매개변수로 전달된 값으로 오버라이드
       if (domain) headers['X-Domain'] = domain;
       if (apiKey) headers['X-API-Key'] = apiKey;
 
@@ -247,7 +259,7 @@ const IngestJobAPI = {
    * @param {string} apiKey Freshdesk API 키
    * @returns {Promise<Object>} 수집 결과
    */
-  async triggerImmediate(options = {}, domain = null, apiKey = null) {
+  async triggerImmediate(options = {}, client = null, domain = null, apiKey = null) {
     try {
       console.log('⚡ 즉시 데이터 수집 실행...', options);
 
@@ -257,7 +269,18 @@ const IngestJobAPI = {
         'X-Platform': 'freshdesk',
       };
 
-      // 동적 Freshdesk 설정 추가 (백엔드 dependencies.py 헤더명 사용)
+      // iparams에서 Freshdesk 설정 가져오기 (우선순위)
+      if (client) {
+        try {
+          const config = await getFreshdeskConfigFromIparams(client);
+          if (config?.domain) headers['X-Domain'] = config.domain;
+          if (config?.apiKey) headers['X-API-Key'] = config.apiKey;
+        } catch (error) {
+          console.warn('⚠️ iparams 설정 로드 실패, 매개변수 사용:', error.message);
+        }
+      }
+
+      // 매개변수로 전달된 값으로 오버라이드
       if (domain) headers['X-Domain'] = domain;
       if (apiKey) headers['X-API-Key'] = apiKey;
 
@@ -292,22 +315,91 @@ const IngestJobAPI = {
  * 최적화된 API 모듈
  */
 const API = {
-  // 백엔드 서버 기본 URL
-  baseURL: 'http://localhost:8000',
+  // 백엔드 서버 URL - 환경별 자동 감지
+  get baseURL() {
+    // iparams에서 backend_url 가져오기 (동기 방식)
+    try {
+      // Freshdesk 앱 환경에서는 iparams 사용
+      if (typeof client !== 'undefined' && client.iparams) {
+        // 비동기 처리가 필요하므로 일단 기본값 사용하고 나중에 업데이트
+        return this._cachedBaseURL || 'http://localhost:8000';
+      }
+    } catch (error) {
+      console.warn('⚠️ iparams 접근 실패, 기본 URL 사용:', error.message);
+    }
+
+    // 환경별 기본 URL 설정
+    const hostname = window.location.hostname;
+    
+    if (hostname === 'localhost' || hostname.includes('127.0.0.1')) {
+      return 'http://localhost:8000';
+    } else if (hostname.includes('10001')) {
+      // FDK 개발 환경 (fdk run)
+      return 'http://localhost:8000';
+    } else {
+      // 운영 환경 - Freshdesk 앱에서 실행 중
+      return this._cachedBaseURL || 'http://localhost:8000';
+    }
+  },
+
+  // 캐시된 베이스 URL
+  _cachedBaseURL: null,
+
+  /**
+   * 백엔드 URL을 동적으로 설정하는 함수
+   */
+  async initializeBackendURL(client) {
+    try {
+      if (client && client.iparams) {
+        const iparams = await client.iparams.get();
+        if (iparams?.backend_url) {
+          this._cachedBaseURL = iparams.backend_url;
+          console.log('✅ iparams에서 백엔드 URL 설정:', this._cachedBaseURL);
+          return this._cachedBaseURL;
+        }
+      }
+    } catch (error) {
+      console.warn('⚠️ iparams에서 백엔드 URL 가져오기 실패:', error.message);
+    }
+
+    // 기본값 설정
+    this._cachedBaseURL = 'http://localhost:8000';
+    console.log('🛠️ 기본 백엔드 URL 사용:', this._cachedBaseURL);
+    return this._cachedBaseURL;
+  },
 
   /**
    * 백엔드 연결 상태 확인
    */
-  async checkBackendConnection() {
+  async checkBackendConnection(client = null) {
     try {
       console.log('🔗 백엔드 연결 상태 확인 중...');
+      
+      // 백엔드 URL 초기화
+      if (client) {
+        await this.initializeBackendURL(client);
+      }
+
+      // 기본 헤더 설정
+      const headers = {
+        'X-Tenant-ID': 'wedosoft',
+        'X-Platform': 'freshdesk',
+      };
+
+      // Freshdesk 설정값 추가 (가능한 경우)
+      if (client) {
+        try {
+          const config = await getFreshdeskConfigFromIparams(client);
+          if (config?.domain) headers['X-Domain'] = config.domain;
+          if (config?.apiKey) headers['X-API-Key'] = config.apiKey;
+        } catch (error) {
+          console.warn('⚠️ Freshdesk 설정 로드 실패, 기본 헤더만 사용:', error.message);
+        }
+      }
+
       const response = await fetch(`${this.baseURL}/health`, {
         method: 'GET',
-        headers: {
-          'X-Tenant-ID': 'wedosoft',
-          'X-Platform': 'freshdesk',
-        },
-        timeout: 5000, // 5초 타임아웃
+        headers: headers,
       });
 
       if (response.ok) {
@@ -319,6 +411,32 @@ const API = {
       }
     } catch (error) {
       console.error('❌ 백엔드 연결 실패:', error.message);
+      return false;
+    }
+  },
+
+  /**
+   * API 모듈 초기화 (앱 시작 시 호출)
+   */
+  async initialize(client) {
+    try {
+      console.log('🚀 API 모듈 초기화 중...');
+      
+      // 백엔드 URL 설정
+      await this.initializeBackendURL(client);
+      
+      // 백엔드 연결 테스트
+      const isConnected = await this.checkBackendConnection(client);
+      
+      if (isConnected) {
+        console.log('✅ API 모듈 초기화 완료 - 백엔드 연결 정상');
+        return true;
+      } else {
+        console.warn('⚠️ API 모듈 초기화 완료 - 백엔드 연결 실패 (폴백 모드로 동작)');
+        return false;
+      }
+    } catch (error) {
+      console.error('❌ API 모듈 초기화 실패:', error);
       return false;
     }
   },
@@ -547,7 +665,7 @@ const API = {
       const performanceKey = `API-${method}-${endpoint}`;
       const startTime = performance.now();
 
-      const response = await fetch(`http://localhost:8000/${endpoint}`, requestOptions);
+      const response = await fetch(`${this.baseURL}/${endpoint}`, requestOptions);
 
       const endTime = performance.now();
       console.log(`[성능] ${performanceKey}: ${(endTime - startTime).toFixed(2)}ms`);
