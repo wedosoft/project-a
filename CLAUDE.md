@@ -75,3 +75,6 @@ RAG 기반 Freshdesk Custom App - FastAPI + Qdrant + 멀티 LLM
 - **📖 관리 도구 가이드**: `docs/claude-guide-manager-guide.md`
 - **🔧 스크립트 파일**: `scripts/claude-guide-manager.sh`
 - **🌍 글로벌 지침**: `~/.claude/CLAUDE.md`
+
+## 🛠 개발 환경 가이드
+- python을 실행할 때는 반드시 backend/venv 에서 작업하세요. 가상환경이 없으면 만들어서 하세요.
