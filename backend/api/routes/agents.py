@@ -15,8 +15,7 @@ from ..models.responses import (
     AgentResponse, AgentListResponse, LicenseUpdateResponse,
     BulkLicenseUpdateRequest, BulkLicenseUpdateResponse
 )
-from ..dependencies import get_tenant_id, get_platform, get_api_key, get_domain
-from core.database import get_session
+from ..dependencies import get_tenant_id, get_platform, get_api_key, get_domain, get_session
 from core.repositories.agent_repository import AgentRepository
 from core.database.models.agent import Agent
 

@@ -270,7 +270,7 @@ window.Events = {
             this.handleSuggestedSolutionsTab(client);
             break;
           case 'copilot-tab':
-            this.handleCopilotTab(client);
+            this.handleCopilotTab();
             break;
         }
       });
@@ -402,18 +402,18 @@ window.Events = {
   },
 
   // 코파일럿 탭 처리 함수
-  handleCopilotTab(client) {
+  handleCopilotTab() {
     console.log('🤖 코파일럿 탭 활성화');
 
     // 코파일럿 이벤트가 이미 설정되어 있는지 확인하고, 없으면 설정
     if (!window.copilotEventsSetup) {
-      this.setupCopilotEvents(client);
+      this.setupCopilotEvents();
       window.copilotEventsSetup = true;
     }
   },
 
   // 코파일럿 이벤트 설정 함수
-  setupCopilotEvents(client) {
+  setupCopilotEvents() {
     console.log('🤖 코파일럿 이벤트 설정 - HTML의 기존 이벤트와 통합');
     
     // HTML에서 이미 onclick="sendMessage()" 이벤트가 설정되어 있으므로

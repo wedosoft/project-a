@@ -13,8 +13,7 @@ from datetime import datetime, timedelta
 import logging
 
 from ..models.responses import BaseModel, Field
-from ..dependencies import get_tenant_id, get_platform, get_api_key, get_domain
-from core.database import get_session
+from ..dependencies import get_tenant_id, get_platform, get_api_key, get_domain, get_session
 from core.database.models.agent import Agent
 
 # 라우터 생성

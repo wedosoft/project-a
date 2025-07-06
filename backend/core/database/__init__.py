@@ -5,7 +5,7 @@
 Freshdesk 플랫폼만 지원합니다.
 """
 
-from .database import DatabaseManager
+from .database import DatabaseManager, get_session
 from .vectordb import VectorDBFactory, VectorDBInterface, QdrantAdapter, vector_db
 from .factory import DatabaseFactory, TenantDataManager, DatabaseType, get_database
 from .tenant_config import TenantConfigManager
@@ -30,6 +30,7 @@ __all__ = [
     'TenantDataManager', 
     'DatabaseType',
     'get_database',
+    'get_session',
     
     # Configuration
     'TenantConfigManager',

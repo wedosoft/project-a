@@ -16,13 +16,10 @@ import asyncio
 from ..models.responses import BaseModel, Field
 from ..dependencies import (
     get_tenant_id, get_platform, get_api_key, get_domain,
-    get_vector_db, get_tenant_config
+    get_vector_db, get_tenant_config, get_session
 )
-from core.database import get_session
-from core.database.models.ticket import Ticket
-from core.database.models.article import Article
 from core.database.models.agent import Agent
-from core.database.models.attachment import Attachment
+from core.database.models.integrated_object import IntegratedObject
 
 # 라우터 생성
 router = APIRouter(prefix="/admin/system", tags=["시스템 관리"])

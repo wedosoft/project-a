@@ -15,9 +15,8 @@ import asyncio
 from ..models.responses import BaseModel, Field
 from ..dependencies import (
     get_tenant_id, get_platform, get_api_key, get_domain,
-    get_fetcher, get_tenant_config
+    get_fetcher, get_tenant_config, get_session
 )
-from core.database import get_session
 from core.repositories.agent_repository import AgentRepository
 from core.schemas.agent import normalize_agent_data
 

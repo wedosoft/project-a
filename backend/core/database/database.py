@@ -445,6 +445,24 @@ def get_database(tenant_id: str = None, platform: str = "freshdesk") -> SQLiteDa
     return _database_cache[cache_key]
 
 
+def get_session(tenant_id: str = None, platform: str = "freshdesk"):
+    """
+    데이터베이스 세션을 반환하는 헬퍼 함수
+    
+    Args:
+        tenant_id: 테넌트 ID (필수)
+        platform: 플랫폼 이름 (기본값: "freshdesk")
+    
+    Returns:
+        SQLAlchemy 세션
+    """
+    if not tenant_id:
+        raise ValueError("tenant_id는 필수 매개변수입니다")
+    
+    db_instance = get_database(tenant_id, platform)
+    return db_instance.get_session()
+
+
 def validate_multitenant_setup() -> Dict[str, Any]:
     """멀티테넌트 설정 검증"""
     validation = {

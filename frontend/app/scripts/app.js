@@ -467,7 +467,7 @@ if (typeof window.isFDKModal !== 'undefined' && window.isFDKModal) {
         console.log('🎭 모달 템플릿 렌더링 완료');
 
         // FDK 모달에서는 백엔드 호출이나 복잡한 로직 완전 금지
-        setTimeout(() => {
+        setTimeout(async () => {
           console.log('🚫 모달에서 백엔드 호출 금지 - 캐시된 데이터만 사용');
           
           // 캐시된 데이터만 사용하여 간단한 UI 업데이트 (백엔드 호출 없음)

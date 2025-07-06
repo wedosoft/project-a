@@ -161,6 +161,24 @@ async def get_domain(
     return x_domain
 
 
+async def get_session(
+    tenant_id: str = Depends(get_tenant_id),
+    platform: str = Depends(get_platform)
+):
+    """
+    데이터베이스 세션 의존성 함수
+    
+    Args:
+        tenant_id: 테넌트 ID (헤더에서 추출)
+        platform: 플랫폼 이름 (헤더에서 추출)
+    
+    Returns:
+        SQLAlchemy 세션
+    """
+    from core.database import get_session as db_get_session
+    return db_get_session(tenant_id, platform)
+
+
 async def get_tenant_config(
     tenant_id: str = Depends(get_tenant_id),
     platform: str = Depends(get_platform), 
