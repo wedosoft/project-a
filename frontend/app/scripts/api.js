@@ -697,6 +697,21 @@ const API = {
       return result;
     } catch (error) {
       console.error('❌ Vector DB 초기 데이터 로딩 실패:', error);
+      
+      // 사용자 친화적인 에러 메시지를 추가
+      if (error.userMessage) {
+        console.error('🔸 사용자 메시지:', error.userMessage);
+      }
+      
+      // 특정 에러 유형별로 구체적인 메시지 생성
+      if (error.message && error.message.includes('JSON')) {
+        error.userMessage = 'AI 서비스 응답을 처리하는 중 오류가 발생했습니다. 벡터 데이터베이스 설정을 확인하고 다시 시도해 주세요.';
+      } else if (error.message && error.message.includes('timeout')) {
+        error.userMessage = 'AI 분석 시간이 초과되었습니다. 네트워크 상태를 확인하고 다시 시도해 주세요.';
+      } else if (!error.userMessage) {
+        error.userMessage = 'AI 분석 서비스에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.';
+      }
+      
       throw error;
     }
   },

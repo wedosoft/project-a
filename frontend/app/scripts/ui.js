@@ -292,6 +292,67 @@ window.UI = {
     }
   },
 
+  // 백엔드 오류 시 사용자에게 친화적인 메시지를 표시하는 함수
+  showBackendError(errorMessage, title = 'AI 서비스 오류') {
+    try {
+      console.log('[UI] 백엔드 에러 메시지 표시 시작');
+
+      // 모달 내부에 에러 메시지를 표시할 수 있도록 DOM을 찾고 업데이트
+      const errorContainer = document.getElementById('error-display');
+      const mainContent = document.getElementById('main-content');
+
+      if (errorContainer) {
+        // 에러 컨테이너가 있으면 에러 메시지 표시
+        errorContainer.innerHTML = `
+          <div class="alert alert-danger" style="margin: 20px; padding: 20px; border-radius: 8px; border: 1px solid #dc3545; background-color: #f8d7da; color: #721c24;">
+            <div style="display: flex; align-items: center; margin-bottom: 15px;">
+              <span style="font-size: 24px; margin-right: 12px;">⚠️</span>
+              <strong style="font-size: 16px;">${title}</strong>
+            </div>
+            <div style="font-size: 14px; line-height: 1.5; margin-bottom: 15px;">
+              ${errorMessage}
+            </div>
+            <div style="font-size: 12px; color: #6c757d; margin-top: 10px;">
+              문제가 지속되면 Freshdesk 관리자에게 문의하세요.
+            </div>
+          </div>
+        `;
+        errorContainer.style.display = 'block';
+        
+        // 메인 컨텐츠는 숨기기
+        if (mainContent) {
+          mainContent.style.display = 'none';
+        }
+        
+        console.log('[UI] 백엔드 에러 메시지 표시 완료 (DOM 업데이트)');
+      } else {
+        // 에러 컨테이너가 없으면 모달로 표시
+        const errorContent = `
+          <div class="alert alert-danger" style="margin: 0; padding: 20px; border-radius: 8px; border: 1px solid #dc3545; background-color: #f8d7da; color: #721c24;">
+            <div style="display: flex; align-items: center; margin-bottom: 15px;">
+              <span style="font-size: 24px; margin-right: 12px;">⚠️</span>
+              <strong style="font-size: 16px;">${title}</strong>
+            </div>
+            <div style="font-size: 14px; line-height: 1.5; margin-bottom: 15px;">
+              ${errorMessage}
+            </div>
+            <div style="font-size: 12px; color: #6c757d; margin-top: 10px;">
+              문제가 지속되면 Freshdesk 관리자에게 문의하세요.
+            </div>
+          </div>
+        `;
+        
+        this.showModal(errorContent, title);
+        console.log('[UI] 백엔드 에러 메시지 표시 완료 (모달)');
+      }
+    } catch (error) {
+      console.error('[UI] 백엔드 에러 메시지 표시 오류:', error);
+      
+      // 최후의 수단: 토스트 메시지로 대체
+      this.showToast(`${title}: ${errorMessage}`, 'error');
+    }
+  },
+
   // 캐시된 데이터로 UI를 즉시 업데이트하는 함수
   updateUIWithCachedData(data) {
     try {

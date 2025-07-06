@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 상담사 지원 시스템 - 새로운 UI 설계</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="test-styles.css" rel="stylesheet">
+</head>
+<body>
+    <div class="main-container">
+        <!-- 🎫 티켓 요약 섹션 (상단) -->
+        <section class="ticket-summary-section">
+            <div class="section-header">
+                <div class="header-content">
+                    <h2>
+                        <i class="fas fa-ticket-alt"></i>
+                        AI 분석 정보
+                    </h2>
+                    <div class="header-actions">
+                        <span class="ticket-number">#1234</span>
+                        <button class="btn-collapse" id="summaryToggle">
+                            <i class="fas fa-chevron-up"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="summary-content" id="summaryContent">
+                <div class="summary-grid">
+                    <!-- 1. 티켓 기본 정보 -->
+                    <div class="summary-card">
+                        <div class="card-header">
+                            <i class="fas fa-info-circle"></i>
+                            <h3>티켓 정보</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="info-grid">
+                                <div class="info-item">
+                                    <span class="label">제목:</span>
+                                    <span class="value">AI 분석 전략 문의</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="label">상태:</span>
+                                    <span class="value status-open">분석 중</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="label">우선순위:</span>
+                                    <span class="value priority-high">높음</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="label">유형:</span>
+                                    <span class="value">처리 중</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 2. 감정 분석 -->
+                    <div class="summary-card">
+                        <div class="card-header">
+                            <i class="fas fa-heart"></i>
+                            <h3>감정 분석</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="emotion-analysis">
+                                <div class="emotion-item">
+                                    <div class="emotion-label">긍정적</div>
+                                    <div class="emotion-bar">
+                                        <div class="emotion-fill positive" style="width: 75%"></div>
+                                    </div>
+                                    <div class="emotion-value">75%</div>
+                                </div>
+                                <div class="emotion-item">
+                                    <div class="emotion-label">중립적</div>
+                                    <div class="emotion-bar">
+                                        <div class="emotion-fill neutral" style="width: 20%"></div>
+                                    </div>
+                                    <div class="emotion-value">20%</div>
+                                </div>
+                                <div class="emotion-item">
+                                    <div class="emotion-label">부정적</div>
+                                    <div class="emotion-bar">
+                                        <div class="emotion-fill negative" style="width: 5%"></div>
+                                    </div>
+                                    <div class="emotion-value">5%</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 3. 핵심 요약 -->
+                    <div class="summary-card">
+                        <div class="card-header">
+                            <i class="fas fa-brain"></i>
+                            <h3>핵심 요약</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="summary-text">
+                                <p>고객이 AI 분석 도구의 전략적 활용 방안에 대해 문의하였습니다. 특히 데이터 분석 효율성과 비용 최적화 방안에 관심이 높으며, 구체적인 구현 방법론을 요청하고 있습니다.</p>
+                            </div>
+                            <div class="key-points">
+                                <div class="key-point">
+                                    <i class="fas fa-check-circle"></i>
+                                    <span>데이터 분석 효율성 개선</span>
+                                </div>
+                                <div class="key-point">
+                                    <i class="fas fa-check-circle"></i>
+                                    <span>비용 최적화 방안</span>
+                                </div>
+                                <div class="key-point">
+                                    <i class="fas fa-check-circle"></i>
+                                    <span>구현 방법론 가이드</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 4. 추천 액션 -->
+                    <div class="summary-card">
+                        <div class="card-header">
+                            <i class="fas fa-lightbulb"></i>
+                            <h3>추천 액션</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="action-items">
+                                <div class="action-item priority-high">
+                                    <div class="action-priority">
+                                        <i class="fas fa-exclamation-triangle"></i>
+                                        <span>높음</span>
+                                    </div>
+                                    <div class="action-content">
+                                        <div class="action-title">전문가 상담 연결</div>
+                                        <div class="action-desc">AI 전략 컨설턴트와의 1:1 상담 예약</div>
+                                    </div>
+                                </div>
+                                <div class="action-item priority-medium">
+                                    <div class="action-priority">
+                                        <i class="fas fa-info-circle"></i>
+                                        <span>중간</span>
+                                    </div>
+                                    <div class="action-content">
+                                        <div class="action-title">관련 자료 제공</div>
+                                        <div class="action-desc">AI 활용 사례집 및 ROI 계산 도구 전달</div>
+                                    </div>
+                                </div>
+                                <div class="action-item priority-low">
+                                    <div class="action-priority">
+                                        <i class="fas fa-check-circle"></i>
+                                        <span>낮음</span>
+                                    </div>
+                                    <div class="action-content">
+                                        <div class="action-title">후속 팔로업</div>
+                                        <div class="action-desc">1주일 후 만족도 조사 및 추가 지원</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 📊 하단 3분할 섹션 -->
+        <section class="bottom-sections">
+            <!-- 유사 티켓 -->
+            <div class="section-panel">
+                <div class="panel-header">
+                    <h3>
+                        <i class="fas fa-copy"></i>
+                        유사 티켓
+                    </h3>
+                    <div class="panel-actions">
+                        <button class="btn-refresh" title="새로고침">
+                            <i class="fas fa-sync-alt"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="panel-content">
+                    <div class="search-bar">
+                        <input type="text" class="search-input" placeholder="키워드로 검색...">
+                        <button class="btn-search">
+                            <i class="fas fa-search"></i>
+                        </button>
+                    </div>
+                    <div class="content-area">
+                        <div class="ticket-item">
+                            <div class="ticket-header">
+                                <span class="ticket-id">#1156</span>
+                                <span class="ticket-similarity">95%</span>
+                            </div>
+                            <div class="ticket-title">AI 도입 전략 수립 문의</div>
+                            <div class="ticket-meta">
+                                <span class="ticket-status resolved">해결됨</span>
+                                <span class="ticket-date">2일 전</span>
+                            </div>
+                        </div>
+                        <div class="ticket-item">
+                            <div class="ticket-header">
+                                <span class="ticket-id">#1089</span>
+                                <span class="ticket-similarity">89%</span>
+                            </div>
+                            <div class="ticket-title">데이터 분석 도구 비교 요청</div>
+                            <div class="ticket-meta">
+                                <span class="ticket-status resolved">해결됨</span>
+                                <span class="ticket-date">1주일 전</span>
+                            </div>
+                        </div>
+                        <div class="ticket-item">
+                            <div class="ticket-header">
+                                <span class="ticket-id">#1034</span>
+                                <span class="ticket-similarity">82%</span>
+                            </div>
+                            <div class="ticket-title">AI 비용 최적화 방안</div>
+                            <div class="ticket-meta">
+                                <span class="ticket-status resolved">해결됨</span>
+                                <span class="ticket-date">2주일 전</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 추천 솔루션 -->
+            <div class="section-panel">
+                <div class="panel-header">
+                    <h3>
+                        <i class="fas fa-lightbulb"></i>
+                        추천 솔루션
+                    </h3>
+                    <div class="panel-actions">
+                        <button class="btn-refresh" title="새로고침">
+                            <i class="fas fa-sync-alt"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="panel-content">
+                    <div class="search-bar">
+                        <input type="text" class="search-input" placeholder="솔루션 검색...">
+                        <button class="btn-search">
+                            <i class="fas fa-search"></i>
+                        </button>
+                    </div>
+                    <div class="content-area">
+                        <div class="solution-item">
+                            <div class="solution-header">
+                                <div class="solution-score">98%</div>
+                                <div class="solution-type">가이드</div>
+                            </div>
+                            <div class="solution-title">AI 전략 수립 완벽 가이드</div>
+                            <div class="solution-excerpt">
+                                기업의 AI 도입 전략을 체계적으로 수립하는 방법과 단계별 실행 방안을 상세히 설명합니다...
+                            </div>
+                            <div class="solution-meta">
+                                <span class="solution-views">조회 1,234회</span>
+                                <span class="solution-helpful">도움됨 95%</span>
+                            </div>
+                        </div>
+                        <div class="solution-item">
+                            <div class="solution-header">
+                                <div class="solution-score">94%</div>
+                                <div class="solution-type">FAQ</div>
+                            </div>
+                            <div class="solution-title">AI 도구 비용 최적화 FAQ</div>
+                            <div class="solution-excerpt">
+                                자주 묻는 AI 도구 비용 관련 질문과 답변을 통해 효율적인 예산 관리 방법을 제시합니다...
+                            </div>
+                            <div class="solution-meta">
+                                <span class="solution-views">조회 892회</span>
+                                <span class="solution-helpful">도움됨 91%</span>
+                            </div>
+                        </div>
+                        <div class="solution-item">
+                            <div class="solution-header">
+                                <div class="solution-score">87%</div>
+                                <div class="solution-type">케이스</div>
+                            </div>
+                            <div class="solution-title">중소기업 AI 도입 성공 사례</div>
+                            <div class="solution-excerpt">
+                                실제 중소기업의 AI 도입 사례를 통해 실무진이 참고할 수 있는 구체적인 방법론을 제공합니다...
+                            </div>
+                            <div class="solution-meta">
+                                <span class="solution-views">조회 567회</span>
+                                <span class="solution-helpful">도움됨 89%</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AI 채팅 -->
+            <div class="section-panel">
+                <div class="panel-header">
+                    <h3>
+                        <i class="fas fa-robot"></i>
+                        AI 어시스턴트
+                    </h3>
+                    <div class="panel-actions">
+                        <button class="btn-clear" title="대화 지우기">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="panel-content">
+                    <div class="chat-area">
+                        <div class="chat-messages">
+                            <div class="message-item assistant">
+                                <div class="message-avatar">
+                                    <i class="fas fa-robot"></i>
+                                </div>
+                                <div class="message-content">
+                                    <div class="message-text">
+                                        안녕하세요! 티켓 #1234에 대한 분석을 완료했습니다. 
+                                        AI 전략 수립과 관련하여 어떤 점이 가장 궁금하신지 알려주세요.
+                                    </div>
+                                    <div class="message-time">방금 전</div>
+                                </div>
+                            </div>
+                            <div class="message-item user">
+                                <div class="message-content">
+                                    <div class="message-text">
+                                        비용 최적화 방안을 자세히 알고 싶습니다.
+                                    </div>
+                                    <div class="message-time">방금 전</div>
+                                </div>
+                                <div class="message-avatar">
+                                    <i class="fas fa-user"></i>
+                                </div>
+                            </div>
+                            <div class="message-item assistant">
+                                <div class="message-avatar">
+                                    <i class="fas fa-robot"></i>
+                                </div>
+                                <div class="message-content">
+                                    <div class="message-text">
+                                        AI 비용 최적화를 위한 3가지 핵심 전략을 제안드립니다:
+                                        <br><br>
+                                        1. 📊 <strong>단계적 도입</strong>: 핵심 업무부터 시작하여 점진적 확장
+                                        <br>
+                                        2. 🔄 <strong>클라우드 활용</strong>: 온프레미스 대비 30-40% 비용 절감
+                                        <br>
+                                        3. 📈 <strong>ROI 측정</strong>: 정량적 성과 지표 설정 및 모니터링
+                                        <br><br>
+                                        어떤 부분에 대해 더 자세히 알고 싶으신가요?
+                                    </div>
+                                    <div class="message-time">방금 전</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="chat-input">
+                            <div class="input-group">
+                                <input type="text" class="chat-input-field" placeholder="메시지를 입력하세요...">
+                                <button class="btn-send">
+                                    <i class="fas fa-paper-plane"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- 로딩 오버레이 -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-content">
+            <div class="loading-spinner">
+                <i class="fas fa-brain fa-spin"></i>
+            </div>
+            <div class="loading-text">AI가 데이터를 분석하고 있습니다...</div>
+            <div class="loading-progress">
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: 65%"></div>
+                </div>
+                <div class="progress-text">65%</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // 간단한 상호작용 구현
+        document.addEventListener('DOMContentLoaded', function() {
+            // 티켓 요약 토글
+            const summaryToggle = document.getElementById('summaryToggle');
+            const summaryContent = document.getElementById('summaryContent');
+            
+            summaryToggle.addEventListener('click', function() {
+                summaryContent.classList.toggle('collapsed');
+                const icon = summaryToggle.querySelector('i');
+                icon.classList.toggle('fa-chevron-up');
+                icon.classList.toggle('fa-chevron-down');
+            });
+
+            // 새로고침 버튼
+            document.querySelectorAll('.btn-refresh').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    this.querySelector('i').classList.add('fa-spin');
+                    setTimeout(() => {
+                        this.querySelector('i').classList.remove('fa-spin');
+                    }, 2000);
+                });
+            });
+
+            // 채팅 입력
+            const chatInput = document.querySelector('.chat-input-field');
+            const sendBtn = document.querySelector('.btn-send');
+            
+            function sendMessage() {
+                const message = chatInput.value.trim();
+                if (message) {
+                    // 메시지 추가 로직 (실제 구현에서는 서버 통신)
+                    console.log('메시지 전송:', message);
+                    chatInput.value = '';
+                }
+            }
+
+            sendBtn.addEventListener('click', sendMessage);
+            chatInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    sendMessage();
+                }
+            });
+        });
+    </script>
+</body>
+</html>

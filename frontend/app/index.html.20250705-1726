@@ -15,7 +15,7 @@
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: #f8f9fa;
             margin: 0;
-            padding: 0 0 10px 0;
+            padding: 0;
             color: #1f2937;
             display: flex;
             justify-content: flex-end;
@@ -35,6 +35,9 @@
             animation: slideIn 0.3s ease-out;
             position: relative;
             overflow: hidden;
+            /* 스크롤 차단을 위한 추가 스타일 */
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
         }
 
         @keyframes slideIn {
@@ -51,16 +54,18 @@
         /* 모달 컨테이너 (네이티브 스타일) */
         .modal-container {
             width: 480px;
-            height: calc(100vh - 10px);
+            height: 100vh;
             background: white;
-            border-radius: 12px;
+            border-radius: 0;
             box-shadow: -2px 0 8px rgba(0, 0, 0, 0.1);
             display: flex;
             flex-direction: column;
-            overflow: hidden;
+            /* 스크롤 차단을 위한 추가 스타일 */
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
+            overflow-y: auto;
+            overflow-x: hidden;
             border-left: 1px solid #e5e7eb;
-            margin-bottom: 10px;
-            position: relative;
         }
 
         /* 스마트 헤더 (얇은 헤더) */
@@ -70,13 +75,7 @@
             padding: 8px 20px;
             flex-shrink: 0;
             border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            z-index: 10;
-            border-top-left-radius: 12px;
-            border-top-right-radius: 12px;
+            position: relative;
         }
 
         .header-content {
@@ -138,10 +137,10 @@
         .main-content {
             display: flex;
             flex-direction: column;
-            flex: 1;
-            overflow-y: auto;
-            overflow-x: hidden;
-            padding-top: 60px; /* 헤더 높이만큼 패딩 추가 */
+            /* flex: 1과 min-height 제거 - 자연스러운 콘텐츠 흐름 */
+            /* 스크롤 차단을 위한 추가 스타일 */
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
         }
 
         /* AI 요약 영역 (FDK 스타일) - 접기/펴기 처리 */
@@ -501,310 +500,64 @@
             box-shadow: 0 2px 6px rgba(139, 92, 246, 0.3);
         }
 
-        /* Copilot 채팅 인터페이스 */
-        .chat-mode-toggle {
+        /* Copilot 탭 특별 스타일 */
+        .copilot-welcome {
             background: white;
-            border-bottom: 1px solid #e5e7eb;
-            padding: 12px 20px;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 32px 20px;
+            text-align: center;
+            margin-top: 20px;
         }
 
-        .mode-toggle-container {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
+        .copilot-welcome .copilot-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            color: #8B5CF6;
         }
 
-        .mode-toggle-section {
-            display: flex;
+        .copilot-welcome h3 {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #374151;
+        }
+
+        .copilot-welcome p {
+            font-size: 14px;
+            color: #6b7280;
+            margin-bottom: 20px;
+            line-height: 1.5;
+        }
+
+        .copilot-btn {
+            background: linear-gradient(135deg, #8B5CF6 0%, #3B82F6 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
             align-items: center;
             gap: 8px;
         }
 
-        .mode-label {
-            font-size: 13px;
-            font-weight: 500;
-            color: #6b7280;
-            transition: color 0.2s;
-            cursor: pointer;
-            user-select: none;
-            white-space: nowrap;
-        }
-
-        .mode-label.active {
-            color: #8B5CF6;
-            font-weight: 600;
-        }
-
-        /* iOS 스타일 토글 스위치 - 더 작게 */
-        .ios-toggle {
-            position: relative;
-            width: 42px;
-            height: 24px;
-            background: #e5e7eb;
-            border-radius: 12px;
-            cursor: pointer;
-            transition: all 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
-            flex-shrink: 0;
-        }
-
-        .ios-toggle.active {
-            background: #8B5CF6;
-        }
-
-        .toggle-slider {
-            position: absolute;
-            top: 2px;
-            left: 2px;
-            width: 20px;
-            height: 20px;
-            background: white;
-            border-radius: 50%;
-            transition: all 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-        }
-
-        .ios-toggle.active .toggle-slider {
-            transform: translateX(18px);
-        }
-
-        .mode-description {
-            font-size: 11px;
-            color: #9ca3af;
-            font-style: italic;
-            text-align: right;
-            flex-shrink: 0;
-        }
-
-        /* 채팅 컨테이너 */
-        .chat-container {
-            display: flex;
-            flex-direction: column;
-            height: 400px;
-            background: white;
-        }
-
-        /* 채팅 메시지 영역 */
-        .chat-messages {
-            flex: 1;
-            overflow-y: auto;
-            padding: 16px 20px;
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-        }
-
-        .chat-message {
-            display: flex;
-            gap: 12px;
-            animation: messageSlideIn 0.3s ease-out;
-        }
-
-        .chat-message.user {
-            flex-direction: row-reverse;
-        }
-
-        @keyframes messageSlideIn {
-            from {
-                opacity: 0;
-                transform: translateY(10px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        .message-avatar {
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 16px;
-            flex-shrink: 0;
-            background: #f3f4f6;
-        }
-
-        .chat-message.user .message-avatar {
-            background: linear-gradient(135deg, #8B5CF6 0%, #3B82F6 100%);
-            color: white;
-        }
-
-        .message-content {
-            flex: 1;
-            max-width: 80%;
-        }
-
-        .message-text {
-            background: #f9fafb;
-            padding: 12px 16px;
-            border-radius: 18px;
-            font-size: 14px;
-            line-height: 1.5;
-            color: #374151;
-            word-wrap: break-word;
-        }
-
-        .chat-message.user .message-text {
-            background: linear-gradient(135deg, #8B5CF6 0%, #3B82F6 100%);
-            color: white;
-            border-radius: 18px 18px 4px 18px;
-        }
-
-        .chat-message.assistant .message-text {
-            border-radius: 18px 18px 18px 4px;
-        }
-
-        .message-time {
-            font-size: 11px;
-            color: #9ca3af;
-            margin-top: 4px;
-            text-align: right;
-        }
-
-        .chat-message.assistant .message-time {
-            text-align: left;
-        }
-
-        /* 채팅 입력 영역 */
-        .chat-input-container {
-            border-top: 1px solid #e5e7eb;
-            padding: 16px 20px;
-            background: #fafbfc;
-        }
-
-        .chat-input-wrapper {
-            display: flex;
-            align-items: flex-end;
-            gap: 12px;
-            background: white;
-            border: 1px solid #e5e7eb;
-            border-radius: 24px;
-            padding: 8px 16px;
-            transition: all 0.2s;
-        }
-
-        .chat-input-wrapper:focus-within {
-            border-color: #8B5CF6;
-            box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
-        }
-
-        #chatInput {
-            flex: 1;
-            border: none;
-            outline: none;
-            resize: none;
-            font-size: 14px;
-            line-height: 1.5;
-            color: #374151;
-            background: transparent;
-            padding: 8px 0;
-            max-height: 100px;
-            font-family: inherit;
-        }
-
-        #chatInput::placeholder {
-            color: #9ca3af;
-        }
-
-        .send-button {
-            background: linear-gradient(135deg, #8B5CF6 0%, #3B82F6 100%);
-            border: none;
-            border-radius: 50%;
-            width: 36px;
-            height: 36px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            transition: all 0.2s;
-            color: white;
-            flex-shrink: 0;
-        }
-
-        .send-button:hover {
-            transform: scale(1.05);
+        .copilot-btn:hover {
+            transform: translateY(-1px);
             box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
         }
 
-        .send-button:disabled {
-            background: #e5e7eb;
-            cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
-        }
-
-        /* 타이핑 인디케이터 */
-        .typing-indicator {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 12px 0;
-        }
-
-        .typing-dots {
-            display: flex;
-            gap: 4px;
-        }
-
-        .typing-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: #8B5CF6;
-            animation: typingDot 1.4s infinite ease-in-out;
-        }
-
-        .typing-dot:nth-child(1) { animation-delay: -0.32s; }
-        .typing-dot:nth-child(2) { animation-delay: -0.16s; }
-
-        @keyframes typingDot {
-            0%, 80%, 100% {
-                transform: scale(0.8);
-                opacity: 0.5;
-            }
-            40% {
-                transform: scale(1);
-                opacity: 1;
-            }
-        }
-
-        /* 채팅 스크롤바 */
-        .chat-messages::-webkit-scrollbar {
-            width: 4px;
-        }
-
-        .chat-messages::-webkit-scrollbar-track {
-            background: transparent;
-        }
-
-        .chat-messages::-webkit-scrollbar-thumb {
-            background: #cbd5e1;
-            border-radius: 2px;
-        }
-
-        .chat-messages::-webkit-scrollbar-thumb:hover {
-            background: #94a3b8;
-        }
-
-        /* 통합 하단 영역 */
-        .combined-footer {
-            background: #f8fafc;
-            border-top: 1px solid #e5e7eb;
-            flex-shrink: 0;
-            border-bottom-left-radius: 12px;
-            border-bottom-right-radius: 12px;
-        }
-        
         /* 피드백 영역 */
         .feedback-section {
             padding: 12px 20px;
+            background: #f8fafc;
+            border-top: 1px solid #e5e7eb;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            border-bottom: 1px solid #e5e7eb;
         }
 
         .feedback-question {
@@ -852,6 +605,7 @@
         .performance-footer {
             padding: 8px 20px;
             background: #f1f5f9;
+            border-top: 1px solid #e5e7eb;
             font-size: 10px;
             color: #6b7280;
             display: flex;
@@ -865,21 +619,21 @@
             gap: 4px;
         }
 
-        /* 스크롤바 스타일링 - 메인 콘텐츠 영역에 적용 */
-        .main-content::-webkit-scrollbar {
+        /* 스크롤바 스타일링 - 모달 컨테이너에만 적용 */
+        .modal-container::-webkit-scrollbar {
             width: 4px;
         }
 
-        .main-content::-webkit-scrollbar-track {
+        .modal-container::-webkit-scrollbar-track {
             background: #f1f5f9;
         }
 
-        .main-content::-webkit-scrollbar-thumb {
+        .modal-container::-webkit-scrollbar-thumb {
             background: #cbd5e1;
             border-radius: 2px;
         }
 
-        .main-content::-webkit-scrollbar-thumb:hover {
+        .modal-container::-webkit-scrollbar-thumb:hover {
             background: #94a3b8;
         }
 
@@ -954,7 +708,7 @@
                 </div>
                 <div class="header-actions">
                     <button class="action-btn" onclick="toggleSummary()" id="summaryToggleBtn" title="요약 접기/펼기">
-                        <span style="font-size: 16px;">⌃</span>
+                        🔼
                     </button>
                     <button class="action-btn" onclick="refreshData()" title="새로고침">
                         <i class="fas fa-sync-alt"></i>
@@ -1219,86 +973,53 @@
 
                 <!-- Copilot 탭 콘텐츠 -->
                 <div class="tab-content" data-tab="copilot">
-                    <!-- 대화 모드 토글 -->
-                    <div class="chat-mode-toggle">
-                        <div class="mode-toggle-container">
-                            <div class="mode-toggle-section">
-                                <span class="mode-label active" data-mode="smart">🎯 스마트 모드</span>
-                                <div class="ios-toggle" onclick="toggleChatMode()">
-                                    <div class="toggle-slider"></div>
-                                </div>
-                                <span class="mode-label" data-mode="free">💭 자유 모드</span>
-                            </div>
-                            <div class="mode-description">
-                                <span id="mode-desc">티켓 정보와 관련 문서를 기반으로 답변합니다</span>
-                            </div>
+                    <div class="insight-panel">
+                        <div class="insight-title">🤖 AI 어시스턴트 기능</div>
+                        <div class="insight-content">
+                            💬 자연어 질문으로 더 정확한 답변을 받아보세요<br>
+                            🎯 맞춤형 답변 생성 및 개선<br>
+                            ⚡ 실시간 상담 지원
                         </div>
                     </div>
 
-                    <!-- 채팅 컨테이너 -->
-                    <div class="chat-container">
-                        <!-- 채팅 메시지 영역 -->
-                        <div class="chat-messages" id="chatMessages">
-                            <div class="chat-message assistant">
-                                <div class="message-avatar">🤖</div>
-                                <div class="message-content">
-                                    <div class="message-text">
-                                        안녕하세요! AI 어시스턴트입니다. 현재 티켓에 대해 궁금한 점이나 도움이 필요한 사항을 말씀해 주세요.
-                                    </div>
-                                    <div class="message-time">방금 전</div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- 입력 영역 -->
-                        <div class="chat-input-container">
-                            <div class="chat-input-wrapper">
-                                <textarea 
-                                    id="chatInput" 
-                                    placeholder="메시지를 입력하세요..." 
-                                    rows="1"
-                                    onkeydown="handleChatKeydown(event)"
-                                    oninput="adjustTextareaHeight(this)"
-                                ></textarea>
-                                <button class="send-button" onclick="sendMessage()" id="sendButton">
-                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <path d="m22 2-7 20-4-9-9-4Z"/>
-                                        <path d="M22 2 11 13"/>
-                                    </svg>
-                                </button>
-                            </div>
-                        </div>
+                    <div class="copilot-welcome">
+                        <div class="copilot-icon">🤖</div>
+                        <h3>AI Copilot</h3>
+                        <p>
+                            이 티켓에 대해 궁금한 점이 있으시면<br>
+                            자유롭게 질문해 주세요.
+                        </p>
+                        <button class="copilot-btn" onclick="startChat()">
+                            💬 AI와 대화하기
+                        </button>
                     </div>
                 </div>
             </div>
         </main>
 
-        <!-- 통합 하단 영역 -->
-        <div class="combined-footer">
-            <!-- 피드백 섹션 -->
-            <div class="feedback-section">
-                <div class="feedback-question">이 AI 분석이 도움이 되었나요?</div>
-                <div class="feedback-actions">
-                    <button class="feedback-btn thumbs-up" onclick="submitFeedback('positive')">
-                        👍 도움됨
-                    </button>
-                    <button class="feedback-btn thumbs-down" onclick="submitFeedback('negative')">
-                        👎 개선필요
-                    </button>
-                </div>
+        <!-- 피드백 섹션 -->
+        <div class="feedback-section">
+            <div class="feedback-question">이 AI 분석이 도움이 되었나요?</div>
+            <div class="feedback-actions">
+                <button class="feedback-btn thumbs-up" onclick="submitFeedback('positive')">
+                    👍 도움됨
+                </button>
+                <button class="feedback-btn thumbs-down" onclick="submitFeedback('negative')">
+                    👎 개선필요
+                </button>
             </div>
+        </div>
 
-            <!-- 성능 지표 푸터 -->
-            <div class="performance-footer">
-                <div class="perf-item">
-                    🕒 처리시간: 3.2초
-                </div>
-                <div class="perf-item">
-                    📊 품질점수: 82%
-                </div>
-                <div class="perf-item">
-                    🔍 검색결과: 5건
-                </div>
+        <!-- 성능 지표 푸터 -->
+        <div class="performance-footer">
+            <div class="perf-item">
+                🕒 처리시간: 3.2초
+            </div>
+            <div class="perf-item">
+                📊 품질점수: 82%
+            </div>
+            <div class="perf-item">
+                🔍 검색결과: 5건
             </div>
         </div>
     </div>
@@ -1375,49 +1096,8 @@
                     body.classList.add('standalone-mode');
                 }
 
-                // 오류 모드 처리
-                checkErrorMode();
-
                 // 컨테이너 크기 조정
                 adjustContainerSize();
-            }
-
-            // 오류 모드 확인 및 처리
-            function checkErrorMode() {
-                try {
-                    // URL 파라미터나 전역 변수로 오류 모드 확인
-                    const urlParams = new URLSearchParams(window.location.search);
-                    const isErrorMode = urlParams.get('errorMode') === 'true' || window.errorMode === true;
-                    
-                    if (isErrorMode) {
-                        console.log('🚨 오류 모드 감지 - UI에 오류 메시지 표시');
-                        showErrorMessage('벡터 DB 연결 오류가 발생했지만 기본 기능은 사용할 수 있습니다.');
-                    }
-                } catch (error) {
-                    console.warn('오류 모드 확인 중 문제 발생:', error);
-                }
-            }
-
-            // 오류 메시지 표시 함수
-            function showErrorMessage(message) {
-                try {
-                    const errorDisplay = document.getElementById('error-display');
-                    if (errorDisplay) {
-                        errorDisplay.innerHTML = `
-                            <div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; padding: 12px; margin: 16px 20px; color: #92400e;">
-                                <div style="display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600;">
-                                    ⚠️ 시스템 알림
-                                </div>
-                                <div style="font-size: 13px; margin-top: 4px;">
-                                    ${message}
-                                </div>
-                            </div>
-                        `;
-                        errorDisplay.style.display = 'block';
-                    }
-                } catch (error) {
-                    console.error('오류 메시지 표시 실패:', error);
-                }
             }
 
             // 컨테이너 크기 조정
@@ -1503,34 +1183,94 @@
             if (section.classList.contains('collapsed')) {
                 // 펴기
                 section.classList.remove('collapsed');
-                toggleBtn.innerHTML = '<span style="font-size: 16px;">⌃</span>';
+                toggleBtn.innerHTML = '🔼';
                 console.log('펼치기 실행');
             } else {
                 // 접기
                 section.classList.add('collapsed');
-                toggleBtn.innerHTML = '<span style="font-size: 16px;">⌄</span>';
+                toggleBtn.innerHTML = '🔽';
                 console.log('접기 실행');
             }
         }
 
-        // 간단한 스크롤 이벤트 관리 - 부모 창으로의 전파만 차단
+        // 강력한 스크롤 이벤트 관리 - 모달에서 부모 창으로의 스크롤 전파 완전 차단
         document.addEventListener('DOMContentLoaded', function() {
             const fdkContainer = document.getElementById('fdk-response-container');
+            const modalContainer = document.querySelector('.modal-container');
+            
+            // 스크롤 차단 함수
+            function preventParentScroll(e) {
+                const target = e.currentTarget;
+                const atTop = target.scrollTop === 0;
+                const atBottom = target.scrollHeight - target.clientHeight <= target.scrollTop + 1;
+                
+                // 위쪽 끝에서 위로 스크롤하려고 할 때
+                if (atTop && e.deltaY < 0) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return false;
+                }
+                
+                // 아래쪽 끝에서 아래로 스크롤하려고 할 때
+                if (atBottom && e.deltaY > 0) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    return false;
+                }
+                
+                // 일반적인 경우에도 부모로의 전파 차단
+                e.stopPropagation();
+            }
+            
+            // FDK 컨테이너에 스크롤 차단 적용
+            if (fdkContainer) {
+                fdkContainer.addEventListener('wheel', preventParentScroll, { passive: false });
+                fdkContainer.addEventListener('DOMMouseScroll', preventParentScroll, { passive: false }); // Firefox
+            }
+            
+            // 모달 컨테이너에도 스크롤 차단 적용
+            if (modalContainer) {
+                modalContainer.addEventListener('wheel', preventParentScroll, { passive: false });
+                modalContainer.addEventListener('DOMMouseScroll', preventParentScroll, { passive: false }); // Firefox
+            }
+            
+            // 탭 영역과 콘텐츠 영역에 더 강력한 차단 적용
+            const tabContents = document.querySelectorAll('.tab-content');
             const mainContent = document.querySelector('.main-content');
             
-            // FDK 컨테이너에서 부모 창으로의 스크롤 전파 차단
-            if (fdkContainer) {
-                fdkContainer.addEventListener('wheel', function(e) {
-                    e.stopPropagation(); // 부모로의 전파만 차단
-                }, { passive: false });
+            // 모든 탭 콘텐츠에 스크롤 차단 적용
+            tabContents.forEach(tabContent => {
+                tabContent.addEventListener('wheel', preventParentScroll, { passive: false });
+                tabContent.addEventListener('DOMMouseScroll', preventParentScroll, { passive: false });
+            });
+            
+            // 메인 콘텐츠에도 스크롤 차단 적용
+            if (mainContent) {
+                mainContent.addEventListener('wheel', preventParentScroll, { passive: false });
+                mainContent.addEventListener('DOMMouseScroll', preventParentScroll, { passive: false });
             }
             
-            // 메인 콘텐츠 영역에서 부모 창으로의 스크롤 전파 차단
-            if (mainContent) {
-                mainContent.addEventListener('wheel', function(e) {
-                    e.stopPropagation(); // 부모로의 전파만 차단
-                }, { passive: false });
+            // 터치 이벤트에 대한 스크롤 차단 (모바일 대응)
+            function preventTouchScroll(e) {
+                if (e.touches.length > 1) return; // 멀티터치는 허용
+                
+                const target = e.currentTarget;
+                const atTop = target.scrollTop === 0;
+                const atBottom = target.scrollHeight - target.clientHeight <= target.scrollTop + 1;
+                
+                // 스크롤 경계에서 더 이상 스크롤할 수 없을 때만 차단
+                if ((atTop && e.deltaY < 0) || (atBottom && e.deltaY > 0)) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
             }
+            
+            // 터치 이벤트 리스너 등록
+            [fdkContainer, modalContainer, mainContent].forEach(element => {
+                if (element) {
+                    element.addEventListener('touchmove', preventTouchScroll, { passive: false });
+                }
+            });
         });
 
         // 액션 버튼 기능들
@@ -1576,164 +1316,8 @@
             alert(`${kbId} 문서의 원본을 표시합니다.`);
         }
 
-        // 채팅 관련 전역 변수
-        let currentChatMode = 'smart'; // 'smart' 또는 'free'
-        let isTyping = false;
-
-        // 대화 모드 토글
-        function toggleChatMode() {
-            const toggle = document.querySelector('.ios-toggle');
-            const smartLabel = document.querySelector('[data-mode="smart"]');
-            const freeLabel = document.querySelector('[data-mode="free"]');
-            const modeDesc = document.getElementById('mode-desc');
-            
-            if (currentChatMode === 'smart') {
-                currentChatMode = 'free';
-                toggle.classList.add('active');
-                smartLabel.classList.remove('active');
-                freeLabel.classList.add('active');
-                modeDesc.textContent = 'AI와 자유롭게 대화할 수 있습니다';
-            } else {
-                currentChatMode = 'smart';
-                toggle.classList.remove('active');
-                smartLabel.classList.add('active');
-                freeLabel.classList.remove('active');
-                modeDesc.textContent = '티켓 정보와 관련 문서를 기반으로 답변합니다';
-            }
-            
-            console.log('채팅 모드 변경:', currentChatMode);
-        }
-
-        // 메시지 전송
-        function sendMessage() {
-            const input = document.getElementById('chatInput');
-            const message = input.value.trim();
-            
-            if (!message || isTyping) return;
-            
-            // 사용자 메시지 추가
-            addMessage('user', message);
-            input.value = '';
-            adjustTextareaHeight(input);
-            
-            // AI 응답 시뮬레이션
-            setTimeout(() => {
-                simulateAIResponse(message);
-            }, 500);
-        }
-
-        // 메시지 추가
-        function addMessage(sender, text) {
-            const chatMessages = document.getElementById('chatMessages');
-            const messageDiv = document.createElement('div');
-            messageDiv.className = `chat-message ${sender}`;
-            
-            const now = new Date();
-            const timeString = now.toLocaleTimeString('ko-KR', { 
-                hour: '2-digit', 
-                minute: '2-digit' 
-            });
-            
-            const avatar = sender === 'user' ? '👤' : '🤖';
-            
-            messageDiv.innerHTML = `
-                <div class="message-avatar">${avatar}</div>
-                <div class="message-content">
-                    <div class="message-text">${text}</div>
-                    <div class="message-time">${timeString}</div>
-                </div>
-            `;
-            
-            chatMessages.appendChild(messageDiv);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-        }
-
-        // AI 응답 시뮬레이션
-        function simulateAIResponse(userMessage) {
-            isTyping = true;
-            showTypingIndicator();
-            
-            // 모드별 응답 생성
-            let response;
-            if (currentChatMode === 'smart') {
-                response = generateSmartResponse(userMessage);
-            } else {
-                response = generateFreeResponse(userMessage);
-            }
-            
-            // 타이핑 시뮬레이션 (1-3초)
-            const typingTime = Math.random() * 2000 + 1000;
-            setTimeout(() => {
-                hideTypingIndicator();
-                addMessage('assistant', response);
-                isTyping = false;
-            }, typingTime);
-        }
-
-        // 스마트 모드 응답 생성
-        function generateSmartResponse(message) {
-            const smartResponses = [
-                "현재 티켓 정보를 바탕으로 분석해보면, 라이선스 추가 요청은 일반적으로 영업팀을 통해 처리됩니다. 관련 문서를 확인하시겠어요?",
-                "유사한 티켓들을 살펴보니, 이런 경우 보통 2-3일 정도 소요됩니다. 더 자세한 진행 상황을 확인해드릴까요?",
-                "KB 문서에 따르면, 라이선스 관련 업무는 승인 프로세스가 필요합니다. 현재 단계를 확인해보겠습니다.",
-                "티켓 내용을 분석한 결과, 고객의 요구사항이 명확해 보입니다. 다음 단계는 무엇인지 안내해드릴게요."
-            ];
-            return smartResponses[Math.floor(Math.random() * smartResponses.length)];
-        }
-
-        // 자유 모드 응답 생성
-        function generateFreeResponse(message) {
-            const freeResponses = [
-                "네, 말씀하신 내용에 대해 도움을 드릴 수 있습니다. 더 구체적으로 어떤 부분이 궁금하신가요?",
-                "좋은 질문이네요! 이런 상황에서는 여러 가지 접근 방법이 있습니다. 어떤 방식을 선호하시나요?",
-                "이해했습니다. 비슷한 경험을 바탕으로 말씀드리면, 이런 경우에는 단계적으로 접근하는 것이 좋습니다.",
-                "네, 도움이 되는 정보를 제공해드릴게요. 먼저 현재 상황을 정확히 파악해보겠습니다."
-            ];
-            return freeResponses[Math.floor(Math.random() * freeResponses.length)];
-        }
-
-        // 타이핑 인디케이터 표시
-        function showTypingIndicator() {
-            const chatMessages = document.getElementById('chatMessages');
-            const typingDiv = document.createElement('div');
-            typingDiv.className = 'chat-message assistant typing-indicator';
-            typingDiv.id = 'typing-indicator';
-            
-            typingDiv.innerHTML = `
-                <div class="message-avatar">🤖</div>
-                <div class="message-content">
-                    <div class="typing-dots">
-                        <div class="typing-dot"></div>
-                        <div class="typing-dot"></div>
-                        <div class="typing-dot"></div>
-                    </div>
-                </div>
-            `;
-            
-            chatMessages.appendChild(typingDiv);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-        }
-
-        // 타이핑 인디케이터 숨기기
-        function hideTypingIndicator() {
-            const typingIndicator = document.getElementById('typing-indicator');
-            if (typingIndicator) {
-                typingIndicator.remove();
-            }
-        }
-
-        // 텍스트 영역 높이 자동 조정
-        function adjustTextareaHeight(textarea) {
-            textarea.style.height = 'auto';
-            textarea.style.height = Math.min(textarea.scrollHeight, 100) + 'px';
-        }
-
-        // 엔터키 처리
-        function handleChatKeydown(event) {
-            if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
-                sendMessage();
-            }
+        function startChat() {
+            alert('AI 채팅을 시작합니다.');
         }
 
         function submitFeedback(type) {
