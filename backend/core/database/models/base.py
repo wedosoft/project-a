@@ -17,6 +17,7 @@ class BaseModel(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    deleted_at = Column(DateTime, nullable=True, index=True)  # 소프트 삭제를 위한 필드
 
 class MultiTenantModel(BaseModel):
     """멀티테넌트 지원을 위한 기본 모델"""

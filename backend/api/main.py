@@ -60,6 +60,9 @@ from .routes import (
     metrics_router,
     attachments_router
 )
+from .routes.agents import router as agents_router
+from .routes.licenses import router as licenses_router
+from .routes.admin_system import router as admin_system_router
 
 # 하위 호환성을 위한 기존 라우터 유지 (추후 제거 예정)
 from .freshdesk_attachments import router as freshdesk_attachments_router
@@ -152,6 +155,9 @@ app.include_router(ingest_router)
 app.include_router(health_router)
 app.include_router(metrics_router)
 app.include_router(attachments_router)
+app.include_router(agents_router)
+app.include_router(licenses_router)
+app.include_router(admin_system_router)
 
 # 하위 호환성을 위한 기존 라우터 유지 (추후 제거 예정)
 app.include_router(freshdesk_attachments_router)

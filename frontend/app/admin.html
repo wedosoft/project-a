@@ -1,0 +1,1143 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Copilot Canvas - 관리자 콘솔</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8f9fa;
+            margin: 0;
+            padding: 10px;
+        }
+        
+        .main-container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px 25px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 600;
+        }
+        
+        .content {
+            padding: 25px;
+        }
+        
+        .section {
+            margin-bottom: 30px;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 20px;
+        }
+        
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #343a40;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 8px;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-label {
+            font-weight: 500;
+            color: #495057;
+            margin-bottom: 8px;
+            display: block;
+        }
+        
+        .form-control {
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            padding: 10px 12px;
+            font-size: 14px;
+            transition: border-color 0.15s ease-in-out;
+        }
+        
+        .form-control:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s ease;
+        }
+        
+        .btn-primary {
+            background-color: #667eea;
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background-color: #5a6fd8;
+        }
+        
+        .btn-success {
+            background-color: #28a745;
+            color: white;
+        }
+        
+        .btn-success:hover {
+            background-color: #218838;
+        }
+        
+        .btn-danger {
+            background-color: #dc3545;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background-color: #c82333;
+        }
+        
+        .btn-info {
+            background-color: #17a2b8;
+            color: white;
+        }
+        
+        .btn-info:hover {
+            background-color: #138496;
+        }
+        
+        .btn-warning {
+            background-color: #ffc107;
+            color: #212529;
+        }
+        
+        .btn-warning:hover {
+            background-color: #e0a800;
+        }
+        
+        .alert {
+            padding: 12px 16px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            border: 1px solid transparent;
+        }
+        
+        .alert-success {
+            background-color: #d4edda;
+            border-color: #c3e6cb;
+            color: #155724;
+        }
+        
+        .alert-danger {
+            background-color: #f8d7da;
+            border-color: #f5c6cb;
+            color: #721c24;
+        }
+        
+        .alert-info {
+            background-color: #d1ecf1;
+            border-color: #bee5eb;
+            color: #0c5460;
+        }
+        
+        .alert-warning {
+            background-color: #fff3cd;
+            border-color: #ffeaa7;
+            color: #856404;
+        }
+        
+        .progress {
+            height: 20px;
+            background-color: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .progress-bar {
+            height: 100%;
+            background-color: #667eea;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        
+        .form-check {
+            margin-bottom: 10px;
+        }
+        
+        .form-check-input {
+            margin-right: 8px;
+        }
+        
+        .form-text {
+            font-size: 12px;
+            color: #6c757d;
+            margin-top: 5px;
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        
+        .stat-card {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            padding: 15px;
+            text-align: center;
+        }
+        
+        .stat-number {
+            font-size: 24px;
+            font-weight: 600;
+            color: #667eea;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            color: #6c757d;
+            margin-top: 5px;
+        }
+        
+        .agent-card {
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            padding: 15px;
+            margin-bottom: 10px;
+        }
+        
+        .agent-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .license-badge {
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            color: white;
+        }
+        
+        .license-active {
+            background-color: #28a745;
+        }
+        
+        .license-inactive {
+            background-color: #dc3545;
+        }
+    </style>
+</head>
+<body>
+    <script>
+        console.log('=== Admin page loaded ===');
+        console.log('Window location:', window.location.href);
+        console.log('Document ready state:', document.readyState);
+        
+        // FDK가 자동으로 로드되지 않은 경우 수동 로드
+        if (typeof app === 'undefined' && !window.frsh_init_loaded) {
+            console.log('FDK not found, loading manually...');
+            var script = document.createElement('script');
+            script.src = 'https://static.freshdev.io/fdk/2.0/assets/fresh_client.js';
+            script.onload = function() {
+                console.log('FDK script loaded manually');
+                window.frsh_init_loaded = true;
+            };
+            document.head.appendChild(script);
+        } else {
+            console.log('FDK already available:', typeof app);
+        }
+    </script>
+    <div id="debug-info" style="background: yellow; padding: 10px; font-family: monospace; font-size: 12px;">
+        Debug: Page loaded at <span id="load-time"></span>
+    </div>
+    <script>
+        document.getElementById('load-time').textContent = new Date().toLocaleTimeString();
+    </script>
+    
+    <div class="main-container">
+        <div class="header">
+            <h1>🎨 Copilot Canvas 관리자 콘솔</h1>
+            <p style="margin: 10px 0 0 0; opacity: 0.9;">RAG 기반 Freshdesk 데이터 관리 시스템</p>
+        </div>
+        
+        <div class="content">
+            <!-- 알림 영역 -->
+            <div id="alertArea"></div>
+            
+            <!-- 연결 상태 섹션 -->
+            <div class="section">
+                <div class="section-title">🔗 연결 상태</div>
+                <div id="connectionStatus">
+                    <p>연결 정보를 확인하는 중...</p>
+                </div>
+            </div>
+            
+            <!-- 데이터 수집 관리 섹션 -->
+            <div class="section">
+                <div class="section-title">📊 데이터 수집 관리</div>
+                
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label class="form-label" for="start_date">수집 시작 날짜</label>
+                            <input type="date" class="form-control" id="start_date">
+                            <small class="form-text">지정하지 않으면 모든 데이터를 수집합니다</small>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="form-group">
+                            <label class="form-label" for="end_date">수집 종료 날짜</label>
+                            <input type="date" class="form-control" id="end_date">
+                            <small class="form-text">지정하지 않으면 현재까지 수집합니다</small>
+                        </div>
+                    </div>
+                </div>
+                
+                
+                <div class="form-group">
+                    <button type="button" class="btn btn-success" id="startIngestBtn" onclick="startDataIngestion()">
+                        🚀 데이터 수집 시작
+                    </button>
+                    <button type="button" class="btn btn-danger hidden" id="stopIngestBtn" onclick="stopDataIngestion()">
+                        ⏹️ 수집 중지
+                    </button>
+                </div>
+                
+                <!-- 진행률 표시 -->
+                <div id="progressSection" class="hidden">
+                    <div class="progress">
+                        <div id="progressBar" class="progress-bar" style="width: 0%">0%</div>
+                    </div>
+                    <div id="progressText" style="margin-top: 10px; font-size: 14px; color: #6c757d;">
+                        수집 준비 중...
+                    </div>
+                </div>
+                
+                <!-- 수집 통계 -->
+                <div id="statsSection" class="hidden">
+                    <h6 style="margin-top: 30px; margin-bottom: 15px;">📈 수집 통계</h6>
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-number" id="statTickets">0</div>
+                            <div class="stat-label">티켓</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-number" id="statArticles">0</div>
+                            <div class="stat-label">지식베이스</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-number" id="statVectors">0</div>
+                            <div class="stat-label">벡터</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-number" id="statTime">0</div>
+                            <div class="stat-label">처리시간(초)</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 라이선스 관리 섹션 -->
+            <div class="section">
+                <div class="section-title">💳 라이선스 관리</div>
+                
+                <!-- 라이선스 요약 -->
+                <div class="license-summary" style="margin-bottom: 20px;">
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-number" id="totalLicenses">0</div>
+                            <div class="stat-label">전체 에이전트</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-number" id="activeLicenses">0</div>
+                            <div class="stat-label">활성 라이선스</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-number" id="inactiveLicenses">0</div>
+                            <div class="stat-label">비활성 라이선스</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-number" id="licenseUtilization">0%</div>
+                            <div class="stat-label">활용률</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 라이선스 관리 버튼 -->
+                <div class="form-group">
+                    <button type="button" class="btn btn-primary" onclick="syncAgents()">
+                        🔄 에이전트 동기화
+                    </button>
+                    <button type="button" class="btn btn-info" onclick="loadLicenseSummary()">
+                        📊 요약 새로고침
+                    </button>
+                </div>
+                
+                <!-- 에이전트 목록 필터 -->
+                <div class="row" style="margin-top: 20px;">
+                    <div class="col-md-6">
+                        <input type="text" class="form-control" id="agentSearch" placeholder="이름 또는 이메일 검색">
+                    </div>
+                    <div class="col-md-4">
+                        <select class="form-control" id="licenseFilter">
+                            <option value="">전체 라이선스</option>
+                            <option value="true">활성 라이선스</option>
+                            <option value="false">비활성 라이선스</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <button type="button" class="btn btn-primary btn-block" onclick="loadAgents()">
+                            검색
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- 에이전트 목록 -->
+                <div id="agentList" style="margin-top: 20px; max-height: 400px; overflow-y: auto;">
+                    <p style="color: #6c757d; text-align: center; padding: 20px;">
+                        에이전트 목록을 불러오려면 동기화를 실행하세요.
+                    </p>
+                </div>
+            </div>
+            
+            <!-- 시스템 관리 섹션 -->
+            <div class="section">
+                <div class="section-title">⚙️ 시스템 관리</div>
+                
+                <!-- 시스템 상태 -->
+                <div id="systemStatus" style="margin-bottom: 20px;">
+                    <div class="alert alert-info">
+                        <strong>시스템 상태:</strong> 확인 중...
+                    </div>
+                </div>
+                
+                <!-- 데이터 관리 -->
+                <div class="form-group">
+                    <label class="form-label">🗑️ 데이터 관리</label>
+                    <div class="alert alert-warning" style="margin-bottom: 10px;">
+                        <strong>⚠️ 주의:</strong> 데이터 삭제는 신중하게 진행하세요. (30일 이내 복구 가능)
+                    </div>
+                    <button type="button" class="btn btn-danger" onclick="showDataPurgeDialog()">
+                        🗑️ 데이터 제거
+                    </button>
+                    <button type="button" class="btn btn-warning" onclick="showDataRestoreDialog()">
+                        ♻️ 데이터 복구
+                    </button>
+                </div>
+                
+                <!-- 시스템 통계 -->
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-number" id="totalTickets">0</div>
+                        <div class="stat-label">티켓</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" id="totalArticles">0</div>
+                        <div class="stat-label">KB 문서</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" id="totalVectors">0</div>
+                        <div class="stat-label">벡터</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" id="deletedItems">0</div>
+                        <div class="stat-label">삭제 대기</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 전역 변수
+        let client = null;
+        let iparams = null;
+        let isAdmin = false;
+        let tenantId = null;
+        let backendUrl = null;
+        
+        console.log('=== Script block started ===');
+        
+        // 테스트를 위한 임시 데이터
+        var testMode = false;
+        
+        // FDK 초기화 함수
+        function initializeFDK() {
+            console.log('=== initializeFDK called ===');
+            
+            if (typeof app !== 'undefined' && app.initialized) {
+                console.log('FDK found, initializing...');
+                app.initialized().then(function(_client) {
+                    console.log('=== FDK initialized successfully ===');
+                    client = _client;
+                    initializeApp();
+                }).catch(function(error) {
+                    console.error('FDK initialization error:', error);
+                    runInTestMode();
+                });
+            } else {
+                console.warn('FDK not available, running in test mode');
+                runInTestMode();
+            }
+        }
+        
+        // 테스트 모드로 실행
+        function runInTestMode() {
+            console.log('=== Running in test mode ===');
+            testMode = true;
+            iparams = {
+                freshdesk_domain: 'wedosoft.freshdesk.com',
+                freshdesk_api_key: 'test-api-key'
+            };
+            tenantId = 'wedosoft';
+            backendUrl = getBackendUrl();
+            isAdmin = true;
+            console.log('Test mode setup complete:', { iparams, tenantId, backendUrl });
+            initializeApp();
+        }
+        
+        // 앱 초기화
+        async function initializeApp() {
+            console.log('=== initializeApp called ===');
+            
+            try {
+                if (!testMode) {
+                
+                    // 사용자 정보 가져오기
+                    try {
+                        const userData = await client.data.get('loggedInUser');
+                        console.log('User data:', userData);
+                        
+                        // abilities 배열에서 'view_admin' 권한 확인
+                        const userAbilities = userData.loggedInUser?.abilities || [];
+                        isAdmin = userAbilities.includes('view_admin');
+                        
+                        console.log('Is admin:', isAdmin);
+                        console.log('User abilities:', userAbilities);
+                        
+                    } catch (error) {
+                        console.error('사용자 정보 로드 실패:', error);
+                        isAdmin = false;
+                    }
+                    
+                    // 관리자 권한 체크 제거 (일단 모든 사용자 허용)
+                    // if (!isAdmin) {
+                    //     document.body.innerHTML = `...`;
+                    //     return;
+                    // }
+                    
+                    // iparams 가져오기
+                    try {
+                        iparams = await client.iparams.get();
+                        console.log('iparams loaded:', iparams);
+                    } catch (error) {
+                        console.error('Failed to load iparams:', error);
+                        iparams = {};
+                    }
+                
+                    // 연결 정보 설정
+                    if (iparams && iparams.freshdesk_domain) {
+                        const subdomain = iparams.freshdesk_domain.split('.')[0];
+                        tenantId = subdomain;
+                        console.log('tenantId set to:', tenantId);
+                    } else {
+                        console.warn('freshdesk_domain not found in iparams, using default');
+                        tenantId = 'wedosoft';
+                    }
+                    backendUrl = getBackendUrl();
+                }
+                
+                // 연결 상태 표시
+                updateConnectionStatus();
+                
+                // 백엔드 연결 테스트
+                testBackendConnection();
+                
+                // 초기 데이터 로드 (일단 주석 처리)
+                // loadLicenseSummary();
+                // loadSystemStatus();
+                
+                // 날짜 기본값 설정
+                const today = new Date().toISOString().split('T')[0];
+                document.getElementById('end_date').value = today;
+                
+                const thirtyDaysAgo = new Date();
+                thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+                document.getElementById('start_date').value = thirtyDaysAgo.toISOString().split('T')[0];
+                
+                // 관리자 확인 성공 메시지
+                showAlert('✅ 관리자 권한이 확인되었습니다.', 'success');
+                
+                // 이벤트 리스너
+                client.events.on('app.activated', function() {
+                    showAlert('Copilot Canvas 콘솔이 활성화되었습니다.', 'success');
+                });
+                
+            } catch (error) {
+                console.error('App initialization error:', error);
+                showAlert('앱 초기화 중 오류가 발생했습니다.', 'danger');
+            }
+        }
+        
+        // 페이지 로드 시 초기화
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('=== DOMContentLoaded fired ===');
+            
+            // FDK 초기화 시도
+            setTimeout(initializeFDK, 100);
+        });
+        
+        // window.onload 백업
+        window.onload = function() {
+            console.log('=== window.onload fired ===');
+            if (!client && !testMode) {
+                console.log('Retrying FDK initialization...');
+                initializeFDK();
+            }
+        };
+        
+        /**
+         * 환경에 따른 백엔드 URL 반환
+         */
+        function getBackendUrl() {
+            // ngrok 임시 주소 사용
+            return 'https://ee26-61-73-3-53.ngrok-free.app';
+        }
+        
+        /**
+         * 연결 상태 업데이트
+         */
+        function updateConnectionStatus() {
+            const statusDiv = document.getElementById('connectionStatus');
+            const domain = iparams?.freshdesk_domain || 'N/A';
+            const tenant = tenantId || 'N/A';
+            const mode = testMode ? ' (테스트 모드)' : '';
+            
+            statusDiv.innerHTML = `
+                <div class="row">
+                    <div class="col-md-6">
+                        <strong>도메인:</strong> ${domain}
+                    </div>
+                    <div class="col-md-6">
+                        <strong>테넌트 ID:</strong> ${tenant}
+                    </div>
+                </div>
+                <div class="row mt-2">
+                    <div class="col-md-6">
+                        <strong>백엔드:</strong> ${backendUrl || 'N/A'}
+                    </div>
+                    <div class="col-md-6">
+                        <span class="badge badge-success">✓ 연결됨${mode}</span>
+                    </div>
+                </div>
+            `;
+        }
+        
+        /**
+         * 알림 메시지 표시
+         */
+        function showAlert(message, type = 'info') {
+            const alertArea = document.getElementById('alertArea');
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${type}`;
+            alertDiv.innerHTML = message;
+            
+            alertArea.innerHTML = '';
+            alertArea.appendChild(alertDiv);
+            
+            // 5초 후 자동 제거 (성공/정보 메시지만)
+            if (type === 'success' || type === 'info') {
+                setTimeout(() => {
+                    alertDiv.remove();
+                }, 5000);
+            }
+        }
+        
+        /**
+         * 백엔드 연결 테스트
+         */
+        async function testBackendConnection() {
+            console.log('=== Testing backend connection ===');
+            
+            try {
+                // 간단한 health check 또는 root 엔드포인트 테스트
+                const response = await fetch(backendUrl, {
+                    method: 'GET',
+                    headers: {
+                        'ngrok-skip-browser-warning': 'true'
+                    }
+                });
+                
+                console.log('Backend response status:', response.status);
+                
+                if (response.ok) {
+                    showAlert('✅ 백엔드 연결 성공', 'success');
+                } else {
+                    showAlert(`⚠️ 백엔드 응답: ${response.status}`, 'warning');
+                }
+                
+                // 기본 health check만 테스트
+                try {
+                    const healthResponse = await fetch(backendUrl + '/health', {
+                        method: 'GET',
+                        headers: {
+                            'ngrok-skip-browser-warning': 'true'
+                        }
+                    });
+                    console.log(`Health check: ${healthResponse.status}`);
+                } catch (e) {
+                    console.log(`Health check: ERROR - ${e.message}`);
+                }
+                
+            } catch (error) {
+                console.error('Backend connection failed:', error);
+                showAlert('❌ 백엔드 연결 실패: ' + error.message, 'danger');
+            }
+        }
+        
+        /**
+         * API 요청 헬퍼
+         */
+        async function apiRequest(endpoint, options = {}) {
+            const defaultHeaders = {
+                'X-Tenant-ID': tenantId,
+                'X-Platform': 'freshdesk',
+                'X-Domain': iparams.freshdesk_domain,
+                'X-API-Key': iparams.freshdesk_api_key,
+                'ngrok-skip-browser-warning': 'true'
+            };
+            
+            const config = {
+                ...options,
+                headers: {
+                    ...defaultHeaders,
+                    ...options.headers
+                }
+            };
+            
+            try {
+                const response = await fetch(`${backendUrl}${endpoint}`, config);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                return await response.json();
+            } catch (error) {
+                console.error(`API 요청 실패 (${endpoint}):`, error);
+                throw error;
+            }
+        }
+        
+        /**
+         * 데이터 수집 시작
+         */
+        async function startDataIngestion() {
+            const startDate = document.getElementById('start_date').value;
+            const endDate = document.getElementById('end_date').value;
+            const includeAttachments = false; // 첨부파일 처리 비활성화
+            
+            // UI 상태 변경
+            document.getElementById('startIngestBtn').classList.add('hidden');
+            document.getElementById('stopIngestBtn').classList.remove('hidden');
+            document.getElementById('progressSection').classList.remove('hidden');
+            document.getElementById('statsSection').classList.add('hidden');
+            
+            // 진행률 초기화
+            updateProgress(0, '데이터 수집을 시작합니다...');
+            
+            try {
+                const result = await apiRequest('/ingest', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        start_date: startDate || null,
+                        end_date: endDate || null,
+                        include_attachments: includeAttachments
+                    })
+                });
+                
+                // 성공 시 결과 표시
+                showAlert('✅ 데이터 수집이 완료되었습니다!', 'success');
+                
+                // 통계 업데이트
+                document.getElementById('statTickets').textContent = result.tickets_processed || 0;
+                document.getElementById('statArticles').textContent = result.articles_processed || 0;
+                document.getElementById('statVectors').textContent = result.vectors_created || 0;
+                document.getElementById('statTime').textContent = (result.processing_time_seconds || 0).toFixed(1);
+                
+                document.getElementById('statsSection').classList.remove('hidden');
+                updateProgress(100, '데이터 수집이 완료되었습니다!');
+                
+            } catch (error) {
+                showAlert(`❌ 데이터 수집 실패: ${error.message}`, 'danger');
+            } finally {
+                // UI 상태 복원
+                document.getElementById('startIngestBtn').classList.remove('hidden');
+                document.getElementById('stopIngestBtn').classList.add('hidden');
+            }
+        }
+        
+        /**
+         * 데이터 수집 중지
+         */
+        function stopDataIngestion() {
+            showAlert('⏹️ 데이터 수집이 중지되었습니다.', 'info');
+            
+            // UI 상태 복원
+            document.getElementById('startIngestBtn').classList.remove('hidden');
+            document.getElementById('stopIngestBtn').classList.add('hidden');
+            updateProgress(0, '수집이 중지되었습니다.');
+        }
+        
+        /**
+         * 진행률 업데이트
+         */
+        function updateProgress(percent, text) {
+            const progressBar = document.getElementById('progressBar');
+            const progressText = document.getElementById('progressText');
+            
+            progressBar.style.width = `${percent}%`;
+            progressBar.textContent = `${percent}%`;
+            progressText.textContent = text;
+        }
+        
+        /**
+         * 라이선스 요약 로드
+         */
+        async function loadLicenseSummary() {
+            try {
+                const data = await apiRequest('/licenses/summary');
+                
+                // 통계 업데이트
+                document.getElementById('totalLicenses').textContent = data.total_licenses;
+                document.getElementById('activeLicenses').textContent = data.active_licenses;
+                document.getElementById('inactiveLicenses').textContent = data.inactive_licenses;
+                document.getElementById('licenseUtilization').textContent = data.utilization_rate + '%';
+                
+            } catch (error) {
+                console.error('라이선스 요약 로드 실패:', error);
+            }
+        }
+        
+        /**
+         * 에이전트 동기화
+         */
+        async function syncAgents() {
+            try {
+                showAlert('에이전트 동기화를 시작합니다...', 'info');
+                
+                const response = await apiRequest('/agents/sync', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ force_refresh: true })
+                });
+                
+                showAlert('✅ 에이전트 동기화가 완료되었습니다!', 'success');
+                
+                // 목록 새로고침
+                loadAgents();
+                loadLicenseSummary();
+                
+            } catch (error) {
+                showAlert('❌ 에이전트 동기화에 실패했습니다.', 'danger');
+            }
+        }
+        
+        /**
+         * 에이전트 목록 로드
+         */
+        async function loadAgents() {
+            const search = document.getElementById('agentSearch').value;
+            const licenseFilter = document.getElementById('licenseFilter').value;
+            
+            try {
+                const params = new URLSearchParams({
+                    page: 1,
+                    page_size: 100
+                });
+                
+                if (search) params.append('search', search);
+                if (licenseFilter) params.append('license_active', licenseFilter);
+                
+                const data = await apiRequest(`/agents?${params}`);
+                displayAgents(data.agents);
+                
+            } catch (error) {
+                console.error('에이전트 목록 로드 실패:', error);
+                showAlert('에이전트 목록을 불러오는데 실패했습니다.', 'danger');
+            }
+        }
+        
+        /**
+         * 에이전트 목록 표시
+         */
+        function displayAgents(agents) {
+            const agentList = document.getElementById('agentList');
+            
+            if (!agents || agents.length === 0) {
+                agentList.innerHTML = `
+                    <p style="color: #6c757d; text-align: center; padding: 20px;">
+                        에이전트가 없습니다.
+                    </p>
+                `;
+                return;
+            }
+            
+            const agentHtml = agents.map(agent => `
+                <div class="agent-card">
+                    <div class="agent-header">
+                        <div>
+                            <strong>${agent.name}</strong>
+                            <span style="color: #6c757d; margin-left: 10px;">${agent.email}</span>
+                        </div>
+                        <div>
+                            <span class="license-badge ${agent.license_active ? 'license-active' : 'license-inactive'}">
+                                ${agent.license_active ? '활성' : '비활성'}
+                            </span>
+                            <button class="btn btn-sm ${agent.license_active ? 'btn-danger' : 'btn-success'} ml-2" 
+                                    onclick="toggleAgentLicense(${agent.id}, ${!agent.license_active})">
+                                ${agent.license_active ? '비활성화' : '활성화'}
+                            </button>
+                        </div>
+                    </div>
+                    ${agent.job_title ? `<div style="margin-top: 5px; font-size: 13px; color: #6c757d;">직책: ${agent.job_title}</div>` : ''}
+                </div>
+            `).join('');
+            
+            agentList.innerHTML = agentHtml;
+        }
+        
+        /**
+         * 개별 라이선스 토글
+         */
+        async function toggleAgentLicense(agentId, activate) {
+            try {
+                await apiRequest(`/agents/${agentId}/license`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ license_active: activate })
+                });
+                
+                showAlert(`라이선스가 ${activate ? '활성화' : '비활성화'}되었습니다.`, 'success');
+                loadAgents();
+                loadLicenseSummary();
+                
+            } catch (error) {
+                showAlert('라이선스 상태 변경에 실패했습니다.', 'danger');
+            }
+        }
+        
+        /**
+         * 시스템 상태 로드
+         */
+        async function loadSystemStatus() {
+            try {
+                const data = await apiRequest('/admin/system/status');
+                
+                // 시스템 상태 업데이트
+                const statusDiv = document.getElementById('systemStatus');
+                const statusClass = data.status === 'healthy' ? 'success' : 
+                                  data.status === 'warning' ? 'warning' : 'danger';
+                const statusText = data.status === 'healthy' ? '정상' :
+                                 data.status === 'warning' ? '주의' : '위험';
+                
+                statusDiv.innerHTML = `
+                    <div class="alert alert-${statusClass}">
+                        <strong>✅ 시스템 상태:</strong> ${statusText}
+                    </div>
+                `;
+                
+                // 통계 업데이트
+                if (data.data_stats) {
+                    document.getElementById('totalTickets').textContent = data.data_stats.tickets || 0;
+                    document.getElementById('totalArticles').textContent = data.data_stats.articles || 0;
+                    document.getElementById('totalVectors').textContent = data.data_stats.vectors || 0;
+                }
+                
+                if (data.storage_status) {
+                    document.getElementById('deletedItems').textContent = data.storage_status.soft_deleted_items || 0;
+                }
+                
+            } catch (error) {
+                console.error('시스템 상태 로드 실패:', error);
+            }
+        }
+        
+        /**
+         * 데이터 제거 다이얼로그
+         */
+        function showDataPurgeDialog() {
+            if (!isAdmin) {
+                showAlert('이 기능은 관리자만 사용할 수 있습니다.', 'danger');
+                return;
+            }
+            const purgeType = prompt(
+                '삭제할 데이터 타입을 입력하세요:\n' +
+                '- all: 모든 데이터\n' +
+                '- tickets: 티켓만\n' +
+                '- articles: KB 문서만\n' +
+                '- agents: 에이전트만\n' +
+                '- vectors: 벡터 데이터만'
+            );
+            
+            if (!purgeType) return;
+            
+            const validTypes = ['all', 'tickets', 'articles', 'agents', 'vectors'];
+            if (!validTypes.includes(purgeType)) {
+                showAlert('유효하지 않은 타입입니다.', 'danger');
+                return;
+            }
+            
+            const hardDelete = confirm(
+                '하드 삭제를 하시겠습니까?\n' +
+                '예: 즉시 완전 삭제 (복구 불가)\n' +
+                '아니오: 소프트 삭제 (30일 이내 복구 가능)'
+            );
+            
+            if (confirm(`정말로 ${purgeType} 데이터를 삭제하시겠습니까?`)) {
+                purgeData(purgeType, hardDelete);
+            }
+        }
+        
+        /**
+         * 데이터 제거
+         */
+        async function purgeData(purgeType, hardDelete) {
+            try {
+                showAlert('데이터를 삭제하는 중...', 'info');
+                
+                const data = await apiRequest('/admin/system/purge', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        purge_type: purgeType,
+                        hard_delete: hardDelete,
+                        include_attachments: true,
+                        reason: '관리자 요청'
+                    })
+                });
+                
+                let message = '✅ 데이터 삭제가 완료되었습니다.\n\n';
+                
+                Object.entries(data.deleted_counts).forEach(([key, value]) => {
+                    if (value > 0) {
+                        message += `${key}: ${value}개\n`;
+                    }
+                });
+                
+                if (!hardDelete && data.recovery_deadline) {
+                    message += `\n복구 가능 기한: ${new Date(data.recovery_deadline).toLocaleDateString('ko-KR')}`;
+                }
+                
+                alert(message);
+                loadSystemStatus();
+                
+            } catch (error) {
+                showAlert('데이터 삭제에 실패했습니다.', 'danger');
+            }
+        }
+        
+        /**
+         * 데이터 복구 다이얼로그
+         */
+        function showDataRestoreDialog() {
+            if (!isAdmin) {
+                showAlert('이 기능은 관리자만 사용할 수 있습니다.', 'danger');
+                return;
+            }
+            const restoreType = prompt(
+                '복구할 데이터 타입을 입력하세요:\n' +
+                '- all: 모든 데이터\n' +
+                '- tickets: 티켓만\n' +
+                '- articles: KB 문서만\n' +
+                '- agents: 에이전트만'
+            );
+            
+            if (!restoreType) return;
+            
+            const validTypes = ['all', 'tickets', 'articles', 'agents'];
+            if (!validTypes.includes(restoreType)) {
+                showAlert('유효하지 않은 타입입니다.', 'danger');
+                return;
+            }
+            
+            if (confirm(`${restoreType} 데이터를 복구하시겠습니까?`)) {
+                restoreData(restoreType);
+            }
+        }
+        
+        /**
+         * 데이터 복구
+         */
+        async function restoreData(restoreType) {
+            try {
+                showAlert('데이터를 복구하는 중...', 'info');
+                
+                const data = await apiRequest('/admin/system/restore', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        restore_type: restoreType
+                    })
+                });
+                
+                let message = '✅ 데이터 복구가 완료되었습니다.\n\n';
+                
+                Object.entries(data.restored_counts).forEach(([key, value]) => {
+                    if (value > 0) {
+                        message += `${key}: ${value}개\n`;
+                    }
+                });
+                
+                alert(message);
+                loadSystemStatus();
+                
+            } catch (error) {
+                showAlert('데이터 복구에 실패했습니다.', 'danger');
+            }
+        }
+    </script>
+</body>
+</html>

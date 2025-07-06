@@ -781,22 +781,6 @@ async def init_legacy_hybrid_mode(
         )
 
 
-@router.get("/init/{ticket_id}/health")
-async def init_health_check(
-    ticket_id: str,
-    tenant_id: str = Depends(get_tenant_id)
-):
-    """Init 엔드포인트 헬스체크"""
-    try:
-        return {
-            "status": "healthy",
-            "ticket_id": ticket_id,
-            "tenant_id": tenant_id,
-            "timestamp": datetime.utcnow().isoformat(),
-            "pattern": "sequential_execution"
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"헬스체크 실패: {str(e)}")
 
 
 
