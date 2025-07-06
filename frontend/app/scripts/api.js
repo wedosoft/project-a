@@ -315,71 +315,30 @@ const IngestJobAPI = {
  * 최적화된 API 모듈
  */
 const API = {
-  // 백엔드 서버 URL - 환경별 자동 감지
+  // 백엔드 서버 URL - 환경별 자동 감지 (사용자 설정 불가)
   get baseURL() {
-    // iparams에서 backend_url 가져오기 (동기 방식)
-    try {
-      // Freshdesk 앱 환경에서는 iparams 사용
-      if (typeof client !== 'undefined' && client.iparams) {
-        // 비동기 처리가 필요하므로 일단 기본값 사용하고 나중에 업데이트
-        return this._cachedBaseURL || 'http://localhost:8000';
-      }
-    } catch (error) {
-      console.warn('⚠️ iparams 접근 실패, 기본 URL 사용:', error.message);
-    }
-
-    // 환경별 기본 URL 설정
+    // 환경별 자동 감지된 백엔드 URL 사용
     const hostname = window.location.hostname;
     
     if (hostname === 'localhost' || hostname.includes('127.0.0.1')) {
+      // 개발 환경
       return 'http://localhost:8000';
     } else if (hostname.includes('10001')) {
       // FDK 개발 환경 (fdk run)
       return 'http://localhost:8000';
     } else {
-      // 운영 환경 - Freshdesk 앱에서 실행 중
-      return this._cachedBaseURL || 'http://localhost:8000';
+      // 운영 환경 - 고정된 백엔드 URL 사용
+      return 'https://your-production-backend.amazonaws.com'; // 실제 운영 URL로 변경 필요
     }
   },
 
-  // 캐시된 베이스 URL
-  _cachedBaseURL: null,
-
   /**
-   * 백엔드 URL을 동적으로 설정하는 함수
-   */
-  async initializeBackendURL(client) {
-    try {
-      if (client && client.iparams) {
-        const iparams = await client.iparams.get();
-        if (iparams?.backend_url) {
-          this._cachedBaseURL = iparams.backend_url;
-          console.log('✅ iparams에서 백엔드 URL 설정:', this._cachedBaseURL);
-          return this._cachedBaseURL;
-        }
-      }
-    } catch (error) {
-      console.warn('⚠️ iparams에서 백엔드 URL 가져오기 실패:', error.message);
-    }
-
-    // 기본값 설정
-    this._cachedBaseURL = 'http://localhost:8000';
-    console.log('🛠️ 기본 백엔드 URL 사용:', this._cachedBaseURL);
-    return this._cachedBaseURL;
-  },
-
-  /**
-   * 백엔드 연결 상태 확인
+   * 백엔드 연결 상태 확인 (iparams에서 backend_url 제거)
    */
   async checkBackendConnection(client = null) {
     try {
       console.log('🔗 백엔드 연결 상태 확인 중...');
       
-      // 백엔드 URL 초기화
-      if (client) {
-        await this.initializeBackendURL(client);
-      }
-
       // 기본 헤더 설정
       const headers = {
         'X-Tenant-ID': 'wedosoft',
@@ -416,14 +375,11 @@ const API = {
   },
 
   /**
-   * API 모듈 초기화 (앱 시작 시 호출)
+   * API 모듈 초기화 (백엔드 URL 자동 감지로 간소화)
    */
   async initialize(client) {
     try {
       console.log('🚀 API 모듈 초기화 중...');
-      
-      // 백엔드 URL 설정
-      await this.initializeBackendURL(client);
       
       // 백엔드 연결 테스트
       const isConnected = await this.checkBackendConnection(client);
