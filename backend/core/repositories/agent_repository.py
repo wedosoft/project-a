@@ -10,8 +10,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy import and_
+from datetime import datetime
 
 from ..database.models.agent import Agent
+from ..database.models.license_history import LicenseHistory
 
 logger = logging.getLogger(__name__)
 
@@ -142,14 +144,17 @@ class AgentRepository:
             )
         ).all()
     
-    def update_license_status(self, tenant_id: str, agent_id: int, license_active: bool) -> bool:
+    def update_license_status(self, tenant_id: str, agent_id: int, license_active: bool, 
+                            performed_by: str = "system", reason: str = None) -> bool:
         """
-        에이전트의 라이선스 상태를 업데이트합니다.
+        에이전트의 라이선스 상태를 업데이트하고 히스토리를 기록합니다.
         
         Args:
             tenant_id: 테넌트 ID
             agent_id: 에이전트 ID
             license_active: 라이선스 활성화 여부
+            performed_by: 수행자
+            reason: 변경 사유
             
         Returns:
             bool: 업데이트 성공 여부
@@ -157,9 +162,33 @@ class AgentRepository:
         try:
             agent = self.get_agent_by_id(tenant_id, agent_id)
             if agent:
-                agent.license_active = license_active
-                self.session.commit()
-                logger.info(f"에이전트 라이선스 상태 업데이트: {agent.email} -> {license_active}")
+                # 이전 상태 저장
+                previous_status = agent.license_active
+                
+                # 상태가 실제로 변경되는 경우에만 처리
+                if previous_status != license_active:
+                    # 라이선스 상태 업데이트
+                    agent.license_active = license_active
+                    
+                    # 히스토리 기록
+                    history = LicenseHistory(
+                        tenant_id=tenant_id,
+                        platform=agent.platform,
+                        agent_id=agent_id,
+                        agent_name=agent.name,
+                        agent_email=agent.email,
+                        action="activated" if license_active else "deactivated",
+                        previous_status=previous_status,
+                        new_status=license_active,
+                        performed_by=performed_by,
+                        performed_at=datetime.utcnow(),
+                        reason=reason
+                    )
+                    self.session.add(history)
+                    
+                    self.session.commit()
+                    logger.info(f"에이전트 라이선스 상태 업데이트: {agent.email} -> {license_active}")
+                
                 return True
             else:
                 logger.warning(f"에이전트를 찾을 수 없음: tenant_id={tenant_id}, id={agent_id}")

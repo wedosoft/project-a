@@ -3,12 +3,14 @@
     "schema": {
       "method": "GET",
       "protocol": "https",
-      "host": "e1e4-58-122-170-2.ngrok-free.app",
+      "host": "ee26-61-73-3-53.ngrok-free.app",
       "path": "/${context.path}",
       "headers": {
         "Content-Type": "application/json",
-        "X-Freshdesk-Domain": "wedosoft",
-        "X-Freshdesk-API-Key": "Ug9H1cKCZZtZ4haamBy",
+        "X-Freshdesk-Domain": "<%= iparam.freshdesk_domain %>",
+        "X-Freshdesk-API-Key": "<%= iparam.freshdesk_api_key %>",
+        "X-Tenant-ID": "<%= iparam.freshdesk_domain.split('.')[0] %>",
+        "X-Platform": "freshdesk",
         "ngrok-skip-browser-warning": "true"
       }
     }
@@ -17,12 +19,14 @@
     "schema": {
       "method": "POST",
       "protocol": "https",
-      "host": "e1e4-58-122-170-2.ngrok-free.app",
+      "host": "ee26-61-73-3-53.ngrok-free.app",
       "path": "/${context.path}",
       "headers": {
         "Content-Type": "application/json",
-        "X-Freshdesk-Domain": "#{freshdesk_domain}",
-        "X-Freshdesk-API-Key": "#{freshdesk_api_key}",
+        "X-Freshdesk-Domain": "<%= iparam.freshdesk_domain %>",
+        "X-Freshdesk-API-Key": "<%= iparam.freshdesk_api_key %>",
+        "X-Tenant-ID": "<%= iparam.freshdesk_domain.split('.')[0] %>",
+        "X-Platform": "freshdesk",
         "ngrok-skip-browser-warning": "true"
       }
     }

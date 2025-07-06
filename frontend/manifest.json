@@ -5,10 +5,6 @@
         "ticket_top_navigation": {
           "url": "index.html",
           "icon": "styles/images/icon.svg"
-        },
-        "ticket_sidebar": {
-          "url": "index.html",
-          "icon": "styles/images/icon.svg"
         }
       },
       "interface": {
@@ -24,19 +20,14 @@
       }
     },
     "common": {
-      "events": {},
-      "functions": {},
-      "requests": {
-        "backendApi": {
-          "schema": {
-            "host": "",
-            "endpoints": {
-              "init": "/init/{{ticket_id}}",
-              "query": "/query"
-            }
-          }
+      "location": {
+        "full_page_app": {
+          "url": "admin.html",
+          "icon": "styles/images/icon.svg"
         }
-      }
+      },
+      "events": {},
+      "functions": {}
     }
   },
   "platform-version": "3.0",

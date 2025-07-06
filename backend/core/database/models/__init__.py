@@ -14,6 +14,7 @@ from .company import Company
 from .agent import Agent
 from .integrated_object import IntegratedObject
 from .progress_log import ProgressLog
+from .license_history import LicenseHistory
 
 __all__ = [
     # 기본 클래스
@@ -23,5 +24,6 @@ __all__ = [
     "Company",
     "Agent", 
     "IntegratedObject",
-    "ProgressLog"
+    "ProgressLog",
+    "LicenseHistory"
 ]

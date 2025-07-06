@@ -219,3 +219,67 @@ class SimilarTicketsResponse(BaseModel):
     
     ticket_id: str = Field(description="원본 티켓의 ID")
     similar_tickets: List[SimilarTicketItem] = Field(description="검색된 유사 티켓 목록")
+
+
+class AgentResponse(BaseModel):
+    """에이전트 정보 응답 모델"""
+    
+    id: int = Field(description="에이전트 ID")
+    tenant_id: str = Field(description="테넌트 ID")
+    platform: str = Field(description="플랫폼")
+    name: str = Field(description="에이전트 이름")
+    email: str = Field(description="에이전트 이메일")
+    job_title: Optional[str] = Field(default=None, description="직책")
+    active: bool = Field(description="활성화 상태")
+    available: bool = Field(description="가용 상태")
+    license_active: bool = Field(description="라이선스 활성화 상태")
+    type: Optional[str] = Field(default=None, description="에이전트 타입")
+    language: Optional[str] = Field(default=None, description="언어")
+    time_zone: Optional[str] = Field(default=None, description="시간대")
+    last_login_at: Optional[str] = Field(default=None, description="마지막 로그인 시간")
+    created_at: datetime = Field(description="생성 시간")
+    updated_at: datetime = Field(description="수정 시간")
+    
+    class Config:
+        orm_mode = True
+
+
+class AgentListResponse(BaseModel):
+    """에이전트 목록 응답 모델"""
+    
+    agents: List[AgentResponse] = Field(description="에이전트 목록")
+    total_count: int = Field(description="전체 개수")
+    page: int = Field(description="현재 페이지")
+    page_size: int = Field(description="페이지 크기")
+    total_pages: int = Field(description="전체 페이지 수")
+    license_stats: Dict[str, int] = Field(
+        description="라이선스 통계 (total_licenses, active_licenses)"
+    )
+
+
+class LicenseUpdateResponse(BaseModel):
+    """라이선스 업데이트 응답 모델"""
+    
+    agent_id: int = Field(description="에이전트 ID")
+    license_active: bool = Field(description="라이선스 활성화 상태")
+    updated_at: datetime = Field(description="업데이트 시간")
+    agent_name: str = Field(description="에이전트 이름")
+    agent_email: str = Field(description="에이전트 이메일")
+    active_licenses_count: int = Field(description="활성 라이선스 수")
+
+
+class BulkLicenseUpdateRequest(BaseModel):
+    """일괄 라이선스 업데이트 요청 모델"""
+    
+    agent_ids: List[int] = Field(description="에이전트 ID 목록")
+    license_active: bool = Field(description="라이선스 활성화 상태")
+
+
+class BulkLicenseUpdateResponse(BaseModel):
+    """일괄 라이선스 업데이트 응답 모델"""
+    
+    total_requested: int = Field(description="요청된 전체 수")
+    success_count: int = Field(description="성공 수")
+    failed_count: int = Field(description="실패 수")
+    failed_agent_ids: List[int] = Field(default_factory=list, description="실패한 에이전트 ID 목록")
+    active_licenses_count: int = Field(description="활성 라이선스 수")
