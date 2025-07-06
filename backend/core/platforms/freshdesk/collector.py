@@ -433,7 +433,7 @@ class FreshdeskCollector:
                 "error": str(e),
                 "success": False
             })
-                raise
+            raise
 
 
 async def main():
