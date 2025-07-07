@@ -270,16 +270,7 @@ let globalTicketData = {
   // 스트리밍 상태 관리 추가
   streaming_status: {
     is_streaming: false, // 현재 스트리밍 중인지 여부
-    overall_progress: 0, // 전체 진행률 (0-100%)
-    start_time: null, // 스트리밍 시작 시간
-    estimated_completion: null, // 예상 완료 시간
-    stages: {
-      ticket_fetch: { completed: false, progress: 0, message: null },
-      summary: { completed: false, progress: 0, message: null },
-      similar_tickets: { completed: false, progress: 0, message: null },
-      kb_documents: { completed: false, progress: 0, message: null }
-    },
-    error: null // 스트리밍 중 발생한 에러
+    last_event: null // 마지막으로 수신된 이벤트 타입
   },
   
   // 앱 로딩 상태 관리 (Progressive Enhancement)
@@ -500,89 +491,15 @@ function getGlobalLoading() {
   return globalTicketData.isLoading;
 }
 
-// === 스트리밍 상태 관리 함수 ===
-
 /**
- * 스트리밍 시작
- * @param {string} ticketId - 티켓 ID
+ * 스트리밍 상태 관리
+ * @param {Object} status - 스트리밍 상태 객체
  */
-function startStreaming(ticketId) {
-  globalTicketData.streaming_status = {
-    is_streaming: true,
-    overall_progress: 0,
-    start_time: new Date().toISOString(),
-    estimated_completion: null,
-    stages: {
-      ticket_fetch: { completed: false, progress: 0, message: 'Initializing...' },
-      summary: { completed: false, progress: 0, message: 'Waiting...' },
-      similar_tickets: { completed: false, progress: 0, message: 'Waiting...' },
-      kb_documents: { completed: false, progress: 0, message: 'Waiting...' }
-    },
-    error: null
-  };
-  
-  globalTicketData.cached_ticket_id = ticketId;
-  console.log(`🌊 스트리밍 시작: ${ticketId}`);
-}
-
-/**
- * 스트리밍 종료
- * @param {boolean} success - 성공 여부
- * @param {string} error - 에러 메시지 (실패 시)
- */
-function stopStreaming(success = true, error = null) {
-  if (globalTicketData.streaming_status.is_streaming) {
-    globalTicketData.streaming_status.is_streaming = false;
-    globalTicketData.streaming_status.overall_progress = success ? 100 : 0;
-    globalTicketData.streaming_status.error = error;
-    
-    if (success) {
-      // 모든 단계를 완료로 표시
-      Object.keys(globalTicketData.streaming_status.stages).forEach(stage => {
-        globalTicketData.streaming_status.stages[stage].completed = true;
-        globalTicketData.streaming_status.stages[stage].progress = 100;
-      });
-      console.log('✅ 스트리밍 완료');
-    } else {
-      console.error('❌ 스트리밍 실패:', error);
-    }
-  }
-}
-
-/**
- * 스트리밍 단계 업데이트
- * @param {string} stage - 단계 이름 (ticket_fetch, summary, similar_tickets, kb_documents)
- * @param {number} progress - 진행률 (0-100)
- * @param {string} message - 상태 메시지
- * @param {boolean} completed - 완료 여부
- */
-function updateStreamingStage(stage, progress, message = null, completed = false) {
-  if (!globalTicketData.streaming_status.is_streaming) return;
-  
-  if (globalTicketData.streaming_status.stages[stage]) {
-    globalTicketData.streaming_status.stages[stage].progress = Math.min(100, Math.max(0, progress));
-    globalTicketData.streaming_status.stages[stage].completed = completed || progress >= 100;
-    
-    if (message) {
-      globalTicketData.streaming_status.stages[stage].message = message;
-    }
-    
-    // 전체 진행률 계산 (각 단계의 가중 평균)
-    const stageWeights = {
-      ticket_fetch: 0.1,  // 10%
-      summary: 0.4,       // 40%
-      similar_tickets: 0.3, // 30%
-      kb_documents: 0.2   // 20%
-    };
-    
-    let overallProgress = 0;
-    Object.entries(globalTicketData.streaming_status.stages).forEach(([stageName, stageData]) => {
-      overallProgress += (stageData.progress * (stageWeights[stageName] || 0.25));
-    });
-    
-    globalTicketData.streaming_status.overall_progress = Math.round(overallProgress);
-    
-    console.log(`📊 [${stage}] ${progress}% - ${message || 'Processing...'}`);
+function setStreamingStatus(status) {
+  if (typeof status === 'object' && status !== null) {
+    globalTicketData.streaming_status = { ...globalTicketData.streaming_status, ...status };
+  } else {
+    console.warn('⚠️ 유효하지 않은 스트리밍 상태입니다.');
   }
 }
 
@@ -591,44 +508,7 @@ function updateStreamingStage(stage, progress, message = null, completed = false
  * @returns {Object} 현재 스트리밍 상태
  */
 function getStreamingStatus() {
-  return { ...globalTicketData.streaming_status };
-}
-
-/**
- * 스트리밍 중인지 확인
- * @returns {boolean} 스트리밍 여부
- */
-function isStreaming() {
-  return globalTicketData.streaming_status.is_streaming;
-}
-
-/**
- * 스트리밍 진행률 조회
- * @returns {number} 전체 진행률 (0-100)
- */
-function getStreamingProgress() {
-  return globalTicketData.streaming_status.overall_progress;
-}
-
-/**
- * 특정 단계의 완료 여부 확인
- * @param {string} stage - 단계 이름
- * @returns {boolean} 완료 여부
- */
-function isStageCompleted(stage) {
-  return globalTicketData.streaming_status.stages[stage]?.completed || false;
-}
-
-/**
- * 스트리밍 에러 설정
- * @param {string} errorMessage - 에러 메시지
- */
-function setStreamingError(errorMessage) {
-  if (globalTicketData.streaming_status) {
-    globalTicketData.streaming_status.error = errorMessage;
-    globalTicketData.streaming_status.is_streaming = false;
-    console.error(`🌊 스트리밍 에러: ${errorMessage}`);
-  }
+  return globalTicketData.streaming_status;
 }
 
 // === 에러 상태 관리 함수 ===
@@ -859,14 +739,8 @@ window.GlobalState = {
   getGlobalError,
 
   // 스트리밍 상태 관리
-  startStreaming,
-  stopStreaming,
-  updateStreamingStage,
+  setStreamingStatus,
   getStreamingStatus,
-  isStreaming,
-  getStreamingProgress,
-  isStageCompleted,
-  setStreamingError,
   
   // 앱 로딩 상태 관리 (Progressive Enhancement)
   setLoadingStatus,

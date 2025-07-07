@@ -1458,18 +1458,23 @@
     <!-- 마크다운 파서 -->
     <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
     
-    <!-- 앱 모듈들 (의존성 순서에 따라 로드) -->
-    <script src="scripts/globals.js"></script>
+    <!-- 간소화된 앱 스크립트 -->
     <script src="scripts/utils.js"></script>
-    <script src="scripts/api.js"></script>
-    <script src="scripts/data.js"></script>
-    <script src="scripts/ui.js"></script>
-    <script src="scripts/events.js"></script>
     <script src="scripts/app.js"></script>
 
     <script>
-        // 🚀 시스템 초기화 관리자 - 모든 문제 해결을 위한 통합 관리
-        window.SystemInitializer = {
+        // 간단한 초기화 체크
+        window.addEventListener('load', () => {
+            if (!window.App) {
+                console.error('앱 모듈 로드 실패');
+                document.body.innerHTML = '<div style="padding: 20px; color: red;">앱 로드 실패. 새로고침 해주세요.</div>';
+            }
+        });
+    </script>
+    
+    <!-- 이전 코드는 나중에 제거 예정 -->
+    <script type="text/x-old-code">
+        // SystemInitializer 및 기타 복잡한 초기화 코드들...
             initialized: false,
             moduleStatus: {},
             
@@ -1489,7 +1494,7 @@
                 
                 // 2. API 모듈 초기화
                 try {
-                    if (window.API && typeof window.API.init === 'function') {
+                    if (ModuleDependencyManager.isModuleReady('api')) {
                         await window.API.init();
                         console.log('✅ API 모듈 초기화 완료');
                         this.moduleStatus.API = 'ready';

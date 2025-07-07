@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>상세 테스트</title>
+    <style>
+        .test-section { margin: 20px 0; padding: 10px; border: 1px solid #ccc; }
+        .success { color: green; }
+        .error { color: red; }
+        .warning { color: orange; }
+        
+        /* 실제 CSS 클래스들 추가 */
+        .summary-text { border: 1px solid #ddd; padding: 10px; min-height: 50px; }
+        .chat-messages { border: 1px solid #ddd; padding: 10px; min-height: 100px; overflow-y: auto; }
+        .message { margin: 5px 0; padding: 5px; }
+        .message.user { background: #e3f2fd; }
+        .message.assistant { background: #f3e5f5; }
+        .send-button { padding: 5px 10px; }
+        .mode-button { margin: 2px; padding: 5px; }
+        .mode-button.active { background: #4caf50; color: white; }
+        .tab-button { margin: 2px; padding: 5px; }
+        .tab-button.active { background: #2196f3; color: white; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+    </style>
+</head>
+<body>
+    <h1>App.js 상세 테스트</h1>
+    
+    <!-- 실제 DOM 구조 -->
+    <div class="test-section">
+        <h2>1. 요약 영역</h2>
+        <div class="summary-text" id="summaryText">여기에 요약이 표시됩니다...</div>
+    </div>
+    
+    <div class="test-section">
+        <h2>2. 유사 티켓</h2>
+        <div id="similarTicketsContainer">유사 티켓이 여기에 표시됩니다...</div>
+    </div>
+    
+    <div class="test-section">
+        <h2>3. KB 문서</h2>
+        <div id="kbDocumentsContainer">KB 문서가 여기에 표시됩니다...</div>
+    </div>
+    
+    <div class="test-section">
+        <h2>4. 채팅</h2>
+        <div id="chatResults" class="chat-messages">채팅 메시지가 여기에 표시됩니다...</div>
+        <input type="text" id="chatInput" placeholder="메시지를 입력하세요" style="width: 70%;">
+        <button id="sendButton" class="send-button">전송</button>
+    </div>
+    
+    <div class="test-section">
+        <h2>5. 모드 버튼</h2>
+        <button class="mode-button active" data-mode="smart">스마트 모드</button>
+        <button class="mode-button" data-mode="free">자유 모드</button>
+    </div>
+    
+    <div class="test-section">
+        <h2>6. 탭 버튼</h2>
+        <button class="tab-button active" data-tab="summary">요약</button>
+        <button class="tab-button" data-tab="tickets">티켓</button>
+        <button class="tab-button" data-tab="kb">KB</button>
+        
+        <div id="summaryTab" class="tab-content active">요약 탭 내용</div>
+        <div id="ticketsTab" class="tab-content">티켓 탭 내용</div>
+        <div id="kbTab" class="tab-content">KB 탭 내용</div>
+    </div>
+    
+    <div id="loading-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); color: white; text-align: center; padding-top: 20%;">로딩중...</div>
+    
+    <div class="test-section">
+        <h2>테스트 결과</h2>
+        <div id="test-results"></div>
+        <button onclick="runTests()">테스트 실행</button>
+        <button onclick="clearResults()">결과 지우기</button>
+    </div>
+
+    <!-- 스크립트 로드 -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
+    
+    <!-- Mock FDK for testing -->
+    <script>
+        // FDK Mock - 테스트용
+        window.app = {
+            initialized: function() {
+                return Promise.resolve({
+                    data: {
+                        get: function(type) {
+                            if (type === 'ticket') {
+                                return Promise.resolve({
+                                    ticket: {
+                                        id: 'test-ticket-123',
+                                        subject: 'Test Ticket Subject'
+                                    }
+                                });
+                            }
+                        }
+                    }
+                });
+            }
+        };
+    </script>
+    
+    <script src="scripts/utils.js"></script>
+    <script src="scripts/app.js"></script>
+    
+    <script>
+        let testResults = [];
+        
+        function log(message, type = 'info') {
+            const className = type === 'success' ? 'success' : type === 'error' ? 'error' : type === 'warning' ? 'warning' : '';
+            testResults.push(`<div class="${className}">${message}</div>`);
+            console.log(`[${type.toUpperCase()}] ${message}`);
+        }
+        
+        function updateResults() {
+            document.getElementById('test-results').innerHTML = testResults.join('');
+        }
+        
+        function clearResults() {
+            testResults = [];
+            updateResults();
+        }
+        
+        async function runTests() {
+            testResults = [];
+            log('=== 테스트 시작 ===');
+            
+            // 1. 기본 객체 로드 확인
+            log('1. 기본 객체 로드 확인');
+            if (typeof window.App !== 'undefined') {
+                log('✅ App 객체 로드됨', 'success');
+            } else {
+                log('❌ App 객체 로드 실패', 'error');
+                updateResults();
+                return;
+            }
+            
+            if (typeof window.Utils !== 'undefined') {
+                log('✅ Utils 객체 로드됨', 'success');
+            } else {
+                log('❌ Utils 객체 로드 실패', 'error');
+            }
+            
+            if (typeof marked !== 'undefined') {
+                log('✅ marked 라이브러리 로드됨', 'success');
+            } else {
+                log('❌ marked 라이브러리 로드 실패', 'error');
+            }
+            
+            // 2. App 구조 확인
+            log('\\n2. App 구조 확인');
+            const requiredSections = ['config', 'state', 'api', 'ui', 'events'];
+            requiredSections.forEach(section => {
+                if (App[section]) {
+                    log(`✅ App.${section} 존재`, 'success');
+                } else {
+                    log(`❌ App.${section} 누락`, 'error');
+                }
+            });
+            
+            // 3. UI 메서드 테스트
+            log('\\n3. UI 메서드 테스트');
+            try {
+                // 요약 업데이트 테스트
+                App.ui.updateSummary('**테스트 요약입니다.** \\n\\n- 항목 1\\n- 항목 2');
+                const summaryElement = document.querySelector('.summary-text');
+                if (summaryElement.innerHTML.includes('<strong>')) {
+                    log('✅ updateSummary 메서드 정상 작동', 'success');
+                } else {
+                    log('❌ updateSummary 메서드 실패', 'error');
+                }
+                
+                // 로딩 표시/숨기기 테스트
+                App.ui.showLoading();
+                const loadingOverlay = document.getElementById('loading-overlay');
+                if (loadingOverlay.style.display === 'flex') {
+                    log('✅ showLoading 메서드 정상 작동', 'success');
+                } else {
+                    log('❌ showLoading 메서드 실패', 'error');
+                }
+                
+                setTimeout(() => {
+                    App.ui.hideLoading();
+                    if (loadingOverlay.style.display === 'none') {
+                        log('✅ hideLoading 메서드 정상 작동', 'success');
+                    } else {
+                        log('❌ hideLoading 메서드 실패', 'error');
+                    }
+                    updateResults();
+                }, 500);
+                
+                // 채팅 메시지 추가 테스트
+                const messageId = Date.now();
+                App.ui.addChatMessage('user', '테스트 메시지입니다', messageId);
+                const messageElement = document.getElementById(`msg-${messageId}`);
+                if (messageElement) {
+                    log('✅ addChatMessage 메서드 정상 작동', 'success');
+                } else {
+                    log('❌ addChatMessage 메서드 실패', 'error');
+                }
+                
+                // 유사 티켓 렌더링 테스트
+                const testTickets = [
+                    {
+                        id: '12345',
+                        subject: '테스트 티켓 제목',
+                        status: 'Open',
+                        priority: 'High',
+                        created_at: new Date().toISOString()
+                    }
+                ];
+                App.ui.renderSimilarTickets(testTickets);
+                const ticketsContainer = document.getElementById('similarTicketsContainer');
+                if (ticketsContainer.innerHTML.includes('테스트 티켓 제목')) {
+                    log('✅ renderSimilarTickets 메서드 정상 작동', 'success');
+                } else {
+                    log('❌ renderSimilarTickets 메서드 실패', 'error');
+                }
+                
+                // KB 문서 렌더링 테스트
+                const testDocs = [
+                    {
+                        id: 'doc123',
+                        title: '테스트 KB 문서',
+                        category: '일반',
+                        views: 100
+                    }
+                ];
+                App.ui.renderKBDocuments(testDocs);
+                const kbContainer = document.getElementById('kbDocumentsContainer');
+                if (kbContainer.innerHTML.includes('테스트 KB 문서')) {
+                    log('✅ renderKBDocuments 메서드 정상 작동', 'success');
+                } else {
+                    log('❌ renderKBDocuments 메서드 실패', 'error');
+                }
+                
+            } catch (e) {
+                log(`❌ UI 메서드 예외 발생: ${e.message}`, 'error');
+            }
+            
+            // 4. 이벤트 핸들러 테스트
+            log('\\n4. 이벤트 핸들러 테스트');
+            try {
+                // 모드 전환 테스트
+                App.events.handleModeSwitch('free');
+                if (App.state.currentMode === 'free') {
+                    log('✅ handleModeSwitch 메서드 정상 작동', 'success');
+                } else {
+                    log('❌ handleModeSwitch 메서드 실패', 'error');
+                }
+                
+                // 탭 전환 테스트
+                App.events.handleTabSwitch('tickets');
+                const activeTab = document.querySelector('.tab-content.active');
+                if (activeTab && activeTab.id === 'ticketsTab') {
+                    log('✅ handleTabSwitch 메서드 정상 작동', 'success');
+                } else {
+                    log('❌ handleTabSwitch 메서드 실패', 'error');
+                }
+                
+            } catch (e) {
+                log(`❌ 이벤트 핸들러 예외 발생: ${e.message}`, 'error');
+            }
+            
+            // 5. Utils 메서드 테스트
+            log('\\n5. Utils 메서드 테스트');
+            try {
+                const testDate = Utils.formatDate(new Date().toISOString());
+                if (testDate) {
+                    log('✅ Utils.formatDate 정상 작동', 'success');
+                } else {
+                    log('❌ Utils.formatDate 실패', 'error');
+                }
+                
+                const truncated = Utils.truncateText('이것은 매우 긴 텍스트입니다. 잘려야 합니다.', 10);
+                if (truncated.includes('...')) {
+                    log('✅ Utils.truncateText 정상 작동', 'success');
+                } else {
+                    log('❌ Utils.truncateText 실패', 'error');
+                }
+                
+            } catch (e) {
+                log(`❌ Utils 메서드 예외 발생: ${e.message}`, 'error');
+            }
+            
+            // 6. Init 메서드 테스트 (FDK Mock 사용)
+            log('\\n6. Init 메서드 테스트');
+            try {
+                // setupEventListeners 직접 테스트
+                App.setupEventListeners();
+                
+                // 버튼 클릭 이벤트 테스트
+                const sendButton = document.getElementById('sendButton');
+                if (sendButton && sendButton.onclick === null) {
+                    log('✅ 이벤트 리스너 설정됨', 'success');
+                } else {
+                    log('⚠️ 이벤트 리스너 상태 확인 필요', 'warning');
+                }
+                
+                // 입력창 키보드 이벤트 테스트 - 실제 이벤트 발생시켜보기
+                const chatInput = document.getElementById('chatInput');
+                if (chatInput) {
+                    let enterEventWorking = false;
+                    const originalHandleSendMessage = App.events.handleSendMessage;
+                    App.events.handleSendMessage = async function() {
+                        enterEventWorking = true;
+                        log('✅ 엔터키 이벤트 정상 작동', 'success');
+                    };
+                    
+                    // 엔터키 이벤트 시뮬레이션
+                    const enterEvent = new KeyboardEvent('keypress', { key: 'Enter' });
+                    chatInput.dispatchEvent(enterEvent);
+                    
+                    // 원래 함수 복원
+                    App.events.handleSendMessage = originalHandleSendMessage;
+                    
+                    if (!enterEventWorking) {
+                        log('❌ 엔터키 이벤트 작동 안함', 'error');
+                    }
+                }
+                
+                log('✅ setupEventListeners 메서드 정상 실행', 'success');
+                
+            } catch (e) {
+                log(`❌ Init 관련 예외 발생: ${e.message}`, 'error');
+            }
+            
+            // 7. API 구조 확인 (실제 호출은 안함)
+            log('\\n7. API 구조 확인');
+            const apiMethods = ['getHeaders', 'loadInitialData', 'sendChatQuery'];
+            apiMethods.forEach(method => {
+                if (typeof App.api[method] === 'function') {
+                    log(`✅ App.api.${method} 함수 존재`, 'success');
+                } else {
+                    log(`❌ App.api.${method} 함수 누락`, 'error');
+                }
+            });
+            
+            // getHeaders 실제 호출 테스트
+            try {
+                const headers = App.api.getHeaders();
+                if (headers && headers['Content-Type'] === 'application/json') {
+                    log('✅ getHeaders 메서드 정상 작동', 'success');
+                } else {
+                    log('❌ getHeaders 메서드 결과 이상', 'error');
+                }
+            } catch (e) {
+                log(`❌ getHeaders 메서드 예외: ${e.message}`, 'error');
+            }
+            
+            log('\\n=== 테스트 완료 ===');
+            updateResults();
+        }
+        
+        // 페이지 로드 시 자동 실행
+        document.addEventListener('DOMContentLoaded', function() {
+            setTimeout(runTests, 500);
+        });
+    </script>
+</body>
+</html>

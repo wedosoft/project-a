@@ -291,21 +291,28 @@ window.Data = {
    */
   renderDataToUI(data) {
     try {
-      console.log('🎨 UI 렌더링 시작:', data);
+      // 내부 필드들 필터링
+      const filteredData = this.filterInternalFields(data);
+      
+      console.log('🎨 UI 렌더링 시작:', {
+        summary: filteredData.summary ? '요약 데이터 있음' : '요약 데이터 없음',
+        similar_tickets: filteredData.similar_tickets ? `유사 티켓 ${filteredData.similar_tickets.length}개` : '유사 티켓 없음',
+        kb_documents: filteredData.kb_documents ? `KB 문서 ${filteredData.kb_documents.length}개` : 'KB 문서 없음'
+      });
       
       // 1. 요약 데이터 렌더링
-      if (data.summary) {
-        this.renderSummaryToUI(data.summary);
+      if (filteredData.summary) {
+        this.renderSummaryToUI(filteredData.summary);
       }
       
       // 2. 유사 티켓 렌더링
-      if (data.similar_tickets && data.similar_tickets.length > 0) {
-        this.renderSimilarTicketsToUI(data.similar_tickets);
+      if (filteredData.similar_tickets && filteredData.similar_tickets.length > 0) {
+        this.renderSimilarTicketsToUI(filteredData.similar_tickets);
       }
       
       // 3. KB 문서 (추천 솔루션) 렌더링
-      if (data.kb_documents && data.kb_documents.length > 0) {
-        this.renderKBDocumentsToUI(data.kb_documents);
+      if (filteredData.kb_documents && filteredData.kb_documents.length > 0) {
+        this.renderKBDocumentsToUI(filteredData.kb_documents);
       }
       
       // 4. 로딩 상태 해제 및 콘텐츠 표시
@@ -315,6 +322,30 @@ window.Data = {
     } catch (error) {
       console.error('❌ UI 렌더링 실패:', error);
     }
+  },
+
+  /**
+   * 내부 필드들을 필터링하여 UI 렌더링용 데이터만 반환
+   * @param {Object} data - 원본 데이터
+   * @returns {Object} 필터링된 데이터
+   */
+  filterInternalFields(data) {
+    const allowedFields = [
+      'summary',
+      'similar_tickets', 
+      'kb_documents',
+      'recommended_solutions',
+      'ticket_info'
+    ];
+    
+    const filtered = {};
+    allowedFields.forEach(field => {
+      if (data[field] !== undefined) {
+        filtered[field] = data[field];
+      }
+    });
+    
+    return filtered;
   },
 
   /**
@@ -879,167 +910,65 @@ window.Data = {
    * @param {string} agentLanguage - 에이전트 UI 언어 (선택사항)
    * @returns {Promise<Object>} 로드된 데이터 또는 null
    */
-  async loadInitialDataFromBackend(client, ticket, agentLanguage = null) {
-    try {
-      console.log('🚀 백엔드 초기 데이터 로드 시작:', ticket.id);
-      
-      // ✅ 모달에서 호출된 경우 캐시된 데이터만 사용
-      if (window.location.search.includes('usePreloadedData=true')) {
-        console.log('⚡ 모달 모드: 백엔드 호출 스킵, 캐시 데이터 사용');
-        const globalData = GlobalState.getGlobalTicketData();
-        if (globalData.summary) {
-          console.log('✅ 캐시된 데이터 발견:', globalData);
-          
-          // UI 업데이트만 실행
-          if (window.UI && window.UI.updateUIWithBackendData) {
-            window.UI.updateUIWithBackendData(globalData);
-          }
-          
-          return globalData;
-        } else {
-          console.log('⚠️ 캐시된 데이터 없음');
-          return null;
+  loadInitialDataFromBackend(client, ticket) {
+    return new Promise((resolve, reject) => {
+      try {
+        console.log('🚀 백엔드 스트리밍 데이터 로드 시작:', ticket.id);
+        GlobalState.setGlobalLoading(true);
+        GlobalState.setStreamingStatus({ is_streaming: true, last_event: null });
+
+        if (!window.API) {
+          console.error('❌ API 모듈이 로드되지 않음');
+          GlobalState.setGlobalLoading(false);
+          GlobalState.setStreamingStatus({ is_streaming: false });
+          return reject(new Error('API module not loaded'));
         }
-      }
-      
-      // 로딩 상태 설정
-      GlobalState.setGlobalLoading(true);
-      
-      // API 모듈이 있는지 확인
-      if (!window.API) {
-        console.error('❌ API 모듈이 로드되지 않음');
-        return false;
-      }
-      
-      // 에이전트 언어 기본값 설정 (API 모듈 단순화로 인해 자동 감지 제거)
-      if (!agentLanguage) {
-        agentLanguage = 'en'; // 기본값
-        console.log(`🌍 에이전트 언어 기본값 사용: ${agentLanguage}`);
-      }
-      
-      // 백엔드 /init 엔드포인트 호출 (에이전트 언어 포함)
-      const response = await API.loadInitData(client, ticket.id);
-      
-      console.log('🔍 백엔드 응답 상세 분석:', {
-        response: response,
-        type: typeof response,
-        keys: response ? Object.keys(response) : null
-      });
-      
-      // 응답 성공 여부 확인 (다양한 응답 형태 지원)
-      const isSuccess = response && (
-        response.success === true ||  // { success: true, data: ... }
-        response.status === 'success' ||  // { status: 'success', data: ... }
-        (response.data && !response.error) ||  // { data: ..., error: null }
-        (!response.error && Object.keys(response).length > 0)  // 에러가 없고 데이터가 있으면
-      );
-      
-      if (isSuccess) {
-        console.log('✅ 백엔드 초기 데이터 로드 성공');
-        
-        // ✅ 성공 시 에러 상태 클리어
-        GlobalState.setGlobalError(false, null);
-        console.log('🧹 에러 상태 클리어됨 - 데이터 로드 성공');
-        
-        // 응답 데이터 구조 정규화
-        let responseData = response.data || response;  // data 필드가 없으면 전체 응답을 데이터로 사용
-        
-        // 전역 상태에 데이터 저장
-        if (responseData) {
-          GlobalState.updateGlobalTicketData(ticket.id, 'cached_ticket_id');
-          
-          if (responseData.summary) {
-            GlobalState.updateGlobalTicketData(responseData.summary, 'summary');
-          }
-          
-          if (responseData.similar_tickets) {
-            GlobalState.updateGlobalTicketData(responseData.similar_tickets, 'similar_tickets');
-          }
-          
-          if (responseData.kb_documents) {
-            GlobalState.updateGlobalTicketData(responseData.kb_documents, 'kb_documents');
-          }
-          
-          // 캐시 유효성 갱신
-          GlobalState.updateGlobalTicketData(new Date().toISOString(), 'last_updated');
-          
-          // 🎨 UI 업데이트 호출 (강화된 버전)
+
+        const onStream = (event) => {
           try {
-            // 기존 에러 표시 제거
-            const errorDisplay = document.getElementById('error-display');
-            if (errorDisplay) {
-              errorDisplay.style.display = 'none';
-            }
-            
-            // 메인 콘텐츠 표시
-            const mainContent = document.getElementById('main-content');
-            if (mainContent) {
-              mainContent.style.display = 'block';
-            }
-            
-            // UI 업데이트 함수 호출
-            if (window.UI && window.UI.updateUIWithBackendData) {
-              window.UI.updateUIWithBackendData(responseData);
-              console.log('🎨 UI 업데이트 성공');
+            GlobalState.setStreamingStatus({ is_streaming: true, last_event: event.type });
+            if (event.type === 'done') {
+              console.log('✅ 스트리밍 완료');
+              GlobalState.setStreamingStatus({ is_streaming: false, last_event: 'done' });
+              GlobalState.setGlobalLoading(false);
+              resolve(true);
+            } else if (event.type === 'error') {
+              console.error('❌ 스트리밍 오류:', event.message);
+              GlobalState.setGlobalError(true, event.message);
+              GlobalState.setStreamingStatus({ is_streaming: false, last_event: 'error' });
+              GlobalState.setGlobalLoading(false);
+              reject(new Error(event.message));
             } else {
-              console.warn('⚠️ UI 모듈 또는 updateUIWithBackendData 함수가 없음');
+              // 데이터 유형에 따라 전역 상태 업데이트
+              if (event.summary) {
+                GlobalState.updateGlobalTicketData(event.summary, 'summary');
+              }
+              if (event.similar_tickets) {
+                GlobalState.updateGlobalTicketData(event.similar_tickets, 'similar_tickets');
+              }
+              if (event.kb_documents) {
+                GlobalState.updateGlobalTicketData(event.kb_documents, 'kb_documents');
+              }
+              // UI 점진적 업데이트
+              if (window.UI && window.UI.updateUIWithCachedData) {
+                window.UI.updateUIWithCachedData(GlobalState.getGlobalTicketData());
+              }
             }
-            
-            console.log('🎨 강제 UI 상태 업데이트 완료');
-          } catch (uiError) {
-            console.error('❌ UI 업데이트 실패:', uiError);
+          } catch (streamError) {
+            console.error('❌ onStream 콜백 내부 오류:', streamError);
           }
-          
-          console.log('📦 저장된 데이터:', {
-            ticket_id: ticket.id,
-            has_summary: !!responseData.summary,
-            similar_tickets_count: responseData.similar_tickets?.length || 0,
-            kb_documents_count: responseData.kb_documents?.length || 0
-          });
-          
-          // 🎯 즉시 UI 렌더링 호출
-          this.renderDataToUI(responseData);
-        }
-        
-        return true;
-      } else {
-        console.warn('⚠️ 백엔드 초기 데이터 로드 실패:', response);
-        
-        // 응답 구조 분석을 위한 상세 로깅
-        if (response) {
-          console.warn('  - response.success:', response.success);
-          console.warn('  - response.error:', response.error);
-          console.warn('  - response.data:', response.data);
-          console.warn('  - response keys:', Object.keys(response));
-        } else {
-          console.warn('  - 응답이 null 또는 undefined');
-        }
-        
-        // 에러 원인별 구체적인 메시지
-        let errorMessage = '알 수 없는 오류가 발생했습니다.';
-        if (!response) {
-          errorMessage = '서버 응답이 없습니다.';
-        } else if (response.error) {
-          errorMessage = response.error;
-        } else if (response.message) {
-          errorMessage = response.message;
-        }
-        
-        GlobalState.setGlobalError(true, errorMessage);
-        
-        return false;
+        };
+
+        API.loadInitData(client, ticket.id, { onStream });
+
+      } catch (error) {
+        console.error('❌ 백엔드 스트리밍 데이터 로드 오류:', error);
+        GlobalState.setGlobalError(true, '백엔드 연결에 실패했습니다.');
+        GlobalState.setGlobalLoading(false);
+        GlobalState.setStreamingStatus({ is_streaming: false });
+        reject(error);
       }
-    } catch (error) {
-      console.error('❌ 백엔드 초기 데이터 로드 오류:', error);
-      
-      // 에러 상태 설정
-      GlobalState.setGlobalError(true, '백엔드 연결에 실패했습니다.');
-      
-      return false;
-    } finally {
-      // 로딩 상태 해제
-      GlobalState.setGlobalLoading(false);
-    }
+    });
   },
 
   /**
@@ -2100,16 +2029,17 @@ Data.isAvailable = function () {
   const hasAPI = typeof window.API !== 'undefined' && window.API !== null;
   
   if (!hasAPI) {
-    console.log('[DATA] API 모듈 대기 중... (기본 기능은 사용 가능)');
+    console.warn("Data: API 모듈을 찾을 수 없습니다.");
   }
   
-  // GlobalState만 필수, API는 선택적
-  return hasGlobalState;
+  return hasGlobalState && hasAPI;
 };
 
-// 모듈 등록 (로그 없음)
+// Data 모듈 등록은 파일 끝에서 처리됨
 
-// 모듈 의존성 시스템에 등록
-if (typeof ModuleDependencyManager !== 'undefined') {
-  ModuleDependencyManager.registerModule('data', Object.keys(Data).length);
-}
+// 모듈 의존성 시스템에 등록 (API 모듈 로드 대기)
+setTimeout(() => {
+  if (typeof ModuleDependencyManager !== 'undefined') {
+    ModuleDependencyManager.registerModule('data', Object.keys(Data).length, ['globals', 'utils', 'api']);
+  }
+}, 100);

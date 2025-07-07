@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>실제 백엔드 테스트</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            margin: 20px;
+            line-height: 1.6;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            background: #f9f9f9;
+        }
+        .controls {
+            margin: 10px 0;
+        }
+        .controls input, .controls select, .controls button {
+            margin: 5px;
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        .controls button {
+            background: #007cba;
+            color: white;
+            cursor: pointer;
+        }
+        .controls button:hover {
+            background: #005a87;
+        }
+        .controls button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .output {
+            background: #fff;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            padding: 10px;
+            min-height: 100px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+        }
+        .summary-output {
+            background: #fff;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            padding: 15px;
+            min-height: 100px;
+            max-height: 400px;
+            overflow-y: auto;
+            line-height: 1.5;
+        }
+        .summary-output h1, .summary-output h2, .summary-output h3 {
+            color: #333;
+            margin-top: 20px;
+            margin-bottom: 10px;
+        }
+        .summary-output ul, .summary-output ol {
+            margin: 10px 0;
+            padding-left: 20px;
+        }
+        .summary-output strong {
+            color: #d73027;
+        }
+        .status {
+            padding: 5px 10px;
+            border-radius: 3px;
+            font-weight: bold;
+            display: inline-block;
+            margin: 2px;
+        }
+        .status.loading {
+            background: #fff3cd;
+            color: #856404;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .ticket-item, .kb-item {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+            margin: 5px 0;
+        }
+        .ticket-header {
+            font-weight: bold;
+            color: #007cba;
+        }
+        .chat-container {
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            background: white;
+        }
+        .message {
+            margin: 10px 0;
+            padding: 8px 12px;
+            border-radius: 8px;
+        }
+        .message.user {
+            background: #e3f2fd;
+            margin-left: 20px;
+        }
+        .message.assistant {
+            background: #f3e5f5;
+            margin-right: 20px;
+        }
+        .progress {
+            width: 100%;
+            height: 20px;
+            background: #f0f0f0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #4caf50, #81c784);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+    </style>
+</head>
+<body>
+    <h1>🚀 실제 백엔드 API 테스트</h1>
+    
+    <!-- 설정 섹션 -->
+    <div class="test-section">
+        <h2>⚙️ 백엔드 설정</h2>
+        <div class="controls">
+            <label>백엔드 URL:</label>
+            <input type="text" id="backendUrl" value="http://localhost:8000" style="width: 200px;">
+            
+            <label>Tenant ID:</label>
+            <input type="text" id="tenantId" value="wedosoft" style="width: 100px;">
+            
+            <label>API Key:</label>
+            <input type="text" id="apiKey" value="Ug9H1cKCZZtZ4haamBy" style="width: 150px;">
+            
+            <label>Domain:</label>
+            <input type="text" id="domain" value="wedosoft.freshdesk.com" style="width: 200px;">
+        </div>
+        
+        <div class="controls">
+            <button onclick="testConnection()">🔌 연결 테스트</button>
+            <span id="connectionStatus" class="status">대기 중</span>
+        </div>
+    </div>
+
+    <!-- Init API 테스트 -->
+    <div class="test-section">
+        <h2>🎯 Init API 테스트 (/init/{ticket_id})</h2>
+        <div class="controls">
+            <label>Ticket ID:</label>
+            <input type="text" id="ticketId" value="13056" style="width: 100px;">
+            
+            <label>스트리밍:</label>
+            <input type="checkbox" id="initStreaming" checked>
+            
+            <button onclick="testInit()" id="initBtn">🚀 Init 테스트</button>
+            <span id="initStatus" class="status">대기 중</span>
+        </div>
+        
+        <div class="progress" id="initProgress" style="display: none;">
+            <div class="progress-bar" id="initProgressBar"></div>
+        </div>
+        
+        <h3>📝 요약 (실시간 스트리밍)</h3>
+        <div id="summaryOutput" class="summary-output">요약이 여기에 실시간으로 표시됩니다...</div>
+        
+        <h3>🎫 유사 티켓</h3>
+        <div id="similarTicketsOutput">유사 티켓이 여기에 표시됩니다...</div>
+        
+        <h3>📚 KB 문서</h3>
+        <div id="kbDocumentsOutput">KB 문서가 여기에 표시됩니다...</div>
+        
+        <h3>🔍 Raw 로그</h3>
+        <div id="initLog" class="output">로그가 여기에 표시됩니다...</div>
+    </div>
+
+    <!-- Query API 테스트 -->
+    <div class="test-section">
+        <h2>💬 Query API 테스트 (/query)</h2>
+        <div class="controls">
+            <label>질문:</label>
+            <input type="text" id="queryText" placeholder="질문을 입력하세요" style="width: 300px;" value="이 티켓의 문제점을 요약해주세요">
+            
+            <label>모드:</label>
+            <select id="agentMode">
+                <option value="true">상담원 모드 (agent_mode=true)</option>
+                <option value="false">일반 모드 (agent_mode=false)</option>
+            </select>
+            
+            <label>스트리밍:</label>
+            <input type="checkbox" id="queryStreaming" checked>
+            
+            <button onclick="testQuery()" id="queryBtn">💬 Query 테스트</button>
+            <span id="queryStatus" class="status">대기 중</span>
+        </div>
+        
+        <h3>💬 채팅 대화</h3>
+        <div id="chatOutput" class="chat-container">채팅 응답이 여기에 실시간으로 표시됩니다...</div>
+        
+        <h3>🔍 Raw 로그</h3>
+        <div id="queryLog" class="output">로그가 여기에 표시됩니다...</div>
+    </div>
+
+    <!-- 마크다운 파서 -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
+    
+    <script>
+        // 전역 변수
+        let currentConfig = {};
+        
+        // 설정 업데이트
+        function updateConfig() {
+            currentConfig = {
+                baseURL: document.getElementById('backendUrl').value,
+                tenantId: document.getElementById('tenantId').value,
+                apiKey: document.getElementById('apiKey').value,
+                domain: document.getElementById('domain').value
+            };
+        }
+        
+        // 헤더 생성
+        function getHeaders() {
+            return {
+                'Content-Type': 'application/json',
+                'X-Tenant-ID': currentConfig.tenantId,
+                'X-Platform': 'freshdesk',
+                'X-Domain': currentConfig.domain,
+                'X-API-Key': currentConfig.apiKey
+            };
+        }
+        
+        // 로그 추가 함수
+        function addLog(elementId, message, type = 'info') {
+            const logElement = document.getElementById(elementId);
+            const timestamp = new Date().toLocaleTimeString();
+            const logLine = `[${timestamp}] ${type.toUpperCase()}: ${message}\\n`;
+            logElement.textContent += logLine;
+            logElement.scrollTop = logElement.scrollHeight;
+        }
+        
+        // 상태 업데이트
+        function updateStatus(elementId, status, type = 'loading') {
+            const statusElement = document.getElementById(elementId);
+            statusElement.textContent = status;
+            statusElement.className = `status ${type}`;
+        }
+        
+        // 연결 테스트
+        async function testConnection() {
+            updateConfig();
+            updateStatus('connectionStatus', '연결 중...', 'loading');
+            
+            try {
+                const response = await fetch(`${currentConfig.baseURL}/health`, {
+                    method: 'GET',
+                    headers: getHeaders()
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    updateStatus('connectionStatus', `연결 성공 (${response.status})`, 'success');
+                    console.log('Health check response:', data);
+                } else {
+                    updateStatus('connectionStatus', `연결 실패 (${response.status})`, 'error');
+                }
+            } catch (error) {
+                updateStatus('connectionStatus', `연결 오류: ${error.message}`, 'error');
+                console.error('Connection test failed:', error);
+            }
+        }
+        
+        // Init API 테스트
+        async function testInit() {
+            updateConfig();
+            const ticketId = document.getElementById('ticketId').value;
+            const streaming = document.getElementById('initStreaming').checked;
+            
+            if (!ticketId) {
+                alert('Ticket ID를 입력하세요');
+                return;
+            }
+            
+            // UI 초기화
+            document.getElementById('summaryOutput').innerHTML = '';
+            document.getElementById('similarTicketsOutput').innerHTML = '';
+            document.getElementById('kbDocumentsOutput').innerHTML = '';
+            document.getElementById('initLog').textContent = '';
+            
+            updateStatus('initStatus', '초기화 중...', 'loading');
+            document.getElementById('initBtn').disabled = true;
+            
+            if (streaming) {
+                document.getElementById('initProgress').style.display = 'block';
+            }
+            
+            addLog('initLog', `Init API 호출 시작: ${currentConfig.baseURL}/init/${ticketId}?stream=${streaming}`);
+            
+            try {
+                const url = `${currentConfig.baseURL}/init/${ticketId}?stream=${streaming}`;
+                const response = await fetch(url, {
+                    method: 'GET',
+                    headers: getHeaders()
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                if (streaming) {
+                    await handleInitStreaming(response);
+                } else {
+                    const data = await response.json();
+                    handleInitData(data);
+                    updateStatus('initStatus', '완료', 'success');
+                }
+                
+            } catch (error) {
+                addLog('initLog', `오류 발생: ${error.message}`, 'error');
+                updateStatus('initStatus', `오류: ${error.message}`, 'error');
+                console.error('Init test failed:', error);
+            } finally {
+                document.getElementById('initBtn').disabled = false;
+                document.getElementById('initProgress').style.display = 'none';
+            }
+        }
+        
+        // Init 스트리밍 처리
+        async function handleInitStreaming(response) {
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let progress = 0;
+            
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\\n');
+                buffer = lines.pop();
+                
+                for (const line of lines) {
+                    if (line.trim() === '') continue; // 빈 줄 무시
+                    
+                    if (line.startsWith('data: ')) {
+                        const dataStr = line.slice(6).trim();
+                        addLog('initLog', `수신: ${dataStr}`);
+                        
+                        if (dataStr === '[DONE]') {
+                            updateStatus('initStatus', '완료', 'success');
+                            document.getElementById('initProgressBar').style.width = '100%';
+                            return;
+                        }
+                        
+                        try {
+                            const data = JSON.parse(dataStr);
+                            handleInitStreamData(data);
+                            
+                        } catch (parseError) {
+                            addLog('initLog', `JSON 파싱 실패: ${dataStr}`, 'error');
+                            console.error('Parse error:', parseError);
+                            
+                            // 멀티라인 JSON인 경우 다시 시도
+                            try {
+                                // data: 로 시작하는 여러 줄이 한번에 올 수 있음
+                                const jsonLines = dataStr.split('\\ndata: ');
+                                for (let jsonLine of jsonLines) {
+                                    if (jsonLine.trim()) {
+                                        const cleanLine = jsonLine.replace(/^data: /, '').trim();
+                                        if (cleanLine) {
+                                            const multiData = JSON.parse(cleanLine);
+                                            handleInitStreamData(multiData);
+                                        }
+                                    }
+                                }
+                            } catch (multiParseError) {
+                                addLog('initLog', `멀티라인 파싱도 실패: ${dataStr}`, 'error');
+                            }
+                        }
+                    } else if (line.trim() !== '') {
+                        // data: 없이 바로 JSON이 오는 경우
+                        try {
+                            const data = JSON.parse(line.trim());
+                            handleInitStreamData(data);
+                            addLog('initLog', `직접 JSON 파싱 성공: ${line.trim()}`);
+                        } catch (directParseError) {
+                            addLog('initLog', `알 수 없는 형식: ${line}`, 'warn');
+                        }
+                    }
+                }
+            }
+            
+            updateStatus('initStatus', '완료', 'success');
+            document.getElementById('initProgressBar').style.width = '100%';
+        }
+        
+        // Init 데이터 처리
+        function handleInitStreamData(data) {
+            switch(data.type) {
+                case 'summary':
+                    const summaryElement = document.getElementById('summaryOutput');
+                    // 요약은 전체 텍스트로 받아서 바로 마크다운 파싱
+                    summaryElement.innerHTML = marked.parse(data.content || '');
+                    addLog('initLog', `요약 수신 완료: ${data.content?.length || 0}자`);
+                    break;
+                    
+                case 'similar_tickets':
+                    renderSimilarTickets(data.content || []);
+                    addLog('initLog', `유사 티켓 ${data.content?.length || 0}개 수신`);
+                    break;
+                    
+                case 'kb_documents':
+                    renderKBDocuments(data.content || []);
+                    addLog('initLog', `KB 문서 ${data.content?.length || 0}개 수신`);
+                    break;
+                    
+                case 'progress':
+                    // 진행률 업데이트
+                    const progress = data.progress || 0;
+                    document.getElementById('initProgressBar').style.width = `${progress}%`;
+                    updateStatus('initStatus', `${data.stage || 'processing'}: ${data.message || ''}`, 'loading');
+                    addLog('initLog', `진행률 ${progress}%: ${data.message || ''}`);
+                    break;
+                    
+                case 'complete':
+                    addLog('initLog', '초기화 완료');
+                    updateStatus('initStatus', '완료', 'success');
+                    document.getElementById('initProgressBar').style.width = '100%';
+                    break;
+                    
+                case 'error':
+                    addLog('initLog', `에러: ${data.message || '알 수 없는 오류'}`, 'error');
+                    updateStatus('initStatus', `에러: ${data.message || ''}`, 'error');
+                    break;
+                    
+                default:
+                    addLog('initLog', `알 수 없는 타입: ${data.type} - ${JSON.stringify(data)}`);
+            }
+        }
+        
+        // Init 일반 데이터 처리 (비스트리밍)
+        function handleInitData(data) {
+            if (data.summary) {
+                document.getElementById('summaryOutput').innerHTML = marked.parse(data.summary);
+            }
+            if (data.similar_tickets) {
+                renderSimilarTickets(data.similar_tickets);
+            }
+            if (data.kb_documents) {
+                renderKBDocuments(data.kb_documents);
+            }
+            addLog('initLog', '일반 모드 응답 처리 완료');
+        }
+        
+        // 유사 티켓 렌더링
+        function renderSimilarTickets(tickets) {
+            const container = document.getElementById('similarTicketsOutput');
+            if (!tickets || tickets.length === 0) {
+                container.innerHTML = '<p>유사 티켓이 없습니다.</p>';
+                return;
+            }
+            
+            container.innerHTML = tickets.map(ticket => `
+                <div class="ticket-item">
+                    <div class="ticket-header">#${ticket.id}: ${ticket.subject || ticket.title || 'N/A'}</div>
+                    <div>상태: ${ticket.status || 'N/A'} | 우선순위: ${ticket.priority || 'N/A'}</div>
+                    <div>생성일: ${ticket.created_at ? new Date(ticket.created_at).toLocaleDateString() : 'N/A'}</div>
+                </div>
+            `).join('');
+        }
+        
+        // KB 문서 렌더링
+        function renderKBDocuments(documents) {
+            const container = document.getElementById('kbDocumentsOutput');
+            if (!documents || documents.length === 0) {
+                container.innerHTML = '<p>KB 문서가 없습니다.</p>';
+                return;
+            }
+            
+            container.innerHTML = documents.map(doc => `
+                <div class="kb-item">
+                    <div class="ticket-header">📚 ${doc.title || 'N/A'}</div>
+                    <div>카테고리: ${doc.category || 'N/A'} | 조회수: ${doc.views || 0}</div>
+                    <div>점수: ${doc.score || 'N/A'}</div>
+                </div>
+            `).join('');
+        }
+        
+        // Query API 테스트
+        async function testQuery() {
+            updateConfig();
+            const query = document.getElementById('queryText').value;
+            const agentMode = document.getElementById('agentMode').value === 'true';
+            const streaming = document.getElementById('queryStreaming').checked;
+            const ticketId = document.getElementById('ticketId').value;
+            
+            if (!query) {
+                alert('질문을 입력하세요');
+                return;
+            }
+            
+            // UI 초기화
+            document.getElementById('queryLog').textContent = '';
+            
+            updateStatus('queryStatus', '질문 처리 중...', 'loading');
+            document.getElementById('queryBtn').disabled = true;
+            
+            // 사용자 메시지 추가
+            addChatMessage('user', query);
+            
+            addLog('queryLog', `Query API 호출: agent_mode=${agentMode}, stream=${streaming}`);
+            
+            try {
+                const requestBody = {
+                    query: query,
+                    agent_mode: agentMode,
+                    stream_response: streaming,
+                    ticket_id: ticketId
+                };
+                
+                const response = await fetch(`${currentConfig.baseURL}/query`, {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify(requestBody)
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                if (streaming) {
+                    await handleQueryStreaming(response);
+                } else {
+                    const data = await response.json();
+                    addChatMessage('assistant', data.response || '응답 없음');
+                    updateStatus('queryStatus', '완료', 'success');
+                }
+                
+            } catch (error) {
+                addLog('queryLog', `오류 발생: ${error.message}`, 'error');
+                updateStatus('queryStatus', `오류: ${error.message}`, 'error');
+                addChatMessage('assistant', `❌ 오류: ${error.message}`, 'error');
+                console.error('Query test failed:', error);
+            } finally {
+                document.getElementById('queryBtn').disabled = false;
+            }
+        }
+        
+        // Query 스트리밍 처리
+        async function handleQueryStreaming(response) {
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let messageId = Date.now();
+            let currentMessage = '';
+            
+            // 빈 어시스턴트 메시지 생성
+            addChatMessage('assistant', '', messageId);
+            
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\\n');
+                buffer = lines.pop();
+                
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        const dataStr = line.slice(6).trim();
+                        addLog('queryLog', `수신: ${dataStr}`);
+                        
+                        if (dataStr === '[DONE]') {
+                            updateStatus('queryStatus', '완료', 'success');
+                            return;
+                        }
+                        
+                        try {
+                            const data = JSON.parse(dataStr);
+                            if (data.type === 'content' && data.content) {
+                                currentMessage += data.content;
+                                updateChatMessage(messageId, currentMessage);
+                            }
+                        } catch (parseError) {
+                            addLog('queryLog', `JSON 파싱 실패: ${dataStr}`, 'warn');
+                        }
+                    }
+                }
+            }
+            
+            updateStatus('queryStatus', '완료', 'success');
+        }
+        
+        // 채팅 메시지 추가
+        function addChatMessage(role, content, messageId = null) {
+            const container = document.getElementById('chatOutput');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${role}`;
+            
+            if (messageId) {
+                messageDiv.id = `msg-${messageId}`;
+            }
+            
+            if (marked && content) {
+                messageDiv.innerHTML = marked.parse(content);
+            } else {
+                messageDiv.textContent = content;
+            }
+            
+            container.appendChild(messageDiv);
+            container.scrollTop = container.scrollHeight;
+        }
+        
+        // 채팅 메시지 업데이트 (스트리밍용)
+        function updateChatMessage(messageId, content) {
+            const messageElement = document.getElementById(`msg-${messageId}`);
+            if (messageElement && marked) {
+                messageElement.innerHTML = marked.parse(content);
+                document.getElementById('chatOutput').scrollTop = document.getElementById('chatOutput').scrollHeight;
+            }
+        }
+        
+        // 엔터키로 질문 전송
+        document.getElementById('queryText').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                testQuery();
+            }
+        });
+        
+        // 페이지 로드 시 자동 연결 테스트
+        window.addEventListener('load', function() {
+            setTimeout(testConnection, 500);
+        });
+    </script>
+</body>
+</html>

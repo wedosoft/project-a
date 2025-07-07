@@ -938,5 +938,7 @@ window.Events = {
 
 // === 모듈 등록 (로그 없음) ===
 if (typeof ModuleDependencyManager !== 'undefined') {
-  ModuleDependencyManager.registerModule('events', Object.keys(window.Events).length);
+  setTimeout(() => {
+    ModuleDependencyManager.registerModule('events', Object.keys(window.Events).length, ['globals', 'ui', 'data']);
+  }, 200);
 }

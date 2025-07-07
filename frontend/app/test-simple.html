@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>App.js 테스트</title>
+</head>
+<body>
+    <h1>App.js 로드 테스트</h1>
+    
+    <!-- 테스트용 DOM 요소들 -->
+    <div id="summaryText" class="summary-text">요약 텍스트 영역</div>
+    <div id="similarTicketsContainer">유사 티켓 컨테이너</div>
+    <div id="kbDocumentsContainer">KB 문서 컨테이너</div>
+    <div id="chatResults" class="chat-messages">채팅 메시지 영역</div>
+    
+    <input type="text" id="chatInput" placeholder="메시지 입력">
+    <button id="sendButton" class="send-button">전송</button>
+    
+    <div id="loading-overlay" style="display: none;">로딩중...</div>
+    
+    <div id="test-results"></div>
+
+    <!-- 마크다운 파서 -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
+    
+    <!-- 우리의 스크립트들 -->
+    <script src="scripts/utils.js"></script>
+    <script src="scripts/app.js"></script>
+    
+    <script>
+        // 테스트 실행
+        document.addEventListener('DOMContentLoaded', function() {
+            const results = document.getElementById('test-results');
+            let testResults = [];
+            
+            // 1. App 객체 존재 확인
+            if (typeof window.App !== 'undefined') {
+                testResults.push('✅ App 객체가 로드되었습니다');
+            } else {
+                testResults.push('❌ App 객체가 로드되지 않았습니다');
+            }
+            
+            // 2. Utils 객체 존재 확인
+            if (typeof window.Utils !== 'undefined') {
+                testResults.push('✅ Utils 객체가 로드되었습니다');
+            } else {
+                testResults.push('❌ Utils 객체가 로드되지 않았습니다');
+            }
+            
+            // 3. App의 주요 메서드들 확인
+            if (window.App) {
+                const requiredMethods = ['api', 'ui', 'events', 'init', 'setupEventListeners'];
+                requiredMethods.forEach(method => {
+                    if (typeof window.App[method] !== 'undefined') {
+                        testResults.push(`✅ App.${method} 존재`);
+                    } else {
+                        testResults.push(`❌ App.${method} 누락`);
+                    }
+                });
+            }
+            
+            // 4. DOM 요소들 선택 테스트
+            const requiredElements = [
+                'summaryText',
+                'similarTicketsContainer', 
+                'kbDocumentsContainer',
+                'chatResults',
+                'chatInput',
+                'sendButton',
+                'loading-overlay'
+            ];
+            
+            requiredElements.forEach(id => {
+                const element = document.getElementById(id);
+                if (element) {
+                    testResults.push(`✅ DOM 요소 #${id} 존재`);
+                } else {
+                    testResults.push(`❌ DOM 요소 #${id} 누락`);
+                }
+            });
+            
+            // 5. 마크다운 파서 확인
+            if (typeof marked !== 'undefined') {
+                testResults.push('✅ marked 라이브러리 로드됨');
+                try {
+                    const testMarkdown = marked.parse('**테스트**');
+                    if (testMarkdown.includes('<strong>')) {
+                        testResults.push('✅ marked 파싱 정상 작동');
+                    }
+                } catch (e) {
+                    testResults.push('❌ marked 파싱 오류: ' + e.message);
+                }
+            } else {
+                testResults.push('❌ marked 라이브러리 누락');
+            }
+            
+            // 6. UI 메서드 테스트
+            if (window.App && window.App.ui) {
+                try {
+                    // 요약 업데이트 테스트
+                    window.App.ui.updateSummary('**테스트 요약**');
+                    const summaryElement = document.querySelector('.summary-text');
+                    if (summaryElement && summaryElement.innerHTML.includes('<strong>')) {
+                        testResults.push('✅ updateSummary 메서드 정상 작동');
+                    } else {
+                        testResults.push('❌ updateSummary 메서드 오류');
+                    }
+                } catch (e) {
+                    testResults.push('❌ updateSummary 메서드 예외: ' + e.message);
+                }
+            }
+            
+            // 결과 출력
+            results.innerHTML = '<h2>테스트 결과:</h2><ul>' + 
+                testResults.map(result => `<li>${result}</li>`).join('') + 
+                '</ul>';
+                
+            // 콘솔에도 출력
+            console.log('=== App.js 테스트 결과 ===');
+            testResults.forEach(result => console.log(result));
+        });
+    </script>
+</body>
+</html>

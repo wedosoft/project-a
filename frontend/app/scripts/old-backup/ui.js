@@ -1578,7 +1578,9 @@ Object.assign(UI, {
 
 // 모듈 등록 (로그 없음)
 
-// 모듈 의존성 시스템에 등록 (data 의존성 명시)
-if (typeof ModuleDependencyManager !== 'undefined') {
-  ModuleDependencyManager.registerModule('ui', Object.keys(UI).length, ['data']);
-}
+// 모듈 의존성 시스템에 등록 (data 의존성 명시, 지연 등록)
+setTimeout(() => {
+  if (typeof ModuleDependencyManager !== 'undefined') {
+    ModuleDependencyManager.registerModule('ui', Object.keys(UI).length, ['globals', 'utils', 'data']);
+  }
+}, 150);

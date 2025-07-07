@@ -11,7 +11,7 @@ if (typeof window.API === 'undefined') {
 const API = {
   // 백엔드 URL
   get baseURL() {
-    return 'https://4837-58-122-170-2.ngrok-free.app';
+    return 'http://localhost:8000';
   },
 
   // 초기화 상태
@@ -35,46 +35,83 @@ const API = {
       'X-Tenant-ID': 'wedosoft',
       'X-Platform': 'freshdesk',
       'X-Domain': 'wedosoft.freshdesk.com',
-      'X-API-Key': 'Ug9H1cKCZZtZ4haamBy',
-      'ngrok-skip-browser-warning': 'true'
+      'X-API-Key': 'Ug9H1cKCZZtZ4haamBy'
     };
   },
 
   /**
-   * 초기 데이터 로드
+   * 초기 데이터 스트리밍 로드
    */
-  async loadInitData(clientOrTicketId, ticketIdOrUndefined) {
+  async loadInitData(clientOrTicketId, ticketIdOrUndefined, options = {}) {
     // 매개변수 유연성 제공
     let ticketId;
     
     if (typeof clientOrTicketId === 'string' || typeof clientOrTicketId === 'number') {
-      // client 없이 호출된 경우: loadInitData(ticketId)
       ticketId = clientOrTicketId;
     } else {
-      // client와 함께 호출된 경우: loadInitData(client, ticketId)
       ticketId = ticketIdOrUndefined;
     }
+
+    const { onStream } = options;
+    if (!onStream) {
+      // 스트리밍 콜백이 없으면 기존 방식(비스트리밍)으로 대체하거나 에러 처리
+      console.error('❌ onStream 콜백이 제공되지 않아 loadInitData를 중단합니다.');
+      return;
+    }
+
     try {
-      console.log(`🚀 초기 데이터 로딩: ${ticketId}`);
+      console.log(`🚀 스트리밍 초기 데이터 로딩: ${ticketId}`);
       
       const response = await fetch(`${this.baseURL}/init/${ticketId}`, {
         method: 'GET',
-        headers: this.getDefaultHeaders()
+        headers: {
+          ...this.getDefaultHeaders(),
+          'Accept': 'text/event-stream'
+        }
       });
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
-      const data = await response.json();
-      
-      return {
-        ok: true,
-        status: response.status,
-        data: data
-      };
+      // 스트리밍 응답 처리
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            if (onStream) onStream({ type: 'done' });
+            break;
+          }
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const dataStr = line.slice(5).trim();
+              if (dataStr === '[DONE]') {
+                if (onStream) onStream({ type: 'done' });
+              } else {
+                this.processStreamData(dataStr, onStream);
+              }
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+
+      return { ok: true, streaming: true, status: response.status };
     } catch (error) {
-      console.error('❌ 초기 데이터 로딩 실패:', error);
+      console.error('❌ 초기 데이터 스트리밍 실패:', error);
+      if (onStream) {
+        onStream({ type: 'error', message: error.message });
+      }
       throw error;
     }
   },
@@ -288,7 +325,7 @@ const API = {
 
       // 성공적으로 파싱된 JSON 데이터 처리
       if (onStream && eventData) {
-        console.log('✅ JSON 파싱 성공:', eventData);
+        console.log('✅ JSON 파싱 성공:', eventData.type || 'Unknown type');
         onStream(eventData);
       }
     } catch (error) {
@@ -398,14 +435,12 @@ try {
 console.log('🎯 간소화된 API 모듈 로드 완료');
 
 // 모듈 의존성 시스템에 등록 (안전한 방식)
-setTimeout(() => {
-  if (typeof ModuleDependencyManager !== 'undefined') {
-    ModuleDependencyManager.registerModule('api', Object.keys(API).length, ['globals', 'utils']);
-    console.log('📦 [API] 모듈 의존성 등록 완료');
-  } else {
-    console.warn('⚠️ ModuleDependencyManager가 로드되지 않음 - API 모듈 등록 건너뛰기');
-  }
-}, 500);
+if (typeof ModuleDependencyManager !== 'undefined') {
+  ModuleDependencyManager.registerModule('api', Object.keys(API).length, ['globals', 'utils']);
+  console.log('📦 [API] 모듈 의존성 등록 완료');
+} else {
+  console.warn('⚠️ ModuleDependencyManager가 로드되지 않음 - API 모듈 등록 건너뛰기');
+}
 
 // API 가용성 확인 함수 추가
 window.API.checkAvailability = function() {
