@@ -7,7 +7,7 @@ deployment_environments:
   local:
     default_provider: "gemini"
     default_chat_model: "gemini-1.5-flash"
-    default_embedding_model: "text-embedding-3-small"
+    default_embedding_model: "text-embedding-3-large"
     cost_limit: "low"
     
     # 환경별 모델 오버라이드
@@ -45,7 +45,7 @@ deployment_environments:
   aws_dev:
     default_provider: "anthropic"
     default_chat_model: "claude-3-5-haiku-20241022"
-    default_embedding_model: "text-embedding-3-small"
+    default_embedding_model: "text-embedding-3-large"
     cost_limit: "medium"
     
     model_overrides:
@@ -79,7 +79,7 @@ deployment_environments:
   aws_prod:
     default_provider: "anthropic"
     default_chat_model: "claude-3-sonnet-20240229"
-    default_embedding_model: "text-embedding-3-small"
+    default_embedding_model: "text-embedding-3-large"
     cost_limit: "high"
     
     model_overrides:
@@ -122,7 +122,7 @@ deployment_environments:
   kubernetes:
     default_provider: "anthropic"
     default_chat_model: "claude-3-5-haiku-20241022"
-    default_embedding_model: "text-embedding-3-small"
+    default_embedding_model: "text-embedding-3-large"
     cost_limit: "medium"
     
     model_overrides:
@@ -151,7 +151,7 @@ deployment_environments:
   azure:
     default_provider: "openai"
     default_chat_model: "gpt-4-turbo"
-    default_embedding_model: "text-embedding-3-small"
+    default_embedding_model: "text-embedding-3-large"
     cost_limit: "medium"
     
     model_overrides:
@@ -186,7 +186,7 @@ test_environments:
   unit_test:
     default_provider: "openai"
     default_chat_model: "gpt-3.5-turbo"
-    default_embedding_model: "text-embedding-3-small"
+    default_embedding_model: "text-embedding-3-large"
     cost_limit: "very_low"
     
     feature_flags:
@@ -208,7 +208,7 @@ test_environments:
   integration_test:
     default_provider: "gemini"
     default_chat_model: "gemini-1.5-flash"
-    default_embedding_model: "text-embedding-3-small"
+    default_embedding_model: "text-embedding-3-large"
     cost_limit: "low"
     
     feature_flags:
@@ -230,7 +230,7 @@ test_environments:
   load_test:
     default_provider: "anthropic"
     default_chat_model: "claude-3-5-haiku-20241022"
-    default_embedding_model: "text-embedding-3-small"
+    default_embedding_model: "text-embedding-3-large"
     cost_limit: "medium"
     
     feature_flags:

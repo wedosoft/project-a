@@ -316,11 +316,19 @@ window.Events = {
 
   // 유사 티켓 이벤트 설정 함수
   setupSimilarTicketsEvents(client) {
-    // 새로고침 버튼 - 공통 함수 사용
+    // 새로고침 버튼 - 안전한 API 접근
     this.setupRefreshButton(
       'refresh-similar-tickets',
       'similar_tickets',
-      API.loadSimilarTicketsFromBackend,
+      (client) => {
+        // 안전한 API 호출
+        if (window.API && typeof window.API.loadSimilarTicketsFromBackend === 'function') {
+          return window.API.loadSimilarTicketsFromBackend(client);
+        } else {
+          console.warn('⚠️ API.loadSimilarTicketsFromBackend 함수를 찾을 수 없음');
+          return Promise.resolve([]);
+        }
+      },
       client
     );
 
@@ -506,8 +514,13 @@ window.Events = {
           '일반적인 질문입니다.'
       };
 
+      // API 모듈 준비 확인
+      if (!window.API || !window.API.sendChatQuery) {
+        throw new Error('API 모듈이 준비되지 않았습니다');
+      }
+      
       // 새로운 sendChatQuery API 사용
-      const response = await API.sendChatQuery(client, queryData, {
+      const response = await window.API.sendChatQuery(client, queryData, {
         onStream: (eventData) => {
           this.handleStreamingResponse(eventData, resultsElement, loadingMessage);
         },

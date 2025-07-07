@@ -117,7 +117,7 @@ class OpenAIProvider(BaseLLMProvider):
         """임베딩 생성"""
         try:
             response = await self.client.embeddings.create(
-                model=model or "text-embedding-3-small",
+                model=model or "text-embedding-3-large",
                 input=texts
             )
             

@@ -85,7 +85,7 @@ class Settings(BaseSettings):
     # 애플리케이션 설정 (멀티테넌트 환경 고려)
     TENANT_ID: Optional[str] = Field(None, description="기본 테넌트 ID (개발/테스트용, 운영환경에서는 헤더 사용)")
     PROCESS_ATTACHMENTS: bool = Field(True, description="첨부 파일 처리 여부")
-    EMBEDDING_MODEL: str = Field("text-embedding-3-small", description="임베딩 모델 이름")
+    EMBEDDING_MODEL: str = Field("text-embedding-3-large", description="임베딩 모델 이름")
     LOG_LEVEL: str = Field("INFO", description="로깅 레벨")
     MAX_TOKENS: int = Field(4096, description="LLM 최대 토큰 수")
     

@@ -24,49 +24,6 @@
 
 // Data 모듈 정의 - 모든 데이터 관련 함수를 하나의 객체로 관리
 window.Data = {
-  /**
-   * 모의 추천 솔루션 생성
-   *
-   * 개발 및 테스트 목적으로 모의 추천 솔루션 데이터를 생성합니다.
-   * 백엔드 연결이 없거나 테스트 환경에서 사용됩니다.
-   *
-   * @returns {Array<Object>} 모의 솔루션 배열
-   *
-   * @example
-   * const mockSolutions = Data.generateMockSolutions();
-   * console.log(mockSolutions.length); // 3
-   */
-  generateMockSolutions() {
-    return [
-      {
-        id: 'mock_1',
-        title: '일반적인 문제 해결 방법',
-        content: '이 문제는 보통 다음과 같이 해결할 수 있습니다...',
-        category: '일반',
-        relevance_score: 0.8,
-        source: '지식베이스',
-        type: 'solution',
-      },
-      {
-        id: 'mock_2',
-        title: 'FAQ 답변',
-        content: '자주 묻는 질문에 대한 답변입니다...',
-        category: 'FAQ',
-        relevance_score: 0.7,
-        source: 'FAQ',
-        type: 'solution',
-      },
-      {
-        id: 'mock_3',
-        title: '단계별 가이드',
-        content: '문제 해결을 위한 단계별 가이드입니다...',
-        category: '가이드',
-        relevance_score: 0.6,
-        source: '사용자 매뉴얼',
-        type: 'solution',
-      },
-    ];
-  },
 
   /**
    * 티켓 상세 정보 로드 및 UI 업데이트
@@ -154,20 +111,14 @@ window.Data = {
       }
 
       // 캐시된 데이터가 없거나 다른 티켓인 경우에만 API 호출
-      console.log('⚠️ 추천 솔루션이 캐시에 없음 - /init 엔드포인트에서 이미 받았어야 하는 데이터');
-
-      // /init 엔드포인트에서 이미 모든 데이터를 받았어야 하므로,
-      // 별도 API 호출 대신 모의 데이터 표시
-      console.log('🔄 모의 데이터로 폴백');
-      this.displaySuggestedSolutions(this.generateMockSolutions());
-
-      // 캐시 업데이트 (모의 데이터로)
-      GlobalState.updateGlobalTicketData(this.generateMockSolutions(), 'recommended_solutions');
-      GlobalState.updateGlobalTicketData(ticket.id, 'cached_ticket_id');
+      console.log('⚠️ 추천 솔루션이 캐시에 없음 - 백엔드에서 데이터를 받지 못했습니다');
+      
+      // UI에 데이터 없음 상태 표시
+      this.showNoDataMessage('추천 솔루션', '백엔드에서 데이터를 가져오지 못했습니다. 새로고침을 시도해주세요.');
     } catch (error) {
       console.error('❌ 추천 솔루션 로드 오류:', error);
-      // 폴백: 모의 데이터 표시
-      this.displaySuggestedSolutions(this.generateMockSolutions());
+      // 에러 메시지 표시 (더이상 모의 데이터 사용하지 않음)
+      this.showNoDataMessage('추천 솔루션', '데이터 로드 중 오류가 발생했습니다: ' + error.message);
     }
   },
 
@@ -269,10 +220,16 @@ window.Data = {
         return false;
       }
       
-      // API 모듈 확인 - 없으면 즉시 실패
-      if (!window.API) {
-        console.error('❌ API 모듈이 로드되지 않음 - 사용자가 새로고침 필요');
-        return false;
+      // API 모듈 안전 확인
+      if (!window.SAFE_MODULE_ACCESS.isAPIReady()) {
+        console.error('❌ API 모듈이 아직 준비되지 않음 - 모듈 로드 대기');
+        
+        // 최대 5초 대기
+        const ready = await window.SAFE_MODULE_ACCESS.waitForModules(5000);
+        if (!ready) {
+          console.error('❌ API 모듈 로드 타임아웃 - 사용자가 새로고침 필요');
+          return false;
+        }
       }
 
       // 🎯 단순화된 백엔드 호출 - 복잡한 로직 제거
@@ -301,6 +258,14 @@ window.Data = {
         
         if (result) {
           console.log('✅ 백엔드 초기화 성공 완료');
+          
+          // 🎯 데이터 로드 성공 시 자동으로 UI 렌더링 호출
+          const globalData = window.GlobalState.getGlobalTicketData();
+          if (globalData && (globalData.summary || globalData.similar_tickets || globalData.kb_documents)) {
+            console.log('🎨 백엔드 데이터 로드 완료 → 자동 UI 렌더링 시작');
+            this.renderDataToUI(globalData);
+          }
+          
           return true;
         } else {
           console.error('❌ 백엔드 초기화 실패 - 사용자가 페이지 새로고침 필요');
@@ -318,6 +283,203 @@ window.Data = {
       this.showUserRefreshMessage();
       return false;
     }
+  },
+
+  /**
+   * 🎨 백엔드 데이터를 UI에 렌더링하는 핵심 함수
+   * @param {Object} data - 백엔드에서 받은 데이터
+   */
+  renderDataToUI(data) {
+    try {
+      console.log('🎨 UI 렌더링 시작:', data);
+      
+      // 1. 요약 데이터 렌더링
+      if (data.summary) {
+        this.renderSummaryToUI(data.summary);
+      }
+      
+      // 2. 유사 티켓 렌더링
+      if (data.similar_tickets && data.similar_tickets.length > 0) {
+        this.renderSimilarTicketsToUI(data.similar_tickets);
+      }
+      
+      // 3. KB 문서 (추천 솔루션) 렌더링
+      if (data.kb_documents && data.kb_documents.length > 0) {
+        this.renderKBDocumentsToUI(data.kb_documents);
+      }
+      
+      // 4. 로딩 상태 해제 및 콘텐츠 표시
+      this.hideLoadingAndShowContent();
+      
+      console.log('✅ UI 렌더링 완료');
+    } catch (error) {
+      console.error('❌ UI 렌더링 실패:', error);
+    }
+  },
+
+  /**
+   * 📝 요약 데이터를 UI에 렌더링
+   * @param {string} summary - 요약 텍스트
+   */
+  renderSummaryToUI(summary) {
+    const summaryElement = document.querySelector('.summary-text');
+    if (summaryElement) {
+      // 마크다운을 HTML로 변환 (간단한 변환)
+      const htmlSummary = this.convertMarkdownToHTML(summary);
+      summaryElement.innerHTML = htmlSummary;
+      
+      // 요약 섹션 표시
+      const summarySection = document.getElementById('summarySection');
+      if (summarySection) {
+        summarySection.classList.remove('collapsed');
+        summarySection.classList.add('expanded');
+      }
+      
+      console.log('📝 요약 렌더링 완료');
+    } else {
+      console.warn('⚠️ .summary-text 엘리먼트를 찾을 수 없음');
+    }
+  },
+
+  /**
+   * 🎫 유사 티켓 데이터를 UI에 렌더링
+   * @param {Array} tickets - 유사 티켓 배열
+   */
+  renderSimilarTicketsToUI(tickets) {
+    const ticketsTab = document.querySelector('[data-tab="tickets"]');
+    if (!ticketsTab) {
+      console.warn('⚠️ 유사 티켓 탭을 찾을 수 없음');
+      return;
+    }
+    
+    // 기존 카드들 제거 (인사이트 패널은 유지)
+    const existingCards = ticketsTab.querySelectorAll('.content-card');
+    existingCards.forEach(card => card.remove());
+    
+    // 유사 티켓 카드 생성
+    tickets.forEach((ticket, index) => {
+      const card = this.createTicketCard(ticket, index);
+      ticketsTab.appendChild(card);
+    });
+    
+    // 탭 카운트 업데이트
+    this.updateTabCount('tickets', tickets.length);
+    
+    console.log(`🎫 유사 티켓 ${tickets.length}개 렌더링 완료`);
+  },
+
+  /**
+   * 📚 KB 문서 데이터를 UI에 렌더링
+   * @param {Array} documents - KB 문서 배열
+   */
+  renderKBDocumentsToUI(documents) {
+    const kbTab = document.querySelector('[data-tab="kb"]');
+    if (!kbTab) {
+      console.warn('⚠️ KB 문서 탭을 찾을 수 없음');
+      return;
+    }
+    
+    // 기존 카드들 제거 (인사이트 패널은 유지)
+    const existingCards = kbTab.querySelectorAll('.content-card');
+    existingCards.forEach(card => card.remove());
+    
+    // KB 문서 카드 생성
+    documents.forEach((doc, index) => {
+      const card = this.createKBCard(doc, index);
+      kbTab.appendChild(card);
+    });
+    
+    // 탭 카운트 업데이트
+    this.updateTabCount('kb', documents.length);
+    
+    console.log(`📚 KB 문서 ${documents.length}개 렌더링 완료`);
+  },
+
+  /**
+   * 🎯 유사 티켓 카드 생성
+   * @param {Object} ticket - 티켓 데이터
+   * @param {number} index - 인덱스
+   * @returns {HTMLElement} 생성된 카드 엘리먼트
+   */
+  createTicketCard(ticket, index) {
+    const card = document.createElement('div');
+    card.className = 'content-card';
+    card.setAttribute('data-ticket-id', ticket.id || index);
+    
+    const relevanceScore = (ticket.relevance_score || ticket.score || 0) * 100;
+    const scoreClass = relevanceScore >= 80 ? 'score-high' : 
+                      relevanceScore >= 60 ? 'score-medium' : 'score-low';
+    const scoreIcon = relevanceScore >= 80 ? '🟢' : 
+                     relevanceScore >= 60 ? '🟡' : '🔴';
+    
+    card.innerHTML = `
+      <div class="card-header">
+        <span class="card-id">#${ticket.id || 'N/A'}</span>
+        <span class="similarity-score ${scoreClass}">${scoreIcon} ${relevanceScore.toFixed(0)}%</span>
+      </div>
+      <div class="card-body">
+        <div class="card-title">${ticket.title || ticket.subject || '제목 없음'}</div>
+        <div class="card-excerpt">${this.truncateText(ticket.content || ticket.description_text || '', 150)}</div>
+        <div class="card-meta">
+          <span class="status-indicator">${ticket.status || 'Unknown'}</span>
+          <span class="priority-indicator">${ticket.priority || 'Normal'}</span>
+          ${ticket.agent_name ? `<span class="agent-name">${ticket.agent_name}</span>` : ''}
+        </div>
+        <div class="card-actions">
+          <button onclick="Data.viewTicketSummary('${ticket.id || index}')" class="action-btn">
+            👁️ 요약보기
+          </button>
+          <button onclick="Data.viewTicketOriginal('${ticket.id || index}')" class="action-btn">
+            📄 원본보기
+          </button>
+        </div>
+      </div>
+    `;
+    
+    return card;
+  },
+
+  /**
+   * 📚 KB 문서 카드 생성
+   * @param {Object} doc - KB 문서 데이터
+   * @param {number} index - 인덱스
+   * @returns {HTMLElement} 생성된 카드 엘리먼트
+   */
+  createKBCard(doc, index) {
+    const card = document.createElement('div');
+    card.className = 'content-card';
+    card.setAttribute('data-kb-id', doc.id || index);
+    
+    const relevanceScore = (doc.relevance_score || doc.score || 0) * 100;
+    const scoreClass = relevanceScore >= 80 ? 'score-high' : 
+                      relevanceScore >= 60 ? 'score-medium' : 'score-low';
+    const scoreIcon = relevanceScore >= 80 ? '🟢' : 
+                     relevanceScore >= 60 ? '🟡' : '🔴';
+    
+    card.innerHTML = `
+      <div class="card-header">
+        <span class="card-id">KB-${doc.id || index}</span>
+        <span class="similarity-score ${scoreClass}">${scoreIcon} ${relevanceScore.toFixed(0)}%</span>
+      </div>
+      <div class="card-body">
+        <div class="card-title">${doc.title || '제목 없음'}</div>
+        <div class="card-excerpt">${this.truncateText(doc.content || doc.description || '', 150)}</div>
+        <div class="card-meta">
+          <span class="status-indicator">${doc.status || 'Published'}</span>
+          ${doc.category ? `<span>📂 ${doc.category}</span>` : ''}
+        </div>
+        <div class="card-actions">
+          <button onclick="Data.viewKBSummary('${doc.id || index}')" class="action-btn">
+            👁️ 내용보기
+          </button>
+          <button onclick="Data.viewKBOriginal('${doc.id || index}')" class="action-btn">
+            🔗 원본열기
+          </button>
+        </div>
+      </div>
+    `;
+    
+    return card;
   },
 
   // 사용자에게 새로고침 메시지 표시
@@ -721,6 +883,25 @@ window.Data = {
     try {
       console.log('🚀 백엔드 초기 데이터 로드 시작:', ticket.id);
       
+      // ✅ 모달에서 호출된 경우 캐시된 데이터만 사용
+      if (window.location.search.includes('usePreloadedData=true')) {
+        console.log('⚡ 모달 모드: 백엔드 호출 스킵, 캐시 데이터 사용');
+        const globalData = GlobalState.getGlobalTicketData();
+        if (globalData.summary) {
+          console.log('✅ 캐시된 데이터 발견:', globalData);
+          
+          // UI 업데이트만 실행
+          if (window.UI && window.UI.updateUIWithBackendData) {
+            window.UI.updateUIWithBackendData(globalData);
+          }
+          
+          return globalData;
+        } else {
+          console.log('⚠️ 캐시된 데이터 없음');
+          return null;
+        }
+      }
+      
       // 로딩 상태 설정
       GlobalState.setGlobalLoading(true);
       
@@ -730,15 +911,10 @@ window.Data = {
         return false;
       }
       
-      // 에이전트 언어가 제공되지 않은 경우 자동 감지
-      if (!agentLanguage && window.API.detectAgentLanguage) {
-        try {
-          agentLanguage = await API.detectAgentLanguage(client);
-          console.log(`🌍 에이전트 언어 자동 감지: ${agentLanguage}`);
-        } catch (error) {
-          console.warn('⚠️ 언어 감지 실패, 기본값 사용:', error);
-          agentLanguage = 'en';
-        }
+      // 에이전트 언어 기본값 설정 (API 모듈 단순화로 인해 자동 감지 제거)
+      if (!agentLanguage) {
+        agentLanguage = 'en'; // 기본값
+        console.log(`🌍 에이전트 언어 기본값 사용: ${agentLanguage}`);
       }
       
       // 백엔드 /init 엔드포인트 호출 (에이전트 언어 포함)
@@ -761,6 +937,10 @@ window.Data = {
       if (isSuccess) {
         console.log('✅ 백엔드 초기 데이터 로드 성공');
         
+        // ✅ 성공 시 에러 상태 클리어
+        GlobalState.setGlobalError(false, null);
+        console.log('🧹 에러 상태 클리어됨 - 데이터 로드 성공');
+        
         // 응답 데이터 구조 정규화
         let responseData = response.data || response;  // data 필드가 없으면 전체 응답을 데이터로 사용
         
@@ -776,19 +956,49 @@ window.Data = {
             GlobalState.updateGlobalTicketData(responseData.similar_tickets, 'similar_tickets');
           }
           
-          if (responseData.recommended_solutions) {
-            GlobalState.updateGlobalTicketData(responseData.recommended_solutions, 'recommended_solutions');
+          if (responseData.kb_documents) {
+            GlobalState.updateGlobalTicketData(responseData.kb_documents, 'kb_documents');
           }
           
           // 캐시 유효성 갱신
           GlobalState.updateGlobalTicketData(new Date().toISOString(), 'last_updated');
           
+          // 🎨 UI 업데이트 호출 (강화된 버전)
+          try {
+            // 기존 에러 표시 제거
+            const errorDisplay = document.getElementById('error-display');
+            if (errorDisplay) {
+              errorDisplay.style.display = 'none';
+            }
+            
+            // 메인 콘텐츠 표시
+            const mainContent = document.getElementById('main-content');
+            if (mainContent) {
+              mainContent.style.display = 'block';
+            }
+            
+            // UI 업데이트 함수 호출
+            if (window.UI && window.UI.updateUIWithBackendData) {
+              window.UI.updateUIWithBackendData(responseData);
+              console.log('🎨 UI 업데이트 성공');
+            } else {
+              console.warn('⚠️ UI 모듈 또는 updateUIWithBackendData 함수가 없음');
+            }
+            
+            console.log('🎨 강제 UI 상태 업데이트 완료');
+          } catch (uiError) {
+            console.error('❌ UI 업데이트 실패:', uiError);
+          }
+          
           console.log('📦 저장된 데이터:', {
             ticket_id: ticket.id,
             has_summary: !!responseData.summary,
             similar_tickets_count: responseData.similar_tickets?.length || 0,
-            solutions_count: responseData.recommended_solutions?.length || 0
+            kb_documents_count: responseData.kb_documents?.length || 0
           });
+          
+          // 🎯 즉시 UI 렌더링 호출
+          this.renderDataToUI(responseData);
         }
         
         return true;
@@ -1299,6 +1509,584 @@ window.Data = {
     // 여기서는 랜덤으로 시뮬레이션
     return await Promise.resolve(Math.random() < 0.1); // 10% 확률로 업데이트 있음
   },
+
+  /**
+   * 🔧 UI 렌더링 유틸리티 함수들
+   */
+
+  /**
+   * 텍스트 길이 제한
+   * @param {string} text - 원본 텍스트
+   * @param {number} maxLength - 최대 길이
+   * @returns {string} 제한된 텍스트
+   */
+  truncateText(text, maxLength) {
+    if (!text || text.length <= maxLength) return text;
+    return text.substring(0, maxLength) + '...';
+  },
+
+  /**
+   * 마크다운을 간단한 HTML로 변환
+   * @param {string} markdown - 마크다운 텍스트
+   * @returns {string} 변환된 HTML
+   */
+  convertMarkdownToHTML(markdown) {
+    if (!markdown) return '';
+    
+    return markdown
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')  // **bold**
+      .replace(/\*(.*?)\*/g, '<em>$1</em>')              // *italic*
+      .replace(/`(.*?)`/g, '<code>$1</code>')            // `code`
+      .replace(/^## (.*$)/gim, '<h2>$1</h2>')            // ## heading
+      .replace(/^### (.*$)/gim, '<h3>$1</h3>')           // ### heading
+      .replace(/^\* (.*$)/gim, '<li>$1</li>')            // * list
+      .replace(/^- (.*$)/gim, '<li>$1</li>')             // - list
+      .replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>')         // wrap lists
+      .replace(/\n/g, '<br>');                           // line breaks
+  },
+
+  /**
+   * 탭 카운트 업데이트
+   * @param {string} tabName - 탭 이름
+   * @param {number} count - 카운트 수
+   */
+  updateTabCount(tabName, count) {
+    const tabButton = document.querySelector(`[data-tab="${tabName}"]`);
+    if (tabButton) {
+      const countElement = tabButton.querySelector('.tab-count');
+      if (countElement) {
+        countElement.textContent = count;
+      }
+    }
+  },
+
+  /**
+   * 로딩 상태 해제 및 콘텐츠 표시
+   */
+  hideLoadingAndShowContent() {
+    // 로딩 오버레이 숨기기
+    const loadingOverlay = document.querySelector('.loading-overlay');
+    if (loadingOverlay) {
+      loadingOverlay.style.display = 'none';
+    }
+    
+    // 메인 콘텐츠 표시
+    const mainContent = document.querySelector('.main-content');
+    if (mainContent) {
+      mainContent.style.opacity = '1';
+    }
+    
+    // 탭 네비게이션 활성화
+    const tabNavigation = document.querySelector('.tab-navigation');
+    if (tabNavigation) {
+      tabNavigation.style.pointerEvents = 'auto';
+    }
+  },
+
+  /**
+   * 🎫 티켓 상호작용 함수들
+   */
+
+  /**
+   * 티켓 요약 보기
+   * @param {string} ticketId - 티켓 ID
+   */
+  viewTicketSummary(ticketId) {
+    try {
+      console.log(`🔍 티켓 요약 보기: ${ticketId}`);
+      
+      // 전역 상태에서 해당 티켓 찾기
+      const globalData = window.GlobalState.getGlobalTicketData();
+      const ticket = globalData.similar_tickets?.find(t => t.id == ticketId || t.ticket_id == ticketId);
+      
+      if (ticket && ticket.ai_summary) {
+        this.showSummaryModal(ticket);
+      } else {
+        console.warn('📝 티켓 요약을 찾을 수 없음, 원본 보기로 대체');
+        this.viewTicketOriginal(ticketId);
+      }
+    } catch (error) {
+      console.error('❌ 티켓 요약 보기 실패:', error);
+    }
+  },
+
+  /**
+   * 티켓 원본 보기 (새 탭)
+   * @param {string} ticketId - 티켓 ID
+   */
+  viewTicketOriginal(ticketId) {
+    try {
+      console.log(`📄 티켓 원본 보기: ${ticketId}`);
+      
+      // Freshdesk 티켓 URL 생성 및 새 탭에서 열기
+      const ticketUrl = `https://wedosoft.freshdesk.com/a/tickets/${ticketId}`;
+      window.open(ticketUrl, '_blank', 'noopener,noreferrer');
+    } catch (error) {
+      console.error('❌ 티켓 원본 보기 실패:', error);
+    }
+  },
+
+  /**
+   * KB 문서 원본 보기 (새 탭)
+   * @param {string} kbId - KB 문서 ID
+   */
+  viewKBOriginal(kbId) {
+    try {
+      console.log(`📚 KB 문서 원본 보기: ${kbId}`);
+      
+      // 전역 상태에서 해당 KB 문서 찾기
+      const globalData = window.GlobalState.getGlobalTicketData();
+      const kbDoc = globalData.kb_documents?.find(doc => doc.id == kbId || doc.article_id == kbId);
+      
+      if (kbDoc && kbDoc.source_url) {
+        window.open(kbDoc.source_url, '_blank', 'noopener,noreferrer');
+      } else {
+        // source_url이 없으면 기본 KB URL 생성
+        const kbUrl = `https://wedosoft.freshdesk.com/support/solutions/articles/${kbId}`;
+        window.open(kbUrl, '_blank', 'noopener,noreferrer');
+      }
+    } catch (error) {
+      console.error('❌ KB 문서 원본 보기 실패:', error);
+    }
+  },
+
+  /**
+   * 📚 KB 문서 요약 보기
+   * @param {string} kbId - KB 문서 ID
+   */
+  viewKBSummary(kbId) {
+    try {
+      console.log(`👁️ KB 문서 상세 보기: ${kbId}`);
+      
+      // 글로벌 상태에서 KB 문서 찾기
+      const globalData = window.GlobalState?.getGlobalTicketData() || {};
+      const kbDocuments = globalData.kb_documents || [];
+      
+      const kbDoc = kbDocuments.find(doc => 
+        doc.id === kbId || doc.id === String(kbId)
+      );
+      
+      if (kbDoc) {
+        // 콘텐츠 길이에 따른 처리 방식 결정
+        const content = kbDoc.content || kbDoc.description || '';
+        
+        if (content.length > 300) {
+          // 긴 콘텐츠: 모달에서 스마트 요약 표시
+          this.showKBDetailModal(kbDoc, 'smart');
+        } else if (content.length > 50) {
+          // 중간 콘텐츠: 전체 내용 표시
+          this.showKBDetailModal(kbDoc, 'full');
+        } else {
+          // 짧은 콘텐츠: 원본으로 바로 이동
+          console.log('📝 짧은 콘텐츠 → 원본으로 이동');
+          this.viewKBOriginal(kbId);
+        }
+      } else {
+        console.warn(`⚠️ KB 문서를 찾을 수 없음: ${kbId}`);
+        // 폴백: 원본 보기로 이동
+        this.viewKBOriginal(kbId);
+      }
+    } catch (error) {
+      console.error('❌ KB 문서 상세 보기 실패:', error);
+    }
+  },
+
+  /**
+   * 요약 모달 표시
+   * @param {Object} ticket - 티켓 데이터
+   */
+  showSummaryModal(ticket) {
+    // 간단한 모달 생성
+    const modal = document.createElement('div');
+    modal.className = 'summary-modal';
+    modal.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      padding: 20px;
+    `;
+    
+    const modalContent = document.createElement('div');
+    modalContent.style.cssText = `
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      max-width: 600px;
+      max-height: 80vh;
+      overflow-y: auto;
+      position: relative;
+    `;
+    
+    modalContent.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h3 style="margin: 0; color: #1f2937;">티켓 #${ticket.id} 요약</h3>
+        <button onclick="this.closest('.summary-modal').remove()" 
+                style="background: none; border: none; font-size: 24px; cursor: pointer; color: #6b7280;">
+          ×
+        </button>
+      </div>
+      <div style="color: #374151; line-height: 1.6;">
+        ${this.convertMarkdownToHTML(ticket.ai_summary)}
+      </div>
+      <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #e5e7eb;">
+        <button onclick="Data.viewTicketOriginal('${ticket.id}')" 
+                style="background: #8B5CF6; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; margin-right: 8px;">
+          📄 원본 보기
+        </button>
+        <button onclick="this.closest('.summary-modal').remove()" 
+                style="background: #6b7280; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer;">
+          닫기
+        </button>
+      </div>
+    `;
+    
+    modal.appendChild(modalContent);
+    document.body.appendChild(modal);
+    
+    // 모달 외부 클릭 시 닫기
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        modal.remove();
+      }
+    });
+  },
+
+  /**
+   * 📚 KB 문서 상세 모달 표시 (개선된 버전)
+   * @param {Object} kbDoc - KB 문서 데이터
+   * @param {string} mode - 표시 모드 ('smart', 'full', 'summary')
+   */
+  showKBDetailModal(kbDoc, mode = 'smart') {
+    const modal = document.createElement('div');
+    modal.className = 'kb-detail-modal';
+    modal.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      padding: 20px;
+    `;
+
+    const content = kbDoc.content || kbDoc.description || '내용을 불러올 수 없습니다.';
+    let displayContent = '';
+    let modeLabel = '';
+
+    // 모드에 따른 콘텐츠 처리
+    switch (mode) {
+      case 'smart':
+        displayContent = this.createSmartSummary(content);
+        modeLabel = '🤖 스마트 요약';
+        break;
+      case 'full':
+        displayContent = this.convertMarkdownToHTML(content);
+        modeLabel = '📄 전체 내용';
+        break;
+      default:
+        displayContent = this.convertMarkdownToHTML(content);
+        modeLabel = '📄 내용';
+    }
+
+    modal.innerHTML = `
+      <div style="
+        background: white;
+        border-radius: 8px;
+        padding: 24px;
+        max-width: 700px;
+        max-height: 85vh;
+        overflow-y: auto;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+        position: relative;
+      ">
+        <div style="
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          margin-bottom: 16px;
+          padding-bottom: 16px;
+          border-bottom: 1px solid #e5e7eb;
+        ">
+          <div style="flex: 1;">
+            <h3 style="margin: 0; color: #1f2937; font-size: 20px; font-weight: 600; line-height: 1.3;">
+              📚 ${kbDoc.title || '제목 없음'}
+            </h3>
+            <div style="margin-top: 6px; font-size: 13px; color: #6b7280;">
+              ${modeLabel}
+              ${kbDoc.category ? ` • 📂 ${kbDoc.category}` : ''}
+              ${kbDoc.status ? ` • ${kbDoc.status}` : ''}
+            </div>
+            ${content.length > 300 && mode === 'smart' ? `
+              <div style="margin-top: 8px;">
+                <button onclick="Data.showKBDetailModal(${JSON.stringify(kbDoc).replace(/"/g, '&quot;')}, 'full')" 
+                        style="
+                          background: #f3f4f6;
+                          border: 1px solid #d1d5db;
+                          border-radius: 4px;
+                          padding: 4px 8px;
+                          cursor: pointer;
+                          font-size: 12px;
+                          color: #374151;
+                        ">📖 전체 내용 보기</button>
+              </div>
+            ` : ''}
+          </div>
+          <button onclick="this.closest('.kb-detail-modal').remove()" 
+                  style="
+                    background: #f3f4f6;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 8px;
+                    cursor: pointer;
+                    font-size: 18px;
+                    color: #6b7280;
+                    line-height: 1;
+                    margin-left: 12px;
+                  ">×</button>
+        </div>
+        
+        <div style="
+          line-height: 1.6;
+          color: #374151;
+          margin-bottom: 20px;
+          font-size: 14px;
+          max-height: 50vh;
+          overflow-y: auto;
+        ">${displayContent}</div>
+        
+        <div style="
+          display: flex;
+          gap: 12px;
+          justify-content: flex-end;
+          padding-top: 16px;
+          border-top: 1px solid #e5e7eb;
+        ">
+          <button onclick="Data.viewKBOriginal('${kbDoc.id}')" 
+                  style="
+                    background: #3b82f6;
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 8px 16px;
+                    cursor: pointer;
+                    font-size: 14px;
+                    font-weight: 500;
+                  ">🔗 원본에서 열기</button>
+          <button onclick="this.closest('.kb-detail-modal').remove()" 
+                  style="
+                    background: #6b7280;
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 8px 16px;
+                    cursor: pointer;
+                    font-size: 14px;
+                    font-weight: 500;
+                  ">닫기</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    // 모달 배경 클릭시 닫기
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        modal.remove();
+      }
+    });
+  },
+
+  /**
+   * 📚 KB 문서 요약 모달 표시 (기존 함수 - 호환성 유지)
+   * @param {Object} kbDoc - KB 문서 데이터
+   */
+  showKBSummaryModal(kbDoc) {
+    // KB 문서 요약 모달 생성
+    const modal = document.createElement('div');
+    modal.className = 'kb-summary-modal';
+    modal.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      padding: 20px;
+    `;
+
+    const content = kbDoc.content || kbDoc.description || '내용을 불러올 수 없습니다.';
+    const htmlContent = this.convertMarkdownToHTML(content);
+
+    modal.innerHTML = `
+      <div style="
+        background: white;
+        border-radius: 8px;
+        padding: 24px;
+        max-width: 600px;
+        max-height: 80vh;
+        overflow-y: auto;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+      ">
+        <div style="
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 16px;
+          padding-bottom: 16px;
+          border-bottom: 1px solid #e5e7eb;
+        ">
+          <div>
+            <h3 style="margin: 0; color: #1f2937; font-size: 20px; font-weight: 600;">
+              📚 ${kbDoc.title || '제목 없음'}
+            </h3>
+            <div style="margin-top: 4px; font-size: 14px; color: #6b7280;">
+              ${kbDoc.category ? `📂 ${kbDoc.category}` : ''}
+              ${kbDoc.status ? `• ${kbDoc.status}` : ''}
+            </div>
+          </div>
+          <button onclick="this.closest('.kb-summary-modal').remove()" 
+                  style="
+                    background: #f3f4f6;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 8px;
+                    cursor: pointer;
+                    font-size: 18px;
+                    color: #6b7280;
+                    line-height: 1;
+                  ">×</button>
+        </div>
+        
+        <div style="
+          line-height: 1.6;
+          color: #374151;
+          margin-bottom: 20px;
+          font-size: 14px;
+        ">${htmlContent}</div>
+        
+        <div style="
+          display: flex;
+          gap: 12px;
+          justify-content: flex-end;
+          padding-top: 16px;
+          border-top: 1px solid #e5e7eb;
+        ">
+          <button onclick="Data.viewKBOriginal('${kbDoc.id}')" 
+                  style="
+                    background: #3b82f6;
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 8px 16px;
+                    cursor: pointer;
+                    font-size: 14px;
+                    font-weight: 500;
+                  ">📄 원본보기</button>
+          <button onclick="this.closest('.kb-summary-modal').remove()" 
+                  style="
+                    background: #6b7280;
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 8px 16px;
+                    cursor: pointer;
+                    font-size: 14px;
+                    font-weight: 500;
+                  ">닫기</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    // 모달 배경 클릭시 닫기
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        modal.remove();
+      }
+    });
+  },
+
+  /**
+   * 🤖 스마트 요약 생성 (클라이언트 사이드)
+   * @param {string} content - 원본 콘텐츠
+   * @returns {string} 요약된 HTML
+   */
+  createSmartSummary(content) {
+    try {
+      // 1. 마크다운을 일반 텍스트로 변환
+      const plainText = content
+        .replace(/#{1,6}\s+/g, '') // 헤더 제거
+        .replace(/\*\*(.*?)\*\*/g, '$1') // 볼드 제거
+        .replace(/\*(.*?)\*/g, '$1') // 이탤릭 제거
+        .replace(/`(.*?)`/g, '$1') // 인라인 코드 제거
+        .replace(/\[(.*?)\]\(.*?\)/g, '$1') // 링크 제거
+        .replace(/\n+/g, ' ') // 줄바꿈을 공백으로
+        .trim();
+
+      // 2. 문장 단위로 분리
+      const sentences = plainText.split(/[.!?]/).filter(s => s.trim().length > 10);
+      
+      // 3. 중요한 문장 선별 (키워드 기반)
+      const importantKeywords = ['해결', '방법', '단계', '설정', '확인', '문제', '오류', '설치', '업데이트'];
+      const scoredSentences = sentences.map(sentence => {
+        const score = importantKeywords.reduce((acc, keyword) => {
+          return acc + (sentence.includes(keyword) ? 1 : 0);
+        }, 0);
+        return { sentence: sentence.trim(), score };
+      });
+
+      // 4. 상위 3-4개 문장 선택
+      const topSentences = scoredSentences
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 4)
+        .map(item => item.sentence)
+        .filter(s => s.length > 0);
+
+      // 5. HTML 형태로 변환
+      if (topSentences.length > 0) {
+        return `
+          <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 12px; margin-bottom: 12px;">
+            <div style="font-size: 12px; color: #64748b; margin-bottom: 8px;">🤖 AI 요약</div>
+            <ul style="margin: 0; padding-left: 20px; color: #334155;">
+              ${topSentences.map(sentence => `<li style="margin-bottom: 4px;">${sentence}.</li>`).join('')}
+            </ul>
+          </div>
+          <div style="font-size: 13px; color: #64748b; font-style: italic;">
+            💡 전체 내용을 보려면 "전체 내용 보기" 버튼을 클릭하세요.
+          </div>
+        `;
+      } else {
+        // 요약 실패 시 처음 300자만 표시
+        const preview = plainText.length > 300 ? plainText.substring(0, 300) + '...' : plainText;
+        return `
+          <div style="line-height: 1.5;">${preview}</div>
+          ${plainText.length > 300 ? '<div style="font-size: 13px; color: #64748b; margin-top: 8px; font-style: italic;">💡 전체 내용을 보려면 "전체 내용 보기" 버튼을 클릭하세요.</div>' : ''}
+        `;
+      }
+    } catch (error) {
+      console.error('❌ 스마트 요약 생성 실패:', error);
+      // 폴백: 처음 200자만 표시
+      const fallback = content.length > 200 ? content.substring(0, 200) + '...' : content;
+      return `<div>${this.convertMarkdownToHTML(fallback)}</div>`;
+    }
+  },
 };
 
 // Data 모듈 export - 주요 함수들을 Data 네임스페이스로 노출
@@ -1306,7 +2094,17 @@ window.Data = {
 
 // 의존성 확인 함수 - 다른 모듈에서 Data 모듈 사용 가능 여부 체크
 Data.isAvailable = function () {
-  return typeof GlobalState !== 'undefined' && typeof API !== 'undefined';
+  const hasGlobalState = typeof GlobalState !== 'undefined';
+  
+  // API 모듈은 선택적 의존성으로 처리 (없어도 기본 기능 동작 가능)
+  const hasAPI = typeof window.API !== 'undefined' && window.API !== null;
+  
+  if (!hasAPI) {
+    console.log('[DATA] API 모듈 대기 중... (기본 기능은 사용 가능)');
+  }
+  
+  // GlobalState만 필수, API는 선택적
+  return hasGlobalState;
 };
 
 // 모듈 등록 (로그 없음)

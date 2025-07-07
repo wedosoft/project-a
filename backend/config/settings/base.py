@@ -38,7 +38,7 @@ DEFAULT_SETTINGS = {
     # 벡터DB 설정
     "vectordb": {
         "collection_name": "documents",
-        "vector_size": 1536,
+        "vector_size": 3072,
         "distance": "cosine"
     },
     

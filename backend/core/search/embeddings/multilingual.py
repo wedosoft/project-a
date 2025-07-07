@@ -47,9 +47,9 @@ MULTILINGUAL_EMBEDDING_MODELS = {
         max_tokens=8191
     ),
     
-    "text-embedding-3-small": EmbeddingConfig(
-        model_name="text-embedding-3-small", 
-        dimension=1536,
+    "text-embedding-3-large": EmbeddingConfig(
+        model_name="text-embedding-3-large", 
+        dimension=3072,
         quality=EmbeddingQuality.HIGH,
         cost_per_1k_tokens=0.00002,
         languages_optimized=["ko", "en", "ja", "zh", "es", "fr", "de"],
@@ -130,7 +130,7 @@ class MultilingualEmbedder:
         if self.quality_level == EmbeddingQuality.ULTRA:
             return "text-embedding-3-large"
         elif self.quality_level == EmbeddingQuality.HIGH:
-            return "text-embedding-3-small"
+            return "text-embedding-3-large"
         else:
             return "multilingual-e5-large"
     

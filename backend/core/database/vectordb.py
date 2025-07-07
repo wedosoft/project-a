@@ -45,8 +45,8 @@ if USE_MULTILINGUAL:
     VECTOR_SIZE = 3072  # text-embedding-3-large (다국어 최적화)
     logger.info("🌍 벡터 차원: 3072 (다국어 최적화 모드)")
 else:
-    VECTOR_SIZE = 1536  # text-embedding-3-small (기존 시스템)
-    logger.info("🔄 벡터 차원: 1536 (기존 하이브리드 모드)")
+    VECTOR_SIZE = 3072  # text-embedding-3-large (표준 시스템)
+    logger.info("🔄 벡터 차원: 3072 (표준 모드)")
 COLLECTION_NAME = "documents"  # 기본 컬렉션명
 
 

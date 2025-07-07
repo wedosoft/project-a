@@ -5,7 +5,7 @@ Vector DB 단독 운영에 최적화된 임베딩 시스템입니다.
 
 🌍 다국어 최적화 임베딩:
 - 환경변수 USE_MULTILINGUAL_EMBEDDING으로 제어
-- 기본값: OpenAI text-embedding-3-small (1536차원)  
+- 기본값: OpenAI text-embedding-3-large (3072차원)  
 - true: OpenAI text-embedding-3-large (3072차원, 다국어 최적화)
 """
 
@@ -42,7 +42,7 @@ if USE_MULTILINGUAL:
         from .embedder import embed_documents
 else:
     from .embedder import embed_documents
-    logger.info("📊 기본 OpenAI 임베딩 시스템 사용 (1536차원)")
+    logger.info("📊 기본 OpenAI 임베딩 시스템 사용 (3072차원)")
 
 __all__ = [
     'embed_documents',

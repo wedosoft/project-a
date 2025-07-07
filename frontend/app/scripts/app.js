@@ -128,6 +128,7 @@ async function showFDKModal(ticketId, hasCachedData = false) {
         hasCachedData: hasCachedData,
         timestamp: new Date().toISOString(),
         noBackendCall: true,
+        usePreloadedData: true, // ✅ 미리 로드된 데이터 사용 플래그
         // 로딩 상태 정보 추가
         loadingStatus: loadingStatus,
         globalData: globalData,
@@ -395,9 +396,16 @@ if (typeof window.isFDKModal !== 'undefined' && window.isFDKModal) {
 
     const client = GlobalState.getClient();
 
-    // 🚀 백그라운드 데이터 로딩 시작 (페이지 로드 즉시)
-    // 사용자가 아이콘을 클릭하기 전에 미리 데이터를 로드하여 대기 시간 최소화
-    startBackgroundDataLoading(client);
+    // 🚀 백그라운드 데이터 로딩 시작 (모듈 준비 후)
+    // 모든 모듈이 로드된 후 안전하게 데이터 로딩 시작
+    setTimeout(async () => {
+      const ready = await window.SAFE_MODULE_ACCESS.waitForModules(3000);
+      if (ready) {
+        startBackgroundDataLoading(client);
+      } else {
+        console.error('❌ 모듈 로드 실패 - 백그라운드 데이터 로딩 건너뛰기');
+      }
+    }, 1000);
 
     // 🎯 상단 네비게이션 앱 아이콘 클릭 시 처리
     // 로딩 상태와 관계없이 항상 모달을 즉시 표시하고, 상태에 따라 적절한 UI 제공

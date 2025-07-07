@@ -323,7 +323,7 @@ async def query_endpoint(
             document_infos = _convert_agent_results_to_document_info(search_results)
             
             return QueryResponse(
-                answer=final_result.get("structured_response", "검색 결과를 처리할 수 없습니다."),
+                answer=final_result.get("ai_summary", "검색 결과를 처리할 수 없습니다."),
                 context_docs=document_infos,
                 context_images=[],
                 metadata={
@@ -569,7 +569,7 @@ async def query_endpoint(
     # LLM에 전달할 최종 컨텍스트 (티켓 정보 + 검색된 문서 정보)
     final_context_for_llm = f"{ticket_context_for_llm}{base_context}"
     
-    prompt = await llm_router.build_prompt(final_context_for_llm, req.query, answer_instructions=req.answer_instructions)
+    prompt = llm_router.build_prompt(final_context_for_llm, req.query, agent_mode=False)
     
     structured_docs = []
     for i, (doc_content_item, metadata_item, distance_or_score_metric) in enumerate(zip(docs, metadatas, distances)):
@@ -769,12 +769,15 @@ async def query_endpoint(
             system_prompt = f"{base_system_prompt} 다음 지침에 따라 응답해 주세요: {req.answer_instructions}"
             
         # 실시간 상담원 쿼리용으로 용도 지정하여 호출
-        response = await llm_router.generate(
-            prompt=prompt, 
-            system_prompt=system_prompt,
-            use_case="realtime"  # 실시간 상담원 쿼리용 모델 사용
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt}
+        ]
+        response = await llm_router.generate_for_use_case(
+            use_case="realtime",
+            messages=messages
         )
-        answer = response.text
+        answer = response.content
         
         # 콘텐츠 타입이 "attachments"나 "images"만 포함되어 있으면 이미지에 대한 설명 추가
         if len(content_types) == 1 and content_types[0] in ["attachments", "images"]:
@@ -810,7 +813,7 @@ async def query_endpoint(
         "search_time_ms": int(search_time * 1000), # 검색 소요 시간 (밀리초)
         "context_time_ms": int(context_time * 1000), # 컨텍스트 생성 소요 시간 (밀리초)
         "llm_time_ms": int(llm_time * 1000), # LLM 호출 소요 시간 (밀리초)
-        "model_used": response.model_used, # 사용된 LLM 모델
+        "model_used": response.model, # 사용된 LLM 모델
         "token_count": context_meta.get("token_count", 0), # 컨텍스트 토큰 수
         "context_docs_count": len(structured_docs), # 사용된 컨텍스트 문서 수
         "search_intent": search_intent, # 검색 의도

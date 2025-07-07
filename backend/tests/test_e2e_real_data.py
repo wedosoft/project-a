@@ -110,7 +110,7 @@ async def test_real_data_end_to_end():
         logger.info("4. 직접 벡터 검색 비교 테스트")
         
         # 더미 임베딩으로 직접 검색
-        dummy_embedding = [0.1] * 1536  # OpenAI 임베딩 차원
+        dummy_embedding = [0.1] * 3072  # OpenAI text-embedding-3-large 차원
         
         # 티켓 검색
         ticket_search_result = vector_db.search(

@@ -37,7 +37,7 @@ class ConfigManager:
             # 폴백 기본값
             default_provider = "gemini"
             default_chat_model = "gemini-1.5-flash"
-            default_embedding_model = "text-embedding-3-small"
+            default_embedding_model = "text-embedding-3-large"
         
         return {
             "timeouts": {
@@ -90,7 +90,7 @@ class ConfigManager:
                 "embedding": {
                     "provider": os.getenv("EMBEDDING_MODEL_PROVIDER", "openai"),
                     "model": os.getenv("EMBEDDING_MODEL_NAME", default_embedding_model),
-                    "dimensions": int(os.getenv("EMBEDDING_DIMENSIONS", "1536"))
+                    "dimensions": int(os.getenv("EMBEDDING_DIMENSIONS", "3072"))
                 },
                 "realtime": {
                     "provider": os.getenv("REALTIME_MODEL_PROVIDER", default_provider),

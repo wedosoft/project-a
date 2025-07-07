@@ -35,7 +35,7 @@ if not OPENAI_API_KEY:
     raise RuntimeError("OPENAI_API_KEY 환경 변수가 필요합니다. (임베딩용)")
 
 # OpenAI 임베딩 함수 설정 - 최신 임베딩 모델 사용
-MODEL_NAME = "text-embedding-3-small"
+MODEL_NAME = "text-embedding-3-large"
 import openai
 
 # OpenAI 클라이언트 설정
@@ -493,7 +493,7 @@ def embed_documents_optimized(
             return embed_documents(docs)
     
     elif mode == "openai":
-        # 기본 OpenAI 방식 (text-embedding-3-small, 1536차원)
+        # 기본 OpenAI 방식 (text-embedding-3-large, 3072차원)
         return embed_documents(docs)
     
     else:

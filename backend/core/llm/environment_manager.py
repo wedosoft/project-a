@@ -99,7 +99,7 @@ class EnvironmentManager:
             name=env_name,
             default_provider=config_data.get('default_provider', 'gemini'),
             default_chat_model=config_data.get('default_chat_model', 'gemini-1.5-flash'),
-            default_embedding_model=config_data.get('default_embedding_model', 'text-embedding-3-small'),
+            default_embedding_model=config_data.get('default_embedding_model', 'text-embedding-3-large'),
             cost_limit=config_data.get('cost_limit', 'medium'),
             rate_limits=config_data.get('rate_limits', {}),
             model_overrides=config_data.get('model_overrides', {}),
@@ -116,7 +116,7 @@ class EnvironmentManager:
         dev_config = {
             'default_provider': 'gemini',
             'default_chat_model': 'gemini-1.5-flash',
-            'default_embedding_model': 'text-embedding-3-small',
+            'default_embedding_model': 'text-embedding-3-large',
             'cost_limit': 'low',
             'rate_limits': {
                 'requests_per_minute': 60,
@@ -145,7 +145,7 @@ class EnvironmentManager:
         staging_config = {
             'default_provider': 'anthropic',
             'default_chat_model': 'claude-3-5-haiku-20241022',
-            'default_embedding_model': 'text-embedding-3-small',
+            'default_embedding_model': 'text-embedding-3-large',
             'cost_limit': 'medium',
             'rate_limits': {
                 'requests_per_minute': 300,
@@ -178,7 +178,7 @@ class EnvironmentManager:
         prod_config = {
             'default_provider': 'anthropic',
             'default_chat_model': 'claude-3-sonnet-20240229',
-            'default_embedding_model': 'text-embedding-3-small',
+            'default_embedding_model': 'text-embedding-3-large',
             'cost_limit': 'high',
             'rate_limits': {
                 'requests_per_minute': 1000,
@@ -220,7 +220,7 @@ class EnvironmentManager:
         test_config = {
             'default_provider': 'openai',
             'default_chat_model': 'gpt-3.5-turbo',
-            'default_embedding_model': 'text-embedding-3-small',
+            'default_embedding_model': 'text-embedding-3-large',
             'cost_limit': 'very_low',
             'rate_limits': {
                 'requests_per_minute': 10,

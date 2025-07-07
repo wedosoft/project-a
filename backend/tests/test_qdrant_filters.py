@@ -33,8 +33,8 @@ async def test_qdrant_doc_type_filter():
     # QdrantAdapter 인스턴스 생성 (기본 컬렉션 사용)
     vectordb = QdrantAdapter()
     
-    # 테스트용 임베딩 (1536차원 - OpenAI/Anthropic 표준)
-    test_embedding = [0.1] * 1536
+    # 테스트용 임베딩 (3072차원 - OpenAI text-embedding-3-large 표준)
+    test_embedding = [0.1] * 3072
     
     # 테스트 파라미터 (실제 데이터 있는 테넌트 사용)
     tenant_id = "wedosoft"

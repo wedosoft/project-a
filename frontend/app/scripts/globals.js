@@ -29,6 +29,113 @@
 // === 전역 객체 및 변수 정의 ===
 
 /**
+ * 🌐 백엔드 URL 중앙 설정
+ * 모든 모듈에서 이 설정을 참조하여 백엔드와 통신
+ */
+window.BACKEND_CONFIG = {
+  // 개발 환경 URL (ngrok 터널링)
+  development: 'https://ec20-58-122-170-2.ngrok-free.app',
+  
+  // 운영 환경 URL (실제 배포 시 수정)
+  production: 'https://your-backend-domain.com',
+  
+  /**
+   * 현재 환경에 맞는 백엔드 URL 반환
+   * @returns {string} 백엔드 URL
+   */
+  getURL() {
+    // 개발 환경 감지
+    if (window.location.hostname === 'localhost' || 
+        window.location.hostname.includes('127.0.0.1') ||
+        window.location.hostname.includes('10001') ||
+        window.location.port === '10001') {
+      return this.development;
+    }
+    
+    // 운영 환경
+    return this.production;
+  },
+  
+  /**
+   * 백엔드 URL 업데이트 (런타임에서 변경 가능)
+   * @param {string} newUrl - 새로운 백엔드 URL
+   * @param {string} environment - 환경 ('development' | 'production')
+   */
+  updateURL(newUrl, environment = 'development') {
+    this[environment] = newUrl;
+    console.log(`🔄 백엔드 URL 업데이트: ${environment} → ${newUrl}`);
+  }
+};
+
+/**
+ * 🛡️ 모듈 초기화 상태 확인 및 안전한 접근 보장
+ */
+window.SAFE_MODULE_ACCESS = {
+  /**
+   * API 모듈이 사용 가능한지 확인
+   */
+  isAPIReady() {
+    return typeof window.API !== 'undefined' && window.API !== null;
+  },
+  
+  /**
+   * Data 모듈이 사용 가능한지 확인
+   */
+  isDataReady() {
+    return typeof window.Data !== 'undefined' && window.Data !== null;
+  },
+  
+  /**
+   * GlobalState가 사용 가능한지 확인
+   */
+  isGlobalStateReady() {
+    return typeof window.GlobalState !== 'undefined' && window.GlobalState !== null;
+  },
+  
+  /**
+   * 안전한 API 호출 래퍼
+   */
+  async safeAPICall(functionName, ...args) {
+    if (!this.isAPIReady()) {
+      console.warn(`⚠️ API 모듈이 아직 준비되지 않음: ${functionName}`);
+      return null;
+    }
+    
+    try {
+      if (typeof window.API[functionName] === 'function') {
+        return await window.API[functionName](...args);
+      } else {
+        console.warn(`⚠️ API 함수를 찾을 수 없음: ${functionName}`);
+        return null;
+      }
+    } catch (error) {
+      console.error(`❌ API 호출 실패 ${functionName}:`, error);
+      return null;
+    }
+  },
+  
+  /**
+   * 모든 필수 모듈이 로드될 때까지 대기
+   */
+  async waitForModules(timeout = 10000) {
+    const startTime = Date.now();
+    
+    while (Date.now() - startTime < timeout) {
+      if (this.isAPIReady() && this.isDataReady() && this.isGlobalStateReady()) {
+        console.log('✅ 모든 필수 모듈 로드 완료');
+        return true;
+      }
+      
+      // 100ms 대기
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    console.error('❌ 모듈 로드 타임아웃');
+    return false;
+  }
+};
+
+/**
  * FDK 클라이언트 객체 (앱 초기화 후 설정됨)
  * Freshdesk 플랫폼과의 통신을 담당하는 핵심 객체
  * @type {Object|null}

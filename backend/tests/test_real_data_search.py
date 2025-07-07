@@ -103,8 +103,8 @@ async def test_vector_search_with_real_data(tenant_id: str):
     logger.info(f"=== 실제 데이터로 벡터 검색 테스트 ===")
     logger.info(f"테넌트 ID: {tenant_id}")
     
-    # 더미 임베딩 생성 (1536차원)
-    dummy_embedding = [0.1] * 1536
+    # 더미 임베딩 생성 (3072차원)
+    dummy_embedding = [0.1] * 3072
     
     # 티켓 검색 테스트
     logger.info("1. 티켓 검색 테스트 (doc_type=ticket)")

@@ -158,7 +158,7 @@ class SearchChain:
         except Exception as e:
             logger.error(f"임베딩 생성 실패: {e}")
             # 기존 오류 처리와 동일하게 기본 임베딩 반환
-            return [0.0] * 1536  # OpenAI embedding 차원
+            return [0.0] * 3072  # OpenAI text-embedding-3-large 차원
 
     def _process_ticket_metadata(self, 
                                 doc_id: str, 

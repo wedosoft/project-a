@@ -96,7 +96,18 @@
             padding: 4px 10px;
             border-radius: 12px;
             font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 4px;
         }
+        
+        .meta-item.sentiment-positive { background: rgba(34, 197, 94, 0.2); }
+        .meta-item.sentiment-neutral { background: rgba(251, 191, 36, 0.2); }
+        .meta-item.sentiment-negative { background: rgba(239, 68, 68, 0.2); }
+        
+        .meta-item.status-resolved { background: rgba(34, 197, 94, 0.2); }
+        .meta-item.status-pending { background: rgba(251, 191, 36, 0.2); }
+        .meta-item.status-open { background: rgba(59, 130, 246, 0.2); }
 
         .header-actions {
             display: flex;
@@ -576,19 +587,20 @@
             flex-shrink: 0;
         }
 
-        /* 채팅 컨테이너 */
+        /* 채팅 컨테이너 - 전체 영역 사용 */
         .chat-container {
             display: flex;
             flex-direction: column;
-            height: 400px;
+            flex: 1;
             background: white;
+            height: calc(100vh - 100px); /* 헤더와 피드백 바 공간 확보 */
         }
 
         /* 채팅 메시지 영역 */
         .chat-messages {
             flex: 1;
             overflow-y: auto;
-            padding: 16px 20px;
+            padding: 16px 20px 130px 20px; /* 입력창(80px) + 하단바(50px) 공간 확보 */
             display: flex;
             flex-direction: column;
             gap: 16px;
@@ -668,11 +680,18 @@
             text-align: left;
         }
 
-        /* 채팅 입력 영역 */
+        /* 채팅 입력 영역 - 하단 바 바로 위 고정 */
         .chat-input-container {
+            position: fixed;
+            bottom: 50px; /* 하단 바 높이만큼 위로 올림 */
+            left: 0;
+            right: 0;
+            width: 100%;
             border-top: 1px solid #e5e7eb;
-            padding: 16px 20px;
+            padding: 12px 16px;
             background: #fafbfc;
+            z-index: 999; /* 하단 바보다 낮게 */
+            box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
         }
 
         .chat-input-wrapper {
@@ -1192,10 +1211,8 @@
         <!-- 얇은 헤더 (메타 정보와 액션 버튼) -->
         <header class="smart-header">
             <div class="header-content">
-                <div class="ticket-meta">
-                    <span class="meta-item">😐 보통</span>
-                    <span class="meta-item">해결완료</span>
-                    <span class="meta-item">김상담 (CS팀)</span>
+                <div class="ticket-meta" id="ticketMeta">
+                    <!-- 티켓 메타데이터가 동적으로 로드됩니다 -->
                 </div>
                 <div class="header-actions">
                     <button class="action-btn" onclick="toggleSummary()" id="summaryToggleBtn" title="요약 접기/펼기">
@@ -1283,32 +1300,11 @@
                 </div>
                 <div class="summary-content" id="summaryContent">
                     <div class="main-summary">
-                        <div class="summary-text">
-                            🔍 <strong>문제 현황</strong><br>
-                            - 핵심 문제와 증상: 아세아홀딩스 라이선스 1명 추가 요청<br>
-                            - 고객 배경 정보: 아세아지주사 세금계산서 담당자로부터 요청<br>
-                            - 비즈니스 임팩트: 라이선스 추가로 인한 업무 효율성 향상<br>
-                            - 감정 상태: 요청은 협조적이며 긍정적으로 보임<br><br>
-                            
-                            💡 <strong>원인 분석</strong><br>
-                            - 파악된 근본 원인: 아세아홀딩스 라이선스 추가 요청<br>
-                            - 기여 요인들: 고객의 업무 확장 또는 새로운 사용자 추가<br>
-                            - 기술적 세부사항: 라이선스 관련 정보 전달 필요<br>
-                            - 원인 확실성 수준: 확정<br><br>
-                            
-                            ⚡ <strong>해결 진행상황</strong><br>
-                            - 현재 상태: 라이선스 추가 작업 진행 중<br>
-                            - 수행된 조치들: We Do Soft에서 추가 작업 진행 중<br>
-                            - 시도한 해결책과 결과: 라이선스 추가 작업 진행 중<br>
-                            - 다음 단계 계획: 아세아홀딩스 재무 담당자 정보 전달 예정<br>
-                            - 예상 해결 시간: 미정<br><br>
-                            
-                            🎯 <strong>중요 인사이트</strong><br>
-                            - 향후 처리 방향: 라이선스 추가 작업 완료 후 고객 확인 요청<br>
-                            - 에스컬레이션 필요성: 현재 단계에서는 필요 없음<br>
-                            - 예방 조치 권장사항: 고객 요청에 따라 신속하게 처리<br>
-                            - 고객 관리 방안: 고객 요청 사항에 대한 신속한 응대<br>
-                            - 학습 포인트: 유사한 요청 시 빠른 대응 필요
+                        <div class="summary-text" id="summaryText">
+                            <!-- AI 요약이 동적으로 로드됩니다 -->
+                            <div class="loading-summary">
+                                🤖 AI가 티켓을 분석하여 요약을 생성 중입니다...
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1319,11 +1315,11 @@
                 <div class="tab-list">
                     <button class="tab-button active" data-tab="tickets">
                         📱 유사 티켓
-                        <span class="tab-count">3</span>
+                        <span class="tab-count" id="similarTicketsCount">0</span>
                     </button>
                     <button class="tab-button" data-tab="kb">
                         📚 KB 문서
-                        <span class="tab-count">2</span>
+                        <span class="tab-count" id="kbDocumentsCount">0</span>
                     </button>
                     <button class="tab-button" data-tab="copilot">
                         🤖 Copilot
@@ -1335,179 +1331,34 @@
             <div class="card-list">
                 <!-- 유사 티켓 탭 콘텐츠 -->
                 <div class="tab-content active" data-tab="tickets">
-                    <div class="insight-panel">
+                    <div class="insight-panel" id="ticketsInsight" style="display: none;">
                         <div class="insight-title">💡 자동 분석 결과</div>
-                        <div class="insight-content">
-                            🎯 평균 유사도: 78% (3건 중 2건이 80% 이상)<br>
-                            📊 상태 분포: 해결완료 2건, 진행중 1건<br>
-                            🏷️ 공통 키워드: "라이선스", "추가", "메일시스템"
+                        <div class="insight-content" id="ticketsInsightContent">
+                            <!-- 유사 티켓 분석 결과가 동적으로 로드됩니다 -->
                         </div>
                     </div>
 
-                    <div class="content-card">
-                        <div class="card-header">
-                            <span class="card-id">#104</span>
-                            <span class="similarity-score score-high">🟢 85%</span>
-                        </div>
-                        <div class="card-body">
-                            <div class="card-title">
-                                전자결재 결재 완료시 PDF 파일 수신 오류의 건
-                            </div>
-                            <div class="card-excerpt">
-                                아시아홀딩스의 메일 시스템 라이선스가 현재 7명까지 있어서, 1명을 추가하고 싶습니다.
-                            </div>
-                            <div class="card-meta">
-                                <div class="meta-left">
-                                    <span>📅 2015-04-10</span>
-                                    <span class="status-indicator status-resolved">해결완료</span>
-                                    <span class="priority-indicator">🔥 긴급</span>
-                                </div>
-                                <span>2일 전</span>
-                            </div>
-                            <div class="card-actions">
-                                <button class="card-btn primary" onclick="viewSummary('#104')">
-                                    👁️ 요약보기
-                                </button>
-                                <button class="card-btn" onclick="viewOriginal('#104')">
-                                    📄 원본보기
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="content-card">
-                        <div class="card-header">
-                            <span class="card-id">#105</span>
-                            <span class="similarity-score score-medium">🟡 78%</span>
-                        </div>
-                        <div class="card-body">
-                            <div class="card-title">
-                                라이선스 관련 업무 처리 요청
-                            </div>
-                            <div class="card-excerpt">
-                                기업 내 데이터 분석을 위한 최적의 도구 선택과 비용 대비 효과 분석을 위한 문의입니다.
-                            </div>
-                            <div class="card-meta">
-                                <div class="meta-left">
-                                    <span>📅 2015-03-15</span>
-                                    <span class="status-indicator status-progress">진행중</span>
-                                    <span class="priority-indicator">🔵 보통</span>
-                                </div>
-                                <span>1주일 전</span>
-                            </div>
-                            <div class="card-actions">
-                                <button class="card-btn primary" onclick="viewSummary('#105')">
-                                    👁️ 요약보기
-                                </button>
-                                <button class="card-btn" onclick="viewOriginal('#105')">
-                                    📄 원본보기
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="content-card">
-                        <div class="card-header">
-                            <span class="card-id">#106</span>
-                            <span class="similarity-score score-medium">🟡 72%</span>
-                        </div>
-                        <div class="card-body">
-                            <div class="card-title">
-                                메일 시스템 확장 관련 문의
-                            </div>
-                            <div class="card-excerpt">
-                                AI 도구 도입 시 비용을 최적화하고 효율적인 예산 계획을 수립하는 방법에 대한 문의입니다.
-                            </div>
-                            <div class="card-meta">
-                                <div class="meta-left">
-                                    <span>📅 2015-02-20</span>
-                                    <span class="status-indicator status-resolved">해결완료</span>
-                                    <span class="priority-indicator">🟠 높음</span>
-                                </div>
-                                <span>2주일 전</span>
-                            </div>
-                            <div class="card-actions">
-                                <button class="card-btn primary" onclick="viewSummary('#106')">
-                                    👁️ 요약보기
-                                </button>
-                                <button class="card-btn" onclick="viewOriginal('#106')">
-                                    📄 원본보기
-                                </button>
-                            </div>
+                    <div id="similarTicketsContainer">
+                        <!-- 유사 티켓 카드들이 동적으로 로드됩니다 -->
+                        <div class="loading-cards">
+                            🔍 유사 티켓을 검색하고 있습니다...
                         </div>
                     </div>
                 </div>
 
                 <!-- KB 문서 탭 콘텐츠 -->
                 <div class="tab-content" data-tab="kb">
-                    <div class="insight-panel">
+                    <div class="insight-panel" id="kbInsight" style="display: none;">
                         <div class="insight-title">📚 지식베이스 검색 결과</div>
-                        <div class="insight-content">
-                            🎯 관련도 높은 문서: 2건<br>
-                            📊 평균 관련성: 85%<br>
-                            🏷️ 주제: 라이선스 관리, 시스템 확장
+                        <div class="insight-content" id="kbInsightContent">
+                            <!-- KB 문서 분석 결과가 동적으로 로드됩니다 -->
                         </div>
                     </div>
 
-                    <div class="content-card">
-                        <div class="card-header">
-                            <span class="card-id">KB-001</span>
-                            <span class="similarity-score score-high">🟢 89%</span>
-                        </div>
-                        <div class="card-body">
-                            <div class="card-title">
-                                라이선스 추가 신청 및 승인 프로세스
-                            </div>
-                            <div class="card-excerpt">
-                                기업 라이선스 추가 신청 시 필요한 서류와 승인 프로세스에 대한 상세 가이드입니다.
-                            </div>
-                            <div class="card-meta">
-                                <div class="meta-left">
-                                    <span>📅 2024-01-15</span>
-                                    <span class="status-indicator status-resolved">최신</span>
-                                    <span>📂 시스템관리</span>
-                                </div>
-                                <span>업데이트: 1개월 전</span>
-                            </div>
-                            <div class="card-actions">
-                                <button class="card-btn primary" onclick="viewKBSummary('KB-001')">
-                                    👁️ 요약보기
-                                </button>
-                                <button class="card-btn" onclick="viewKBOriginal('KB-001')">
-                                    📄 원본보기
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="content-card">
-                        <div class="card-header">
-                            <span class="card-id">KB-002</span>
-                            <span class="similarity-score score-high">🟢 82%</span>
-                        </div>
-                        <div class="card-body">
-                            <div class="card-title">
-                                메일 시스템 용량 및 사용자 확장 가이드
-                            </div>
-                            <div class="card-excerpt">
-                                메일 시스템의 사용자 수 확장과 관련된 기술적 요구사항 및 절차를 설명합니다.
-                            </div>
-                            <div class="card-meta">
-                                <div class="meta-left">
-                                    <span>📅 2024-02-10</span>
-                                    <span class="status-indicator status-resolved">최신</span>
-                                    <span>📂 기술지원</span>
-                                </div>
-                                <span>업데이트: 3주 전</span>
-                            </div>
-                            <div class="card-actions">
-                                <button class="card-btn primary" onclick="viewKBSummary('KB-002')">
-                                    👁️ 요약보기
-                                </button>
-                                <button class="card-btn" onclick="viewKBOriginal('KB-002')">
-                                    📄 원본보기
-                                </button>
-                            </div>
+                    <div id="kbDocumentsContainer">
+                        <!-- KB 문서 카드들이 동적으로 로드됩니다 -->
+                        <div class="loading-cards">
+                            📚 지식베이스 문서를 검색하고 있습니다...
                         </div>
                     </div>
                 </div>
@@ -1532,8 +1383,8 @@
 
                     <!-- 채팅 컨테이너 -->
                     <div class="chat-container">
-                        <!-- 채팅 메시지 영역 -->
-                        <div class="chat-messages" id="chatMessages">
+                        <!-- 채팅 메시지 영역 (동적 로딩) -->
+                        <div class="chat-messages" id="chatResults">
                             <div class="chat-message assistant">
                                 <div class="message-avatar">🤖</div>
                                 <div class="message-content">
@@ -1554,8 +1405,10 @@
                                     rows="1"
                                     onkeydown="handleChatKeydown(event)"
                                     oninput="adjustTextareaHeight(this)"
+                                    oncompositionstart="handleCompositionStart(event)"
+                                    oncompositionend="handleCompositionEnd(event)"
                                 ></textarea>
-                                <button class="send-button" onclick="sendMessage()" id="sendButton">
+                                <button class="send-button" onclick="if(!isSendingMessage) sendMessage()" id="sendButton">
                                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                         <path d="m22 2-7 20-4-9-9-4Z"/>
                                         <path d="M22 2 11 13"/>
@@ -1584,15 +1437,15 @@
             </div>
 
             <!-- 성능 지표 푸터 -->
-            <div class="performance-footer">
+            <div class="performance-footer" id="performanceFooter">
                 <div class="perf-item">
-                    🕒 처리시간: 3.2초
+                    🕒 처리시간: <span id="processingTime">-</span>
                 </div>
                 <div class="perf-item">
-                    📊 품질점수: 82%
+                    📊 품질점수: <span id="qualityScore">-</span>
                 </div>
                 <div class="perf-item">
-                    🔍 검색결과: 5건
+                    🔍 검색결과: <span id="searchResults">-</span>
                 </div>
             </div>
         </div>
@@ -1615,6 +1468,260 @@
     <script src="scripts/app.js"></script>
 
     <script>
+        // 🚀 시스템 초기화 관리자 - 모든 문제 해결을 위한 통합 관리
+        window.SystemInitializer = {
+            initialized: false,
+            moduleStatus: {},
+            
+            // 모듈 초기화 순서 및 검증
+            async initializeSystem() {
+                console.log('🔧 시스템 초기화 시작...');
+                
+                // 1. 필수 모듈 존재 확인
+                const requiredModules = ['GlobalState', 'UI', 'API', 'Data', 'Events'];
+                const missingModules = requiredModules.filter(module => !window[module]);
+                
+                if (missingModules.length > 0) {
+                    console.error('❌ 필수 모듈 누락:', missingModules);
+                    this.showErrorMessage('시스템 초기화 실패: ' + missingModules.join(', ') + ' 모듈이 로드되지 않았습니다.');
+                    return false;
+                }
+                
+                // 2. API 모듈 초기화
+                try {
+                    if (window.API && typeof window.API.init === 'function') {
+                        await window.API.init();
+                        console.log('✅ API 모듈 초기화 완료');
+                        this.moduleStatus.API = 'ready';
+                    }
+                } catch (error) {
+                    console.error('❌ API 초기화 실패:', error);
+                    this.moduleStatus.API = 'error';
+                }
+                
+                // 3. 이벤트 핸들러 설정
+                try {
+                    this.setupChatHandlers();
+                    console.log('✅ 채팅 핸들러 설정 완료');
+                } catch (error) {
+                    console.error('❌ 채팅 핸들러 설정 실패:', error);
+                }
+                
+                // 4. UI 초기화
+                try {
+                    this.initializeUI();
+                    console.log('✅ UI 초기화 완료');
+                } catch (error) {
+                    console.error('❌ UI 초기화 실패:', error);
+                }
+                
+                this.initialized = true;
+                console.log('🎉 시스템 초기화 완료');
+                return true;
+            },
+            
+            // 채팅 기능 핸들러 설정
+            setupChatHandlers() {
+                // 전송 버튼 이벤트
+                const sendButton = document.getElementById('sendButton');
+                if (sendButton) {
+                    // 기존 이벤트 제거
+                    sendButton.replaceWith(sendButton.cloneNode(true));
+                    const newSendButton = document.getElementById('sendButton');
+                    
+                    newSendButton.addEventListener('click', this.handleChatSubmit.bind(this));
+                    console.log('📤 전송 버튼 이벤트 설정 완료');
+                }
+                
+                // 입력창 Enter 키 이벤트
+                const chatInput = document.getElementById('chatInput');
+                if (chatInput) {
+                    // 기존 이벤트 제거
+                    chatInput.replaceWith(chatInput.cloneNode(true));
+                    const newChatInput = document.getElementById('chatInput');
+                    
+                    newChatInput.addEventListener('keypress', (e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            this.handleChatSubmit();
+                        }
+                    });
+                    console.log('⌨️ 입력창 키보드 이벤트 설정 완료');
+                }
+            },
+            
+            // 채팅 메시지 전송 처리
+            async handleChatSubmit() {
+                const chatInput = document.getElementById('chatInput');
+                const sendButton = document.getElementById('sendButton');
+                const chatResults = document.getElementById('chatResults');
+                
+                if (!chatInput || !chatResults) {
+                    console.error('❌ 채팅 UI 요소를 찾을 수 없음');
+                    return;
+                }
+                
+                const message = chatInput.value.trim();
+                if (!message) {
+                    console.warn('⚠️ 빈 메시지는 전송할 수 없습니다');
+                    return;
+                }
+                
+                // UI 상태 업데이트
+                if (sendButton) sendButton.disabled = true;
+                chatInput.disabled = true;
+                
+                // 사용자 메시지 표시
+                this.addChatMessage(chatResults, 'user', message);
+                chatInput.value = '';
+                
+                // 로딩 메시지 표시
+                const loadingMessage = this.addChatMessage(chatResults, 'assistant', '생각하는 중...');
+                loadingMessage.classList.add('loading');
+                
+                try {
+                    // API 모듈 준비 확인
+                    if (!window.API || this.moduleStatus.API !== 'ready') {
+                        throw new Error('API 모듈이 준비되지 않았습니다');
+                    }
+                    
+                    // 백엔드 API 호출
+                    const response = await window.API.sendChatQuery({
+                        query: message,
+                        agent_mode: this.getCurrentMode() === 'smart',
+                        stream_response: true,
+                        ticket_id: await this.getTicketId()
+                    });
+                    
+                    // 로딩 메시지 제거
+                    chatResults.removeChild(loadingMessage);
+                    
+                    // 응답 표시
+                    this.addChatMessage(chatResults, 'assistant', response.content || response.message || '응답을 받을 수 없습니다.');
+                    
+                } catch (error) {
+                    console.error('❌ 채팅 전송 실패:', error);
+                    
+                    // 로딩 메시지 제거
+                    if (chatResults.contains(loadingMessage)) {
+                        chatResults.removeChild(loadingMessage);
+                    }
+                    
+                    // 에러 메시지 표시
+                    this.addChatMessage(chatResults, 'assistant', '죄송합니다. 오류가 발생했습니다: ' + error.message);
+                } finally {
+                    // UI 상태 복원
+                    if (sendButton) sendButton.disabled = false;
+                    chatInput.disabled = false;
+                    chatInput.focus();
+                }
+            },
+            
+            // 채팅 메시지 추가
+            addChatMessage(container, sender, content) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `chat-message ${sender}`;
+                
+                if (sender === 'user') {
+                    messageDiv.innerHTML = `<strong>You:</strong> ${content}`;
+                } else {
+                    messageDiv.innerHTML = `<strong>AI:</strong> ${content}`;
+                }
+                
+                container.appendChild(messageDiv);
+                container.scrollTop = container.scrollHeight;
+                
+                return messageDiv;
+            },
+            
+            // 현재 모드 확인 (스마트/자유)
+            getCurrentMode() {
+                const smartTab = document.querySelector('[data-tab="smart"]');
+                return smartTab && smartTab.classList.contains('active') ? 'smart' : 'free';
+            },
+            
+            // 티켓 ID 가져오기
+            async getTicketId() {
+                try {
+                    if (window.app) {
+                        const client = await window.app.initialized();
+                        const ticketData = await client.data.get('ticket');
+                        return ticketData?.ticket?.id || '123';
+                    }
+                    return '123';
+                } catch (error) {
+                    console.warn('⚠️ 티켓 ID 가져오기 실패:', error);
+                    return '123';
+                }
+            },
+            
+            // UI 초기화
+            initializeUI() {
+                // 입력창 활성화
+                const chatInput = document.getElementById('chatInput');
+                if (chatInput) {
+                    chatInput.disabled = false;
+                    chatInput.placeholder = '메시지를 입력하세요...';
+                }
+                
+                // 전송 버튼 활성화
+                const sendButton = document.getElementById('sendButton');
+                if (sendButton) {
+                    sendButton.disabled = false;
+                }
+                
+                // 초기 상태 메시지
+                const chatResults = document.getElementById('chatResults');
+                if (chatResults && chatResults.children.length === 0) {
+                    this.addChatMessage(chatResults, 'assistant', 'AI 어시스턴트가 준비되었습니다. 무엇을 도와드릴까요?');
+                }
+            },
+            
+            // 에러 메시지 표시
+            showErrorMessage(message) {
+                const errorDiv = document.createElement('div');
+                errorDiv.style.cssText = `
+                    position: fixed;
+                    top: 20px;
+                    right: 20px;
+                    background: #fee2e2;
+                    color: #dc2626;
+                    padding: 12px 16px;
+                    border-radius: 8px;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                    z-index: 10000;
+                    max-width: 400px;
+                `;
+                errorDiv.textContent = message;
+                document.body.appendChild(errorDiv);
+                
+                setTimeout(() => {
+                    if (errorDiv.parentNode) {
+                        errorDiv.parentNode.removeChild(errorDiv);
+                    }
+                }, 5000);
+            }
+        };
+        
+        // 🛡️ 모듈 로드 상태 디버깅 및 초기화 검증
+        console.log('🔍 모듈 로드 상태 확인 시작');
+        
+        // 30초 후 모듈 상태 리포트
+        setTimeout(() => {
+            console.log('📊 모듈 로드 상태 리포트:');
+            console.log('- BACKEND_CONFIG:', typeof window.BACKEND_CONFIG !== 'undefined');
+            console.log('- SAFE_MODULE_ACCESS:', typeof window.SAFE_MODULE_ACCESS !== 'undefined');
+            console.log('- API:', typeof window.API !== 'undefined');
+            console.log('- Data:', typeof window.Data !== 'undefined');
+            console.log('- GlobalState:', typeof window.GlobalState !== 'undefined');
+            
+            if (window.SAFE_MODULE_ACCESS) {
+                console.log('- API Ready:', window.SAFE_MODULE_ACCESS.isAPIReady());
+                console.log('- Data Ready:', window.SAFE_MODULE_ACCESS.isDataReady());
+                console.log('- GlobalState Ready:', window.SAFE_MODULE_ACCESS.isGlobalStateReady());
+            }
+        }, 3000);
+        
         // FDK 환경 감지 및 최적화
         (function() {
             'use strict';
@@ -1779,15 +1886,54 @@
             }
         }
         
-        // 탭 버튼에 이벤트 리스너 추가
-        document.addEventListener('DOMContentLoaded', function() {
-            document.querySelectorAll('.tab-button').forEach(btn => {
-                btn.addEventListener('click', function() {
-                    const tabName = this.getAttribute('data-tab');
-                    switchTab(tabName);
-                });
+        // 탭 버튼에 이벤트 리스너 추가 (강화된 버전)
+        function initializeTabSwitching() {
+            console.log('🔧 탭 전환 기능 초기화');
+            
+            const tabButtons = document.querySelectorAll('.tab-button');
+            console.log(`📋 탭 버튼 발견: ${tabButtons.length}개`);
+            
+            tabButtons.forEach((btn, index) => {
+                const tabName = btn.getAttribute('data-tab');
+                console.log(`🏷️ 탭 ${index + 1}: ${tabName}`);
+                
+                // 기존 이벤트 리스너 제거 후 새로 추가
+                btn.removeEventListener('click', handleTabClick);
+                btn.addEventListener('click', handleTabClick);
             });
-        });
+        }
+        
+        function handleTabClick(event) {
+            const tabName = event.currentTarget.getAttribute('data-tab');
+            console.log(`🔄 탭 클릭됨: ${tabName}`);
+            switchTab(tabName);
+        }
+        
+        // DOM 로드 완료 후 초기화
+        document.addEventListener('DOMContentLoaded', initializeTabSwitching);
+        
+        // 추가적으로 약간 지연 후에도 실행 (모듈 로딩 후)
+        setTimeout(initializeTabSwitching, 1000);
+        
+        // 헤더 메타데이터 업데이트 함수
+        function updateHeaderMetadata(ticketInfo) {
+            const metaContainer = document.getElementById('ticketMeta');
+            if (!metaContainer || !ticketInfo) return;
+            
+            console.log('🏷️ 헤더 메타데이터 업데이트:', ticketInfo);
+            
+            // 기본 정보로 헤더 업데이트
+            const priority = ticketInfo.priority || 'Medium';
+            const status = ticketInfo.status || 'Open';
+            const ticketId = ticketInfo.id || 'Unknown';
+            
+            metaContainer.innerHTML = `
+                <span class="meta-item">티켓 #${ticketId}</span>
+                <span class="meta-item status-${status.toLowerCase()}">${status}</span>
+                <span class="meta-item priority-${priority.toLowerCase()}">${priority}</span>
+                <span class="meta-item">📊 AI 분석 완료</span>
+            `;
+        }
 
         // 요약 접기/펴기 기능 + 스크롤 디버깅
         function toggleSummary() {
@@ -1898,50 +2044,213 @@
             console.log('채팅 모드 변경:', currentChatMode);
         }
 
+        // 중복 호출 방지 플래그
+        let isSendingMessage = false;
+        
         // 메시지 전송
         async function sendMessage() {
             const input = document.getElementById('chatInput');
             const sendButton = document.getElementById('sendButton');
             const message = input.value.trim();
             
-            console.log('sendMessage 호출됨:', { message, isTyping });
+            console.log('🚀 sendMessage 호출됨:', { message, isTyping, isSendingMessage });
             
-            if (!message || isTyping) {
-                console.log('메시지 전송 취소:', { noMessage: !message, isTyping });
+            // 중복 호출 방지
+            if (isSendingMessage) {
+                console.log('🚫 메시지 전송 중복 호출 차단');
                 return;
             }
             
-            // Events 모듈의 채팅 시스템 사용
-            if (window.Events && window.Events.performCopilotSearch) {
-                try {
-                    // 기본 검색 타입 설정 (사용자가 선택하지 않은 경우)
-                    const selectedTypes = getSelectedContentTypes() || ['tickets', 'solutions'];
-                    
-                    // 버튼 비활성화
-                    sendButton.disabled = true;
-                    
-                    // Events 모듈을 통한 채팅 처리
-                    const client = window.GlobalState?.getClient();
-                    if (client) {
-                        await window.Events.performCopilotSearch(client, message, selectedTypes);
-                        input.value = '';
-                        adjustTextareaHeight(input);
-                    } else {
-                        throw new Error('FDK 클라이언트가 초기화되지 않았습니다.');
-                    }
-                } catch (error) {
-                    console.error('채팅 전송 실패:', error);
-                    // 🚫 중복 메시지 렌더링 제거: Events 모듈에서 이미 처리됨
-                } finally {
-                    sendButton.disabled = false;
-                    isTyping = false;
+            if (!message || isTyping) {
+                console.log('📝 메시지 전송 취소:', { noMessage: !message, isTyping });
+                return;
+            }
+            
+            // 전송 시작 플래그 설정
+            isSendingMessage = true;
+            
+            try {
+                // 버튼 비활성화 및 입력 클리어
+                sendButton.disabled = true;
+                input.value = '';
+                adjustTextareaHeight(input);
+                
+                // 사용자 메시지 즉시 표시
+                addMessage('user', message);
+                
+                // 타이핑 인디케이터 표시
+                showTypingIndicator();
+                
+                // API 모듈 상태 확인 (강화된 검증)
+                if (!window.API) {
+                    throw new Error('API 모듈이 로드되지 않았습니다');
                 }
-            } else {
-                // 🚫 폴백 로직 제거: Events 모듈만 사용
-                console.error('❌ Events 모듈이 로드되지 않았습니다.');
-                addMessage('assistant', '채팅 시스템을 초기화할 수 없습니다. 페이지를 새로고침해 주세요.');
+                
+                // API 함수 가용성 확인
+                if (!window.API.sendChatQuery) {
+                    console.warn('⚠️ API.sendChatQuery가 없음, 다시 시도 중...');
+                    
+                    // 잠시 대기 후 재확인
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    
+                    if (!window.API.sendChatQuery) {
+                        throw new Error('API.sendChatQuery 함수를 찾을 수 없습니다. 페이지를 새로고침해주세요.');
+                    }
+                }
+                
+                console.log('✅ API 모듈 검증 완료');
+                
+                // 백엔드로 직접 API 호출
+                const ticketId = document.querySelector('[data-ticket-id]')?.dataset.ticketId || 
+                                 window.GlobalState?.getGlobalTicketData()?.cached_ticket_id || 
+                                 '123';
+                
+                const queryData = {
+                    query: message,
+                    agent_mode: currentChatMode === 'smart',
+                    stream_response: true,
+                    ticket_id: ticketId
+                };
+                
+                console.log('📤 API 호출 시작:', queryData);
+                
+                let responseBuffer = '';
+                let currentMessageDiv = null;
+                
+                // 스트리밍 응답 처리
+                await window.API.sendChatQuery(queryData, {
+                    onStream: (data) => {
+                        try {
+                            console.log('📨 스트리밍 데이터 수신:', data);
+                            
+                            // 타이핑 인디케이터 제거 (첫 응답 시에만)
+                            if (!currentMessageDiv) {
+                                hideTypingIndicator();
+                                
+                                // AI 응답 메시지 컨테이너 생성
+                                const chatResults = document.getElementById('chatResults');
+                                if (chatResults) {
+                                    currentMessageDiv = document.createElement('div');
+                                    currentMessageDiv.className = 'chat-message assistant';
+                                    
+                                    const now = new Date();
+                                    const timeString = now.toLocaleTimeString('ko-KR', { 
+                                        hour: '2-digit', 
+                                        minute: '2-digit' 
+                                    });
+                                    
+                                    currentMessageDiv.innerHTML = `
+                                        <div class="message-avatar">🤖</div>
+                                        <div class="message-content">
+                                            <div class="message-text"></div>
+                                            <div class="message-time">${timeString}</div>
+                                        </div>
+                                    `;
+                                    
+                                    chatResults.appendChild(currentMessageDiv);
+                                }
+                            }
+                            
+                            // 스트리밍 응답 처리 - 다양한 데이터 형식 지원
+                            let content = '';
+                            
+                            // 데이터 타입별 처리
+                            if (typeof data === 'string') {
+                                // 순수 텍스트 데이터
+                                content = data;
+                            } else if (data && typeof data === 'object') {
+                                // JSON 객체 데이터
+                                if (data.type === 'text' || data.type === 'chunk') {
+                                    content = data.content || data.text || data.chunk || '';
+                                } else if (data.content) {
+                                    content = data.content;
+                                } else if (data.text) {
+                                    content = data.text;
+                                } else if (data.chunk) {
+                                    content = data.chunk;
+                                } else if (data.answer) {
+                                    // 일반 응답 형식
+                                    content = data.answer;
+                                } else {
+                                    // 알 수 없는 형식은 무시 (raw JSON 표시 방지)
+                                    console.log('🔍 알 수 없는 데이터 형식 무시:', data);
+                                    content = '';
+                                }
+                            }
+                            
+                            if (content) {
+                                responseBuffer += content;
+                                
+                                // 메시지 업데이트
+                                if (currentMessageDiv) {
+                                    const messageText = currentMessageDiv.querySelector('.message-text');
+                                    if (messageText) {
+                                        messageText.innerHTML = formatAIResponse(responseBuffer);
+                                    }
+                                }
+                                
+                                // 스크롤 업데이트
+                                const chatResults = document.getElementById('chatResults');
+                                if (chatResults) {
+                                    chatResults.scrollTop = chatResults.scrollHeight;
+                                }
+                            }
+                        } catch (streamError) {
+                            console.error('❌ 스트리밍 처리 오류:', streamError);
+                        }
+                    }
+                });
+                
+                // 스트리밍 완료 후 정리
+                if (!currentMessageDiv && responseBuffer) {
+                    // 스트리밍이 실패했지만 응답이 있는 경우
+                    hideTypingIndicator();
+                    addMessage('assistant', responseBuffer);
+                } else if (!responseBuffer) {
+                    // 스트리밍이 완전히 실패한 경우, 일반 API 호출로 fallback
+                    console.log('📡 스트리밍 실패, 일반 모드로 재시도');
+                    try {
+                        const fallbackData = { ...queryData, stream_response: false };
+                        const result = await window.API.sendChatQuery(fallbackData);
+                        
+                        if (result && result.data && result.data.answer) {
+                            hideTypingIndicator();
+                            addMessage('assistant', result.data.answer);
+                        } else {
+                            throw new Error('일반 모드 응답도 실패');
+                        }
+                    } catch (fallbackError) {
+                        console.error('❌ Fallback 모드도 실패:', fallbackError);
+                        hideTypingIndicator();
+                        addMessage('assistant', '죄송합니다. 서버에서 응답을 받을 수 없습니다. 잠시 후 다시 시도해주세요.');
+                    }
+                }
+                
+                console.log('✅ 메시지 전송 완료');
+                
+            } catch (error) {
+                console.error('❌ 메시지 전송 실패:', error);
+                hideTypingIndicator();
+                
+                // 에러 유형별 친화적 메시지 제공
+                let errorMessage = '죄송합니다. 메시지 전송 중 오류가 발생했습니다.';
+                
+                if (error.message.includes('API 모듈')) {
+                    errorMessage = '시스템 초기화 중입니다. 잠시 후 다시 시도해주세요.';
+                } else if (error.message.includes('네트워크') || error.message.includes('fetch')) {
+                    errorMessage = '네트워크 연결을 확인하고 다시 시도해주세요.';
+                } else if (error.message.includes('JSON') || error.message.includes('파싱')) {
+                    errorMessage = '서버 응답 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
+                } else if (error.message.includes('timeout')) {
+                    errorMessage = '응답 시간이 초과되었습니다. 다시 시도해주세요.';
+                }
+                
+                addMessage('assistant', errorMessage);
+            } finally {
+                // UI 상태 복원
                 sendButton.disabled = false;
                 isTyping = false;
+                isSendingMessage = false;
             }
         }
         
@@ -1955,80 +2264,18 @@
             return types.length > 0 ? types : null;
         }
         
-        // 백엔드로 채팅 메시지 전송
-        async function sendChatToBackend(message) {
-            isTyping = true;
-            showTypingIndicator();
-            
-            try {
-                // FDK 클라이언트 가져오기
-                const client = await app.initialized();
-                
-                // 현재 티켓 ID 가져오기
-                let ticketId = null;
-                try {
-                    const ticketData = await client.data.get('ticket');
-                    ticketId = ticketData?.ticket?.id;
-                } catch (error) {
-                    console.warn('티켓 ID를 가져올 수 없습니다:', error);
-                }
-                
-                // API 호출 데이터 준비
-                const queryData = {
-                    query: message,
-                    agent_mode: currentChatMode === 'smart',
-                    stream_response: true,
-                    ticket_id: ticketId
-                };
-                
-                // 스트리밍 응답 처리
-                let fullResponse = '';
-                const streamHandler = (eventData) => {
-                    if (eventData.type === 'token' && eventData.content) {
-                        fullResponse += eventData.content;
-                        // 실시간으로 메시지 업데이트
-                        updateStreamingMessage(fullResponse);
-                    } else if (eventData.type === 'complete') {
-                        hideTypingIndicator();
-                        if (!fullResponse) {
-                            fullResponse = eventData.data?.answer || generateDefaultResponse(message);
-                        }
-                        finalizeStreamingMessage(fullResponse);
-                        isTyping = false;
-                    } else if (eventData.type === 'error') {
-                        throw new Error(eventData.error || 'Stream error');
-                    }
-                };
-                
-                // API 호출
-                if (window.API && window.API.sendChatQuery) {
-                    await window.API.sendChatQuery(client, queryData, {
-                        onStream: streamHandler,
-                        fallbackToNormal: true
-                    });
-                } else {
-                    // API 모듈이 없으면 폴백
-                    console.warn('API 모듈을 찾을 수 없습니다. 시뮬레이션 모드로 전환합니다.');
-                    simulateAIResponse(message);
-                }
-                
-            } catch (error) {
-                console.error('백엔드 API 호출 실패:', error);
-                hideTypingIndicator();
-                
-                // 에러 시 폴백 응답
-                const errorMessage = '죄송합니다. 서버 연결에 문제가 있습니다. 잠시 후 다시 시도해 주세요.';
-                addMessage('assistant', errorMessage);
-                isTyping = false;
-            }
-        }
         
-        // 스트리밍 메시지 업데이트
+        // 스트리밍 메시지 업데이트 (수정됨: chatResults 사용)
         let currentStreamingMessage = null;
         function updateStreamingMessage(content) {
             if (!currentStreamingMessage) {
                 hideTypingIndicator();
-                const chatMessages = document.getElementById('chatMessages');
+                const chatResults = document.getElementById('chatResults');
+                if (!chatResults) {
+                    console.error('chatResults 요소를 찾을 수 없습니다');
+                    return;
+                }
+                
                 const messageDiv = document.createElement('div');
                 messageDiv.className = 'chat-message assistant streaming';
                 messageDiv.id = 'streaming-message';
@@ -2042,20 +2289,22 @@
                 messageDiv.innerHTML = `
                     <div class="message-avatar">🤖</div>
                     <div class="message-content">
-                        <div class="message-text">${escapeHtml(content)}</div>
+                        <div class="message-text">${renderMarkdown(content)}</div>
                         <div class="message-time">${timeString}</div>
                     </div>
                 `;
                 
-                chatMessages.appendChild(messageDiv);
+                chatResults.appendChild(messageDiv);
                 currentStreamingMessage = messageDiv;
-                chatMessages.scrollTop = chatMessages.scrollHeight;
+                chatResults.scrollTop = chatResults.scrollHeight;
             } else {
                 const textElement = currentStreamingMessage.querySelector('.message-text');
                 if (textElement) {
-                    textElement.textContent = content;
-                    const chatMessages = document.getElementById('chatMessages');
-                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                    textElement.innerHTML = renderMarkdown(content);
+                    const chatResults = document.getElementById('chatResults');
+                    if (chatResults) {
+                        chatResults.scrollTop = chatResults.scrollHeight;
+                    }
                 }
             }
         }
@@ -2066,8 +2315,8 @@
                 currentStreamingMessage.classList.remove('streaming');
                 const textElement = currentStreamingMessage.querySelector('.message-text');
                 if (textElement) {
-                    // 마크다운 렌더링
-                    const renderedContent = renderMarkdown(content);
+                    // AI 응답 포맷 변환 후 마크다운 렌더링
+                    const renderedContent = formatAIResponse(content);
                     textElement.innerHTML = renderedContent;
                 }
                 currentStreamingMessage = null;
@@ -2081,6 +2330,38 @@
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+        
+        // AI 응답 포맷 변환 함수 (XML 태그 처리)
+        function formatAIResponse(text) {
+            if (!text) return '';
+            
+            // XML 태그가 포함된 스마트 모드 응답인지 확인
+            if (text.includes('<search_analysis>') || text.includes('<search_strategy>')) {
+                // XML 태그를 제거하고 사용자 친화적 형식으로 변환
+                let formatted = text
+                    // search_analysis 처리
+                    .replace(/<search_analysis>([\s\S]*?)<\/search_analysis>/g, (match, content) => {
+                        return `**🔍 문제 분석**\n${content.trim()}\n\n`;
+                    })
+                    // search_strategy 처리
+                    .replace(/<search_strategy>([\s\S]*?)<\/search_strategy>/g, (match, content) => {
+                        return `**📋 해결 전략**\n${content.trim()}\n\n`;
+                    })
+                    // primary_results 처리
+                    .replace(/<primary_results>([\s\S]*?)<\/primary_results>/g, (match, content) => {
+                        return `**✅ 주요 해결방법**\n${content.trim()}\n\n`;
+                    })
+                    // related_suggestions 처리
+                    .replace(/<related_suggestions>([\s\S]*?)<\/related_suggestions>/g, (match, content) => {
+                        return `**💡 추가 제안사항**\n${content.trim()}\n\n`;
+                    });
+                
+                return renderMarkdown(formatted);
+            } else {
+                // 일반 텍스트는 그대로 마크다운 렌더링
+                return renderMarkdown(text);
+            }
         }
         
         // 마크다운 렌더링 함수
@@ -2113,7 +2394,12 @@
 
         // 메시지 추가
         function addMessage(sender, text) {
-            const chatMessages = document.getElementById('chatMessages');
+            const chatResults = document.getElementById('chatResults');
+            if (!chatResults) {
+                console.error('chatResults 요소를 찾을 수 없습니다');
+                return;
+            }
+            
             const messageDiv = document.createElement('div');
             messageDiv.className = `chat-message ${sender}`;
             
@@ -2125,8 +2411,8 @@
             
             const avatar = sender === 'user' ? '👤' : '🤖';
             
-            // 사용자 메시지는 이스케이프, AI 메시지는 마크다운 렌더링
-            const displayText = sender === 'user' ? escapeHtml(text) : renderMarkdown(text);
+            // 사용자 메시지는 이스케이프, AI 메시지는 포맷 변환 후 마크다운 렌더링
+            const displayText = sender === 'user' ? escapeHtml(text) : formatAIResponse(text);
             
             messageDiv.innerHTML = `
                 <div class="message-avatar">${avatar}</div>
@@ -2136,8 +2422,8 @@
                 </div>
             `;
             
-            chatMessages.appendChild(messageDiv);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
+            chatResults.appendChild(messageDiv);
+            chatResults.scrollTop = chatResults.scrollHeight;
         }
 
         // AI 응답 시뮬레이션
@@ -2186,7 +2472,18 @@
 
         // 타이핑 인디케이터 표시
         function showTypingIndicator() {
-            const chatMessages = document.getElementById('chatMessages');
+            const chatResults = document.getElementById('chatResults');
+            if (!chatResults) {
+                console.error('chatResults 요소를 찾을 수 없습니다');
+                return;
+            }
+            
+            // 기존 타이핑 인디케이터 제거
+            const existingIndicator = document.getElementById('typing-indicator');
+            if (existingIndicator) {
+                existingIndicator.remove();
+            }
+            
             const typingDiv = document.createElement('div');
             typingDiv.className = 'chat-message assistant typing-indicator';
             typingDiv.id = 'typing-indicator';
@@ -2202,8 +2499,8 @@
                 </div>
             `;
             
-            chatMessages.appendChild(typingDiv);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
+            chatResults.appendChild(typingDiv);
+            chatResults.scrollTop = chatResults.scrollHeight;
         }
 
         // 타이핑 인디케이터 숨기기
@@ -2222,10 +2519,41 @@
 
         // 엔터키 처리
         function handleChatKeydown(event) {
+            console.log('🔍 키 입력 감지:', event.key, 'isComposing:', event.isComposing);
+            
+            // 한글 입력 중(IME 조합 중)이면 처리하지 않음
+            if (event.isComposing || event.keyCode === 229 || isComposing) {
+                console.log('🔤 한글 입력 중 - 대기');
+                return;
+            }
+            
             if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
-                sendMessage();
+                console.log('🚀 엔터키 입력 - sendMessage 호출 시도');
+                
+                // 중복 호출 방지 확인
+                if (!isSendingMessage) {
+                    console.log('✅ 메시지 전송 시작');
+                    sendMessage();
+                } else {
+                    console.log('🚫 Enter 키 중복 호출 차단');
+                }
             }
+        }
+
+        // 한글 입력 처리를 위한 변수
+        let isComposing = false;
+
+        // 한글 입력 시작
+        function handleCompositionStart(event) {
+            console.log('🔤 한글 입력 시작');
+            isComposing = true;
+        }
+
+        // 한글 입력 완료
+        function handleCompositionEnd(event) {
+            console.log('🔤 한글 입력 완료');
+            isComposing = false;
         }
 
         function submitFeedback(type) {
@@ -2306,9 +2634,10 @@
             isTyping = false; // 확실히 false로 설정
         }
 
-        // 🎯 모달 로딩 상태 체크 및 UI 업데이트
+        // 🎯 모달 로딩 상태 체크 및 UI 업데이트 (비활성화됨 - 무한 로딩 방지)
         async function checkLoadingStateAndUpdateUI() {
-            console.log('🔍 모달 로딩 상태 체크 시작');
+            console.log('⚠️ checkLoadingStateAndUpdateUI 함수가 비활성화됨 (무한 로딩 방지)');
+            return; // 함수 비활성화
             
             try {
                 // FDK 클라이언트 초기화
@@ -2354,7 +2683,7 @@
                     console.log('⏳ 초기 상태 - 로딩 시작 대기 중');
                     // 잠시 후 다시 체크
                     setTimeout(() => {
-                        checkLoadingStateAndUpdateUI();
+                        // checkLoadingStateAndUpdateUI(); // 무한 로딩 방지를 위해 비활성화
                     }, 1000);
                 }
                 
@@ -2513,16 +2842,120 @@
         }
 
         // DOM 로드 완료 후 초기화
+        // 전역 에러 처리기 설정
+        window.addEventListener('error', function(e) {
+            console.error('🚨 전역 JavaScript 오류:', e.error);
+            console.error('📍 오류 위치:', e.filename, ':', e.lineno, ':', e.colno);
+        });
+        
+        window.addEventListener('unhandledrejection', function(e) {
+            console.error('🚨 처리되지 않은 Promise 거부:', e.reason);
+            e.preventDefault(); // 브라우저 콘솔에 오류 표시 방지
+        });
+        
         document.addEventListener('DOMContentLoaded', function() {
-            console.log('DOM 로드 완료, 모달 초기화 시작');
+            console.log('📄 DOM 로드 완료 - 시스템 초기화 시작');
             
-            // 🎯 로딩 상태 체크 및 UI 업데이트 (최우선)
-            checkLoadingStateAndUpdateUI();
+            // ✅ 미리 로드된 데이터 사용 플래그 확인
+            const urlParams = new URLSearchParams(window.location.search);
+            const usePreloadedData = urlParams.get('usePreloadedData') === 'true';
             
-            // 채팅 입력창 초기화
-            initializeChatInput();
+            console.log('🎯 초기화 모드:', { usePreloadedData });
             
-            // 카드 호버 효과
+            // 모듈 초기화 확인
+            console.log('🔍 모듈 상태 확인:', {
+                API: !!window.API,
+                Data: !!window.Data,
+                UI: !!window.UI,
+                GlobalState: !!window.GlobalState
+            });
+            
+            // API 모듈이 없으면 수동 초기화
+            if (!window.API && typeof API !== 'undefined') {
+                window.API = API;
+                console.log('✅ API 모듈 수동 등록 완료');
+            }
+            
+            // 헤더 메타데이터 초기화 (빈 상태로 표시)
+            if (window.UI && window.UI.renderTicketMeta) {
+                window.UI.renderTicketMeta(null); // 로딩중 표시
+            } else {
+                // UI 모듈이 없으면 직접 설정
+                const metaContainer = document.getElementById('ticketMeta');
+                if (metaContainer) {
+                    metaContainer.innerHTML = '<span class="meta-item">로딩중...</span>';
+                }
+            }
+            
+            // 🚀 초기화 로직
+            setTimeout(async () => {
+                try {
+                    if (usePreloadedData && window.GlobalState) {
+                        // 미리 로드된 데이터 사용 - 추가 백엔드 호출 없이 캐시 사용
+                        console.log('⚡ 미리 로드된 데이터 사용 모드');
+                        
+                        const globalData = window.GlobalState.getGlobalTicketData();
+                        console.log('🔍 캐시된 데이터 확인:', globalData);
+                        
+                        if (globalData && (globalData.summary || globalData.similar_tickets || globalData.kb_documents)) {
+                            console.log('✅ 캐시된 데이터 사용:', globalData);
+                            
+                            // UI 즉시 업데이트
+                            if (window.UI && window.UI.updateUIWithBackendData) {
+                                window.UI.updateUIWithBackendData(globalData);
+                                console.log('🎨 UI 업데이트 완료');
+                            } else {
+                                console.warn('⚠️ UI 모듈이 없거나 updateUIWithBackendData 함수가 없음');
+                            }
+                            
+                            // 헤더 메타데이터 업데이트
+                            if (globalData.ticket_info) {
+                                updateHeaderMetadata(globalData.ticket_info);
+                            }
+                            
+                            // 로딩 상태 클리어
+                            if (typeof hideLoadingOverlay === 'function') {
+                                hideLoadingOverlay();
+                            }
+                        } else {
+                            console.log('⚠️ 캐시된 데이터 없음 - 일반 초기화로 변경');
+                            // 캐시 데이터가 없으면 일반 초기화 실행
+                            if (window.SystemInitializer && window.SystemInitializer.initializeSystem) {
+                                await window.SystemInitializer.initializeSystem();
+                                console.log('✅ 폴백 시스템 초기화 완료');
+                            } else {
+                                console.error('❌ SystemInitializer가 없음');
+                            }
+                        }
+                    } else {
+                        // 일반 초기화 (기존 로직)
+                        if (window.SystemInitializer && window.SystemInitializer.initializeSystem) {
+                            await window.SystemInitializer.initializeSystem();
+                            console.log('✅ 일반 시스템 초기화 완료');
+                        } else {
+                            console.error('❌ SystemInitializer가 없음 - 기본 초기화만 실행');
+                            // 기본 초기화
+                            initializeChatInput();
+                        }
+                    }
+                } catch (error) {
+                    console.error('❌ 시스템 초기화 실패:', error);
+                    if (typeof showErrorState === 'function') {
+                        showErrorState('시스템 초기화에 실패했습니다.');
+                    }
+                    // 기본 초기화라도 실행
+                    initializeChatInput();
+                } finally {
+                    // 항상 채팅 입력 초기화
+                    initializeChatInput();
+                }
+            }, 100);
+            
+            // 기존 초기화 로직들 제거 (중복 방지)
+            // checkLoadingStateAndUpdateUI(); // 제거
+            // initializeChatInput(); // SystemInitializer가 처리
+            
+            // 간단한 UI 효과만 유지 (SystemInitializer가 메인 로직 처리)
             document.querySelectorAll('.content-card').forEach(card => {
                 card.addEventListener('mouseenter', function() {
                     this.style.transform = 'translateY(-2px)';
@@ -2532,22 +2965,6 @@
                     this.style.transform = 'translateY(0)';
                 });
             });
-            
-            // 입력창 클릭 테스트
-            const chatInput = document.getElementById('chatInput');
-            if (chatInput) {
-                chatInput.addEventListener('click', function() {
-                    console.log('채팅 입력창 클릭됨');
-                });
-                
-                chatInput.addEventListener('focus', function() {
-                    console.log('채팅 입력창 포커스됨');
-                });
-                
-                chatInput.addEventListener('input', function() {
-                    console.log('채팅 입력창 입력됨:', this.value);
-                });
-            }
         });
     </script>
 </body>

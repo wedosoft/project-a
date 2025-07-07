@@ -54,7 +54,7 @@ providers:
         cost_tier: "low"
         speed_tier: "fast"
         quality_tier: "good"
-        dimensions: 1536
+        dimensions: 3072
         deprecated: false
         
       text-embedding-3-large:
@@ -231,7 +231,7 @@ use_cases:
   embedding:
     priority_models:
       - provider: "openai"
-        model: "text-embedding-3-small"
+        model: "text-embedding-3-large"
         reason: "범용적인 임베딩 품질"
       - provider: "openai"
         model: "text-embedding-3-large"
@@ -240,7 +240,7 @@ use_cases:
         model: "models/embedding-001"
         reason: "다국어 지원"
     requirements:
-      dimensions: 1536
+      dimensions: 3072
 
 # 모델 deprecation 정책
 deprecation_policy:

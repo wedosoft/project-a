@@ -1270,6 +1270,312 @@ window.hideModal = function() {
   }
 };
 
+/**
+ * 백엔드 데이터 렌더링 함수들을 UI 모듈에 추가
+ */
+Object.assign(UI, {
+  /**
+   * 백엔드 데이터로 티켓 메타데이터 렌더링
+   */
+  renderTicketMeta(ticketData) {
+    const metaContainer = document.getElementById('ticketMeta');
+    if (!metaContainer) return;
+
+    // 데이터가 없으면 로딩 상태 표시
+    if (!ticketData) {
+      metaContainer.innerHTML = `
+        <span class="meta-item">로딩중...</span>
+      `;
+      return;
+    }
+
+    // 실제 데이터 표시
+    const sentiment = ticketData.sentiment;
+    const status = ticketData.status;
+    const group = ticketData.group;
+    const assignee = ticketData.assignee;
+
+    // 감정 상태 매핑
+    const sentimentMap = {
+      'positive': { icon: '😊', text: '긍정', class: 'sentiment-positive' },
+      'neutral': { icon: '😐', text: '보통', class: 'sentiment-neutral' },
+      'negative': { icon: '😠', text: '부정', class: 'sentiment-negative' }
+    };
+
+    // 처리 상태 매핑
+    const statusMap = {
+      'open': { text: '처리중', class: 'status-open' },
+      'pending': { text: '대기중', class: 'status-pending' },
+      'resolved': { text: '해결완료', class: 'status-resolved' }
+    };
+
+    const sentimentInfo = sentimentMap[sentiment] || sentimentMap.neutral;
+    const statusInfo = statusMap[status] || statusMap.open;
+
+    metaContainer.innerHTML = `
+      <span class="meta-item ${sentimentInfo.class}">${sentimentInfo.icon} ${sentimentInfo.text}</span>
+      <span class="meta-item ${statusInfo.class}">${statusInfo.text}</span>
+      <span class="meta-item">${group}</span>
+      <span class="meta-item">${assignee}</span>
+    `;
+  },
+
+  /**
+   * AI 요약 렌더링
+   */
+  renderAISummary(summaryData) {
+    const summaryText = document.getElementById('summaryText');
+    if (!summaryText || !summaryData) return;
+
+    summaryText.innerHTML = `
+      🔍 <strong>문제 현황</strong><br>
+      ${summaryData.problem_overview || '분석 중...'}<br><br>
+      
+      💡 <strong>원인 분석</strong><br>
+      ${summaryData.root_cause || '분석 중...'}<br><br>
+      
+      🎯 <strong>해결 방안</strong><br>
+      ${summaryData.solution || '분석 중...'}<br><br>
+      
+      🔑 <strong>주요 인사이트</strong><br>
+      ${summaryData.insights || '분석 중...'}
+    `;
+  },
+
+  /**
+   * 유사 티켓 렌더링
+   */
+  renderSimilarTickets(tickets) {
+    const container = document.getElementById('similarTicketsContainer');
+    const countElement = document.getElementById('similarTicketsCount');
+    const insightPanel = document.getElementById('ticketsInsight');
+    const insightContent = document.getElementById('ticketsInsightContent');
+
+    if (!container) return;
+
+    // 카운트 업데이트
+    if (countElement) {
+      countElement.textContent = tickets.length;
+    }
+
+    if (tickets.length === 0) {
+      container.innerHTML = '<div class="no-results">🔍 관련된 유사 티켓을 찾을 수 없습니다.</div>';
+      return;
+    }
+
+    // 인사이트 패널 업데이트
+    if (insightPanel && insightContent) {
+      const avgScore = Math.round(tickets.reduce((sum, t) => sum + (t.relevance_score * 100), 0) / tickets.length);
+      const resolved = tickets.filter(t => t.status === 'resolved').length;
+      
+      insightContent.innerHTML = `
+        🎯 평균 유사도: ${avgScore}% (${tickets.length}건)<br>
+        📊 상태 분포: 해결완료 ${resolved}건, 진행중 ${tickets.length - resolved}건<br>
+        🏷️ 검색 품질: 높음
+      `;
+      insightPanel.style.display = 'block';
+    }
+
+    // 티켓 카드 렌더링
+    container.innerHTML = tickets.map(ticket => `
+      <div class="content-card">
+        <div class="card-header">
+          <span class="card-id">#${ticket.id}</span>
+          <span class="similarity-score ${this.getScoreClass(ticket.relevance_score)}">
+            ${this.getScoreIcon(ticket.relevance_score)} ${Math.round(ticket.relevance_score * 100)}%
+          </span>
+        </div>
+        <div class="card-body">
+          <div class="card-title">${ticket.title || '제목 없음'}</div>
+          <div class="card-excerpt">${ticket.content?.substring(0, 150) || '내용 없음'}...</div>
+          <div class="card-meta">
+            <div class="meta-left">
+              <span>📅 ${ticket.created_at ? new Date(ticket.created_at).toLocaleDateString() : '-'}</span>
+              <span class="status-indicator status-${ticket.status || 'unknown'}">${ticket.status || 'unknown'}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    `).join('');
+  },
+
+  /**
+   * KB 문서 렌더링
+   */
+  renderKBDocuments(documents) {
+    const container = document.getElementById('kbDocumentsContainer');
+    const countElement = document.getElementById('kbDocumentsCount');
+    const insightPanel = document.getElementById('kbInsight');
+    const insightContent = document.getElementById('kbInsightContent');
+
+    if (!container) return;
+
+    // 카운트 업데이트
+    if (countElement) {
+      countElement.textContent = documents.length;
+    }
+
+    if (documents.length === 0) {
+      container.innerHTML = '<div class="no-results">📚 관련된 지식베이스 문서를 찾을 수 없습니다.</div>';
+      return;
+    }
+
+    // 인사이트 패널 업데이트
+    if (insightPanel && insightContent) {
+      const avgScore = Math.round(documents.reduce((sum, d) => sum + (d.relevance_score * 100), 0) / documents.length);
+      
+      insightContent.innerHTML = `
+        🎯 관련도 높은 문서: ${documents.length}건<br>
+        📊 평균 관련성: ${avgScore}%<br>
+        🏷️ 주제: 관련 기술 문서
+      `;
+      insightPanel.style.display = 'block';
+    }
+
+    // 문서 카드 렌더링
+    container.innerHTML = documents.map(doc => `
+      <div class="content-card">
+        <div class="card-header">
+          <span class="card-id">KB-${doc.id}</span>
+          <span class="similarity-score ${this.getScoreClass(doc.relevance_score)}">
+            ${this.getScoreIcon(doc.relevance_score)} ${Math.round(doc.relevance_score * 100)}%
+          </span>
+        </div>
+        <div class="card-body">
+          <div class="card-title">${doc.title || '제목 없음'}</div>
+          <div class="card-excerpt">${doc.excerpt || doc.content?.substring(0, 150) || '내용 없음'}...</div>
+          <div class="card-meta">
+            <div class="meta-left">
+              <span>📅 ${doc.updated_at ? new Date(doc.updated_at).toLocaleDateString() : '-'}</span>
+              <span class="status-indicator status-resolved">최신</span>
+              <span>📂 ${doc.category || '기술문서'}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    `).join('');
+  },
+
+  /**
+   * 성능 지표 업데이트
+   */
+  updatePerformanceMetrics(data) {
+    const processingTime = document.getElementById('processingTime');
+    const qualityScore = document.getElementById('qualityScore');
+    const searchResults = document.getElementById('searchResults');
+
+    if (processingTime && data.execution_time) {
+      processingTime.textContent = `${parseFloat(data.execution_time).toFixed(1)}초`;
+    }
+
+    if (qualityScore && data.search_quality_score) {
+      qualityScore.textContent = `${Math.round(data.search_quality_score * 100)}%`;
+    }
+
+    if (searchResults) {
+      const totalResults = (data.similar_tickets?.length || 0) + (data.kb_documents?.length || 0);
+      searchResults.textContent = `${totalResults}건`;
+    }
+  },
+
+  /**
+   * 유틸리티 함수들
+   */
+  getScoreClass(score) {
+    if (score >= 0.8) return 'score-high';
+    if (score >= 0.6) return 'score-medium';
+    return 'score-low';
+  },
+
+  getScoreIcon(score) {
+    if (score >= 0.8) return '🟢';
+    if (score >= 0.6) return '🟡';
+    return '🔴';
+  },
+
+  /**
+   * 백엔드 데이터로 전체 UI 업데이트 (강화된 버전)
+   */
+  updateUIWithBackendData(data) {
+    console.log('🎨 백엔드 데이터로 UI 업데이트 시작:', data);
+
+    try {
+      // 강제로 로딩 상태 종료 및 콘텐츠 표시
+      this.forceShowMainContent();
+      
+      // 1. 티켓 메타데이터 업데이트
+      if (data.ticket_summary) {
+        this.renderTicketMeta(data.ticket_summary);
+        console.log('✅ 티켓 메타데이터 렌더링 완료');
+      }
+
+      // 2. AI 요약 업데이트
+      if (data.summary) {
+        this.renderAISummary(data.summary);
+        console.log('✅ AI 요약 렌더링 완료');
+      }
+
+      // 3. 유사 티켓 렌더링
+      if (data.similar_tickets && Array.isArray(data.similar_tickets)) {
+        this.renderSimilarTickets(data.similar_tickets);
+        console.log(`✅ 유사 티켓 ${data.similar_tickets.length}개 렌더링 완료`);
+      }
+
+      // 4. KB 문서 렌더링
+      if (data.kb_documents && Array.isArray(data.kb_documents)) {
+        this.renderKBDocuments(data.kb_documents);
+        console.log(`✅ KB 문서 ${data.kb_documents.length}개 렌더링 완료`);
+      }
+
+      // 5. 성능 지표 업데이트
+      this.updatePerformanceMetrics(data);
+      console.log('✅ 성능 지표 업데이트 완료');
+
+      console.log('✅ 전체 UI 업데이트 완료');
+    } catch (error) {
+      console.error('❌ UI 업데이트 실패:', error);
+      // 에러 발생 시에도 기본 콘텐츠는 표시
+      this.forceShowMainContent();
+    }
+  },
+
+  /**
+   * 강제로 메인 콘텐츠 표시 (로딩/에러 상태 무시)
+   */
+  forceShowMainContent() {
+    try {
+      // 로딩 오버레이 숨기기
+      const loadingOverlay = document.querySelector('.loading-overlay');
+      if (loadingOverlay) {
+        loadingOverlay.style.display = 'none';
+      }
+
+      // 에러 표시 숨기기
+      const errorDisplay = document.getElementById('error-display');
+      if (errorDisplay) {
+        errorDisplay.style.display = 'none';
+      }
+
+      // 메인 콘텐츠 표시
+      const mainContent = document.getElementById('main-content');
+      if (mainContent) {
+        mainContent.style.display = 'block';
+        mainContent.style.visibility = 'visible';
+      }
+
+      // 모든 섹션 표시
+      const sections = document.querySelectorAll('.content-section, .ai-summary-section, .similar-tickets-section, .kb-documents-section');
+      sections.forEach(section => {
+        section.style.display = 'block';
+      });
+
+      console.log('🔧 강제 메인 콘텐츠 표시 완료');
+    } catch (error) {
+      console.error('❌ 강제 메인 콘텐츠 표시 실패:', error);
+    }
+  }
+});
+
 // 모듈 등록 (로그 없음)
 
 // 모듈 의존성 시스템에 등록 (data 의존성 명시)

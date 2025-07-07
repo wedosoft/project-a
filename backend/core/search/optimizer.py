@@ -137,8 +137,8 @@ class VectorSearchOptimizer:
             return embeddings.embed_query(text)
         except Exception as e:
             logger.error(f"임베딩 생성 실패: {e}")
-            # 기본 임베딩 반환 (OpenAI 차원)
-            return [0.0] * 1536
+            # 기본 임베딩 반환 (OpenAI text-embedding-3-large 차원)
+            return [0.0] * 3072
 
 
 # 싱글톤 인스턴스

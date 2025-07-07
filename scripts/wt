@@ -19,7 +19,9 @@ show_help() {
     echo ""
     echo "사용법:"
     echo "  $(basename $0) create <branch-name>    - 워크트리 생성 및 환경 설정"
+    echo "  $(basename $0) checkout <branch-name>  - 원격 브랜치를 워크트리로 체크아웃"
     echo "  $(basename $0) list                    - 워크트리 목록 조회"
+    echo "  $(basename $0) remote                  - 원격 브랜치 목록 조회"
     echo "  $(basename $0) remove <branch-name>    - 워크트리 및 브랜치 제거"
     echo "  $(basename $0) goto <branch-name>      - 워크트리로 이동"
     echo "  $(basename $0) backend <branch-name>   - 백엔드로 이동하고 가상환경 활성화"
@@ -30,6 +32,7 @@ show_help() {
     echo ""
     echo "예시:"
     echo "  $(basename $0) create feature/admin"
+    echo "  $(basename $0) checkout origin/feature/existing"
     echo "  $(basename $0) backend feature/admin"
     echo "  $(basename $0) start"
     echo "  $(basename $0) merge feature/admin"
@@ -102,6 +105,105 @@ EOF
     else
         echo -e "${YELLOW}📝 새 터미널을 열거나 'source ~/.zshrc'를 실행하면 적용됩니다.${NC}"
     fi
+}
+
+# 원격 브랜치를 워크트리로 체크아웃
+checkout_remote_branch() {
+    local branch_name="$1"
+    
+    if [ -z "$branch_name" ]; then
+        echo -e "${RED}❌ 브랜치 이름을 입력해주세요.${NC}"
+        echo "사용법: $(basename $0) checkout <remote-branch-name>"
+        echo "예시: $(basename $0) checkout origin/feature/existing"
+        echo "      $(basename $0) checkout feature/existing  (origin/ 자동 추가)"
+        exit 1
+    fi
+    
+    # origin/ 접두사가 없으면 자동으로 추가
+    if [[ "$branch_name" != origin/* ]]; then
+        local remote_branch="origin/$branch_name"
+        local local_branch="$branch_name"
+    else
+        local remote_branch="$branch_name"
+        local local_branch="${branch_name#origin/}"
+    fi
+    
+    local folder_name=$(echo "$local_branch" | sed 's/\//-/g')
+    local worktree_path="/Users/alan/GitHub/project-a-$folder_name"
+    
+    echo -e "${BLUE}🚀 원격 브랜치를 워크트리로 체크아웃 중: $remote_branch${NC}"
+    
+    # 프로젝트 루트로 이동
+    cd "$PROJECT_A_ROOT" || exit 1
+    
+    # 원격 브랜치 정보 업데이트
+    echo -e "${YELLOW}🔄 원격 브랜치 정보 업데이트 중...${NC}"
+    git fetch origin
+    
+    # 원격 브랜치가 존재하는지 확인
+    if ! git show-ref --verify --quiet "refs/remotes/$remote_branch"; then
+        echo -e "${RED}❌ 원격 브랜치가 존재하지 않습니다: $remote_branch${NC}"
+        echo -e "${YELLOW}💡 사용 가능한 원격 브랜치 목록:${NC}"
+        git branch -r
+        exit 1
+    fi
+    
+    # 로컬 브랜치가 이미 존재하는지 확인
+    if git show-ref --verify --quiet "refs/heads/$local_branch"; then
+        echo -e "${YELLOW}⚠️ 로컬 브랜치가 이미 존재합니다: $local_branch${NC}"
+        echo -e "${YELLOW}📋 기존 브랜치를 최신 상태로 업데이트합니다...${NC}"
+        git checkout "$local_branch"
+        git pull origin "$local_branch"
+    else
+        # 원격 브랜치에서 로컬 브랜치 생성
+        echo -e "${YELLOW}📋 원격 브랜치에서 로컬 브랜치 생성 중: $local_branch${NC}"
+        git checkout -b "$local_branch" "$remote_branch"
+    fi
+    
+    # dev 브랜치로 돌아가기
+    git checkout dev
+    
+    # 워크트리 생성
+    echo -e "${YELLOW}📁 워크트리 생성 중: $worktree_path${NC}"
+    git worktree add "$worktree_path" "$local_branch"
+    
+    # .env 파일 복사
+    echo -e "${YELLOW}📄 .env 파일 복사 중...${NC}"
+    if [ -f "$PROJECT_A_ROOT/backend/.env" ]; then
+        cp "$PROJECT_A_ROOT/backend/.env" "$worktree_path/backend/.env"
+        echo -e "${GREEN}✅ .env 파일이 복사되었습니다.${NC}"
+    else
+        echo -e "${YELLOW}⚠️ .env 파일이 없습니다.${NC}"
+    fi
+    
+    # 가상환경 생성
+    echo -e "${YELLOW}🐍 가상환경 생성 중...${NC}"
+    cd "$worktree_path/backend"
+    python3 -m venv venv
+    source venv/bin/activate
+    
+    # requirements.txt가 있으면 패키지 설치
+    if [ -f "requirements.txt" ]; then
+        echo -e "${YELLOW}📦 패키지 설치 중...${NC}"
+        pip install -r requirements.txt
+    fi
+    
+    # 자동 가상환경 관리 설정
+    setup_auto_venv_for_worktree "$worktree_path"
+    
+    echo -e "${GREEN}🎉 원격 브랜치 체크아웃 완료!${NC}"
+    echo -e "${BLUE}📍 경로: $worktree_path${NC}"
+    echo -e "${BLUE}🌿 브랜치: $local_branch (from $remote_branch)${NC}"
+    echo ""
+    echo -e "${GREEN}✨ 자동 가상환경이 설정되었습니다!${NC}"
+    echo "이제 backend 폴더로 이동하면 자동으로 가상환경이 활성화됩니다:"
+    echo ""
+    echo -e "${YELLOW}  cd $worktree_path/backend${NC}"
+    echo -e "${YELLOW}  # 🐍 가상환경이 자동 활성화됩니다${NC}"
+    echo ""
+    echo "또는 다음 명령어를 사용하세요:"
+    echo "  $(basename $0) backend $local_branch"
+    echo "  $(basename $0) start"
 }
 
 # 워크트리 생성 및 환경 설정
@@ -177,6 +279,24 @@ list_worktrees() {
     echo -e "${BLUE}📋 워크트리 목록${NC}"
     cd "$PROJECT_A_ROOT"
     git worktree list
+}
+
+# 원격 브랜치 목록 조회
+list_remote_branches() {
+    echo -e "${BLUE}🌐 원격 브랜치 목록${NC}"
+    cd "$PROJECT_A_ROOT"
+    
+    # 원격 브랜치 정보 업데이트
+    echo -e "${YELLOW}🔄 원격 브랜치 정보 업데이트 중...${NC}"
+    git fetch origin
+    
+    echo -e "${GREEN}📋 사용 가능한 원격 브랜치:${NC}"
+    git branch -r --format="%(refname:short)" | grep -v 'origin/HEAD' | sort
+    
+    echo ""
+    echo -e "${YELLOW}💡 사용법:${NC}"
+    echo "  wt checkout feature/branch-name"
+    echo "  wt checkout origin/feature/branch-name"
 }
 
 # 워크트리 및 브랜치 제거
@@ -404,8 +524,14 @@ case "$1" in
     "create")
         create_worktree "$2"
         ;;
+    "checkout")
+        checkout_remote_branch "$2"
+        ;;
     "list")
         list_worktrees
+        ;;
+    "remote")
+        list_remote_branches
         ;;
     "remove")
         remove_worktree "$2"

@@ -58,7 +58,7 @@ class OptimizedVectorRetriever:
         # OpenAI 임베딩 초기화
         self.embeddings = OpenAIEmbeddings(
             openai_api_key=openai_api_key,
-            model="text-embedding-3-small"
+            model="text-embedding-3-large"
         )
         
         # LangChain-Qdrant 벡터스토어 초기화

@@ -60,7 +60,7 @@ def test_search():
     """간단한 검색 테스트를 수행합니다."""
     try:
         # 임의의 쿼리 임베딩 생성 (OpenAI API를 사용하지 않고 테스트)
-        dummy_embedding = [random.random() for _ in range(1536)]
+        dummy_embedding = [random.random() for _ in range(3072)]
         
         # 검색 수행
         DEFAULT_TENANT_ID = "default"
