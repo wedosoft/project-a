@@ -230,148 +230,227 @@ const App = {
 
   // UI 렌더링
   ui: {
-    // 백엔드 티켓 데이터를 기반으로 추가 FDK 데이터 수집
-    async collectAdditionalTicketData() {
-      console.log('🔍 추가 FDK 데이터 수집 시작');
+    // 최적화된 FDK 데이터 수집 (data method 활용)
+    async collectOptimizedTicketData() {
+      console.log('🔍 최적화된 FDK 데이터 수집 시작');
       
       if (!App.state.client) {
-        console.warn('⚠️ FDK Client가 없어 추가 데이터 수집 불가');
-        return;
-      }
-      
-      // FDK 원본 티켓 데이터를 우선 사용, 없으면 백엔드 데이터 사용
-      const ticketData = App.state.originalFDKTicket || App.state.backendTicketData;
-      if (!ticketData) {
-        console.warn('⚠️ 티켓 데이터가 없어 추가 데이터 수집 불가');
+        console.warn('⚠️ FDK Client가 없어 데이터 수집 불가');
         return;
       }
       
       const client = App.state.client;
       
       try {
-        // 1. Contact 데이터 (요청자 정보) - 필수
-        let contactData = null;
-        try {
-          contactData = await client.data.get('contact');
-          console.log('🔍 Contact 데이터 수집 완료:', contactData);
-        } catch (e) {
-          console.warn('⚠️ Contact 데이터 조회 실패:', e);
+        // 1. 기본 FDK data method로 필요한 모든 정보 한 번에 수집
+        console.log('🔍 FDK data method로 기본 데이터 수집 시작...');
+        
+        const [ticketData, contactData, groupData, loggedInUser] = await Promise.all([
+          client.data.get('ticket').catch(e => {
+            console.warn('⚠️ ticket 데이터 조회 실패:', e);
+            return null;
+          }),
+          client.data.get('contact').catch(e => {
+            console.warn('⚠️ contact 데이터 조회 실패:', e);
+            return null;
+          }),
+          client.data.get('group').catch(e => {
+            console.warn('⚠️ group 데이터 조회 실패:', e);
+            return null;
+          }),
+          client.data.get('loggedInUser').catch(e => {
+            console.warn('⚠️ loggedInUser 데이터 조회 실패:', e);
+            return null;
+          })
+        ]);
+        
+        console.log('✅ FDK 기본 데이터 수집 완료');
+        console.log('🎫 Ticket 데이터:', ticketData);
+        console.log('👤 Contact 데이터:', contactData);
+        console.log('👥 Group 데이터:', groupData);
+        console.log('🏢 LoggedInUser 데이터:', loggedInUser);
+        
+        // 2. 백엔드 데이터와 FDK 데이터 통합
+        const mergedTicketData = this.mergeTicketData(
+          App.state.backendTicketData,
+          ticketData?.ticket,
+          App.state.originalFDKTicket
+        );
+        
+        // 3. 상태 레이블 가져오기 (필요한 경우에만 추가 API 호출)
+        let statusLabel = null;
+        if (mergedTicketData && mergedTicketData.status) {
+          // 먼저 ticket 데이터에서 status_label 확인
+          statusLabel = ticketData?.ticket?.status_label || 
+                       mergedTicketData.status_label ||
+                       await this.getStatusLabel(client, mergedTicketData.status);
         }
         
-        // 2. ticket_fields 데이터 (상태 레이블) - 필수
-        let ticketFieldsData = null;
-        try {
-          console.log('🔍 ticket_fields API 호출 시작...');
-          const response = await client.request.invoke('getTicketFields', {
-            type: 'default_status'
-          });
-          console.log('🔍 ticket_fields API 응답:', response);
-          if (response) {
-            ticketFieldsData = response;
-            console.log('🔍 ticket_fields 데이터 수집 완료:', ticketFieldsData);
-          } else {
-            console.warn('⚠️ ticket_fields 응답이 비어있음:', response);
-          }
-        } catch (e) {
-          console.warn('⚠️ ticket_fields 조회 실패:', e);
-        }
+        // 4. 에이전트 정보 처리 (API 호출 필요)
+        let agentData = await this.processAgentData(mergedTicketData, loggedInUser, client);
         
-        // 3. Group 데이터 (담당 그룹) - 필수
-        let groupData = null;
-        if (ticketData.group_id) {
-          try {
-            console.log('🔍 Groups API 호출 시작, group_id:', ticketData.group_id);
-            // 새로운 FDK API 방식으로 groups 호출
-            const groupResponse = await client.request.invoke('getGroupDetails', {
-              id: ticketData.group_id
-            });
-            console.log('🔍 Groups API 응답:', groupResponse);
-            if (groupResponse && groupResponse.name) {
-              console.log('🔍 그룹명:', groupResponse.name);
-              groupData = { name: groupResponse.name, id: ticketData.group_id };
-              console.log('🔍 Groups API로 그룹명 조회 성공:', groupData);
-            } else if (ticketData.group?.name) {
-              groupData = { name: ticketData.group.name, id: ticketData.group_id };
-              console.log('🔍 티켓 데이터에서 그룹명 추출:', groupData);
-            } else {
-              console.log('🔍 그룹 ID만 있음, 그룹명 없이 ID만 저장:', ticketData.group_id);
-              groupData = { name: `그룹 ID: ${ticketData.group_id}`, id: ticketData.group_id };
-            }
-          } catch (e) {
-            console.warn('⚠️ 그룹 정보 조회 실패:', e);
-            // Fallback으로 티켓 데이터 확인
-            if (ticketData.group?.name) {
-              groupData = { name: ticketData.group.name, id: ticketData.group_id };
-            } else {
-              groupData = { name: `그룹 ID: ${ticketData.group_id}`, id: ticketData.group_id };
-            }
-          }
-        }
-        
-        // 4. Agent 데이터 (담당자) - 필수
-        let agentData = null;
-        if (ticketData.responder_id) {
-          try {
-            console.log('🔍 Agents API 호출 시작, responder_id:', ticketData.responder_id);
-            // 새로운 FDK API 방식으로 agents 호출
-            const agentResponse = await client.request.invoke('getAgentDetails', {
-              id: ticketData.responder_id
-            });
-            console.log('🔍 Agents API 응답:', agentResponse);
-            if (agentResponse && agentResponse.contact && agentResponse.contact.name) {
-              console.log('🔍 에이전트명:', agentResponse.contact.name);
-              agentData = { contact: { name: agentResponse.contact.name }, id: ticketData.responder_id };
-              console.log('🔍 Agents API로 담당자명 조회 성공:', agentData);
-            } else {
-              // Fallback으로 로그인 사용자 확인
-              console.log('🔍 Agents API 실패, loggedInUser로 폴백 시도...');
-              const loggedInUser = await client.data.get('loggedInUser');
-              console.log('🔍 loggedInUser 정보:', loggedInUser);
-              if (loggedInUser && loggedInUser.contact && loggedInUser.contact.id === ticketData.responder_id) {
-                agentData = { contact: { name: loggedInUser.contact.name }, id: ticketData.responder_id };
-                console.log('🔍 로그인 사용자 정보에서 담당자명 추출:', agentData);
-              } else if (ticketData.responder?.name) {
-                agentData = { contact: { name: ticketData.responder.name }, id: ticketData.responder_id };
-                console.log('🔍 티켓 데이터에서 담당자명 추출:', agentData);
-              } else {
-                console.log('🔍 담당자 ID만 있음, ID만 저장:', ticketData.responder_id);
-                agentData = { contact: { name: `에이전트 ID: ${ticketData.responder_id}` }, id: ticketData.responder_id };
-              }
-            }
-          } catch (e) {
-            console.warn('⚠️ 담당자 정보 조회 실패:', e);
-            // Fallback 처리
-            if (ticketData.responder?.name) {
-              agentData = { contact: { name: ticketData.responder.name }, id: ticketData.responder_id };
-            } else {
-              agentData = { contact: { name: `에이전트 ID: ${ticketData.responder_id}` }, id: ticketData.responder_id };
-            }
-          }
-        } else {
-          console.log('🔍 responder_id가 없음, 미배정으로 처리');
-          agentData = { contact: { name: '미배정' }, id: null };
-        }
-        
-        // 5. 모든 데이터 통합 및 저장
-        const allTicketData = {
-          ticket: { ticket: ticketData }, // 기존 구조 유지
+        // 5. 통합된 데이터 구성
+        const optimizedTicketData = {
+          ticket: { ticket: mergedTicketData },
           contact: contactData,
-          group: groupData,
+          group: groupData || this.extractGroupFromTicket(mergedTicketData),
           agent: agentData,
-          ticketFields: ticketFieldsData,
+          statusLabel: statusLabel,
           lastUpdated: Date.now()
         };
         
-        // 캐시에 저장
-        App.state.cachedTicketInfo = allTicketData;
-        console.log('🔍 모든 추가 데이터 수집 완료 및 캐시 저장');
+        // 6. 캐시에 저장
+        App.state.cachedTicketInfo = optimizedTicketData;
+        console.log('✅ 최적화된 데이터 수집 완료 및 캐시 저장');
         
-        // 헤더 업데이트
-        App.ui.updateTicketHeader(allTicketData);
+        // 7. 헤더 업데이트
+        App.ui.updateTicketHeader(optimizedTicketData);
         
       } catch (error) {
-        console.error('❌ 추가 FDK 데이터 수집 실패:', error);
+        console.error('❌ 최적화된 FDK 데이터 수집 실패:', error);
       }
+    },
+    
+    // 백엔드, FDK, 원본 티켓 데이터 통합
+    mergeTicketData(backendData, fdkData, originalData) {
+      console.log('🔄 티켓 데이터 통합 시작');
+      
+      // 우선순위: 백엔드 > FDK > 원본
+      const merged = {
+        ...(originalData || {}),
+        ...(fdkData || {}),
+        ...(backendData || {})
+      };
+      
+      console.log('✅ 티켓 데이터 통합 완료:', merged);
+      return merged;
+    },
+    
+    // 상태 레이블 가져오기 (캐시 활용)
+    async getStatusLabel(client, statusId) {
+      // 상태 레이블 캐시 확인
+      if (this.statusLabelCache && this.statusLabelCache[statusId]) {
+        return this.statusLabelCache[statusId];
+      }
+      
+      try {
+        // status_options data method 시도 (v3.0에서 사용 가능한 경우)
+        const statusOptions = await client.data.get('status_options').catch(() => null);
+        if (statusOptions && statusOptions.length > 0) {
+          const statusOption = statusOptions.find(opt => opt.id === statusId);
+          if (statusOption) {
+            // 캐시에 저장
+            if (!this.statusLabelCache) this.statusLabelCache = {};
+            this.statusLabelCache[statusId] = statusOption.label;
+            return statusOption.label;
+          }
+        }
+        
+        // 기본값 반환
+        const defaultLabels = {
+          1: '열림',
+          2: '대기중', 
+          3: '해결완료',
+          4: '해결완료',
+          5: '종료'
+        };
+        return defaultLabels[statusId] || '알 수 없음';
+        
+      } catch (error) {
+        console.warn('⚠️ 상태 레이블 조회 실패:', error);
+        return '알 수 없음';
+      }
+    },
+    
+    // 에이전트 이름 캐시 (성능 최적화)
+    agentNameCache: {},
+    
+    // 에이전트 정보 처리 (API 호출 필요)
+    async processAgentData(ticketData, loggedInUser, client) {
+      if (!ticketData || !ticketData.responder_id) {
+        return { contact: { name: '미배정' }, id: null };
+      }
+      
+      // 티켓 데이터에서 에이전트 이름이 이미 있는 경우
+      if (ticketData.responder_name || ticketData.agent_name) {
+        return {
+          contact: { name: ticketData.responder_name || ticketData.agent_name },
+          id: ticketData.responder_id
+        };
+      }
+      
+      // 로그인 사용자가 담당자인 경우 (빠른 확인)
+      if (loggedInUser && loggedInUser.contact && 
+          loggedInUser.contact.id === ticketData.responder_id) {
+        return {
+          contact: { name: loggedInUser.contact.name },
+          id: ticketData.responder_id
+        };
+      }
+      
+      // 에이전트 이름 캐시 확인
+      if (this.agentNameCache[ticketData.responder_id]) {
+        console.log('✅ 캐시에서 에이전트 이름 반환:', this.agentNameCache[ticketData.responder_id]);
+        return {
+          contact: { name: this.agentNameCache[ticketData.responder_id] },
+          id: ticketData.responder_id
+        };
+      }
+      
+      // API 호출로 에이전트 정보 가져오기
+      try {
+        console.log('🔍 에이전트 API 호출 시작, responder_id:', ticketData.responder_id);
+        const response = await client.request.get(`/api/v2/agents/${ticketData.responder_id}`);
+        const agent = JSON.parse(response.response);
+        
+        if (agent && agent.contact && agent.contact.name) {
+          console.log('✅ 에이전트 API로 담당자명 조회 성공:', agent.contact.name);
+          
+          // 캐시에 저장
+          this.agentNameCache[ticketData.responder_id] = agent.contact.name;
+          
+          return {
+            contact: { name: agent.contact.name },
+            id: ticketData.responder_id
+          };
+        }
+      } catch (error) {
+        console.warn('⚠️ 에이전트 API 호출 실패:', error);
+      }
+      
+      // 기본값 (API 실패 시)
+      return {
+        contact: { name: `에이전트 ID: ${ticketData.responder_id}` },
+        id: ticketData.responder_id
+      };
+    },
+    
+    // 티켓에서 그룹 정보 추출
+    extractGroupFromTicket(ticketData) {
+      if (!ticketData) return null;
+      
+      if (ticketData.group_name) {
+        return {
+          name: ticketData.group_name,
+          id: ticketData.group_id
+        };
+      }
+      
+      if (ticketData.group && ticketData.group.name) {
+        return {
+          name: ticketData.group.name,
+          id: ticketData.group_id || ticketData.group.id
+        };
+      }
+      
+      if (ticketData.group_id) {
+        return {
+          name: `그룹 ID: ${ticketData.group_id}`,
+          id: ticketData.group_id
+        };
+      }
+      
+      return null;
     },
 
 
@@ -442,9 +521,9 @@ const App = {
       }
     },
 
-    // 헤더 티켓 메타정보 업데이트 (통합 데이터 사용)
-    updateTicketHeader(allTicketData, emotionData = null) {
-      console.log('🔍 updateTicketHeader 호출됨 - allTicketData:', allTicketData);
+    // 최적화된 헤더 업데이트 (data method 결과 활용)
+    updateTicketHeader(optimizedData, emotionData = null) {
+      console.log('🔍 updateTicketHeader 호출됨 - optimizedData:', optimizedData);
       console.log('🔍 updateTicketHeader 호출됨 - emotionData:', emotionData);
       
       const metaRow1 = document.getElementById('metaRow1');
@@ -456,7 +535,7 @@ const App = {
 
       // 1줄: 감정상태, 우선순위, 진행상태
       
-      // 1. 백엔드 감정상태 (있는 경우에만)
+      // 1. 백엔드 감정상태 (백엔드에서 제공하지 않으므로 기본값)
       if (emotionData && emotionData.emotion) {
         const emotionMap = {
           'positive': '😊 긍정',
@@ -473,14 +552,15 @@ const App = {
         row1Items.push('<span class="meta-item">😐 보통</span>');
       }
 
-      // 2. 우선순위 (FDK 또는 백엔드 ticket_fields 사용)
+      // 2. 우선순위 (FDK data method 우선 사용)
       let priority = '😐 보통';
-      if (allTicketData?.ticket?.ticket) {
-        const ticket = allTicketData.ticket.ticket;
+      if (optimizedData?.ticket?.ticket) {
+        const ticket = optimizedData.ticket.ticket;
         
-        // 우선순위 - 먼저 텍스트 레이블 사용, 없으면 정수값 매핑
-        let priorityText = ticket.priority_label;
-        if (!priorityText) {
+        // FDK에서 priority_label이 있으면 우선 사용
+        let priorityText = ticket.priority_label || ticket.priority_name;
+        
+        if (!priorityText && ticket.priority) {
           const priorityMap = {
             1: '낮음',
             2: '보통', 
@@ -489,6 +569,8 @@ const App = {
           };
           priorityText = priorityMap[ticket.priority] || '보통';
         }
+        
+        if (!priorityText) priorityText = '보통';
         
         // 텍스트에 이모지 추가
         const priorityEmoji = {
@@ -502,38 +584,34 @@ const App = {
       }
       row1Items.push(`<span class="meta-item">${priority}</span>`);
 
-      // 3. 진행상태 (백엔드 ticket_fields 레이블 우선 사용)
+      // 3. 진행상태 (FDK data method와 백엔드 데이터 통합)
       let status = '⚪ 알 수 없음';
-      if (allTicketData?.ticket?.ticket) {
-        const ticket = allTicketData.ticket.ticket;
-        let statusText = null;
+      if (optimizedData?.ticket?.ticket) {
+        const ticket = optimizedData.ticket.ticket;
         
-        // 백엔드에서 가져온 ticket_fields 레이블 우선 사용
-        if (allTicketData.ticketFields && ticket.status) {
-          try {
-            const statusFields = allTicketData.ticketFields;
-            // ticket_fields에서 현재 티켓 상태에 해당하는 레이블 찾기
-            if (statusFields.choices && Array.isArray(statusFields.choices)) {
-              const statusChoice = statusFields.choices.find(choice => choice.id === ticket.status);
-              if (statusChoice) {
-                statusText = statusChoice.label;
-                console.log('🔍 ticket_fields에서 상태 레이블 찾음:', statusText);
-              }
-            }
-          } catch (e) {
-            console.warn('⚠️ ticket_fields에서 상태 레이블 추출 실패:', e);
-          }
+        // 우선순위: FDK status_label > 최적화된 statusLabel > 기본 매핑
+        let statusText = ticket.status_label || 
+                        ticket.status_name ||
+                        optimizedData.statusLabel;
+        
+        if (!statusText && ticket.status) {
+          // 기본 상태 매핑
+          const statusMap = {
+            1: '열림',
+            2: '대기중',
+            3: '해결완료', 
+            4: '해결완료',
+            5: '종료'
+          };
+          statusText = statusMap[ticket.status] || '알 수 없음';
         }
         
-        // ticket_fields에서 찾지 못한 경우 기본값
-        if (!statusText) {
-          statusText = '알 수 없음';
-        }
+        if (!statusText) statusText = '알 수 없음';
         
         // 상태에 이모지 추가
         const statusEmoji = {
           '열림': '🟢', 'Open': '🟢',
-          '대기중': '🟡', 'Pending': '🟡',
+          '대기중': '🟡', 'Pending': '🟡', 
           '해결완료': '✅', 'Resolved': '✅',
           '종료': '⚪', 'Closed': '⚪',
           '고객 대기': '🟠',
@@ -546,40 +624,40 @@ const App = {
 
       // 2줄: 요청자, 담당그룹, 담당자
 
-      // 4. 요청자 (contact 데이터 사용)
+      // 4. 요청자 (FDK contact data method 우선 사용)
       let requester = '👤 미확인';
-      if (allTicketData?.contact?.contact?.name) {
-        requester = `👤 ${allTicketData.contact.contact.name}`;
-      } else if (allTicketData?.ticket?.ticket?.requester) {
-        requester = `👤 ${allTicketData.ticket.ticket.requester}`;
+      if (optimizedData?.contact?.contact?.name) {
+        requester = `👤 ${optimizedData.contact.contact.name}`;
+      } else if (optimizedData?.contact?.name) {
+        requester = `👤 ${optimizedData.contact.name}`;
+      } else if (optimizedData?.ticket?.ticket?.requester_name) {
+        requester = `👤 ${optimizedData.ticket.ticket.requester_name}`;
       }
       row2Items.push(`<span class="meta-item">${requester}</span>`);
 
-      // 5. 담당그룹 (group 데이터 사용)
+      // 5. 담당그룹 (FDK group data method 우선 사용)
       let group = '👥 CS팀';
-      if (allTicketData?.group?.name) {
-        group = `👥 ${allTicketData.group.name}`;
-      } else if (allTicketData?.ticket?.ticket?.group?.name) {
-        group = `👥 ${allTicketData.ticket.ticket.group.name}`;
-      } else if (allTicketData?.ticket?.ticket?.group_name) {
-        group = `👥 ${allTicketData.ticket.ticket.group_name}`;
+      if (optimizedData?.group?.name) {
+        group = `👥 ${optimizedData.group.name}`;
+      } else if (optimizedData?.group?.group_name) {
+        group = `👥 ${optimizedData.group.group_name}`;
+      } else if (optimizedData?.ticket?.ticket?.group_name) {
+        group = `👥 ${optimizedData.ticket.ticket.group_name}`;
       }
       row2Items.push(`<span class="meta-item">${group}</span>`);
 
-      // 6. 담당자 (agent 데이터 사용)
+      // 6. 담당자 (최적화된 agent 데이터 사용)
       let agent = '👤 미배정';
-      if (allTicketData?.agent?.contact?.name) {
-        agent = `👤 ${allTicketData.agent.contact.name}`;
-      } else if (allTicketData?.ticket?.ticket?.responder?.name) {
-        agent = `👤 ${allTicketData.ticket.ticket.responder.name}`;
-      } else if (allTicketData?.ticket?.ticket?.responder_name) {
-        agent = `👤 ${allTicketData.ticket.ticket.responder_name}`;
+      if (optimizedData?.agent?.contact?.name) {
+        agent = `👤 ${optimizedData.agent.contact.name}`;
       }
       row2Items.push(`<span class="meta-item">${agent}</span>`);
 
       // HTML 업데이트
       metaRow1.innerHTML = row1Items.join('');
       metaRow2.innerHTML = row2Items.join('');
+      
+      console.log('✅ 최적화된 헤더 업데이트 완료');
     },
 
     // 요약 업데이트 (개선된 마크다운 렌더링)
@@ -1287,8 +1365,8 @@ const App = {
             App.state.backendTicketData = data.ticket;
             console.log('💾 백엔드 티켓 데이터 저장 완료');
             
-            // 티켓 정보를 받았으면 추가 FDK 데이터 수집 시작
-            this.collectAdditionalTicketData();
+            // 티켓 정보를 받았으면 최적화된 FDK 데이터 수집 시작
+            this.collectOptimizedTicketData();
           }
           break;
           
@@ -1446,7 +1524,7 @@ const App = {
       App.state.originalFDKTicket = basicTicketData.ticket;
       
       // 기본 헤더 업데이트 (최소한의 정보라도 표시)
-      await App.ui.collectAdditionalTicketData();
+      await App.ui.collectOptimizedTicketData();
       
       // 백엔드에서 초기 데이터 로드 시작 (더 정확한 티켓 정보로 업데이트됨)
       console.log('🔄 백엔드 초기 데이터 로드 시작');

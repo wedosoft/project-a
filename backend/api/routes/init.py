@@ -636,21 +636,94 @@ async def init_legacy_hybrid_mode(
         logger.info(f"🔍 티켓 메타데이터 구조: {list(ticket_metadata.keys())}")
         logger.info(f"🔍 추출된 description_text: {description_text[:100]}...")
         
-        # 순차 실행으로 초기화 처리 - 벡터 검색 사용
-        # 벡터 검색 어댑터 사용
-        hybrid_adapter = InitHybridAdapter()
+        # 벡터 단독 검색 실행
+        from core.database.vectordb import search_vector_db_only
         
-        result = await hybrid_adapter.execute_vector_init(
-            llm_manager=llm_manager,
-            ticket_data=structured_ticket_data,
-            tenant_id=tenant_id,
-            platform=platform,
-            include_summary=include_summary,
-            include_similar_tickets=include_similar_tickets,
-            include_kb_docs=include_kb_docs,
-            top_k_tickets=top_k_tickets,
-            top_k_kb=top_k_kb
+        # 티켓 내용 구성
+        ticket_content_parts = []
+        if structured_ticket_data.get("subject"):
+            ticket_content_parts.append(f"제목: {structured_ticket_data['subject']}")
+        if structured_ticket_data.get("description_text"):
+            ticket_content_parts.append(f"설명: {structured_ticket_data['description_text']}")
+        
+        # 대화내역 추가
+        if structured_ticket_data.get("conversations"):
+            conversations = structured_ticket_data["conversations"]
+            ticket_content_parts.append(f"대화내역 (총 {len(conversations)}개):")
+            for i, conv in enumerate(conversations[:10]):  # 최대 10개만
+                if conv.get("body_text"):
+                    content = conv['body_text'][:300]  # 300자로 제한
+                    ticket_content_parts.append(f"대화 {i+1}: {content}{'...' if len(conv['body_text']) > 300 else ''}")
+        
+        ticket_content = "\n".join(ticket_content_parts)
+        
+        # 병렬 검색 실행
+        import asyncio
+        
+        async def generate_summary():
+            if not include_summary:
+                return None
+            summary_result = await llm_manager.generate_ticket_summary(structured_ticket_data)
+            return summary_result.get("summary", "요약 생성 실패")
+        
+        async def search_similar_tickets():
+            if not include_similar_tickets:
+                return []
+            similar_results = await search_vector_db_only(
+                query=ticket_content,
+                tenant_id=tenant_id,
+                platform=platform,
+                doc_types=["ticket"],
+                limit=top_k_tickets,
+                exclude_id=ticket_id
+            )
+            return [
+                {
+                    "id": result.get("original_id") or result["metadata"].get("original_id"),
+                    "subject": result.get("subject") or result["metadata"].get("subject", ""),
+                    "content": result.get("content", ""),
+                    "score": result["score"],
+                    "metadata": result.get("metadata", {})
+                }
+                for result in similar_results
+            ]
+        
+        async def search_kb_documents():
+            if not include_kb_docs:
+                return []
+            kb_results = await search_vector_db_only(
+                query=ticket_content,
+                tenant_id=tenant_id,
+                platform=platform,
+                doc_types=["article"],
+                limit=top_k_kb
+            )
+            return [
+                {
+                    "id": result.get("original_id") or result["metadata"].get("original_id"),
+                    "title": result.get("title") or result["metadata"].get("title", ""),
+                    "url": f"/kb/articles/{result.get('original_id')}",
+                    "score": result["score"],
+                    "created_at": result.get("created_at", ""),
+                    "updated_at": result.get("updated_at", ""),
+                }
+                for result in kb_results
+            ]
+        
+        # 병렬 실행
+        summary_text, similar_tickets, kb_documents = await asyncio.gather(
+            generate_summary(),
+            search_similar_tickets(),
+            search_kb_documents()
         )
+        
+        # 결과 구성
+        result = {
+            "summary": summary_text,
+            "similar_tickets": similar_tickets,
+            "kb_documents": kb_documents,
+            "execution_time": time.time() - sequential_start_time
+        }
         
         sequential_execution_time = time.time() - sequential_start_time
         logger.info(f"하이브리드 순차 실행 완료 - ticket_id: {ticket_id}, 총 실행시간: {sequential_execution_time:.2f}초")
@@ -1005,7 +1078,7 @@ async def init_streaming_vector_only_mode(
                 return kb_documents
 
             # 1단계: 요약 생성 시작 알림
-            yield f"data: {json.dumps(send_progress('analysis', 20, 'AI 요약 생성 중...', start_time))}\n\n"
+            yield f"data: {json.dumps(send_progress('analysis', 30, 'AI 요약 생성 중...', start_time))}\n\n"
             
             # 1단계: 요약과 검색을 병렬로 실행
             summary_text, raw_similar_tickets, kb_documents = await asyncio.gather(
@@ -1015,7 +1088,7 @@ async def init_streaming_vector_only_mode(
             )
             
             # 요약 완료 진행률
-            yield f"data: {json.dumps(send_progress('analysis_complete', 40, 'AI 요약 생성 완료', start_time))}\n\n"
+            yield f"data: {json.dumps(send_progress('analysis_complete', 50, 'AI 요약 생성 완료', start_time))}\n\n"
             
             # 요약 결과 전송
             summary_chunk = {
@@ -1027,7 +1100,7 @@ async def init_streaming_vector_only_mode(
             
             # 2단계: 유사 티켓 요약 생성 (병렬 처리)
             if raw_similar_tickets:
-                yield f"data: {json.dumps(send_progress('similar_tickets', 60, f'유사 티켓 검색 완료 ({len(raw_similar_tickets)}건)', start_time))}\n\n"
+                yield f"data: {json.dumps(send_progress('similar_tickets', 70, f'유사 티켓 검색 완료 ({len(raw_similar_tickets)}건)', start_time))}\n\n"
                 
                 # 플랫폼 설정 구성
             platform_config = {
@@ -1039,7 +1112,7 @@ async def init_streaming_vector_only_mode(
             
             similar_tickets = await llm_manager.generate_similar_ticket_summaries(raw_similar_tickets, ui_language, platform_config)
             
-            yield f"data: {json.dumps(send_progress('similar_processing', 80, '유사 티켓 요약 생성 완료', start_time))}\n\n"
+            yield f"data: {json.dumps(send_progress('similar_processing', 85, '유사 티켓 요약 생성 완료', start_time))}\n\n"
             
             similar_chunk = {
                 "type": "similar_tickets",
@@ -1049,7 +1122,7 @@ async def init_streaming_vector_only_mode(
             
             # KB 문서 결과 전송
             if kb_documents:
-                yield f"data: {json.dumps(send_progress('kb_documents', 90, f'지식베이스 검색 완료 ({len(kb_documents)}건)', start_time))}\n\n"
+                yield f"data: {json.dumps(send_progress('kb_documents', 95, f'지식베이스 검색 완료 ({len(kb_documents)}건)', start_time))}\n\n"
                 
                 kb_chunk = {
                     "type": "kb_documents",
