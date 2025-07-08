@@ -400,7 +400,8 @@ start_server() {
     fi
     
     echo -e "${GREEN}🚀 백엔드 서버를 시작합니다...${NC}"
-    uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
+    #uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
+    uvicorn main:app --log-level info --access-log --use-colors --reload
 }
 
 # 기존 워크트리에 자동 가상환경 설정 추가
