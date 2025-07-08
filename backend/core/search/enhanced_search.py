@@ -646,7 +646,7 @@ class EnhancedSearchEngine:
             category_score = sum(1 for keyword in category_keywords if keyword in doc_lower)
             
             # 메타데이터에서도 카테고리 관련성 확인
-            title = meta.get("title", meta.get("subject", "")).lower()
+            title = meta.get("subject", meta.get("title", "")).lower()
             title_score = sum(1 for keyword in category_keywords if keyword in title)
             
             total_score = category_score + (title_score * 2)  # 제목에 더 높은 가중치
@@ -887,7 +887,7 @@ class EnhancedSearchEngine:
         metadatas = results.get("metadatas", [])
         
         for i, (doc, meta) in enumerate(zip(documents[:5], metadatas[:5])):
-            title = meta.get("title", meta.get("subject", f"문서 {i+1}"))
+            title = meta.get("subject", meta.get("title", f"문서 {i+1}"))
             attachment_summary = meta.get("attachment_summary", {})
             
             formatted.append(f"""
@@ -906,7 +906,7 @@ class EnhancedSearchEngine:
         metadatas = results.get("metadatas", [])
         
         for i, (doc, meta) in enumerate(zip(documents[:5], metadatas[:5])):
-            title = meta.get("title", meta.get("subject", f"문서 {i+1}"))
+            title = meta.get("subject", meta.get("title", f"문서 {i+1}"))
             doc_type = meta.get("doc_type", "unknown")
             
             formatted.append(f"""

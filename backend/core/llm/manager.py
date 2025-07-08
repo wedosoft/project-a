@@ -66,6 +66,7 @@ class LLMManager:
         # 캐시
         self.response_cache = TTLCache(maxsize=1000, ttl=3600)
         self.embedding_cache = TTLCache(maxsize=1000, ttl=3600)
+        self.status_mapping_cache = TTLCache(maxsize=10, ttl=7200)  # 2시간 캐시
         
         # 초기화
         self._initialize_providers()
@@ -293,7 +294,7 @@ class LLMManager:
                 "urgency_level": "보통"
             }
     
-    async def generate_similar_ticket_summaries(self, similar_tickets: List[Dict[str, Any]], ui_language: str = "ko") -> List[Dict[str, Any]]:
+    async def generate_similar_ticket_summaries(self, similar_tickets: List[Dict[str, Any]], ui_language: str = "ko", platform_config: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         """
         유사 티켓들에 대한 요약 생성 (병렬 처리)
         
@@ -313,13 +314,24 @@ class LLMManager:
         import asyncio
         import os
         
+        # 상태 매핑 정보 가져오기
+        status_mapping = {}
+        if platform_config:
+            try:
+                platform_name = platform_config.get("platform", "freshdesk")
+                status_mapping = await self.get_status_mapping(platform_name, platform_config)
+                logger.info(f"상태 매핑 로드 완료: {len(status_mapping)}개")
+            except Exception as e:
+                logger.warning(f"상태 매핑 로드 실패, 기본값 사용: {e}")
+                status_mapping = {2: "Open", 3: "Pending", 4: "Resolved", 5: "Closed"}
+        
         # 병렬 처리 활성화 확인
         enable_parallel = os.getenv("ENABLE_PARALLEL_PROCESSING", "true").lower() == "true"
         max_concurrent = int(os.getenv("MAX_CONCURRENT_SUMMARIES", "3"))
         
         if not enable_parallel or len(similar_tickets) <= 1:
             # 순차 처리 (기존 로직)
-            return await self._generate_similar_tickets_sequential(similar_tickets, ui_language)
+            return await self._generate_similar_tickets_sequential(similar_tickets, ui_language, status_mapping)
         
         # 병렬 처리
         logger.info(f"🚀 [병렬 처리] 유사 티켓 {len(similar_tickets)}개 병렬 요약 시작 (최대 동시 실행: {max_concurrent}개)")
@@ -329,7 +341,7 @@ class LLMManager:
         
         async def process_ticket_with_semaphore(ticket, index):
             async with semaphore:
-                return await self._generate_single_ticket_summary(ticket, index, ui_language)
+                return await self._generate_single_ticket_summary(ticket, index, ui_language, status_mapping)
         
         # 모든 티켓에 대해 병렬 작업 생성
         tasks = [
@@ -360,7 +372,7 @@ class LLMManager:
         
         return summarized_tickets
 
-    async def _generate_similar_tickets_sequential(self, similar_tickets: List[Dict[str, Any]], ui_language: str = "ko") -> List[Dict[str, Any]]:
+    async def _generate_similar_tickets_sequential(self, similar_tickets: List[Dict[str, Any]], ui_language: str = "ko", status_mapping: Dict[int, str] = None) -> List[Dict[str, Any]]:
         """
         유사 티켓들에 대한 요약 생성 (순차 처리 - 기존 로직)
         """
@@ -437,7 +449,7 @@ class LLMManager:
                 
                 ticket_data_for_summary = {
                     "id": ticket.get("id"),
-                    "subject": ticket.get("title", ""),
+                    "subject": ticket.get("subject", ""),
                     "description_text": ticket.get("content", ""),  # Vector DB의 content 사용
                     "description": ticket.get("content", ""),       # 폴백용
                     "status": ticket.get("metadata", {}).get("status"),
@@ -465,8 +477,8 @@ class LLMManager:
                         # 아티클은 메타데이터만 사용하므로 요약 생성하지 않음
                         summarized_ticket = {
                             "id": ticket.get("id"),
-                            "title": ticket.get("title", ""),
-                            "content": f"📚 **지식베이스 문서**\n\n**제목**: {ticket.get('title', '')}\n\n원본 링크에서 확인하세요.",
+                            "title": ticket.get("subject", ""),
+                            "content": f"📚 **지식베이스 문서**\n\n**제목**: {ticket.get('subject', '')}\n\n원본 링크에서 확인하세요.",
                             "score": ticket.get("score", 0.0),
                             "metadata": ticket.get("metadata", {})
                         }
@@ -493,7 +505,7 @@ class LLMManager:
                         summary_text = f"{summary_result}\n\n**🎯 유사도**: {ticket.get('score', 0.0):.3f}"
                     else:
                         logger.warning(f"Empty summary result for ticket {ticket.get('id')}, using fallback")
-                        ticket_title = ticket.get("title", "제목 없음")
+                        ticket_title = ticket.get("subject", "제목 없음")
                         summary_text = f"## 🔍 {ticket_title}\n\n**문제 상황**: 유사 티켓 요약 생성 실패\n\n**🎯 유사도**: {ticket.get('score', 0.0):.3f}"
                     
                     logger.debug(f"✅ [유사 티켓 요약] 티켓 {ticket.get('id')} YAML 템플릿 기반 요약 완료 ({len(summary_text)}자)")
@@ -502,7 +514,7 @@ class LLMManager:
                 except Exception as e:
                     logger.error(f"❌ [유사 티켓 요약] 티켓 {ticket.get('id')} YAML 템플릿 요약 실패: {e}")
                     # 폴백: 간단한 마크다운 요약
-                    ticket_title = ticket.get("title", "제목 없음")
+                    ticket_title = ticket.get("subject", "제목 없음")
                     ticket_content = ticket.get("content", "")
                     summary_parts = []
                     summary_parts.append(f"## 🔍 {ticket_title}")
@@ -515,7 +527,8 @@ class LLMManager:
                 # 결과 구성
                 summarized_ticket = {
                     "id": ticket.get("id"),
-                    "title": ticket.get("title", ""),
+                    "title": ticket.get("subject", ""),
+                    "subject": ticket.get("subject", ""),  # subject 필드도 포함
                     "content": summary_text,  # YAML 템플릿 기반 마크다운 요약
                     "score": ticket.get("score", 0.0),
                     "metadata": ticket.get("metadata", {})
@@ -528,7 +541,8 @@ class LLMManager:
                 # 실패한 경우 원본 content 사용
                 fallback_ticket = {
                     "id": ticket.get("id"),
-                    "title": ticket.get("title", ""),
+                    "title": ticket.get("subject", ""),
+                    "subject": ticket.get("subject", ""),  # subject 필드도 포함
                     "content": ticket.get("content", "요약 생성에 실패했습니다.")[:200] + "...",
                     "score": ticket.get("score", 0.0),
                     "metadata": ticket.get("metadata", {})
@@ -538,7 +552,7 @@ class LLMManager:
         logger.info(f"🎯 [유사 티켓 요약] 완료: {len(summarized_tickets)}건 처리")
         return summarized_tickets
 
-    async def _generate_single_ticket_summary(self, ticket: Dict[str, Any], index: int, ui_language: str = "ko") -> Dict[str, Any]:
+    async def _generate_single_ticket_summary(self, ticket: Dict[str, Any], index: int, ui_language: str = "ko", status_mapping: Dict[int, str] = None) -> Dict[str, Any]:
         """
         개별 티켓에 대한 요약 생성 (병렬 처리용)
         
@@ -565,7 +579,7 @@ class LLMManager:
             
             ticket_data_for_summary = {
                 "id": ticket.get("id"),
-                "subject": ticket.get("title", ""),
+                "subject": ticket.get("subject") or ticket.get("title", ""),
                 "description_text": ticket.get("content", ""),
                 "description": ticket.get("content", ""),
                 "status": ticket.get("metadata", {}).get("status"),
@@ -582,8 +596,9 @@ class LLMManager:
                 logger.info(f"📚 [병렬 요약 {index+1}] 아티클 ID {ticket.get('id')} - 요약 생성하지 않음")
                 return {
                     "id": ticket.get("id"),
-                    "title": ticket.get("title", ""),
-                    "content": f"📚 **지식베이스 문서**\n\n**제목**: {ticket.get('title', '')}\n\n원본 링크에서 확인하세요.",
+                    "title": ticket.get("subject", ""),
+                    "subject": ticket.get("subject", ""),  # subject 필드도 포함
+                    "content": f"📚 **지식베이스 문서**\n\n**제목**: {ticket.get('subject', '')}\n\n원본 링크에서 확인하세요.",
                     "score": ticket.get("score", 0.0),
                     "metadata": ticket.get("metadata", {})
                 }
@@ -602,7 +617,7 @@ class LLMManager:
                 summary_text = summary_result  # 유사도 정보 제거 (메타데이터로 처리)
             else:
                 logger.warning(f"[병렬 요약 {index+1}] Empty summary result for ticket {ticket.get('id')}, using fallback")
-                ticket_title = ticket.get("title", "제목 없음")
+                ticket_title = ticket.get("subject", "제목 없음")
                 summary_text = f"🔴 **문제**\n유사 티켓 요약 생성 실패\n\n⚡ **처리결과**\n요약 생성 오류\n\n📚 **참고자료**\n원본 티켓 확인 필요"
             
             ticket_time = time.time() - ticket_start_time
@@ -610,9 +625,17 @@ class LLMManager:
             
             # 메타데이터 강화 (요청자, 담당자, 상태 등)
             enhanced_metadata = ticket.get("metadata", {}).copy()
+            
+            # Status 정수값을 라벨로 변환 (동적 매핑 사용)
+            original_status = enhanced_metadata.get("status")
+            if status_mapping and original_status is not None:
+                status_label = status_mapping.get(original_status, "미확인")
+            else:
+                status_label = "미확인"
+            
             enhanced_metadata.update({
                 "similarity_score": round(ticket.get("score", 0.0), 3),
-                "ticket_status": enhanced_metadata.get("status", "미확인"),
+                "ticket_status": status_label,
                 "priority": enhanced_metadata.get("priority", "보통"),
                 "requester": enhanced_metadata.get("requester_name") or enhanced_metadata.get("from_email", "미확인"),
                 "assignee": enhanced_metadata.get("agent_name") or enhanced_metadata.get("assigned_agent", "미지정")
@@ -620,7 +643,8 @@ class LLMManager:
             
             return {
                 "id": ticket.get("id"),
-                "title": ticket.get("title", ""),
+                "title": ticket.get("subject") or ticket.get("title", ""),
+                "subject": ticket.get("subject") or ticket.get("title", ""),  # subject 필드도 포함
                 "content": summary_text,  # 순수 요약 내용만
                 "score": ticket.get("score", 0.0),
                 "metadata": enhanced_metadata  # 강화된 메타데이터
@@ -641,14 +665,15 @@ class LLMManager:
         Returns:
             폴백 티켓 정보
         """
-        ticket_title = ticket.get("title", "제목 없음")
+        ticket_title = ticket.get("subject", "제목 없음")
         ticket_content = ticket.get("content", "")
         
         fallback_content = f"## 🔍 {ticket_title}\n\n**유사 문제**: {ticket_content[:300] if ticket_content else '내용 없음'}...\n\n**🎯 유사도**: {ticket.get('score', 0.0):.3f}"
         
         return {
             "id": ticket.get("id"),
-            "title": ticket.get("title", ""),
+            "title": ticket.get("subject") or ticket.get("title", ""),
+            "subject": ticket.get("subject") or ticket.get("title", ""),  # subject 필드도 포함
             "content": fallback_content,
             "score": ticket.get("score", 0.0),
             "metadata": ticket.get("metadata", {})
@@ -1246,6 +1271,49 @@ class LLMManager:
         
         # 기본값
         return '📎'  # 일반 첨부파일
+    
+    async def get_status_mapping(self, platform: str, config: Dict[str, Any]) -> Dict[int, str]:
+        """
+        플랫폼에서 상태 매핑 정보를 가져옵니다.
+        
+        Args:
+            platform: 플랫폼 이름 (예: "freshdesk")
+            config: 플랫폼 설정 정보
+            
+        Returns:
+            Dict[int, str]: 상태 ID와 라벨의 매핑
+        """
+        cache_key = f"status_mapping_{platform}_{config.get('domain', '')}"
+        
+        # 캐시에서 확인
+        if cache_key in self.status_mapping_cache:
+            logger.debug(f"상태 매핑 캐시 히트: {cache_key}")
+            return self.status_mapping_cache[cache_key]
+        
+        try:
+            if platform == "freshdesk":
+                from core.platforms.freshdesk.adapter import FreshdeskAdapter
+                
+                async with FreshdeskAdapter(config) as adapter:
+                    status_mapping = await adapter.fetch_status_mapping()
+                    
+                # 캐시에 저장
+                self.status_mapping_cache[cache_key] = status_mapping
+                logger.info(f"상태 매핑 캐시 저장: {len(status_mapping)}개 상태")
+                return status_mapping
+            else:
+                logger.warning(f"지원하지 않는 플랫폼: {platform}")
+                return {}
+                
+        except Exception as e:
+            logger.error(f"상태 매핑 가져오기 실패: {e}")
+            # 기본 매핑 반환
+            return {
+                2: "Open",
+                3: "Pending", 
+                4: "Resolved",
+                5: "Closed"
+            }
 
 # 전역 싱글톤 인스턴스 (편의성 제공)
 _global_llm_manager = None

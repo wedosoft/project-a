@@ -1769,7 +1769,6 @@ async def search_vector_db_only(
                 "doc_type": result.get("doc_type", ""),
                 "original_id": result.get("original_id", ""),
                 "subject": result.get("subject", ""),
-                "title": result.get("title", ""),
                 "status": result.get("status"),
                 "priority": result.get("priority"),
                 "has_attachments": result.get("has_attachments", False),
@@ -1787,7 +1786,7 @@ async def search_vector_db_only(
         if logger.isEnabledFor(logging.DEBUG) and formatted_results:
             # 상위 1개 결과만 간단히 로깅 (성능 최적화)
             first_result = formatted_results[0]
-            title = (first_result.get("subject") or first_result.get("title", ""))[:25]
+            title = first_result.get("subject", "")[:25]
             if len(title) > 25:
                 title += "..."
             logger.debug(f"상위 결과: {title} (ID: {first_result.get('original_id')}, {first_result.get('score', 0):.3f})")

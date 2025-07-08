@@ -91,9 +91,8 @@ class SimilarTicketItem(BaseModel):
         description="Platform-Neutral 3-Tuple 키 (tenant_id:platform:original_id)"
     )
     
-    # 티켓 제목 (프레시데스크 원본 필드명 우선)
-    subject: Optional[str] = Field(default=None, description="유사 티켓의 제목 (프레시데스크)")
-    title: Optional[str] = Field(default=None, description="유사 티켓의 제목 (아티클용, 하위호환성)")
+    # 티켓 제목 (프레시데스크 원본 필드명)
+    subject: Optional[str] = Field(default=None, description="유사 티켓의 제목")
     
     # 티켓 내용
     content: Optional[str] = Field(default=None, description="유사 티켓의 내용")

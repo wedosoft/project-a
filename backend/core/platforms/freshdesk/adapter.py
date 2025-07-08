@@ -588,3 +588,60 @@ class FreshdeskAdapter(PlatformAdapter):
             return status_mapping.get(status, str(status))
         
         return str(status)
+    
+    async def fetch_status_mapping(self) -> Dict[int, str]:
+        """
+        Freshdesk API에서 티켓 상태 매핑 정보를 가져옵니다.
+        
+        Returns:
+            Dict[int, str]: 상태 ID와 라벨의 매핑 (예: {2: "열림", 3: "대기중", 4: "해결됨"})
+        """
+        try:
+            logger.info("Freshdesk 상태 매핑 정보 수집 시작")
+            
+            # Freshdesk ticket_fields API 호출
+            url = f"{self.base_url}/api/v2/ticket_fields"
+            response = await self.fetch_with_retry(url)
+            
+            # ticket_fields에서 status 필드 찾기
+            ticket_fields = response.get("ticket_fields", [])
+            status_field = None
+            
+            for field in ticket_fields:
+                if field.get("name") == "status":
+                    status_field = field
+                    break
+            
+            if not status_field:
+                logger.warning("status 필드를 찾을 수 없습니다")
+                return {}
+            
+            # choices에서 상태 매핑 추출
+            choices = status_field.get("choices", [])
+            status_mapping = {}
+            
+            for choice in choices:
+                status_id = choice.get("value")
+                status_label = choice.get("label")
+                
+                if status_id is not None and status_label:
+                    # 정수로 변환 시도
+                    try:
+                        status_id_int = int(status_id)
+                        status_mapping[status_id_int] = status_label
+                        logger.debug(f"상태 매핑 추가: {status_id_int} -> {status_label}")
+                    except (ValueError, TypeError):
+                        logger.warning(f"상태 ID를 정수로 변환할 수 없음: {status_id}")
+            
+            logger.info(f"상태 매핑 정보 수집 완료: {len(status_mapping)}개 상태")
+            return status_mapping
+            
+        except Exception as e:
+            logger.error(f"Freshdesk 상태 매핑 수집 실패: {e}")
+            # 기본 매핑 반환 (fallback)
+            return {
+                2: "Open",
+                3: "Pending", 
+                4: "Resolved",
+                5: "Closed"
+            }

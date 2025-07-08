@@ -513,7 +513,15 @@ async def init_vector_only_mode(
             logger.info("🚀 [병렬 처리] 2단계: 유사 티켓 요약 병렬 생성 시작")
             parallel_stage2_start = time.time()
             
-            similar_tickets = await llm_manager.generate_similar_ticket_summaries(raw_similar_tickets, ui_language)
+            # 플랫폼 설정 구성
+            platform_config = {
+                "platform": platform,
+                "domain": domain,
+                "api_key": api_key,
+                "tenant_id": tenant_id
+            }
+            
+            similar_tickets = await llm_manager.generate_similar_ticket_summaries(raw_similar_tickets, ui_language, platform_config)
             
             parallel_stage2_time = time.time() - parallel_stage2_start
             logger.info(f"⏱️ [병렬 처리] 2단계 완료 - 유사 티켓 {len(similar_tickets)}건, 소요시간: {parallel_stage2_time:.2f}초")
@@ -812,20 +820,33 @@ async def init_streaming_vector_only_mode(
             from core.database.vectordb import search_vector_db_only
             from core.llm.manager import get_llm_manager
             
-            # 진행률 업데이트 함수
-            def send_progress(stage: str, progress: float, message: str = ""):
-                return {
+            # 진행률 업데이트 함수 (예상시간 계산 포함)
+            def send_progress(stage: str, progress: float, message: str = "", start_time_ref: float = None):
+                result = {
                     "type": "progress",
                     "stage": stage,
                     "progress": progress,
                     "message": message
                 }
+                
+                # 예상시간 계산 (시작 시간이 제공된 경우)
+                if start_time_ref and progress > 0:
+                    elapsed_time = time.time() - start_time_ref
+                    if progress < 100:
+                        # 남은 진행률을 기반으로 예상시간 계산
+                        estimated_total_time = (elapsed_time / progress) * 100
+                        remaining_time = max(0, estimated_total_time - elapsed_time)
+                        result["remaining_time"] = int(remaining_time)
+                    else:
+                        result["remaining_time"] = 0
+                
+                return result
             
             # 시작
             yield f"data: {json.dumps(send_progress('init', 0, 'Vector DB 단독 초기화 시작'))}\n\n"
             
             # 1. 실시간 Freshdesk API로 현재 티켓 정보 조회
-            yield f"data: {json.dumps(send_progress('ticket_fetch', 10, '현재 티켓 정보 조회 중'))}\n\n"
+            yield f"data: {json.dumps(send_progress('ticket_fetch', 10, '현재 티켓 정보 조회 중', start_time))}\n\n"
             
             from core.platforms.freshdesk.fetcher import fetch_ticket_details
             
@@ -984,7 +1005,7 @@ async def init_streaming_vector_only_mode(
                 return kb_documents
 
             # 1단계: 요약 생성 시작 알림
-            yield f"data: {json.dumps(send_progress('summary', 20, '실시간 요약 및 검색 병렬 실행 중'))}\n\n"
+            yield f"data: {json.dumps(send_progress('analysis', 20, 'AI 요약 생성 중...', start_time))}\n\n"
             
             # 1단계: 요약과 검색을 병렬로 실행
             summary_text, raw_similar_tickets, kb_documents = await asyncio.gather(
@@ -992,6 +1013,9 @@ async def init_streaming_vector_only_mode(
                 streaming_search_similar_task(),
                 streaming_search_kb_task()
             )
+            
+            # 요약 완료 진행률
+            yield f"data: {json.dumps(send_progress('analysis_complete', 40, 'AI 요약 생성 완료', start_time))}\n\n"
             
             # 요약 결과 전송
             summary_chunk = {
@@ -1003,18 +1027,30 @@ async def init_streaming_vector_only_mode(
             
             # 2단계: 유사 티켓 요약 생성 (병렬 처리)
             if raw_similar_tickets:
-                yield f"data: {json.dumps(send_progress('similar_summaries', 60, f'유사 티켓 요약 병렬 생성 중 (0/{len(raw_similar_tickets)})'))}\n\n"
+                yield f"data: {json.dumps(send_progress('similar_tickets', 60, f'유사 티켓 검색 완료 ({len(raw_similar_tickets)}건)', start_time))}\n\n"
                 
-                similar_tickets = await llm_manager.generate_similar_ticket_summaries(raw_similar_tickets, ui_language)
-                
-                similar_chunk = {
-                    "type": "similar_tickets",
-                    "content": similar_tickets
-                }
-                yield f"data: {json.dumps(similar_chunk)}\n\n"
+                # 플랫폼 설정 구성
+            platform_config = {
+                "platform": platform,
+                "domain": domain,
+                "api_key": api_key,
+                "tenant_id": tenant_id
+            }
+            
+            similar_tickets = await llm_manager.generate_similar_ticket_summaries(raw_similar_tickets, ui_language, platform_config)
+            
+            yield f"data: {json.dumps(send_progress('similar_processing', 80, '유사 티켓 요약 생성 완료', start_time))}\n\n"
+            
+            similar_chunk = {
+                "type": "similar_tickets",
+                "content": similar_tickets
+            }
+            yield f"data: {json.dumps(similar_chunk)}\n\n"
             
             # KB 문서 결과 전송
             if kb_documents:
+                yield f"data: {json.dumps(send_progress('kb_documents', 90, f'지식베이스 검색 완료 ({len(kb_documents)}건)', start_time))}\n\n"
+                
                 kb_chunk = {
                     "type": "kb_documents",
                     "content": kb_documents
@@ -1022,7 +1058,7 @@ async def init_streaming_vector_only_mode(
                 yield f"data: {json.dumps(kb_chunk)}\n\n"
             
             # 완료
-            yield f"data: {json.dumps(send_progress('complete', 100, 'Vector DB 단독 초기화 완료'))}\n\n"
+            yield f"data: {json.dumps({'type': 'complete', 'progress': 100, 'message': '모든 분석 완료!'})}\n\n"
             
             # 완료 로깅
             streaming_execution_time = time.time() - start_time
