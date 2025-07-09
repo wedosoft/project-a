@@ -27,7 +27,10 @@
         }
       },
       "events": {},
-      "functions": {}
+      "functions": {},
+      "requests": {
+        "getAgent": {}
+      }
     }
   },
   "platform-version": "3.0",

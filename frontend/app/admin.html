@@ -270,7 +270,7 @@
         if (typeof app === 'undefined' && !window.frsh_init_loaded) {
             console.log('FDK not found, loading manually...');
             var script = document.createElement('script');
-            script.src = 'https://static.freshdev.io/fdk/2.0/assets/fresh_client.js';
+            script.src = '{{{appclient}}}';
             script.onload = function() {
                 console.log('FDK script loaded manually');
                 window.frsh_init_loaded = true;

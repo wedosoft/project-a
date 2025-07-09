@@ -16,6 +16,8 @@ const App = {
   state: {
     ticketId: null,
     isLoading: false,
+    loadingInProgress: false, // API 호출 중복 방지
+    dataLoaded: false, // 초기 데이터 로드 완료 여부
     currentMode: 'smart', // 'smart' or 'free'
     client: null, // FDK 클라이언트 객체
     
@@ -56,9 +58,24 @@ const App = {
       };
     },
 
-    // 초기 데이터 로드 (스트리밍) - fetch + ReadableStream 사용
+
+    // 초기 데이터 로드 (스트리밍) - fetch + ReadableStream 사용 (중복 방지)
     async loadInitialData(ticketId) {
+      // 중복 호출 방지 체크
+      if (App.state.loadingInProgress || App.state.dataLoaded) {
+        console.log('⚠️ 초기 데이터 로드 중복 방지 - 현재 상태:', {
+          loadingInProgress: App.state.loadingInProgress,
+          dataLoaded: App.state.dataLoaded
+        });
+        return App.state.cachedData;
+      }
+      
+      // 로딩 상태 설정
+      App.state.loadingInProgress = true;
+      App.state.dataLoaded = false;
+      
       const url = `${App.config.baseURL}/init/${ticketId}?stream=true`;
+      console.log('🔄 백엔드 초기 데이터 로드 시작:', url);
       
       try {
         const response = await fetch(url, {
@@ -101,6 +118,8 @@ const App = {
                 
                 if (dataStr === '[DONE]') {
                   App.state.isLoading = false;
+                  App.state.loadingInProgress = false;
+                  App.state.dataLoaded = true;
                   App.ui.hideLoading();
                   return { summary, similarTickets, kbDocuments };
                 }
@@ -122,6 +141,8 @@ const App = {
                       
                       if (result.shouldReturn) {
                         App.state.isLoading = false;
+                        App.state.loadingInProgress = false;
+                        App.state.dataLoaded = true;
                         App.ui.hideLoading();
                         return { summary, similarTickets, kbDocuments };
                       }
@@ -147,6 +168,8 @@ const App = {
                     
                     if (result.shouldReturn) {
                       App.state.isLoading = false;
+                      App.state.loadingInProgress = false;
+                      App.state.dataLoaded = true;
                       App.ui.hideLoading();
                       return { summary, similarTickets, kbDocuments };
                     }
@@ -163,11 +186,15 @@ const App = {
         
         // 스트림이 완료되었지만 complete 이벤트가 없는 경우
         App.state.isLoading = false;
+        App.state.loadingInProgress = false;
+        App.state.dataLoaded = true;
         App.ui.hideLoading();
         return { summary, similarTickets, kbDocuments };
         
       } catch (error) {
         App.state.isLoading = false;
+        App.state.loadingInProgress = false;
+        App.state.dataLoaded = false;
         App.ui.hideLoading();
         console.error('초기 데이터 로드 실패:', error);
         App.ui.showError('백엔드 서버에 연결할 수 없습니다. 서버가 실행 중인지 확인해주세요.');
@@ -277,13 +304,24 @@ const App = {
           App.state.originalFDKTicket
         );
         
-        // 3. 상태 레이블 가져오기 (필요한 경우에만 추가 API 호출)
+        // 3. 상태 레이블 가져오기 (FDK 데이터 우선 사용)
         let statusLabel = null;
         if (mergedTicketData && mergedTicketData.status) {
           // 먼저 ticket 데이터에서 status_label 확인
           statusLabel = ticketData?.ticket?.status_label || 
-                       mergedTicketData.status_label ||
-                       await this.getStatusLabel(client, mergedTicketData.status);
+                       mergedTicketData.status_label;
+          
+          // status_label이 없으면 기본 매핑 사용 (API 호출 방지)
+          if (!statusLabel) {
+            const defaultLabels = {
+              1: '열림',
+              2: '대기중', 
+              3: '해결완료',
+              4: '해결완료',
+              5: '종료'
+            };
+            statusLabel = defaultLabels[mergedTicketData.status] || '알 수 없음';
+          }
         }
         
         // 4. 에이전트 정보 처리 (API 호출 필요)
@@ -365,62 +403,46 @@ const App = {
     // 에이전트 이름 캐시 (성능 최적화)
     agentNameCache: {},
     
-    // 에이전트 정보 처리 (API 호출 필요)
+    // 에이전트 이름 가져오기 (초간단 버전)
+    async getAgentName(agentId, client) {
+      console.log('🔍 getAgentName 호출 시작, agentId:', agentId);
+      
+      try {
+        console.log('🔍 invokeTemplate 시도 중...');
+        const response = await client.request.invokeTemplate('getAgent', {
+          context: { agentId: agentId }
+        });
+        
+        console.log('✅ invokeTemplate 성공, response:', response);
+        
+        const agent = JSON.parse(response.response);
+        console.log('✅ 에이전트 파싱 성공:', agent);
+        
+        if (agent && agent.contact && agent.contact.name) {
+          console.log('✅ 에이전트 이름 반환:', agent.contact.name);
+          return agent.contact.name;
+        } else {
+          console.warn('⚠️ 에이전트 응답 구조 이상:', agent);
+          return `Agent ${agentId}`;
+        }
+        
+      } catch (error) {
+        console.error('❌ getAgentName 오류:', error);
+        console.error('❌ 오류 상세:', error.message);
+        return `Agent ${agentId}`;
+      }
+    },
+    
+    // 에이전트 정보 처리 (단순화된 버전)
     async processAgentData(ticketData, loggedInUser, client) {
       if (!ticketData || !ticketData.responder_id) {
         return { contact: { name: '미배정' }, id: null };
       }
       
-      // 티켓 데이터에서 에이전트 이름이 이미 있는 경우
-      if (ticketData.responder_name || ticketData.agent_name) {
-        return {
-          contact: { name: ticketData.responder_name || ticketData.agent_name },
-          id: ticketData.responder_id
-        };
-      }
+      const agentName = await this.getAgentName(ticketData.responder_id, client);
       
-      // 로그인 사용자가 담당자인 경우 (빠른 확인)
-      if (loggedInUser && loggedInUser.contact && 
-          loggedInUser.contact.id === ticketData.responder_id) {
-        return {
-          contact: { name: loggedInUser.contact.name },
-          id: ticketData.responder_id
-        };
-      }
-      
-      // 에이전트 이름 캐시 확인
-      if (this.agentNameCache[ticketData.responder_id]) {
-        console.log('✅ 캐시에서 에이전트 이름 반환:', this.agentNameCache[ticketData.responder_id]);
-        return {
-          contact: { name: this.agentNameCache[ticketData.responder_id] },
-          id: ticketData.responder_id
-        };
-      }
-      
-      // API 호출로 에이전트 정보 가져오기
-      try {
-        console.log('🔍 에이전트 API 호출 시작, responder_id:', ticketData.responder_id);
-        const response = await client.request.get(`/api/v2/agents/${ticketData.responder_id}`);
-        const agent = JSON.parse(response.response);
-        
-        if (agent && agent.contact && agent.contact.name) {
-          console.log('✅ 에이전트 API로 담당자명 조회 성공:', agent.contact.name);
-          
-          // 캐시에 저장
-          this.agentNameCache[ticketData.responder_id] = agent.contact.name;
-          
-          return {
-            contact: { name: agent.contact.name },
-            id: ticketData.responder_id
-          };
-        }
-      } catch (error) {
-        console.warn('⚠️ 에이전트 API 호출 실패:', error);
-      }
-      
-      // 기본값 (API 실패 시)
       return {
-        contact: { name: `에이전트 ID: ${ticketData.responder_id}` },
+        contact: { name: agentName },
         id: ticketData.responder_id
       };
     },
@@ -503,11 +525,16 @@ const App = {
           
         case 'kb':
           // KB 문서 데이터 복원
+          console.log('📚 KB 탭으로 전환 - 캐시 데이터 확인 중...');
+          console.log('📚 캐시된 KB 문서 데이터:', App.state.cachedData.kbDocuments);
           if (App.state.cachedData.kbDocuments && App.state.cachedData.kbDocuments.length > 0) {
-            console.log('📚 KB 문서 데이터 복원:', App.state.cachedData.kbDocuments.length, '건');
+            console.log('📚 KB 문서 데이터 복원 시작:', App.state.cachedData.kbDocuments.length, '건');
             this.renderKBDocuments(App.state.cachedData.kbDocuments);
+            console.log('📚 KB 문서 데이터 복원 완료');
           } else {
-            console.log('📚 KB 문서 캐시 데이터 없음');
+            console.log('📚 KB 문서 캐시 데이터 없음 - 빈 상태 표시');
+            // 빈 상태도 명시적으로 렌더링
+            this.renderKBDocuments([]);
           }
           break;
           
@@ -637,7 +664,9 @@ const App = {
 
       // 5. 담당그룹 (FDK group data method 우선 사용)
       let group = '👥 CS팀';
-      if (optimizedData?.group?.name) {
+      if (optimizedData?.group?.group?.name) {
+        group = `👥 ${optimizedData.group.group.name}`;
+      } else if (optimizedData?.group?.name) {
         group = `👥 ${optimizedData.group.name}`;
       } else if (optimizedData?.group?.group_name) {
         group = `👥 ${optimizedData.group.group_name}`;
@@ -782,7 +811,34 @@ const App = {
       
       console.log('🔍 Checking tickets data:', tickets);
       
-      if (!tickets || !tickets.length) {
+      // Filter out any KB documents/articles that might have been mixed in
+      const filteredTickets = tickets.filter(item => {
+        // KB documents typically have 'url', 'title', or are marked as KB documents
+        // Tickets typically have 'subject' and ticket IDs
+        const hasUrl = item.url || item.URL;
+        const hasTitle = item.title && !item.subject; // KB docs have title, tickets have subject
+        const isKBDoc = item.category || item.type === 'kb_document' || hasUrl;
+        const hasKBLabel = item.description && item.description.includes('KB문서');
+        
+        const isTicket = !hasUrl && !isKBDoc && !hasKBLabel && !hasTitle;
+        
+        if (!isTicket) {
+          console.log('🚫 Filtering out non-ticket item (KB doc/article):', {
+            id: item.id,
+            hasUrl: !!hasUrl,
+            hasTitle: !!hasTitle,
+            isKBDoc: !!isKBDoc,
+            hasKBLabel: !!hasKBLabel,
+            item: item
+          });
+        }
+        
+        return isTicket;
+      });
+      
+      console.log('🔍 Filtered tickets count:', filteredTickets.length, 'out of', tickets.length);
+      
+      if (!filteredTickets || !filteredTickets.length) {
         console.log('⚠️ No similar tickets to render');
         container.innerHTML = `
           <div class="insight-panel">
@@ -793,15 +849,15 @@ const App = {
         return;
       }
 
-      console.log('✅ Rendering similar tickets:', tickets.length, '건');
+      console.log('✅ Rendering similar tickets:', filteredTickets.length, '건');
 
       // 인사이트 패널 생성 (실제 데이터 구조에 맞게)
-      const avgSimilarity = tickets.reduce((sum, t) => {
+      const avgSimilarity = filteredTickets.reduce((sum, t) => {
         const similarity = t.similarity_score || t.similarity || t.score || 0;
         const similarityPercent = similarity > 1 ? similarity : similarity * 100;
         return sum + similarityPercent;
-      }, 0) / tickets.length;
-      const resolvedCount = tickets.filter(t => {
+      }, 0) / filteredTickets.length;
+      const resolvedCount = filteredTickets.filter(t => {
         // Freshdesk 상태 ID 기반 체크 (4 = resolved)
         const statusId = t.status_id || t.status;
         const statusLabel = t.ticket_status || '';
@@ -813,7 +869,7 @@ const App = {
                statusLabel.toLowerCase().includes('resolved') ||
                statusLabel.toLowerCase().includes('해결');
       }).length;
-      const activeCount = tickets.length - resolvedCount;
+      const activeCount = filteredTickets.length - resolvedCount;
       
       const insightPanel = `
         <div class="insight-panel">
@@ -821,13 +877,13 @@ const App = {
           <div class="insight-content">
             🎯 평균 유사도: ${Math.round(avgSimilarity)}%<br>
             📊 상태 분포: ${resolvedCount}건 해결완료, ${activeCount}건 진행중<br>
-            📋 검색된 티켓: ${tickets.length}건의 유사 사례 발견
+            📋 검색된 티켓: ${filteredTickets.length}건의 유사 사례 발견
           </div>
         </div>
       `;
 
       // 티켓 카드들 생성
-      const ticketCards = tickets.map(ticket => {
+      const ticketCards = filteredTickets.map(ticket => {
         console.log('🎫 Processing ticket:', ticket);
         
         // 실제 데이터 구조에 맞게 필드 매핑
@@ -896,18 +952,27 @@ const App = {
       // 탭 카운트 업데이트
       const countElement = document.getElementById('similarTicketsCount');
       if (countElement) {
-        countElement.textContent = tickets.length;
+        countElement.textContent = filteredTickets.length;
+        console.log('✅ 유사 티켓 탭 카운트 업데이트:', filteredTickets.length);
+      } else {
+        console.error('❌ similarTicketsCount 엘리먼트를 찾을 수 없음');
       }
     },
 
     // KB 문서 렌더링
     renderKBDocuments(documents) {
+      console.log('🚀 renderKBDocuments 함수 호출됨');
+      console.log('🚀 받은 documents 파라미터:', documents);
+      console.log('🚀 documents 타입:', typeof documents);
+      console.log('🚀 documents 배열인가?', Array.isArray(documents));
+      
       const container = document.getElementById('kbDocumentsContainer');
       if (!container) {
         console.error('❌ kbDocumentsContainer not found');
         return;
       }
       
+      console.log('✅ kbDocumentsContainer 찾음:', container);
       console.log('🔍 Checking documents data:', documents);
       
       if (!documents || !documents.length) {
@@ -923,24 +988,6 @@ const App = {
 
       console.log('✅ Rendering KB documents:', documents.length, '건');
 
-      // 인사이트 패널 생성 (실제 데이터 구조에 맞게)
-      const avgRelevance = documents.reduce((sum, d) => {
-        const score = d.score || d.relevance || 0;
-        // 0-1 범위의 소수점을 퍼센트로 변환
-        return sum + (score * 100);
-      }, 0) / documents.length;
-      
-      const insightPanel = `
-        <div class="insight-panel">
-          <div class="insight-title">📚 지식베이스 검색 결과</div>
-          <div class="insight-content">
-            🎯 관련도 높은 문서: ${documents.length}건<br>
-            📊 평균 관련성: ${Math.round(avgRelevance)}%<br>
-            📋 검색된 문서: 지식베이스에서 ${documents.length}건 발견
-          </div>
-        </div>
-      `;
-
       // KB 문서 카드들 생성
       const docCards = documents.map((doc, index) => {
         console.log('📚 Processing document:', doc);
@@ -948,7 +995,10 @@ const App = {
         // 실제 데이터 구조에 맞게 필드 매핑
         const docId = doc.id || 'KB-' + (index + 1);
         const docTitle = doc.title || '제목 없음';
+        
+        // 백엔드에서 올바른 형식의 URL을 받아서 그대로 사용
         const docUrl = doc.url || '#';
+        
         const relevance = doc.score || doc.relevance || 0;
         const createdAt = doc.created_at || doc.createdAt || null;
         
@@ -991,12 +1041,53 @@ const App = {
         `;
       }).join('');
 
-      container.innerHTML = insightPanel + docCards;
+      container.innerHTML = docCards;
+      console.log('✅ KB 문서 HTML 업데이트 완료, 생성된 카드 수:', documents.length);
+      console.log('✅ container.innerHTML 길이:', container.innerHTML.length);
+      
+      // KB 탭 현재 상태 확인
+      const kbTabContent = container.closest('.tab-content');
+      const kbTabButton = document.querySelector('.tab-button[data-tab="kb"]');
+      
+      console.log('🔍 KB 탭 컨테이너 상태 검사:');
+      console.log('  - kbTabContent 존재:', !!kbTabContent);
+      console.log('  - kbTabContent active 클래스:', kbTabContent?.classList.contains('active'));
+      console.log('  - kbTabContent display 스타일:', kbTabContent ? window.getComputedStyle(kbTabContent).display : 'N/A');
+      console.log('  - kbTabButton 존재:', !!kbTabButton);
+      console.log('  - kbTabButton active 클래스:', kbTabButton?.classList.contains('active'));
+      
+      // 컨테이너의 실제 가시성 확인
+      console.log('🔍 container 가시성:');
+      console.log('  - container.offsetHeight:', container.offsetHeight);
+      console.log('  - container.offsetWidth:', container.offsetWidth);
+      console.log('  - container.style.display:', container.style.display);
+      
+      // 강제로 KB 탭을 활성화해보기 (디버깅용)
+      if (kbTabContent && !kbTabContent.classList.contains('active')) {
+        console.log('⚠️ KB 탭이 비활성화 상태입니다. 강제 활성화를 시도합니다.');
+        // 디버깅을 위해 잠시 강제 활성화
+        setTimeout(() => {
+          console.log('🔧 KB 탭 강제 활성화 (5초 후 자동 해제)');
+          kbTabContent.classList.add('active');
+          if (kbTabButton) kbTabButton.classList.add('active');
+          
+          // 5초 후 원래 상태로 복원
+          setTimeout(() => {
+            console.log('🔧 KB 탭 상태 복원');
+            if (!document.querySelector('.tab-button[data-tab="kb"]').classList.contains('active')) {
+              kbTabContent.classList.remove('active');
+            }
+          }, 5000);
+        }, 1000);
+      }
       
       // 탭 카운트 업데이트
       const countElement = document.getElementById('kbDocumentsCount');
       if (countElement) {
         countElement.textContent = documents.length;
+        console.log('✅ KB 문서 탭 카운트 업데이트 완료:', documents.length);
+      } else {
+        console.error('❌ kbDocumentsCount 엘리먼트를 찾을 수 없음');
       }
       
       // KB 문서 클릭 이벤트 (필요시 추가 기능 구현)
@@ -1009,38 +1100,10 @@ const App = {
       });
     },
 
-    // 캐시된 데이터로 다시 렌더링 (탭 전환 시 사용)
-    refreshTabContent(tabName) {
-      console.log('🔄 탭 컨텐츠 새로고침:', tabName);
-      console.log('📊 현재 캐시 상태:', {
-        similarTickets: App.state.cachedData.similarTickets.length,
-        kbDocuments: App.state.cachedData.kbDocuments.length
-      });
-      
-      switch(tabName) {
-        case 'tickets':
-          if (App.state.cachedData.similarTickets.length > 0) {
-            console.log('📱 유사티켓 캐시 데이터 복원:', App.state.cachedData.similarTickets.length, '건');
-            this.renderSimilarTickets(App.state.cachedData.similarTickets);
-          } else {
-            console.log('⚠️ 유사티켓 캐시 데이터 없음');
-          }
-          break;
-          
-        case 'kb':
-          if (App.state.cachedData.kbDocuments.length > 0) {
-            console.log('📚 KB문서 캐시 데이터 복원:', App.state.cachedData.kbDocuments.length, '건');
-            this.renderKBDocuments(App.state.cachedData.kbDocuments);
-          } else {
-            console.log('⚠️ KB문서 캐시 데이터 없음');
-          }
-          break;
-      }
-    },
 
     // 채팅 메시지 추가
     addChatMessage(role, content, messageId) {
-      const container = document.getElementById('chatMessages');
+      const container = document.getElementById('chatResults');
       if (!container) return;
 
       const messageDiv = document.createElement('div');
@@ -1070,7 +1133,7 @@ const App = {
       const messageText = document.querySelector(`#msg-${messageId} .message-text`);
       if (messageText && marked) {
         messageText.innerHTML = marked.parse(content);
-        const container = document.getElementById('chatMessages');
+        const container = document.getElementById('chatResults');
         if (container) {
           container.scrollTop = container.scrollHeight;
         }
@@ -1124,10 +1187,10 @@ const App = {
           data: {
             ticketId: ticketId,
             ticket: ticket,
-            hasCachedData: hasCachedData,
+            hasCachedData: hasCachedData || App.state.dataLoaded,
             timestamp: new Date().toISOString(),
-            noBackendCall: true,
-            usePreloadedData: true, // ✅ 미리 로드된 데이터 사용 플래그
+            noBackendCall: App.state.dataLoaded || hasCachedData, // 데이터 로드 완료 시 백엔드 호출 안함
+            usePreloadedData: App.state.dataLoaded || hasCachedData, // ✅ 미리 로드된 데이터 사용 플래그
             // 로딩 상태 정보 (원본에서 추가)
             loadingStatus: { status: 'ready' },
             globalData: {},
@@ -1319,6 +1382,84 @@ const App = {
       if (loadingOverlay) {
         loadingOverlay.style.display = 'none';
       }
+      
+      // 로딩 완료 시 탭 네비게이션과 카드 리스트 영역 표시
+      const tabNavigation = document.getElementById('tabNavigation');
+      const cardListArea = document.getElementById('cardListArea');
+      
+      if (tabNavigation) {
+        tabNavigation.style.display = 'block';
+        console.log('✅ 탭 네비게이션 표시');
+      }
+      
+      if (cardListArea) {
+        cardListArea.style.display = 'block';
+        console.log('✅ 카드 리스트 영역 표시');
+      }
+      
+      // 로딩 완료 후 유사티켓 탭 활성화 보장
+      setTimeout(() => {
+        this.ensureTicketsTabActive();
+      }, 100);
+    },
+
+    // 유사티켓 탭이 활성화되도록 보장하는 함수
+    ensureTicketsTabActive() {
+      console.log('🔄 ensureTicketsTabActive 실행');
+      
+      // 현재 활성화된 탭 확인
+      const activeTabContents = document.querySelectorAll('.tab-content.active');
+      const activeTabButtons = document.querySelectorAll('.tab-button.active');
+      
+      console.log('🔍 현재 활성화된 탭 수:', {
+        activeTabContents: activeTabContents.length,
+        activeTabButtons: activeTabButtons.length,
+        contentTabs: Array.from(activeTabContents).map(el => el.getAttribute('data-tab')),
+        buttonTabs: Array.from(activeTabButtons).map(el => el.getAttribute('data-tab'))
+      });
+      
+      // 유사티켓 탭 엘리먼트 확인
+      const ticketsTabContent = document.querySelector('.tab-content[data-tab="tickets"]');
+      const ticketsTabButton = document.querySelector('.tab-button[data-tab="tickets"]');
+      
+      if (!ticketsTabContent || !ticketsTabButton) {
+        console.error('❌ 유사티켓 탭 엘리먼트를 찾을 수 없음');
+        return;
+      }
+      
+      console.log('🔄 전체 탭 상태 리셋 후 유사티켓 탭만 활성화');
+      
+      // 모든 탭 강제 비활성화 (중복 활성화 방지)
+      document.querySelectorAll('.tab-content').forEach(content => {
+        content.classList.remove('active');
+        console.log('🔸 탭 콘텐츠 비활성화:', content.getAttribute('data-tab'));
+      });
+      document.querySelectorAll('.tab-button').forEach(btn => {
+        btn.classList.remove('active');
+        console.log('🔸 탭 버튼 비활성화:', btn.getAttribute('data-tab'));
+      });
+      
+      // 유사티켓 탭만 활성화
+      ticketsTabContent.classList.add('active');
+      ticketsTabButton.classList.add('active');
+      
+      // 최종 상태 확인
+      const finalActiveContents = document.querySelectorAll('.tab-content.active');
+      const finalActiveButtons = document.querySelectorAll('.tab-button.active');
+      
+      console.log('✅ 탭 활성화 완료 - 최종 상태:', {
+        activeContents: finalActiveContents.length,
+        activeButtons: finalActiveButtons.length,
+        activeContentTab: finalActiveContents[0]?.getAttribute('data-tab'),
+        activeButtonTab: finalActiveButtons[0]?.getAttribute('data-tab')
+      });
+      
+      if (finalActiveContents.length !== 1 || finalActiveButtons.length !== 1) {
+        console.error('⚠️ 비정상적인 탭 상태 감지 - 여러 탭이 활성화됨');
+      }
+      
+      // 캐시된 데이터 복원
+      App.ui.refreshTabContent('tickets');
     },
 
     // 에러 표시
@@ -1379,20 +1520,98 @@ const App = {
           
         case 'similar_tickets':
           console.log('📦 Similar tickets data received:', data);
-          currentData.similarTickets = data.content || data.similar_tickets || [];
-          App.state.cachedData.similarTickets = currentData.similarTickets; // 캐시에 저장
+          console.log('🔍 Raw similar tickets data structure:', data);
+          const rawTickets = data.content || data.similar_tickets || [];
+          console.log('🔍 Raw tickets array:', rawTickets);
+          
+          // Separate tickets from KB documents that may have been mixed in
+          const actualTickets = [];
+          const mixedInKBDocs = [];
+          
+          rawTickets.forEach((item, index) => {
+            const hasUrl = !!(item.url || item.URL);
+            const hasTitle = !!item.title;
+            const hasSubject = !!item.subject;
+            const hasCategory = !!item.category;
+            const hasKBLabel = item.description && item.description.includes('KB문서');
+            
+            console.log(`🔍 Item ${index}:`, {
+              id: item.id,
+              hasUrl: hasUrl,
+              hasTitle: hasTitle,
+              hasSubject: hasSubject,
+              hasCategory: hasCategory,
+              hasKBLabel: hasKBLabel,
+              item: item
+            });
+            
+            // If it has URL or is marked as KB document, it's probably a KB doc
+            if (hasUrl || hasKBLabel || (hasTitle && !hasSubject)) {
+              console.log(`🚫 Moving item ${index} to KB documents (was in similar_tickets)`);
+              mixedInKBDocs.push(item);
+            } else {
+              actualTickets.push(item);
+            }
+          });
+          
+          console.log(`🔄 Data separation complete: ${actualTickets.length} tickets, ${mixedInKBDocs.length} KB docs`);
+          
+          // Store only actual tickets
+          currentData.similarTickets = actualTickets;
+          App.state.cachedData.similarTickets = currentData.similarTickets;
           console.log('💾 유사티켓 캐시 저장 완료:', App.state.cachedData.similarTickets.length, '건');
           console.log('🎯 Processing similar tickets:', currentData.similarTickets.length, '건');
           this.renderSimilarTickets(currentData.similarTickets);
+          
+          // If we found KB docs mixed in, add them to KB documents
+          if (mixedInKBDocs.length > 0) {
+            console.log('📚 Adding mixed-in KB documents to KB documents cache');
+            if (!currentData.kbDocuments) currentData.kbDocuments = [];
+            if (!App.state.cachedData.kbDocuments) App.state.cachedData.kbDocuments = [];
+            
+            currentData.kbDocuments = [...(currentData.kbDocuments || []), ...mixedInKBDocs];
+            App.state.cachedData.kbDocuments = [...(App.state.cachedData.kbDocuments || []), ...mixedInKBDocs];
+            
+            console.log('📚 Updated KB documents cache with mixed-in docs:', App.state.cachedData.kbDocuments.length);
+            
+            // Update KB tab count
+            const kbCountElement = document.getElementById('kbDocumentsCount');
+            if (kbCountElement) {
+              kbCountElement.textContent = App.state.cachedData.kbDocuments.length;
+            }
+          }
           break;
           
         case 'kb_documents':
           console.log('📦 KB documents data received:', data);
+          console.log('📦 Raw KB data content:', data.content);
           currentData.kbDocuments = data.content || data.kb_documents || [];
           App.state.cachedData.kbDocuments = currentData.kbDocuments; // 캐시에 저장
           console.log('💾 KB문서 캐시 저장 완료:', App.state.cachedData.kbDocuments.length, '건');
           console.log('🎯 Processing KB documents:', currentData.kbDocuments.length, '건');
+          console.log('🎯 KB 문서 데이터 상세:', currentData.kbDocuments);
           this.renderKBDocuments(currentData.kbDocuments);
+          
+          // 강제로 KB 탭 카운트 업데이트
+          const kbCountElement = document.getElementById('kbDocumentsCount');
+          if (kbCountElement) {
+            kbCountElement.textContent = currentData.kbDocuments.length;
+            console.log('🔢 KB 탭 카운트 강제 업데이트:', currentData.kbDocuments.length);
+            
+            // KB 탭 버튼에 시각적 피드백 추가 (데이터가 있음을 알림)
+            const kbTabButton = document.querySelector('.tab-button[data-tab="kb"]');
+            if (kbTabButton && currentData.kbDocuments.length > 0) {
+              // 잠깐 하이라이트 효과를 줘서 데이터가 로드되었음을 알림
+              kbTabButton.style.animation = 'pulse 2s';
+              console.log('✨ KB 탭 버튼에 데이터 로드 알림 효과 적용');
+              
+              setTimeout(() => {
+                if (kbTabButton.style.animation === 'pulse 2s') {
+                  kbTabButton.style.animation = '';
+                }
+              }, 2000);
+            }
+          }
           break;
           
         case 'progress':
@@ -1415,6 +1634,11 @@ const App = {
           App.ui.updateProgressBar(100, '분석 완료!', null, 0);
           console.log('✅ 모든 데이터 로딩 완료');
           
+          // 로딩 상태 업데이트
+          App.state.isLoading = false;
+          App.state.loadingInProgress = false;
+          App.state.dataLoaded = true;
+          
           // 완료 시점에서 헤더 업데이트 (감정 데이터가 있을 수 있음)
           if (App.state.cachedTicketInfo && App.state.cachedTicketInfo.lastUpdated) {
             // data.emotion_data가 있다면 감정 분석 결과로 사용
@@ -1424,6 +1648,12 @@ const App = {
               this.updateTicketHeader(App.state.cachedTicketInfo, emotionData);
             }
           }
+          
+          // 데이터 로딩 완료 후 유사티켓 탭이 활성화되도록 보장
+          setTimeout(() => {
+            console.log('🔄 데이터 로딩 완료 후 유사티켓 탭 활성화 확인');
+            this.ensureTicketsTabActive();
+          }, 500);
           
           return { ...currentData, shouldReturn: true };
           
@@ -1479,24 +1709,103 @@ const App = {
 
     // 탭 전환
     handleTabSwitch(tabName) {
-      console.log('🔄 탭 전환:', tabName);
+      console.log('🔄 탭 전환 시작:', tabName);
       
-      // 모든 탭 컨텐츠 숨기기
+      // 현재 스크롤 위치 저장
+      const mainContent = document.querySelector('.main-content');
+      const currentScrollTop = mainContent ? mainContent.scrollTop : 0;
+      console.log('📍 현재 스크롤 위치:', currentScrollTop);
+      
+      // 전환 전 현재 상태 로깅
+      const beforeActiveContents = document.querySelectorAll('.tab-content.active');
+      const beforeActiveButtons = document.querySelectorAll('.tab-button.active');
+      console.log('🔍 전환 전 활성 탭:', {
+        contentCount: beforeActiveContents.length,
+        buttonCount: beforeActiveButtons.length,
+        contentTabs: Array.from(beforeActiveContents).map(el => el.getAttribute('data-tab')),
+        buttonTabs: Array.from(beforeActiveButtons).map(el => el.getAttribute('data-tab'))
+      });
+      
+      // 스크롤 방지를 위한 추가 처리
+      const preventScroll = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        return false;
+      };
+      
+      // 임시로 스크롤 이벤트 차단
+      if (mainContent) {
+        mainContent.addEventListener('scroll', preventScroll, { passive: false });
+      }
+      
+      // 모든 탭 강제 비활성화
       document.querySelectorAll('.tab-content').forEach(content => {
         content.classList.remove('active');
+        console.log('🔸 콘텐츠 비활성화:', content.getAttribute('data-tab'));
       });
       
-      // 모든 탭 버튼 비활성화
       document.querySelectorAll('.tab-button').forEach(btn => {
         btn.classList.remove('active');
+        console.log('🔸 버튼 비활성화:', btn.getAttribute('data-tab'));
       });
       
-      // 선택된 탭 활성화
-      const selectedContent = document.getElementById(`${tabName}Tab`);
-      const selectedButton = document.querySelector(`[data-tab="${tabName}"]`);
+      // 선택된 탭 엘리먼트 찾기
+      const selectedContent = document.querySelector(`.tab-content[data-tab="${tabName}"]`);
+      const selectedButton = document.querySelector(`.tab-button[data-tab="${tabName}"]`);
       
-      if (selectedContent) selectedContent.classList.add('active');
-      if (selectedButton) selectedButton.classList.add('active');
+      console.log('🔍 선택된 탭 엘리먼트:', {
+        tabName,
+        selectedContent: !!selectedContent,
+        selectedButton: !!selectedButton
+      });
+      
+      if (!selectedContent || !selectedButton) {
+        console.error('❌ 탭 엘리먼트를 찾을 수 없음:', {
+          tabName,
+          contentFound: !!selectedContent,
+          buttonFound: !!selectedButton
+        });
+        // 스크롤 이벤트 차단 해제
+        if (mainContent) {
+          mainContent.removeEventListener('scroll', preventScroll);
+        }
+        return;
+      }
+      
+      // 선택된 탭만 활성화
+      selectedContent.classList.add('active');
+      selectedButton.classList.add('active');
+      
+      // 스크롤 위치 즉시 복원 및 이벤트 차단 해제
+      setTimeout(() => {
+        if (mainContent) {
+          mainContent.scrollTop = currentScrollTop;
+          console.log('📍 스크롤 위치 복원:', currentScrollTop);
+          // 스크롤 이벤트 차단 해제
+          mainContent.removeEventListener('scroll', preventScroll);
+        }
+      }, 0);
+      
+      // 전환 후 상태 확인
+      const afterActiveContents = document.querySelectorAll('.tab-content.active');
+      const afterActiveButtons = document.querySelectorAll('.tab-button.active');
+      
+      console.log('✅ 탭 전환 완료 - 최종 상태:', {
+        targetTab: tabName,
+        activeContents: afterActiveContents.length,
+        activeButtons: afterActiveButtons.length,
+        activeContentTab: afterActiveContents[0]?.getAttribute('data-tab'),
+        activeButtonTab: afterActiveButtons[0]?.getAttribute('data-tab')
+      });
+      
+      // 비정상 상태 감지
+      if (afterActiveContents.length !== 1 || afterActiveButtons.length !== 1) {
+        console.error('⚠️ 탭 전환 후 비정상 상태:', {
+          expectedActiveCount: 1,
+          actualContentCount: afterActiveContents.length,
+          actualButtonCount: afterActiveButtons.length
+        });
+      }
       
       // 캐시된 데이터 복원
       App.ui.refreshTabContent(tabName);
@@ -1526,11 +1835,9 @@ const App = {
       // 기본 헤더 업데이트 (최소한의 정보라도 표시)
       await App.ui.collectOptimizedTicketData();
       
-      // 백엔드에서 초기 데이터 로드 시작 (더 정확한 티켓 정보로 업데이트됨)
-      console.log('🔄 백엔드 초기 데이터 로드 시작');
-      App.api.loadInitialData(App.state.ticketId);
+      // 백엔드에서 초기 데이터 로드는 아래에서 await로 처리됨
       
-      // 🎯 상단 네비게이션 앱 아이콘 클릭 시 처리 (원본에서 이식)
+      // 🎯 상단 네비게이션 앱 아이콘 클릭 시 처리 (최적화된 버전)
       client.events.on('app.activated', async () => {
         try {
           console.log('📱 앱이 활성화됨 - 모달 표시 시작');
@@ -1541,40 +1848,42 @@ const App = {
             ctx = await client.instance.context();
           } catch (contextError) {
             console.warn('⚠️ FDK context 가져오기 실패:', contextError.message);
-            // context를 가져올 수 없는 경우 기본값으로 계속 진행
             ctx = { location: 'unknown' };
           }
 
-          // 상단 네비게이션에서의 동작: 로딩 상태와 관계없이 즉시 모달 표시
+          // 상단 네비게이션에서의 동작: 데이터 로드 상태에 따라 처리
           if (ctx.location === 'ticket_top_navigation') {
-            // 현재 티켓 정보 가져오기 (안전한 FDK API 호출)
-            let ticketData = null;
             let currentTicketId = null;
             
             try {
-              ticketData = await client.data.get('ticket');
+              const ticketData = await client.data.get('ticket');
               currentTicketId = ticketData?.ticket?.id;
               console.log('✅ 앱 활성화 시 티켓 데이터 가져오기 성공');
             } catch (error) {
               console.warn('⚠️ 앱 활성화 시 티켓 데이터 가져오기 실패:', error.message);
-              // EventAPI 오류가 발생해도 계속 진행
               currentTicketId = App.state.ticketId || 'unknown';
             }
 
             console.log('📊 상단 네비게이션에서 모달 열기 요청 - 티켓 ID:', currentTicketId);
+            console.log('📊 현재 데이터 로드 상태:', {
+              dataLoaded: App.state.dataLoaded,
+              loadingInProgress: App.state.loadingInProgress
+            });
             
-            // 즉시 모달 표시
-            await App.ui.showFDKModal(currentTicketId, true);
+            // 데이터 로드 완료 시 캐시된 데이터 사용, 미완료 시 로딩 상태 표시
+            const hasCachedData = App.state.dataLoaded;
+            await App.ui.showFDKModal(currentTicketId, hasCachedData);
           } else {
             console.log('📱 예상치 못한 위치에서의 앱 활성화:', ctx.location);
-            // 예상치 못한 위치에서의 호출도 모달 표시
-            await App.ui.showFDKModal(App.state.ticketId, false);
+            // 예상치 못한 위치에서도 데이터 로드 상태 고려
+            const hasCachedData = App.state.dataLoaded;
+            await App.ui.showFDKModal(App.state.ticketId, hasCachedData);
           }
         } catch (err) {
           console.error('❌ app.activated 이벤트 처리 오류:', err);
-          // 오류가 발생해도 기본 모달은 표시
+          // 오류가 발생해도 기본 모달은 표시 (백엔드 호출 없이)
           try {
-            await App.ui.showFDKModal(App.state.ticketId, false);
+            await App.ui.showFDKModal(App.state.ticketId, true);
           } catch (fallbackError) {
             console.error('❌ 폴백 모달 표시도 실패:', fallbackError);
           }
@@ -1587,11 +1896,19 @@ const App = {
       
       try {
         await App.api.loadInitialData(App.state.ticketId);
+        // 데이터 로드 완료 후 유사티켓 탭 활성화 보장
+        setTimeout(() => {
+          App.ui.ensureTicketsTabActive();
+        }, 100);
       } catch (error) {
         console.error('초기 데이터 로드 실패:', error);
         App.ui.hideLoading();
         // 백엔드 연결 실패 시에도 기본 UI는 표시
         App.ui.showError('백엔드 서버 연결 실패. 일부 기능이 제한됩니다.');
+        // 오류 발생 시에도 유사티켓 탭은 활성화
+        setTimeout(() => {
+          App.ui.ensureTicketsTabActive();
+        }, 100);
       }
       
     } catch (error) {
@@ -1671,11 +1988,18 @@ const App = {
 // 전역으로 노출 (디버깅용 + FDK 이벤트 처리)
 window.App = App;
 
-// Top bar navigation 이벤트 처리용 전역 함수
+// Top bar navigation 이벤트 처리용 전역 함수 (중복 방지 강화)
 window.showFDKModal = async function(ticketId) {
   console.log('📡 Top bar navigation에서 모달 열기 요청');
+  console.log('📊 현재 데이터 로드 상태:', {
+    dataLoaded: App.state.dataLoaded,
+    loadingInProgress: App.state.loadingInProgress
+  });
+  
   if (App && App.ui && App.ui.showFDKModal) {
-    await App.ui.showFDKModal(ticketId || App.state.ticketId);
+    // 데이터 로드 상태에 따라 캐시된 데이터 사용 여부 결정
+    const hasCachedData = App.state.dataLoaded;
+    await App.ui.showFDKModal(ticketId || App.state.ticketId, hasCachedData);
   } else {
     console.error('❌ App.ui.showFDKModal 함수가 준비되지 않음');
   }
@@ -1683,16 +2007,143 @@ window.showFDKModal = async function(ticketId) {
 
 // DOM 로드 완료 시 앱 초기화
 document.addEventListener('DOMContentLoaded', () => {
+  // 모달에서 전달받은 데이터 확인
+  const modalData = window.modalData || {};
+  
+  // 강화된 탭 초기화 함수
+  function forceTabReset() {
+    console.log('🔄 강화된 탭 상태 초기화 실행');
+    
+    // 모든 탭 강제 비활성화
+    document.querySelectorAll('.tab-content').forEach(content => {
+      content.classList.remove('active');
+      content.style.display = 'none'; // 강제로 숨김
+      console.log('🔸 강제 탭 콘텐츠 비활성화:', content.getAttribute('data-tab'));
+    });
+    document.querySelectorAll('.tab-button').forEach(btn => {
+      btn.classList.remove('active');
+      console.log('🔸 강제 탭 버튼 비활성화:', btn.getAttribute('data-tab'));
+    });
+    
+    // 유사티켓 탭만 활성화
+    const ticketsTabContent = document.querySelector('.tab-content[data-tab="tickets"]');
+    const ticketsTabButton = document.querySelector('.tab-button[data-tab="tickets"]');
+    
+    if (ticketsTabContent && ticketsTabButton) {
+      ticketsTabContent.classList.add('active');
+      ticketsTabContent.style.display = 'block'; // 강제로 표시
+      ticketsTabButton.classList.add('active');
+      console.log('✅ 유사티켓 탭 강제 활성화 완료');
+    } else {
+      console.error('❌ 유사티켓 탭 엘리먼트를 찾을 수 없음');
+    }
+  }
+  
+  // DOM 로드 즉시 탭 상태 강제 리셋 및 유사티켓 탭만 활성화
+  console.log('🔄 DOM 로드 - 탭 상태 초기화 시작');
+  forceTabReset();
+  
+  // 추가 보험: 여러 시점에서 탭 상태 강제 리셋
+  setTimeout(() => {
+    console.log('🔄 50ms 후 탭 재확인');
+    forceTabReset();
+  }, 50);
+  
+  setTimeout(() => {
+    console.log('🔄 200ms 후 탭 재확인');
+    forceTabReset();
+  }, 200);
+  
+  setTimeout(() => {
+    console.log('🔄 500ms 후 탭 재확인');
+    forceTabReset();
+    if (window.App && window.App.ui && window.App.ui.ensureTicketsTabActive) {
+      window.App.ui.ensureTicketsTabActive();
+    }
+  }, 500);
+  
+  // noBackendCall 플래그 확인
+  if (modalData.noBackendCall === true) {
+    console.log('🚫 모달에서 noBackendCall 플래그 감지 - 백엔드 호출 생략');
+    App.state.dataLoaded = true;
+    App.state.loadingInProgress = false;
+    
+    // 캐시된 데이터가 있으면 복원
+    if (modalData.hasCachedData) {
+      console.log('📂 캐시된 데이터 사용 모드');
+      // 기본 UI 설정만 하고 백엔드 호출 없이 진행
+      App.setupEventListeners();
+      
+      // noBackendCall 모드에서도 탭 네비게이션 표시
+      const tabNavigation = document.getElementById('tabNavigation');
+      const cardListArea = document.getElementById('cardListArea');
+      
+      if (tabNavigation) {
+        tabNavigation.style.display = 'block';
+        console.log('✅ noBackendCall 모드 - 탭 네비게이션 표시');
+      }
+      
+      if (cardListArea) {
+        cardListArea.style.display = 'block';
+        console.log('✅ noBackendCall 모드 - 카드 리스트 영역 표시');
+      }
+      
+      // 캐시된 데이터 사용 시에도 유사티켓 탭 활성화
+      setTimeout(() => {
+        App.ui.ensureTicketsTabActive();
+      }, 200);
+      return;
+    }
+  }
+  
   // FDK가 로드되었는지 확인
   if (typeof app !== 'undefined') {
     App.init().catch(error => {
       console.error('앱 초기화 중 오류:', error);
       // FDK 없이도 기본 UI는 작동하도록 이벤트 리스너 설정
       App.setupEventListeners();
+      
+      // 오류 시에도 탭 네비게이션 표시
+      const tabNavigation = document.getElementById('tabNavigation');
+      const cardListArea = document.getElementById('cardListArea');
+      
+      if (tabNavigation) {
+        tabNavigation.style.display = 'block';
+        console.log('✅ 초기화 오류 시 - 탭 네비게이션 표시');
+      }
+      
+      if (cardListArea) {
+        cardListArea.style.display = 'block';
+        console.log('✅ 초기화 오류 시 - 카드 리스트 영역 표시');
+      }
+      
+      // 오류 시에도 유사티켓 탭 활성화
+      setTimeout(() => {
+        App.ui.ensureTicketsTabActive();
+      }, 200);
     });
   } else {
     console.warn('FDK가 로드되지 않았습니다. 기본 UI만 작동합니다.');
     // FDK 없이도 기본 UI는 작동하도록 이벤트 리스너 설정
     App.setupEventListeners();
+    
+    // FDK 없이도 탭 네비게이션 표시
+    const tabNavigation = document.getElementById('tabNavigation');
+    const cardListArea = document.getElementById('cardListArea');
+    
+    if (tabNavigation) {
+      tabNavigation.style.display = 'block';
+      console.log('✅ FDK 없음 - 탭 네비게이션 표시');
+    }
+    
+    if (cardListArea) {
+      cardListArea.style.display = 'block';
+      console.log('✅ FDK 없음 - 카드 리스트 영역 표시');
+    }
+    
+    // FDK 없이도 유사티켓 탭 활성화
+    setTimeout(() => {
+      App.ui.ensureTicketsTabActive();
+    }, 200);
   }
 });

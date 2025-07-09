@@ -463,7 +463,7 @@ async def init_vector_only_mode(
                 kb_documents.append({
                     "id": result.get("original_id") or result["metadata"].get("original_id"),
                     "title": result.get("title") or result["metadata"].get("title", ""),
-                    "url": f"/kb/articles/{result.get('original_id')}",
+                    "url": f"https://{domain}/a/solutions/articles/{result.get('original_id')}",
                     "score": result["score"],
                     "created_at": result.get("created_at", ""),
                     "updated_at": result.get("updated_at", ""),
@@ -702,7 +702,7 @@ async def init_legacy_hybrid_mode(
                 {
                     "id": result.get("original_id") or result["metadata"].get("original_id"),
                     "title": result.get("title") or result["metadata"].get("title", ""),
-                    "url": f"/kb/articles/{result.get('original_id')}",
+                    "url": f"https://{domain}/a/solutions/articles/{result.get('original_id')}",
                     "score": result["score"],
                     "created_at": result.get("created_at", ""),
                     "updated_at": result.get("updated_at", ""),
@@ -1069,7 +1069,7 @@ async def init_streaming_vector_only_mode(
                     kb_documents.append({
                         "id": result.get("original_id") or result["metadata"].get("original_id"),
                         "title": result.get("title") or result["metadata"].get("title", ""),
-                        "url": f"/kb/articles/{result.get('original_id')}",
+                        "url": f"https://{domain}/a/solutions/articles/{result.get('original_id')}",
                         "score": result["score"],
                         "created_at": result.get("created_at", ""),
                         "updated_at": result.get("updated_at", ""),
