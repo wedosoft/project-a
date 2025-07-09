@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tab Position Debug</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
+        
+        .header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 80px;
+            background: linear-gradient(135deg, #8B5CF6 0%, #3B82F6 100%);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+            z-index: 1000;
+        }
+        
+        .main {
+            padding-top: 80px;
+            height: 100vh;
+            overflow-y: auto;
+        }
+        
+        .summary-section {
+            background: #ffffff;
+            border-bottom: 1px solid #e5e7eb;
+            transition: all 0.3s ease;
+            padding: 20px;
+            min-height: 100px;
+        }
+        
+        .summary-section.collapsed {
+            height: 0;
+            max-height: 0;
+            border-bottom: none;
+            opacity: 0;
+            overflow: hidden;
+            margin: 0;
+            padding: 0;
+        }
+        
+        .tab-navigation {
+            background-color: #ffffff;
+            border-bottom: 1px solid #e5e7eb;
+            padding: 12px 0;
+            position: sticky;
+            top: 80px;
+            z-index: 999;
+            transition: top 0.3s ease;
+        }
+        
+        .tab-list {
+            display: flex;
+            padding: 0;
+            margin: 0;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+        
+        .tab-button {
+            background: none;
+            border: none;
+            padding: 12px 16px;
+            cursor: pointer;
+            flex: 1;
+            text-align: center;
+            border-bottom: 2px solid transparent;
+            font-size: 13px;
+            color: #6b7280;
+        }
+        
+        .tab-button.active {
+            color: #8B5CF6;
+            border-bottom-color: #8B5CF6;
+            background-color: #faf5ff;
+        }
+        
+        .content {
+            padding: 20px;
+            height: 2000px;
+            background: linear-gradient(to bottom, #f0f0f0, #e0e0e0);
+        }
+        
+        .toggle-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 6px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+        
+        .debug-info {
+            position: fixed;
+            top: 90px;
+            right: 10px;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            z-index: 9999;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>Tab Position Debug</div>
+        <button class="toggle-btn" onclick="toggleSummary()">접기/펼치기</button>
+    </div>
+    
+    <div class="main">
+        <div class="summary-section" id="summarySection">
+            <h2>AI 요약 분석</h2>
+            <p>이것은 요약 섹션입니다. 접기/펼치기 버튼을 클릭해서 탭 위치 변화를 확인하세요.</p>
+            <p>현재 상태: <span id="status">펼쳐짐</span></p>
+        </div>
+        
+        <div class="tab-navigation" id="tabNavigation">
+            <div class="tab-list">
+                <button class="tab-button active">📱 유사 티켓 <span style="background:#e5e7eb;padding:2px 6px;border-radius:8px;margin-left:6px;">3</span></button>
+                <button class="tab-button">📚 KB 문서 <span style="background:#e5e7eb;padding:2px 6px;border-radius:8px;margin-left:6px;">3</span></button>
+                <button class="tab-button">🤖 Copilot</button>
+            </div>
+        </div>
+        
+        <div class="content">
+            <h3>콘텐츠 영역</h3>
+            <p>스크롤해서 sticky 동작을 확인하세요.</p>
+            <div style="height: 100px; background: #ddd; margin: 20px 0;"></div>
+            <div style="height: 100px; background: #ccc; margin: 20px 0;"></div>
+            <div style="height: 100px; background: #bbb; margin: 20px 0;"></div>
+            <div style="height: 100px; background: #aaa; margin: 20px 0;"></div>
+            <div style="height: 100px; background: #999; margin: 20px 0;"></div>
+            <div style="height: 100px; background: #888; margin: 20px 0;"></div>
+            <div style="height: 100px; background: #777; margin: 20px 0;"></div>
+            <div style="height: 100px; background: #666; margin: 20px 0;"></div>
+        </div>
+    </div>
+    
+    <div class="debug-info" id="debugInfo">
+        <div>요약 섹션 높이: <span id="summaryHeight">-</span></div>
+        <div>탭 네비게이션 top: <span id="tabTop">-</span></div>
+        <div>탭 네비게이션 위치: <span id="tabPosition">-</span></div>
+        <div>요약 섹션 클래스: <span id="summaryClass">-</span></div>
+    </div>
+    
+    <script>
+        function updateDebugInfo() {
+            const summarySection = document.getElementById('summarySection');
+            const tabNavigation = document.getElementById('tabNavigation');
+            
+            document.getElementById('summaryHeight').textContent = summarySection.offsetHeight + 'px';
+            document.getElementById('tabTop').textContent = tabNavigation.style.top || 'CSS default';
+            document.getElementById('tabPosition').textContent = tabNavigation.getBoundingClientRect().top + 'px from top';
+            document.getElementById('summaryClass').textContent = summarySection.className;
+        }
+        
+        function toggleSummary() {
+            const section = document.getElementById('summarySection');
+            const status = document.getElementById('status');
+            const tabNavigation = document.getElementById('tabNavigation');
+            
+            if (section.classList.contains('collapsed')) {
+                // 펼치기 - 탭이 요약 섹션 아래에 자연스럽게 위치하도록
+                section.classList.remove('collapsed');
+                status.textContent = '펼쳐짐';
+                tabNavigation.style.top = ''; // CSS 기본값 사용 (sticky 자동 계산)
+                console.log('요약 펼치기 - 탭 위치 CSS 기본값으로 복원');
+            } else {
+                // 접기 - 탭이 헤더 바로 아래에 위치하도록
+                section.classList.add('collapsed');
+                status.textContent = '접힘';
+                tabNavigation.style.top = '80px'; // 헤더 바로 아래로
+                console.log('요약 접기 - 탭 위치 80px (헤더 바로 아래)');
+            }
+            
+            setTimeout(updateDebugInfo, 350); // 애니메이션 완료 후 업데이트
+        }
+        
+        // 초기 정보 업데이트
+        updateDebugInfo();
+        
+        // 스크롤 시 정보 업데이트
+        window.addEventListener('scroll', updateDebugInfo);
+    </script>
+</body>
+</html>

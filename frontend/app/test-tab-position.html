@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tab Position Test</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
+        
+        .header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 80px;
+            background: linear-gradient(135deg, #8B5CF6 0%, #3B82F6 100%);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+            z-index: 1000;
+        }
+        
+        .main {
+            padding-top: 80px; /* JavaScript에서 동적으로 조정됨 */
+            height: 100vh;
+            overflow-y: auto;
+        }
+        
+        /* 요약 영역이 접힌 상태에서 main의 padding을 줄임 */
+        .main.summary-collapsed {
+            padding-top: 80px !important;
+        }
+        
+        .summary-section {
+            background: #ffffff;
+            border-bottom: 1px solid #e5e7eb;
+            transition: all 0.3s ease;
+            padding: 20px;
+            min-height: 100px;
+        }
+        
+        .summary-section.collapsed {
+            height: 0 !important;
+            max-height: 0 !important;
+            border-bottom: none !important;
+            opacity: 0 !important;
+            overflow: hidden !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            min-height: 0 !important;
+        }
+        
+        .tab-navigation {
+            background-color: #ffffff;
+            border-bottom: 1px solid #e5e7eb;
+            padding: 0;
+            position: sticky;
+            top: 80px;
+            z-index: 999;
+            transition: top 0.3s ease;
+        }
+        
+        /* 핵심: summary section이 collapsed될 때 탭 네비게이션 위치 조정 */
+        .summary-section.collapsed + .tab-navigation {
+            top: 80px;
+        }
+        
+        .tab-list {
+            display: flex;
+            padding: 0;
+            margin: 0;
+        }
+        
+        .tab-button {
+            background: none;
+            border: none;
+            padding: 12px 16px;
+            cursor: pointer;
+            flex: 1;
+            text-align: center;
+            border-bottom: 2px solid transparent;
+        }
+        
+        .tab-button.active {
+            color: #8B5CF6;
+            border-bottom-color: #8B5CF6;
+            background-color: #faf5ff;
+        }
+        
+        .content {
+            padding: 20px;
+            height: 2000px; /* 스크롤 테스트용 */
+            background: linear-gradient(to bottom, #f0f0f0, #e0e0e0);
+        }
+        
+        .toggle-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 6px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>Tab Position Test</div>
+        <button class="toggle-btn" onclick="toggleSummary()">접기/펼치기</button>
+    </div>
+    
+    <div class="main">
+        <div class="summary-section" id="summarySection">
+            <h2>AI 요약 분석</h2>
+            <p>이것은 요약 섹션입니다. 접기/펼치기 버튼을 클릭해서 탭 위치 변화를 확인하세요.</p>
+            <p>현재 상태: <span id="status">펼쳐짐</span></p>
+        </div>
+        
+        <div class="tab-navigation" id="tabNavigation">
+            <div class="tab-list">
+                <button class="tab-button active">📱 유사 티켓</button>
+                <button class="tab-button">📚 KB 문서</button>
+                <button class="tab-button">🤖 Copilot</button>
+            </div>
+        </div>
+        
+        <div class="content">
+            <h3>콘텐츠 영역</h3>
+            <p>스크롤해서 sticky 동작을 확인하세요.</p>
+            <p>요약 섹션이 접혔을 때 탭이 헤더와 바로 붙는지 확인하세요.</p>
+            <div style="height: 100px; background: #ddd; margin: 20px 0;"></div>
+            <div style="height: 100px; background: #ccc; margin: 20px 0;"></div>
+            <div style="height: 100px; background: #bbb; margin: 20px 0;"></div>
+            <div style="height: 100px; background: #aaa; margin: 20px 0;"></div>
+            <div style="height: 100px; background: #999; margin: 20px 0;"></div>
+            <div style="height: 100px; background: #888; margin: 20px 0;"></div>
+            <div style="height: 100px; background: #777; margin: 20px 0;"></div>
+            <div style="height: 100px; background: #666; margin: 20px 0;"></div>
+        </div>
+    </div>
+    
+    <script>
+        function toggleSummary() {
+            const section = document.getElementById('summarySection');
+            const status = document.getElementById('status');
+            const tabNavigation = document.getElementById('tabNavigation');
+            const main = document.querySelector('.main');
+            
+            if (section.classList.contains('collapsed')) {
+                // 펼치기 - 탭이 요약 섹션 아래에 자연스럽게 위치하도록
+                section.classList.remove('collapsed');
+                main.classList.remove('summary-collapsed');
+                status.textContent = '펼쳐짐';
+                console.log('✅ 요약 펼치기 실행');
+                
+                // 요약 영역 높이를 계산해서 main padding과 tab position 조정
+                setTimeout(() => {
+                    const summaryHeight = section.offsetHeight;
+                    main.style.paddingTop = (80 + summaryHeight) + 'px';
+                    tabNavigation.style.top = (80 + summaryHeight) + 'px';
+                    console.log(`탭 네비게이션을 요약 영역 아래로 이동: ${80 + summaryHeight}px`);
+                }, 50); // CSS transition 후 높이 계산
+            } else {
+                // 접기 - 탭이 헤더 바로 아래에 위치하도록
+                section.classList.add('collapsed');
+                main.classList.add('summary-collapsed');
+                status.textContent = '접힘';
+                console.log('✅ 요약 접기 실행');
+                
+                // main padding과 tab position을 헤더 높이로만 설정
+                main.style.paddingTop = '80px';
+                tabNavigation.style.top = '80px';
+                console.log('탭 네비게이션을 헤더 바로 아래로 이동: 80px');
+            }
+        }
+        
+        // 페이지 로드 시 초기 위치 설정
+        window.addEventListener('DOMContentLoaded', () => {
+            const section = document.getElementById('summarySection');
+            const tabNavigation = document.getElementById('tabNavigation');
+            const main = document.querySelector('.main');
+            
+            if (!section.classList.contains('collapsed')) {
+                // 요약이 펼쳐진 상태라면 높이 계산해서 위치 조정
+                setTimeout(() => {
+                    const summaryHeight = section.offsetHeight;
+                    main.style.paddingTop = (80 + summaryHeight) + 'px';
+                    tabNavigation.style.top = (80 + summaryHeight) + 'px';
+                    console.log(`초기 탭 위치 설정: ${80 + summaryHeight}px`);
+                }, 100);
+            }
+        });
+    </script>
+</body>
+</html>
