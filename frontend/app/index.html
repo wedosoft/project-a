@@ -121,16 +121,23 @@
             background: #ffffff;
             border-bottom: 1px solid #e5e7eb;
             transition: all 0.3s ease;
+            z-index: 997; /* 탭 네비게이션보다 낮게 설정 */
         }
 
         .summary-section.collapsed {
-            height: 0;
-            max-height: 0;
-            border-bottom: none;
-            opacity: 0;
-            overflow: hidden;
-            margin: 0;
-            padding: 0;
+            height: 0 !important;
+            max-height: 0 !important;
+            border-bottom: none !important;
+            opacity: 0 !important;
+            overflow: hidden !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            min-height: 0 !important;
+        }
+        
+        /* summary section이 collapsed될 때 탭 네비게이션이 헤더에 바로 붙도록 설정 */
+        .summary-section.collapsed + .tab-navigation {
+            top: 80px; /* 헤더 바로 아래로 이동 */
         }
 
         .summary-section.expanded {
@@ -211,15 +218,19 @@
             background-color: #ffffff;
             border-bottom: 1px solid #e5e7eb;
             padding: 0;
-            position: fixed;
-            top: 80px; /* 헤더 바로 아래에 고정 */
+            position: sticky;
+            top: 80px; /* 헤더 높이만큼 오프셋 */
             left: 0;
             right: 0;
             width: 100%;
             max-width: 900px;
             margin: 0 auto;
-            z-index: 998;
+            z-index: 999; /* summary section보다 높게 설정 */
             border-top: 1px solid #e5e7eb;
+            transition: top 0.3s ease; /* 부드러운 위치 전환 */
+            /* sticky 포지션 강화 */
+            -webkit-position: sticky;
+            will-change: transform; /* 성능 최적화 */
         }
 
         .tab-list {
@@ -279,7 +290,7 @@
 
         /* === 탭 콘텐츠 영역 === */
         .tab-content-area {
-            padding: 60px 20px 100px 20px; /* 탭 네비게이션 높이만큼 상단 패딩 추가 */
+            padding: 0px 20px 100px 20px; /* 탭 네비게이션이 sticky이므로 상단 패딩 제거 */
             height: calc(100vh - 300px); /* 고정 높이 설정 */
             overflow: hidden; /* 넘치는 콘텐츠 숨김 */
         }
@@ -287,7 +298,7 @@
         .tab-content {
             display: none;
             padding-top: 16px;
-            height: calc(100vh - 350px); /* 각 탭 컨텐츠 높이 고정 */
+            height: calc(100vh - 300px); /* 각 탭 컨텐츠 높이 조정 */
             overflow-y: auto; /* 개별 탭 스크롤 */
         }
 
@@ -529,7 +540,7 @@
             display: flex;
             flex-direction: column;
             background: white;
-            height: calc(100vh - 350px); /* 고정 높이 설정 */
+            height: calc(100vh - 300px); /* 고정 높이 조정 */
             max-height: 600px; /* 최대 높이 제한 */
             overflow: hidden; /* 넘치는 콘텐츠 숨김 */
         }
@@ -778,17 +789,19 @@
 
         /* === 로딩 오버레이 === */
         .loading-overlay {
-            position: absolute;
+            position: fixed;
             top: 0;
             left: 0;
             right: 0;
             bottom: 0;
-            background: rgba(255, 255, 255, 0.95);
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            z-index: 100;
+            z-index: 1100;
             padding: 40px;
         }
 
@@ -1189,7 +1202,7 @@
             </section>
 
             <!-- 탭 네비게이션 -->
-            <nav class="tab-navigation" id="tabNavigation" style="display: none;">
+            <nav class="tab-navigation" id="tabNavigation">
                 <div class="tab-list">
                     <button type="button" class="tab-button active" data-tab="tickets">
                         📱 유사 티켓
@@ -1206,7 +1219,7 @@
             </nav>
 
             <!-- 탭 콘텐츠 영역 -->
-            <div class="tab-content-area" id="tabContentArea" style="display: none;">
+            <div class="tab-content-area" id="tabContentArea">
                 <!-- 유사 티켓 탭 -->
                 <div class="tab-content active" data-tab="tickets">
                     <div class="insight-panel" id="ticketsInsight" style="display: none;">
@@ -1339,6 +1352,25 @@
     <script src="scripts/utils.js"></script>
     <script src="scripts/app.js"></script>
     <script>
+        // FDK 모달 데이터 설정 (모달에서 백엔드 호출 방지)
+        if (typeof app !== 'undefined') {
+            try {
+                // FDK 클라이언트에서 모달 데이터 가져오기
+                app.initialized().then(client => {
+                    return client.instance.context();
+                }).then(context => {
+                    if (context && context.location === 'modal') {
+                        console.log('🎭 모달 컨텍스트 감지 - 백엔드 호출 방지 설정');
+                        window.modalData = { noBackendCall: true };
+                    }
+                }).catch(error => {
+                    console.log('FDK 컨텍스트 가져오기 실패:', error);
+                });
+            } catch (error) {
+                console.log('FDK 초기화 실패:', error);
+            }
+        }
+        
         // 앱 초기화
         window.addEventListener('load', () => {
             if (!window.App) {

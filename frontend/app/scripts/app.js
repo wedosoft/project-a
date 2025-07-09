@@ -16,7 +16,7 @@ const App = {
   state: {
     ticketId: null,
     isLoading: false,
-    loadingInProgress: false, // API 호출 중복 방지
+    BACKEND_CALLED: false, // 백엔드 호출 여부 - 한 번 호출되면 절대 다시 호출 안함
     dataLoaded: false, // 초기 데이터 로드 완료 여부
     currentMode: 'smart', // 'smart' or 'free'
     client: null, // FDK 클라이언트 객체
@@ -59,23 +59,18 @@ const App = {
     },
 
 
-    // 초기 데이터 로드 (스트리밍) - fetch + ReadableStream 사용 (중복 방지)
+    // 초기 데이터 로드 - 페이지 최초 로딩 시에만 호출
     async loadInitialData(ticketId) {
-      // 중복 호출 방지 체크
-      if (App.state.loadingInProgress || App.state.dataLoaded) {
-        console.log('⚠️ 초기 데이터 로드 중복 방지 - 현재 상태:', {
-          loadingInProgress: App.state.loadingInProgress,
-          dataLoaded: App.state.dataLoaded
-        });
+      // 이미 호출했으면 캐시 반환
+      if (App.state.BACKEND_CALLED) {
+        console.log('🚫 백엔드 이미 호출됨 - 캐시 반환');
         return App.state.cachedData;
       }
       
-      // 로딩 상태 설정
-      App.state.loadingInProgress = true;
-      App.state.dataLoaded = false;
+      App.state.BACKEND_CALLED = true;
+      console.log('🔥 페이지 최초 로딩 - 백엔드 호출 시작');
       
       const url = `${App.config.baseURL}/init/${ticketId}?stream=true`;
-      console.log('🔄 백엔드 초기 데이터 로드 시작:', url);
       
       try {
         const response = await fetch(url, {
@@ -84,7 +79,7 @@ const App = {
         });
         
         if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          throw new Error(`백엔드 서버 오류: ${response.status}`);
         }
         
         const reader = response.body.getReader();
@@ -99,67 +94,25 @@ const App = {
           if (done) break;
           
           buffer += decoder.decode(value, { stream: true });
-          
-          // SSE 형식: data: {json}\n\n 으로 구분
           const chunks = buffer.split('\n\n');
-          buffer = chunks.pop(); // 마지막 불완전한 청크는 버퍼에 보관
+          buffer = chunks.pop();
           
           for (const chunk of chunks) {
             if (!chunk.trim()) continue;
             
-            // 각 청크를 개별적으로 처리
             const lines = chunk.split('\n');
-            let jsonBuffer = '';
-            
             for (const line of lines) {
               if (line.startsWith('data: ')) {
                 const dataStr = line.slice(6).trim();
-                console.log('파싱 시도:', dataStr.substring(0, 100) + '...');
                 
                 if (dataStr === '[DONE]') {
-                  App.state.isLoading = false;
-                  App.state.loadingInProgress = false;
                   App.state.dataLoaded = true;
                   App.ui.hideLoading();
                   return { summary, similarTickets, kbDocuments };
                 }
                 
-                // 멀티라인 JSON 처리
-                if (dataStr.startsWith('{') && !dataStr.endsWith('}')) {
-                  jsonBuffer = dataStr;
-                  continue;
-                } else if (jsonBuffer && dataStr.endsWith('}')) {
-                  jsonBuffer += dataStr;
-                  try {
-                    const data = JSON.parse(jsonBuffer);
-                    console.log('멀티라인 파싱 성공:', data.type);
-                    const result = App.ui.processStreamData(data, { summary, similarTickets, kbDocuments });
-                    if (result) {
-                      summary = result.summary || summary;
-                      similarTickets = result.similarTickets || similarTickets;
-                      kbDocuments = result.kbDocuments || kbDocuments;
-                      
-                      if (result.shouldReturn) {
-                        App.state.isLoading = false;
-                        App.state.loadingInProgress = false;
-                        App.state.dataLoaded = true;
-                        App.ui.hideLoading();
-                        return { summary, similarTickets, kbDocuments };
-                      }
-                    }
-                    jsonBuffer = '';
-                  } catch (parseError) {
-                    console.error('멀티라인 JSON 파싱 실패:', parseError.message);
-                    jsonBuffer = '';
-                  }
-                  continue;
-                }
-                
                 try {
                   const data = JSON.parse(dataStr);
-                  console.log('파싱 성공:', data.type);
-                  
-                  // 데이터 처리
                   const result = App.ui.processStreamData(data, { summary, similarTickets, kbDocuments });
                   if (result) {
                     summary = result.summary || summary;
@@ -167,38 +120,65 @@ const App = {
                     kbDocuments = result.kbDocuments || kbDocuments;
                     
                     if (result.shouldReturn) {
-                      App.state.isLoading = false;
-                      App.state.loadingInProgress = false;
                       App.state.dataLoaded = true;
                       App.ui.hideLoading();
                       return { summary, similarTickets, kbDocuments };
                     }
                   }
                 } catch (parseError) {
-                  console.warn('JSON 파싱 실패 (무시):', parseError.message);
-                  console.log('실패한 데이터 (처음 50자):', dataStr.substring(0, 50));
-                  // 파싱 실패는 무시하고 계속 진행
+                  // JSON 파싱 실패는 무시
                 }
               }
             }
           }
         }
         
-        // 스트림이 완료되었지만 complete 이벤트가 없는 경우
-        App.state.isLoading = false;
-        App.state.loadingInProgress = false;
         App.state.dataLoaded = true;
         App.ui.hideLoading();
         return { summary, similarTickets, kbDocuments };
         
       } catch (error) {
-        App.state.isLoading = false;
-        App.state.loadingInProgress = false;
-        App.state.dataLoaded = false;
         App.ui.hideLoading();
-        console.error('초기 데이터 로드 실패:', error);
-        App.ui.showError('백엔드 서버에 연결할 수 없습니다. 서버가 실행 중인지 확인해주세요.');
+        console.error('백엔드 호출 실패:', error);
+        App.ui.showError('백엔드 서버 연결 실패. 새로고침 버튼을 눌러 다시 시도하세요.');
         throw error;
+      }
+    },
+
+    // 데이터 새로고침 (사용자 버튼 클릭 시)
+    async refreshData() {
+      console.log('🔄 사용자 새로고침 버튼 클릭 - 백엔드 재호출');
+      
+      // 강제로 백엔드 호출 플래그 리셋
+      App.state.BACKEND_CALLED = false;
+      App.state.dataLoaded = false;
+      
+      // 로딩 표시
+      App.state.isLoading = true;
+      App.ui.showLoading();
+      
+      try {
+        const data = await this.loadInitialData(App.state.ticketId);
+        
+        // 캐시 업데이트
+        App.state.cachedData = data;
+        
+        // UI 업데이트
+        if (data.summary) {
+          App.ui.updateSummary(data.summary);
+        }
+        if (data.similarTickets) {
+          App.ui.renderSimilarTickets(data.similarTickets);
+        }
+        if (data.kbDocuments) {
+          App.ui.renderKBDocuments(data.kbDocuments);
+        }
+        
+        console.log('✅ 새로고침 완료');
+        
+      } catch (error) {
+        console.error('새로고침 실패:', error);
+        App.ui.showError('새로고침 실패. 다시 시도해주세요.');
       }
     },
 
@@ -1170,26 +1150,31 @@ const App = {
           };
         }
         
-        // 모달 설정 구성 (원본과 동일하게 확장)
+        // 모달 설정 구성 (자동 백엔드 호출 금지, 새로고침 버튼만 허용)
         const modalConfig = {
           title: "Copilot Canvas - AI 상담사 지원",
           template: "index.html",
           data: {
             ticketId: ticketId,
             ticket: ticket,
-            hasCachedData: hasCachedData || App.state.dataLoaded,
+            hasCachedData: App.state.dataLoaded,
             timestamp: new Date().toISOString(),
-            noBackendCall: App.state.dataLoaded || hasCachedData, // 데이터 로드 완료 시 백엔드 호출 안함
-            usePreloadedData: App.state.dataLoaded || hasCachedData, // ✅ 미리 로드된 데이터 사용 플래그
-            // 로딩 상태 정보 (원본에서 추가)
+            noBackendCall: true, // 모달에서 자동 백엔드 호출 금지
+            usePreloadedData: true, // 캐시 데이터만 사용
+            // 캐시된 데이터 전달
+            cachedData: App.state.cachedData,
+            cachedTicketInfo: App.state.cachedTicketInfo,
+            // 새로고침 버튼 허용
+            allowRefresh: true,
+            // 로딩 상태 정보
             loadingStatus: { status: 'ready' },
             globalData: {},
             streamingStatus: { is_streaming: false },
             hasError: false,
             errorMessage: null,
             // 상태별 플래그
-            isLoading: App.state.isLoading || false,
-            isReady: !App.state.isLoading,
+            isLoading: false,
+            isReady: true,
             isPartiallyLoaded: false
           },
           size: {
@@ -1549,7 +1534,6 @@ const App = {
           
           // 로딩 상태 업데이트
           App.state.isLoading = false;
-          App.state.loadingInProgress = false;
           App.state.dataLoaded = true;
           
           // 완료 시점에서 헤더 업데이트 (감정 데이터가 있을 수 있음)
@@ -1670,51 +1654,64 @@ const App = {
             }
 
             console.log('📊 상단 네비게이션에서 모달 열기 요청 - 티켓 ID:', currentTicketId);
-            console.log('📊 현재 데이터 로드 상태:', {
-              dataLoaded: App.state.dataLoaded,
-              loadingInProgress: App.state.loadingInProgress
-            });
+            console.log('🚫 자동 백엔드 호출 금지 - 캐시 데이터만 사용');
             
-            // 데이터 로드 완료 시 캐시된 데이터 사용, 미완료 시 로딩 상태 표시
-            const hasCachedData = App.state.dataLoaded;
-            await App.ui.showFDKModal(currentTicketId, hasCachedData);
+            // 캐시 데이터만 사용, 새로고침은 사용자가 직접
+            await App.ui.showFDKModal(currentTicketId, true);
           } else {
             console.log('📱 예상치 못한 위치에서의 앱 활성화:', ctx.location);
-            // 예상치 못한 위치에서도 데이터 로드 상태 고려
-            const hasCachedData = App.state.dataLoaded;
-            await App.ui.showFDKModal(App.state.ticketId, hasCachedData);
+            // 캐시 데이터만 사용
+            await App.ui.showFDKModal(App.state.ticketId, true);
           }
         } catch (err) {
           console.error('❌ app.activated 이벤트 처리 오류:', err);
-          // 오류가 발생해도 기본 모달은 표시 (백엔드 호출 없이)
-          try {
-            await App.ui.showFDKModal(App.state.ticketId, true);
-          } catch (fallbackError) {
-            console.error('❌ 폴백 모달 표시도 실패:', fallbackError);
-          }
+          App.ui.showError('모달 열기 실패. 새로고침 버튼을 눌러 다시 시도하세요.');
         }
       });
       
-      // 초기 데이터 로드
-      App.state.isLoading = true;
-      App.ui.showLoading();
+      // 초기 데이터 로드 (모달에서만 건너뛰기)
+      const modalData = window.modalData || {};
+      const isModal = modalData.noBackendCall === true;
       
-      try {
-        await App.api.loadInitialData(App.state.ticketId);
-      } catch (error) {
-        console.error('초기 데이터 로드 실패:', error);
-        App.ui.hideLoading();
-        // 백엔드 연결 실패 시에도 기본 UI는 표시
-        App.ui.showError('백엔드 서버 연결 실패. 일부 기능이 제한됩니다.');
+      console.log('🔍 App.init() 호출됨 - 현재 상태:', {
+        isModal,
+        BACKEND_CALLED: App.state.BACKEND_CALLED,
+        modalData,
+        location: window.location.href,
+        isFrame: window.frameElement !== null,
+        isParent: window.location === window.parent.location
+      });
+      
+      if (!isModal && !App.state.BACKEND_CALLED) {
+        console.log('🔥 페이지 최초 로딩 - 백엔드 호출 실행');
+        App.state.isLoading = true;
+        App.ui.showLoading();
+        
+        try {
+          await App.api.loadInitialData(App.state.ticketId);
+        } catch (error) {
+          console.error('초기 데이터 로드 실패:', error);
+          App.ui.hideLoading();
+          App.ui.showError('백엔드 서버 연결 실패. 새로고침 버튼을 눌러 다시 시도하세요.');
+        }
+      } else {
+        console.log('🚫 백엔드 호출 건너뛰기');
+        
+        // 모달에서 캐시된 데이터 렌더링
+        if (isModal) {
+          console.log('📂 모달에서 캐시된 데이터 렌더링 시작');
+          
+          // 로딩 숨기기
+          App.ui.hideLoading();
+          
+          // 모달로 전달된 캐시 데이터 사용 (DOMContentLoaded에서 처리됨)
+          console.log('⏳ 모달 캐시 데이터 복원 대기 중...');
+        }
       }
       
     } catch (error) {
       console.error('FDK 초기화 오류:', error);
-      console.warn('FDK 없이 기본 모드로 실행합니다.');
-      
-      // FDK 없이도 기본 기능은 사용 가능하도록 더미 티켓 ID 설정
-      App.state.ticketId = 'demo-ticket-' + Date.now();
-      App.ui.showError('FDK 초기화 실패. 데모 모드로 실행됩니다.');
+      App.ui.showError('FDK 초기화 실패. 페이지를 새로고침하세요.');
     }
 
     // 이벤트 리스너 설정
@@ -1801,15 +1798,13 @@ const App = {
         }
         
         if (section.classList.contains('collapsed')) {
-          // 펴기
+          // 펼치기
           section.classList.remove('collapsed');
           toggleBtn.innerHTML = '<span style="font-size: 16px;">⌃</span>';
-          console.log('✅ 요약 펼치기 실행');
         } else {
           // 접기
           section.classList.add('collapsed');
           toggleBtn.innerHTML = '<span style="font-size: 16px;">⌄</span>';
-          console.log('✅ 요약 접기 실행');
         }
       });
     }
@@ -1819,20 +1814,30 @@ const App = {
 // 전역으로 노출 (디버깅용 + FDK 이벤트 처리)
 window.App = App;
 
-// Top bar navigation 이벤트 처리용 전역 함수 (중복 방지 강화)
+// 전역 함수들 (HTML에서 호출용)
 window.showFDKModal = async function(ticketId) {
   console.log('📡 Top bar navigation에서 모달 열기 요청');
   console.log('📊 현재 데이터 로드 상태:', {
     dataLoaded: App.state.dataLoaded,
-    loadingInProgress: App.state.loadingInProgress
+    BACKEND_CALLED: App.state.BACKEND_CALLED
   });
   
   if (App && App.ui && App.ui.showFDKModal) {
-    // 데이터 로드 상태에 따라 캐시된 데이터 사용 여부 결정
-    const hasCachedData = App.state.dataLoaded;
-    await App.ui.showFDKModal(ticketId || App.state.ticketId, hasCachedData);
+    // 캐시 데이터만 사용
+    await App.ui.showFDKModal(ticketId || App.state.ticketId, true);
   } else {
     console.error('❌ App.ui.showFDKModal 함수가 준비되지 않음');
+  }
+};
+
+// 새로고침 버튼용 전역 함수
+window.refreshData = async function() {
+  console.log('🔄 HTML 새로고침 버튼 클릭');
+  
+  if (App && App.api && App.api.refreshData) {
+    await App.api.refreshData();
+  } else {
+    console.error('❌ App.api.refreshData 함수가 준비되지 않음');
   }
 };
 
@@ -1851,26 +1856,72 @@ document.addEventListener('DOMContentLoaded', () => {
   if (modalData.noBackendCall === true) {
     console.log('🚫 모달에서 noBackendCall 플래그 감지 - 백엔드 호출 생략');
     App.state.dataLoaded = true;
-    App.state.loadingInProgress = false;
+    App.state.BACKEND_CALLED = true; // 백엔드 호출 상태도 true로 설정
     
-    // 캐시된 데이터가 있으면 복원
-    if (modalData.hasCachedData) {
-      console.log('📂 캐시된 데이터 사용 모드');
-      // 기본 UI 설정만 하고 백엔드 호출 없이 진행
+    // 모달에서 캐시된 데이터 복원 시도
+    if (modalData.noBackendCall === true) {
+      console.log('📂 모달 모드 - 캐시된 데이터 복원 시작');
+      console.log('🔍 전달받은 modalData:', modalData);
+      
+      // 캐시된 데이터 복원 (전달받은 데이터 우선, 없으면 기본 메시지)
+      if (modalData.cachedData) {
+        App.state.cachedData = modalData.cachedData;
+        console.log('✅ modalData에서 캐시 데이터 복원');
+      } else {
+        // 기본 데이터 설정
+        App.state.cachedData = {
+          summary: '모달에서 캐시된 데이터를 불러오는 중입니다...',
+          similarTickets: [],
+          kbDocuments: []
+        };
+        console.log('⚠️ modalData.cachedData가 없음 - 기본 데이터 설정');
+      }
+      
+      if (modalData.cachedTicketInfo) {
+        App.state.cachedTicketInfo = modalData.cachedTicketInfo;
+        console.log('✅ modalData에서 티켓 정보 복원');
+      }
+      
+      // 기본 UI 설정
       App.setupEventListeners();
       
-      // noBackendCall 모드에서도 탭 네비게이션 표시
+      // UI 데이터 복원
+      setTimeout(() => {
+        // 요약 복원
+        if (App.state.cachedData.summary) {
+          App.ui.updateSummary(App.state.cachedData.summary);
+        }
+        
+        // 유사 티켓 복원
+        if (App.state.cachedData.similarTickets && App.state.cachedData.similarTickets.length > 0) {
+          App.ui.renderSimilarTickets(App.state.cachedData.similarTickets);
+        }
+        
+        // KB 문서 복원
+        if (App.state.cachedData.kbDocuments && App.state.cachedData.kbDocuments.length > 0) {
+          App.ui.renderKBDocuments(App.state.cachedData.kbDocuments);
+        }
+        
+        // 헤더 정보 복원
+        if (App.state.cachedTicketInfo && App.state.cachedTicketInfo.lastUpdated) {
+          App.ui.updateTicketHeader(App.state.cachedTicketInfo);
+        }
+        
+        console.log('✅ 모달 캐시된 데이터 복원 완료');
+      }, 200);
+      
+      // 탭 네비게이션 표시
       const tabNavigation = document.getElementById('tabNavigation');
       const tabContentArea = document.getElementById('tabContentArea');
       
       if (tabNavigation) {
         tabNavigation.style.display = 'block';
-        console.log('✅ noBackendCall 모드 - 탭 네비게이션 표시');
+        console.log('✅ 모달 - 탭 네비게이션 표시');
       }
       
       if (tabContentArea) {
         tabContentArea.style.display = 'block';
-        console.log('✅ noBackendCall 모드 - 탭 콘텐츠 영역 표시');
+        console.log('✅ 모달 - 탭 콘텐츠 영역 표시');
       }
       
       return;
@@ -1881,42 +1932,10 @@ document.addEventListener('DOMContentLoaded', () => {
   if (typeof app !== 'undefined') {
     App.init().catch(error => {
       console.error('앱 초기화 중 오류:', error);
-      // FDK 없이도 기본 UI는 작동하도록 이벤트 리스너 설정
-      App.setupEventListeners();
-      
-      // 오류 시에도 탭 네비게이션 표시
-      const tabNavigation = document.getElementById('tabNavigation');
-      const tabContentArea = document.getElementById('tabContentArea');
-      
-      if (tabNavigation) {
-        tabNavigation.style.display = 'block';
-        console.log('✅ 초기화 오류 시 - 탭 네비게이션 표시');
-      }
-      
-      if (tabContentArea) {
-        tabContentArea.style.display = 'block';
-        console.log('✅ 초기화 오류 시 - 탭 콘텐츠 영역 표시');
-      }
-      
+      App.ui.showError('앱 초기화 실패. 페이지를 새로고침하세요.');
     });
   } else {
-    console.warn('FDK가 로드되지 않았습니다. 기본 UI만 작동합니다.');
-    // FDK 없이도 기본 UI는 작동하도록 이벤트 리스너 설정
-    App.setupEventListeners();
-    
-    // FDK 없이도 탭 네비게이션 표시
-    const tabNavigation = document.getElementById('tabNavigation');
-    const tabContentArea = document.getElementById('tabContentArea');
-    
-    if (tabNavigation) {
-      tabNavigation.style.display = 'block';
-      console.log('✅ FDK 없음 - 탭 네비게이션 표시');
-    }
-    
-    if (tabContentArea) {
-      tabContentArea.style.display = 'block';
-      console.log('✅ FDK 없음 - 탭 콘텐츠 영역 표시');
-    }
-    
+    console.error('FDK가 로드되지 않았습니다.');
+    App.ui.showError('FDK 로드 실패. 페이지를 새로고침하세요.');
   }
 });
