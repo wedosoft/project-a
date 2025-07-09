@@ -14,68 +14,110 @@
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: #f8f9fa;
+            margin: 0;
+            padding: 0 0 10px 0;
             color: #1f2937;
+            display: flex;
+            justify-content: flex-end;
             line-height: 1.5;
             height: 100vh;
+            width: 100%;
             overflow: hidden;
         }
 
-        /* === 앱 컨테이너 === */
-        .app-container {
-            display: flex;
-            justify-content: flex-end;
+        /* === FDK 응답 컨테이너 (필수) === */
+        #fdk-response-container {
             width: 100%;
-            height: 100vh;
-            padding: 0;
+            height: 100%;
+            min-height: 400px;
+            display: flex;
+            flex-direction: column;
+            animation: slideIn 0.3s ease-out;
+            position: relative;
+            overflow: auto;
         }
 
-        /* === 앱 헤더 (완전 고정) === */
-        .app-header {
-            position: fixed;
-            top: 0;
-            right: 0;
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* 모달 컨테이너 (네이티브 스타일) */
+        .modal-container {
             width: 100%;
             max-width: 900px;
-            height: 80px;
-            background: linear-gradient(135deg, #8B5CF6 0%, #3B82F6 100%);
-            color: white;
-            z-index: 1000;
-            border-radius: 0;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0 20px;
+            height: calc(100vh - 70px); /* 헤더 높이만큼 줄임 */
+            background: white;
+            border-radius: 12px;
             box-shadow: -2px 0 8px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border-left: 1px solid #e5e7eb;
+            margin-bottom: 10px;
+            margin-top: 60px; /* 헤더 공간 확보 */
+            position: relative;
         }
 
-        .header-meta {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 8px;
-            font-size: 11px;
-            width: 100%;
-            max-width: 600px;
+        /* 스마트 헤더 (얇은 헤더) */
+        .smart-header {
+            background: linear-gradient(135deg, #8B5CF6 0%, #3B82F6 100%);
+            color: white;
+            padding: 8px 20px;
+            flex-shrink: 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            border-radius: 12px 12px 0 0;
+            margin: 0 auto;
+            max-width: 900px;
+        }
+
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .ticket-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            font-size: 12px;
         }
         
-        .meta-row {
-            display: contents;
+        .meta-row-1, .meta-row-2 {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
         }
 
         .meta-item {
             background: rgba(255, 255, 255, 0.15);
-            padding: 6px 12px;
-            border-radius: 16px;
+            padding: 4px 10px;
+            border-radius: 12px;
             font-weight: 500;
             display: flex;
             align-items: center;
-            justify-content: center;
             gap: 4px;
-            text-align: center;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            min-height: 28px;
         }
+        
+        .meta-item.sentiment-positive { background: rgba(34, 197, 94, 0.2); }
+        .meta-item.sentiment-neutral { background: rgba(251, 191, 36, 0.2); }
+        .meta-item.sentiment-negative { background: rgba(239, 68, 68, 0.2); }
+        
+        .meta-item.status-resolved { background: rgba(34, 197, 94, 0.2); }
+        .meta-item.status-pending { background: rgba(251, 191, 36, 0.2); }
+        .meta-item.status-open { background: rgba(59, 130, 246, 0.2); }
 
         .header-actions {
             display: flex;
@@ -94,46 +136,55 @@
             display: flex;
             align-items: center;
             gap: 4px;
+            position: relative;
+            z-index: 15;
         }
 
         .action-btn:hover {
             background: rgba(255, 255, 255, 0.2);
         }
 
-        /* === 앱 메인 (스크롤 컨테이너) === */
-        .app-main {
-            width: 100%;
-            max-width: 900px;
-            height: 100vh;
-            background: white;
-            border-radius: 0;
-            box-shadow: none;
+        .close-btn {
+            background: rgba(255, 255, 255, 0.2);
             border: none;
-            margin: 0;
-            overflow-y: auto;
-            overflow-x: hidden;
-            padding-top: 80px; /* 헤더 높이만큼 */
-            position: relative;
+            color: white;
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
-        /* === AI 요약 섹션 === */
-        .summary-section {
+        /* 메인 콘텐츠 */
+        .main-content {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding-top: 0; /* 헤더가 밖으로 이동했으므로 패딩 제거 */
+        }
+
+        /* AI 요약 영역 (FDK 스타일) - 접기/펴기 처리 */
+        .ai-summary-section {
             background: #ffffff;
             border-bottom: 1px solid #e5e7eb;
+            padding: 0;  /* 상단 여백 제거 */
+            flex-shrink: 0;
+            overflow: visible;
             transition: all 0.3s ease;
         }
 
-        .summary-section.collapsed {
-            height: 0;
+        .ai-summary-section.collapsed {
             max-height: 0;
             border-bottom: none;
             opacity: 0;
             overflow: hidden;
-            margin: 0;
-            padding: 0;
         }
 
-        .summary-section.expanded {
+        .ai-summary-section.expanded {
             max-height: 500px;
             opacity: 1;
         }
@@ -158,6 +209,26 @@
 
         .summary-title i {
             color: #8B5CF6;
+        }
+
+        .summary-toggle-icon {
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            cursor: pointer;
+            padding: 8px 12px;
+            border-radius: 6px;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            min-width: 40px;
+        }
+
+        .summary-toggle-icon:hover {
+            background: rgba(255, 255, 255, 0.3);
+            border-color: rgba(255, 255, 255, 0.4);
         }
 
         .summary-actions {
@@ -187,13 +258,14 @@
         .summary-content {
             padding: 8px 16px;
             transition: all 0.3s ease;
+            /* 고정 높이 제거 - 콘텐츠 길이에 따라 자연스럽게 확장 */
         }
 
-        .summary-section.collapsed .summary-content {
+        .ai-summary-section.collapsed .summary-content {
             padding: 0 16px;
         }
 
-        .summary-text {
+        .main-summary .summary-text {
             font-size: 14px;
             line-height: 1.4;
             color: #374151;
@@ -206,20 +278,15 @@
             white-space: pre-wrap;
         }
 
-        /* === 탭 네비게이션 (sticky) === */
+        /* 탭 네비게이션 (FDK 스타일) */
         .tab-navigation {
             background-color: #ffffff;
             border-bottom: 1px solid #e5e7eb;
             padding: 0;
-            position: fixed;
-            top: 80px; /* 헤더 바로 아래에 고정 */
-            left: 0;
-            right: 0;
-            width: 100%;
-            max-width: 900px;
-            margin: 0 auto;
-            z-index: 998;
-            border-top: 1px solid #e5e7eb;
+            flex-shrink: 0;
+            position: sticky;
+            top: 0; /* 헤더 바로 아래 위치 */
+            z-index: 999;
         }
 
         .tab-list {
@@ -260,6 +327,12 @@
             border-bottom-color: #8B5CF6 !important;
             background-color: #faf5ff !important;
         }
+        
+        .tab-button:not(.active) {
+            color: #6b7280 !important;
+            border-bottom-color: transparent !important;
+            background-color: transparent !important;
+        }
 
         .tab-count {
             background-color: #e5e7eb;
@@ -277,25 +350,34 @@
             color: white;
         }
 
-        /* === 탭 콘텐츠 영역 === */
-        .tab-content-area {
-            padding: 60px 20px 100px 20px; /* 탭 네비게이션 높이만큼 상단 패딩 추가 */
-            height: calc(100vh - 300px); /* 고정 높이 설정 */
-            overflow: hidden; /* 넘치는 콘텐츠 숨김 */
+        /* 카드 리스트 영역 */
+        .card-list {
+            padding: 0 20px 100px 20px; /* 하단바 공간 확보 */
+            /* flex와 overflow 제거 - 자연스러운 콘텐츠 흐름 */
         }
 
         .tab-content {
-            display: none;
+            display: none !important;
             padding-top: 16px;
-            height: calc(100vh - 350px); /* 각 탭 컨텐츠 높이 고정 */
-            overflow-y: auto; /* 개별 탭 스크롤 */
         }
 
         .tab-content.active {
-            display: block;
+            display: block !important;
+            animation: fadeIn 0.2s ease-in-out;
         }
 
-        /* === 인사이트 패널 === */
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(8px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* 인사이트 패널 (FDK 스타일) */
         .insight-panel {
             background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
             border: 1px solid #f59e0b;
@@ -320,7 +402,7 @@
             line-height: 1.4;
         }
 
-        /* === 콘텐츠 카드 === */
+        /* 콘텐츠 카드 (FDK 스타일) */
         .content-card {
             background: white;
             border: 1px solid #e5e7eb;
@@ -413,6 +495,12 @@
         .status-progress { background: #dbeafe; color: #1e40af; }
         .status-pending { background: #fef3c7; color: #92400e; }
 
+        .priority-indicator {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+        }
+
         .card-actions {
             display: flex;
             gap: 8px;
@@ -451,7 +539,7 @@
             box-shadow: 0 2px 6px rgba(139, 92, 246, 0.3);
         }
 
-        /* === 채팅 인터페이스 === */
+        /* Copilot 채팅 인터페이스 */
         .chat-mode-toggle {
             background: white;
             border-bottom: 1px solid #e5e7eb;
@@ -486,6 +574,7 @@
             font-weight: 600;
         }
 
+        /* iOS 스타일 토글 스위치 - 더 작게 */
         .ios-toggle {
             position: relative;
             width: 42px;
@@ -525,23 +614,23 @@
             flex-shrink: 0;
         }
 
+        /* 채팅 컨테이너 - 전체 영역 사용 */
         .chat-container {
             display: flex;
             flex-direction: column;
+            flex: 1;
             background: white;
-            height: calc(100vh - 350px); /* 고정 높이 설정 */
-            max-height: 600px; /* 최대 높이 제한 */
-            overflow: hidden; /* 넘치는 콘텐츠 숨김 */
+            height: calc(100vh - 100px); /* 헤더와 피드백 바 공간 확보 */
         }
 
+        /* 채팅 메시지 영역 */
         .chat-messages {
             flex: 1;
             overflow-y: auto;
-            padding: 16px 20px 200px 20px; /* 하단 패딩 증가 */
+            padding: 16px 20px 160px 20px; /* 입력창(80px) + 하단바(80px) 공간 확보 */
             display: flex;
             flex-direction: column;
             gap: 16px;
-            min-height: 0; /* flex item이 넘치지 않도록 */
         }
 
         .chat-message {
@@ -618,17 +707,17 @@
             text-align: left;
         }
 
-        /* === 채팅 입력 영역 === */
+        /* 채팅 입력 영역 - 하단 바 바로 위 고정 */
         .chat-input-container {
             position: fixed;
-            bottom: 0; /* 하단 푸터 바로 위 */
+            bottom: 50px; /* 하단 바 높이만큼 위로 올림 */
             left: 0;
             right: 0;
             width: 100%;
             border-top: 1px solid #e5e7eb;
             padding: 12px 16px;
             background: #fafbfc;
-            z-index: 1001; /* 푸터보다 위에 */
+            z-index: 999; /* 하단 바보다 낮게 */
             box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
         }
 
@@ -641,8 +730,6 @@
             border-radius: 24px;
             padding: 8px 16px;
             transition: all 0.2s;
-            max-width: 900px;
-            margin: 0 auto;
         }
 
         .chat-input-wrapper:focus-within {
@@ -695,26 +782,156 @@
             box-shadow: none;
         }
 
-        /* === 하단 푸터 === */
-        .app-footer {
-            background: #f8fafc;
-            border-top: 1px solid #e5e7eb;
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            z-index: 1000;
-            margin-top: 60px; /* 채팅 입력창 높이만큼 여백 */
+        /* 타이핑 인디케이터 */
+        .typing-indicator {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 0;
         }
 
+        .typing-dots {
+            display: flex;
+            gap: 4px;
+        }
+
+        .typing-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #8B5CF6;
+            animation: typingDot 1.4s infinite ease-in-out;
+        }
+
+        .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+        .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+
+        @keyframes typingDot {
+            0%, 80%, 100% {
+                transform: scale(0.8);
+                opacity: 0.5;
+            }
+            40% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        /* 채팅 스크롤바 */
+        .chat-messages::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .chat-messages::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .chat-messages::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 2px;
+        }
+
+        .chat-messages::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+        
+        /* 스트리밍 메시지 애니메이션 */
+        .chat-message.streaming .message-text::after {
+            content: '▋';
+            animation: blink 1s infinite;
+            color: #8B5CF6;
+            font-weight: normal;
+        }
+        
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0; }
+        }
+        
+        /* KB 탭 데이터 로드 알림 애니메이션 */
+        @keyframes pulse {
+            0% { transform: scale(1); background-color: inherit; }
+            50% { transform: scale(1.05); background-color: #e0f2fe; }
+            100% { transform: scale(1); background-color: inherit; }
+        }
+        
+        /* 마크다운 렌더링 스타일 */
+        .message-text h1, .message-text h2, .message-text h3 {
+            margin: 8px 0;
+            font-weight: 600;
+        }
+        
+        .message-text h1 { font-size: 16px; }
+        .message-text h2 { font-size: 15px; }
+        .message-text h3 { font-size: 14px; }
+        
+        .message-text p {
+            margin: 6px 0;
+        }
+        
+        .message-text ul, .message-text ol {
+            margin: 8px 0;
+            padding-left: 20px;
+        }
+        
+        .message-text li {
+            margin: 4px 0;
+        }
+        
+        .message-text code {
+            background: #f3f4f6;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+        }
+        
+        .message-text pre {
+            background: #f3f4f6;
+            padding: 8px;
+            border-radius: 4px;
+            overflow-x: auto;
+            margin: 8px 0;
+        }
+        
+        .message-text pre code {
+            background: none;
+            padding: 0;
+        }
+        
+        .message-text strong {
+            font-weight: 600;
+        }
+        
+        .message-text em {
+            font-style: italic;
+        }
+        
+        .message-text a {
+            color: #8B5CF6;
+            text-decoration: none;
+        }
+        
+        .message-text a:hover {
+            text-decoration: underline;
+        }
+
+        /* 통합 하단 영역 */
+        .combined-footer {
+            background: #f8fafc;
+            border-top: 1px solid #e5e7eb;
+            flex-shrink: 0;
+            border-bottom-left-radius: 12px;
+            border-bottom-right-radius: 12px;
+        }
+        
+        /* 피드백 영역 */
         .feedback-section {
             padding: 12px 20px;
             display: flex;
             justify-content: space-between;
             align-items: center;
             border-bottom: 1px solid #e5e7eb;
-            max-width: 900px;
-            margin: 0 auto;
         }
 
         .feedback-question {
@@ -758,6 +975,7 @@
             color: #991b1b;
         }
 
+        /* 성능 지표 */
         .performance-footer {
             padding: 8px 20px;
             background: #f1f5f9;
@@ -766,8 +984,6 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            max-width: 900px;
-            margin: 0 auto;
         }
 
         .perf-item {
@@ -776,7 +992,69 @@
             gap: 4px;
         }
 
-        /* === 로딩 오버레이 === */
+        /* 스크롤바 스타일링 - 메인 콘텐츠 영역에 적용 */
+        .main-content::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .main-content::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+
+        .main-content::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 2px;
+        }
+
+        .main-content::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+
+        /* 마크다운 스타일 - 줄바꿈 최적화 (간격 축소) */
+        .summary-text h2 {
+            font-size: 14px;
+            font-weight: 700;
+            color: #1f2937;
+            margin: 4px 0 2px 0;
+            border-bottom: 1px solid #e5e7eb;
+            padding-bottom: 1px;
+        }
+
+        .summary-text h3 {
+            font-size: 13px;
+            font-weight: 600;
+            color: #374151;
+            margin: 3px 0 1px 0;
+        }
+
+        .summary-text p {
+            margin: 2px 0;
+            line-height: 1.3;
+        }
+
+        .summary-text ul,
+        .summary-text ol {
+            margin: 2px 0;
+            padding-left: 16px;
+        }
+
+        .summary-text li {
+            margin: 1px 0;
+            line-height: 1.2;
+        }
+
+        .summary-text strong,
+        .summary-text b {
+            color: #1f2937;
+            font-weight: 700;
+        }
+
+        /* 브라우저별 줄바꿈 통일 */
+        .summary-text br + br {
+            line-height: 0.5;
+        }
+
+        /* 로딩 진행률 UI 스타일 */
         .loading-overlay {
             position: absolute;
             top: 0;
@@ -931,158 +1209,30 @@
             font-weight: 600;
         }
 
-        /* === 스크롤바 === */
-        .app-main::-webkit-scrollbar {
-            width: 4px;
-        }
-
-        .app-main::-webkit-scrollbar-track {
-            background: #f1f5f9;
-        }
-
-        .app-main::-webkit-scrollbar-thumb {
-            background: #cbd5e1;
-            border-radius: 2px;
-        }
-
-        .app-main::-webkit-scrollbar-thumb:hover {
-            background: #94a3b8;
-        }
-
-        .chat-messages::-webkit-scrollbar {
-            width: 4px;
-        }
-
-        .chat-messages::-webkit-scrollbar-track {
-            background: transparent;
-        }
-
-        .chat-messages::-webkit-scrollbar-thumb {
-            background: #cbd5e1;
-            border-radius: 2px;
-        }
-
-        .chat-messages::-webkit-scrollbar-thumb:hover {
-            background: #94a3b8;
-        }
-
-        /* === 마크다운 스타일 === */
-        .message-text h1, .message-text h2, .message-text h3 {
-            margin: 8px 0;
-            font-weight: 600;
-        }
-        
-        .message-text h1 { font-size: 16px; }
-        .message-text h2 { font-size: 15px; }
-        .message-text h3 { font-size: 14px; }
-        
-        .message-text p {
-            margin: 6px 0;
-        }
-        
-        .message-text ul, .message-text ol {
-            margin: 8px 0;
-            padding-left: 20px;
-        }
-        
-        .message-text li {
-            margin: 4px 0;
-        }
-        
-        .message-text code {
-            background: #f3f4f6;
-            padding: 2px 4px;
-            border-radius: 3px;
-            font-family: 'Courier New', monospace;
+        .partial-data-notice {
+            background: #fef3c7;
+            border: 1px solid #fbbf24;
+            color: #92400e;
+            padding: 12px 16px;
+            border-radius: 6px;
             font-size: 13px;
-        }
-        
-        .message-text pre {
-            background: #f3f4f6;
-            padding: 8px;
-            border-radius: 4px;
-            overflow-x: auto;
-            margin: 8px 0;
-        }
-        
-        .message-text pre code {
-            background: none;
-            padding: 0;
-        }
-        
-        .message-text strong {
-            font-weight: 600;
-        }
-        
-        .message-text em {
-            font-style: italic;
-        }
-        
-        .message-text a {
-            color: #8B5CF6;
-            text-decoration: none;
-        }
-        
-        .message-text a:hover {
-            text-decoration: underline;
+            margin-top: 16px;
+            text-align: left;
         }
 
-        .summary-text h2 {
-            font-size: 14px;
-            font-weight: 700;
-            color: #1f2937;
-            margin: 4px 0 2px 0;
-            border-bottom: 1px solid #e5e7eb;
-            padding-bottom: 1px;
+        .partial-data-notice strong {
+            display: block;
+            margin-bottom: 4px;
         }
 
-        .summary-text h3 {
-            font-size: 13px;
-            font-weight: 600;
-            color: #374151;
-            margin: 3px 0 1px 0;
-        }
-
-        .summary-text p {
-            margin: 2px 0;
-            line-height: 1.3;
-        }
-
-        .summary-text ul,
-        .summary-text ol {
-            margin: 2px 0;
-            padding-left: 16px;
-        }
-
-        .summary-text li {
-            margin: 1px 0;
-            line-height: 1.2;
-        }
-
-        .summary-text strong,
-        .summary-text b {
-            color: #1f2937;
-            font-weight: 700;
-        }
-
-        /* === 반응형 === */
-        @media (max-width: 768px) {
-            .app-container {
-                padding: 0;
-            }
-            
-            .app-header {
-                margin-right: 0;
-                max-width: 100%;
-            }
-            
-            .app-main {
-                max-width: 100%;
-                border-radius: 0;
+        /* 반응형 */
+        @media (max-width: 500px) {
+            .modal-container {
+                width: 100%;
                 border-left: none;
             }
             
-            .header-meta {
+            .header-content {
                 flex-direction: column;
                 gap: 8px;
             }
@@ -1091,80 +1241,102 @@
                 overflow-x: auto;
             }
         }
+        
+        /* 데스크톱에서 더 넓은 화면 활용 */
+        @media (min-width: 768px) {
+            .modal-container {
+                width: 100%;
+                max-width: 1200px;
+            }
+        }
     </style>
 </head>
 <body>
-    <div class="app-container">
-        <!-- 앱 헤더 (완전 고정) -->
-        <header class="app-header">
-            <div class="header-meta" id="headerMeta">
-                <div class="meta-row" id="metaRow1">
-                    <!-- 감정상태, 우선순위, 진행상태 -->
+    <!-- FDK 응답 컨테이너 (필수) -->
+    <div id="fdk-response-container">
+        <!-- 얇은 헤더 (메타 정보와 액션 버튼) - 모달 컨테이너 밖으로 이동 -->
+        <header class="smart-header">
+            <div class="header-content">
+                <div class="ticket-meta" id="ticketMeta">
+                    <div class="meta-row-1" id="metaRow1">
+                        <!-- 감정상태, 우선순위, 진행상태 -->
+                    </div>
+                    <div class="meta-row-2" id="metaRow2">
+                        <!-- 요청자, 담당그룹, 담당자 -->
+                    </div>
                 </div>
-                <div class="meta-row" id="metaRow2">
-                    <!-- 요청자, 담당그룹, 담당자 -->
+                <div class="header-actions">
+                    <button class="action-btn" id="summaryToggleBtn" title="요약 접기/펼기">
+                        <span style="font-size: 16px;">⌃</span>
+                    </button>
+                    <button class="action-btn" onclick="refreshData()" title="새로고침">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
                 </div>
-            </div>
-            <div class="header-actions">
-                <button class="action-btn" id="summaryToggleBtn" title="요약 접기/펼기">
-                    <span style="font-size: 16px;">⌃</span>
-                </button>
-                <button class="action-btn" onclick="refreshData()" title="새로고침">
-                    <i class="fas fa-sync-alt"></i>
-                </button>
             </div>
         </header>
+        
+        <div class="modal-container">
 
-        <!-- 앱 메인 (스크롤 컨테이너) -->
-        <main class="app-main" id="appMain">
-            <!-- 에러 표시 영역 -->
-            <div id="error-display" style="display: none;">
-                <!-- 에러 메시지 -->
-            </div>
+        <!-- 에러 표시 영역 (초기에는 숨김) -->
+        <div id="error-display" style="display: none;">
+            <!-- 에러 메시지가 여기에 동적으로 표시됩니다 -->
+        </div>
 
-            <!-- 로딩 오버레이 -->
-            <div id="loading-overlay" class="loading-overlay" style="display: none;">
-                <div class="loading-content">
-                    <div class="loading-icon">🤖</div>
-                    <h2 class="loading-title">AI 분석 진행 중...</h2>
-                    <p class="loading-subtitle">티켓 데이터를 분석하고 있습니다</p>
-                    
-                    <div class="progress-bar-container">
-                        <div class="progress-bar-fill" id="progress-bar"></div>
+        <!-- 로딩 진행률 오버레이 -->
+        <div id="loading-overlay" class="loading-overlay" style="display: none;">
+            <div class="loading-content">
+                <div class="loading-icon">🤖</div>
+                <h2 class="loading-title">AI 분석 진행 중...</h2>
+                <p class="loading-subtitle">티켓 데이터를 분석하고 있습니다</p>
+                
+                <!-- 진행률 바 -->
+                <div class="progress-bar-container">
+                    <div class="progress-bar-fill" id="progress-bar"></div>
+                </div>
+                
+                <!-- 진행 정보 -->
+                <div class="progress-info">
+                    <span class="progress-percentage" id="progress-percentage">0%</span>
+                    <span class="progress-time" id="progress-time">예상 시간: 20초</span>
+                </div>
+                
+                <!-- 단계별 진행 상황 -->
+                <div class="progress-stages">
+                    <div class="stage-item" data-stage="ticket">
+                        <span class="stage-icon">📋</span>
+                        <span class="stage-name">티켓 정보 로드</span>
+                        <span class="stage-status">⏳</span>
                     </div>
-                    
-                    <div class="progress-info">
-                        <span class="progress-percentage" id="progress-percentage">0%</span>
-                        <span class="progress-time" id="progress-time">예상 시간: 20초</span>
+                    <div class="stage-item" data-stage="summary">
+                        <span class="stage-icon">🎯</span>
+                        <span class="stage-name">AI 요약 생성</span>
+                        <span class="stage-status">⏳</span>
                     </div>
-                    
-                    <div class="progress-stages">
-                        <div class="stage-item" data-stage="ticket">
-                            <span class="stage-icon">📋</span>
-                            <span class="stage-name">티켓 정보 로드</span>
-                            <span class="stage-status">⏳</span>
-                        </div>
-                        <div class="stage-item" data-stage="summary">
-                            <span class="stage-icon">🎯</span>
-                            <span class="stage-name">AI 요약 생성</span>
-                            <span class="stage-status">⏳</span>
-                        </div>
-                        <div class="stage-item" data-stage="similar">
-                            <span class="stage-icon">🔍</span>
-                            <span class="stage-name">유사 티켓 검색</span>
-                            <span class="stage-status">⏳</span>
-                        </div>
-                        <div class="stage-item" data-stage="kb">
-                            <span class="stage-icon">📚</span>
-                            <span class="stage-name">지식베이스 검색</span>
-                            <span class="stage-status">⏳</span>
-                        </div>
+                    <div class="stage-item" data-stage="similar">
+                        <span class="stage-icon">🔍</span>
+                        <span class="stage-name">유사 티켓 검색</span>
+                        <span class="stage-status">⏳</span>
+                    </div>
+                    <div class="stage-item" data-stage="kb">
+                        <span class="stage-icon">📚</span>
+                        <span class="stage-name">지식베이스 검색</span>
+                        <span class="stage-status">⏳</span>
                     </div>
                 </div>
+                
+                <!-- 부분 데이터 알림 (필요시 표시) -->
+                <div class="partial-data-notice" id="partial-data-notice" style="display: none;">
+                    <strong>💡 일부 데이터 사용 가능</strong>
+                    완료된 분석 결과부터 확인하실 수 있습니다. 채팅 기능도 사용 가능합니다.
+                </div>
             </div>
+        </div>
 
-            <!-- AI 요약 섹션 -->
-            <section class="summary-section" id="summarySection">
+        <!-- 메인 콘텐츠 -->
+        <main class="main-content" id="main-content">
+            <!-- AI 요약 영역 -->
+            <section class="ai-summary-section" id="summarySection">
                 <div class="summary-header">
                     <div class="summary-title">
                         <i class="fas fa-brain"></i>
@@ -1180,61 +1352,60 @@
                     </div>
                 </div>
                 <div class="summary-content" id="summaryContent">
-                    <div class="summary-text" id="summaryText">
-                        <div class="loading-summary">
-                            🤖 AI가 티켓을 분석하여 요약을 생성 중입니다...
+                    <div class="main-summary">
+                        <div class="summary-text" id="summaryText">
+                            <!-- AI 요약이 동적으로 로드됩니다 -->
+                            <div class="loading-summary">
+                                🤖 AI가 티켓을 분석하여 요약을 생성 중입니다...
+                            </div>
                         </div>
                     </div>
                 </div>
             </section>
 
-            <!-- 탭 네비게이션 -->
+            <!-- 탭 네비게이션 (로딩 중 숨김) -->
             <nav class="tab-navigation" id="tabNavigation" style="display: none;">
                 <div class="tab-list">
-                    <button type="button" class="tab-button active" data-tab="tickets">
+                    <button class="tab-button" data-tab="tickets">
                         📱 유사 티켓
                         <span class="tab-count" id="similarTicketsCount">0</span>
                     </button>
-                    <button type="button" class="tab-button" data-tab="kb">
+                    <button class="tab-button" data-tab="kb">
                         📚 KB 문서
                         <span class="tab-count" id="kbDocumentsCount">0</span>
                     </button>
-                    <button type="button" class="tab-button" data-tab="copilot">
+                    <button class="tab-button" data-tab="copilot">
                         🤖 Copilot
                     </button>
                 </div>
             </nav>
 
-            <!-- 탭 콘텐츠 영역 -->
-            <div class="tab-content-area" id="tabContentArea" style="display: none;">
-                <!-- 유사 티켓 탭 -->
-                <div class="tab-content active" data-tab="tickets">
+            <!-- 카드 리스트 영역 (로딩 중 숨김) -->
+            <div class="card-list" id="cardListArea" style="display: none;">
+                <!-- 유사 티켓 탭 콘텐츠 -->
+                <div class="tab-content" data-tab="tickets">
                     <div class="insight-panel" id="ticketsInsight" style="display: none;">
                         <div class="insight-title">💡 자동 분석 결과</div>
                         <div class="insight-content" id="ticketsInsightContent">
-                            <!-- 분석 결과 -->
+                            <!-- 유사 티켓 분석 결과가 동적으로 로드됩니다 -->
                         </div>
                     </div>
+
                     <div id="similarTicketsContainer">
-                        <!-- 유사 티켓 카드들 -->
+                        <!-- 유사 티켓 카드들이 동적으로 로드됩니다 -->
                     </div>
                 </div>
 
-                <!-- KB 문서 탭 -->
+                <!-- KB 문서 탭 콘텐츠 -->
                 <div class="tab-content" data-tab="kb">
-                    <div class="insight-panel" id="kbInsight" style="display: none;">
-                        <div class="insight-title">💡 자동 분석 결과</div>
-                        <div class="insight-content" id="kbInsightContent">
-                            <!-- 분석 결과 -->
-                        </div>
-                    </div>
                     <div id="kbDocumentsContainer">
-                        <!-- KB 문서 카드들 -->
+                        <!-- KB 문서 카드들이 동적으로 로드됩니다 -->
                     </div>
                 </div>
 
-                <!-- Copilot 탭 -->
+                <!-- Copilot 탭 콘텐츠 -->
                 <div class="tab-content" data-tab="copilot">
+                    <!-- 대화 모드 토글 -->
                     <div class="chat-mode-toggle">
                         <div class="mode-toggle-container">
                             <div class="mode-toggle-section">
@@ -1250,7 +1421,9 @@
                         </div>
                     </div>
 
+                    <!-- 채팅 컨테이너 -->
                     <div class="chat-container">
+                        <!-- 채팅 메시지 영역 (동적 로딩) -->
                         <div class="chat-messages" id="chatResults">
                             <div class="chat-message assistant">
                                 <div class="message-avatar">🤖</div>
@@ -1262,68 +1435,84 @@
                                 </div>
                             </div>
                         </div>
+
+                        <!-- 입력 영역 -->
+                        <div class="chat-input-container">
+                            <div class="chat-input-wrapper">
+                                <textarea 
+                                    id="chatInput" 
+                                    placeholder="메시지를 입력하세요..." 
+                                    rows="1"
+                                    onkeydown="handleChatKeydown(event)"
+                                    oninput="adjustTextareaHeight(this)"
+                                    oncompositionstart="handleCompositionStart(event)"
+                                    oncompositionend="handleCompositionEnd(event)"
+                                ></textarea>
+                                <button class="send-button" onclick="if(!isSendingMessage) sendMessage()" id="sendButton">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="m22 2-7 20-4-9-9-4Z"/>
+                                        <path d="M22 2 11 13"/>
+                                    </svg>
+                                </button>
+                            </div>
+                            
+                            <!-- 개발용 테스트 버튼 -->
+                            <div style="margin-top: 8px; text-align: center; opacity: 0.7;">
+                                <button onclick="testMarkdownRendering()" style="padding: 4px 8px; font-size: 12px; background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer;">
+                                    마크다운 테스트
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
         </main>
-    </div>
 
-    <!-- 채팅 입력 영역 -->
-    <div class="chat-input-container" id="chatInputContainer" style="display: none;">
-        <div class="chat-input-wrapper">
-            <textarea 
-                id="chatInput" 
-                placeholder="메시지를 입력하세요..." 
-                rows="1"
-                onkeydown="handleChatKeydown(event)"
-                oninput="adjustTextareaHeight(this)"
-                oncompositionstart="handleCompositionStart(event)"
-                oncompositionend="handleCompositionEnd(event)"
-            ></textarea>
-            <button class="send-button" onclick="if(!isSendingMessage) sendMessage()" id="sendButton">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="m22 2-7 20-4-9-9-4Z"/>
-                    <path d="M22 2 11 13"/>
-                </svg>
-            </button>
-        </div>
-    </div>
+        <!-- 통합 하단 영역 -->
+        <div class="combined-footer">
+            <!-- 피드백 섹션 -->
+            <div class="feedback-section">
+                <div class="feedback-question">이 AI 분석이 도움이 되었나요?</div>
+                <div class="feedback-actions">
+                    <button class="feedback-btn thumbs-up" onclick="submitFeedback('positive')">
+                        👍 도움됨
+                    </button>
+                    <button class="feedback-btn thumbs-down" onclick="submitFeedback('negative')">
+                        👎 개선필요
+                    </button>
+                </div>
+            </div>
 
-    <!-- 앱 푸터 -->
-    <div class="app-footer">
-        <div class="feedback-section">
-            <div class="feedback-question">이 AI 분석이 도움이 되었나요?</div>
-            <div class="feedback-actions">
-                <button class="feedback-btn thumbs-up" onclick="submitFeedback('positive')">
-                    👍 도움됨
-                </button>
-                <button class="feedback-btn thumbs-down" onclick="submitFeedback('negative')">
-                    👎 개선필요
-                </button>
-            </div>
-        </div>
-
-        <div class="performance-footer" id="performanceFooter">
-            <div class="perf-item">
-                🕒 처리시간: <span id="processingTime">-</span>
-            </div>
-            <div class="perf-item">
-                📊 품질점수: <span id="qualityScore">-</span>
-            </div>
-            <div class="perf-item">
-                🔍 검색결과: <span id="searchResults">-</span>
+            <!-- 성능 지표 푸터 -->
+            <div class="performance-footer" id="performanceFooter">
+                <div class="perf-item">
+                    🕒 처리시간: <span id="processingTime">-</span>
+                </div>
+                <div class="perf-item">
+                    📊 품질점수: <span id="qualityScore">-</span>
+                </div>
+                <div class="perf-item">
+                    🔍 검색결과: <span id="searchResults">-</span>
+                </div>
             </div>
         </div>
     </div>
+    <!-- FDK 응답 컨테이너 종료 -->
 
-    <!-- 스크립트 -->
+    <!-- FDK 스크립트 로드 -->
     <script src="{{{appclient}}}"></script>
+    
+    <!-- 마크다운 파서 -->
     <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"></script>
+    
+    <!-- marked.js 로드 실패시 폴백 -->
     <script>
         // marked.js 로드 체크 및 폴백
         window.addEventListener('DOMContentLoaded', () => {
             if (typeof marked === 'undefined') {
                 console.warn('CDN에서 marked.js 로드 실패, 폴백 CDN 시도...');
+                
+                // 폴백 CDN 사용
                 const fallbackScript = document.createElement('script');
                 fallbackScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js';
                 fallbackScript.onload = () => {
@@ -1336,22 +1525,49 @@
             }
         });
     </script>
+    
+    <!-- 간소화된 앱 스크립트 -->
     <script src="scripts/utils.js"></script>
     <script src="scripts/app.js"></script>
+
     <script>
-        // 앱 초기화
+        // 간단한 초기화 체크
         window.addEventListener('load', () => {
             if (!window.App) {
                 console.error('앱 모듈 로드 실패');
                 document.body.innerHTML = '<div style="padding: 20px; color: red;">앱 로드 실패. 새로고침 해주세요.</div>';
             }
             
+            // marked.js 라이브러리 로드 상태 확인
             if (typeof marked !== 'undefined') {
                 console.log('✅ marked.js 라이브러리 로드 성공:', marked.version || 'version unknown');
+                
+                // 간단한 마크다운 테스트
+                try {
+                    const testMarkdown = '**볼드 테스트**';
+                    const result = marked.parse(testMarkdown);
+                    console.log('✅ 마크다운 파싱 테스트 성공:', result);
+                    
+                    // 다양한 마크다운 테스트
+                    const tests = [
+                        { input: '**볼드**', expected: '<p><strong>볼드</strong></p>' },
+                        { input: '*이탤릭*', expected: '<p><em>이탤릭</em></p>' },
+                        { input: '# 제목', expected: '<h1>제목</h1>' },
+                        { input: '- 리스트', expected: '<ul>\n<li>리스트</li>\n</ul>' }
+                    ];
+                    
+                    tests.forEach(test => {
+                        const result = marked.parse(test.input);
+                        console.log(`테스트 입력: "${test.input}" -> 출력: "${result.trim()}"`);
+                    });
+                } catch (error) {
+                    console.error('❌ 마크다운 파싱 테스트 실패:', error);
+                }
             } else {
                 console.error('❌ marked.js 라이브러리가 로드되지 않았습니다!');
             }
         });
     </script>
+    
 </body>
 </html>

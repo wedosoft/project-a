@@ -961,22 +961,12 @@ const App = {
 
     // KB 문서 렌더링
     renderKBDocuments(documents) {
-      console.log('🚀 renderKBDocuments 함수 호출됨');
-      console.log('🚀 받은 documents 파라미터:', documents);
-      console.log('🚀 documents 타입:', typeof documents);
-      console.log('🚀 documents 배열인가?', Array.isArray(documents));
-      
       const container = document.getElementById('kbDocumentsContainer');
       if (!container) {
-        console.error('❌ kbDocumentsContainer not found');
         return;
       }
       
-      console.log('✅ kbDocumentsContainer 찾음:', container);
-      console.log('🔍 Checking documents data:', documents);
-      
       if (!documents || !documents.length) {
-        console.log('⚠️ No KB documents to render');
         container.innerHTML = `
           <div class="insight-panel">
             <div class="insight-title">📚 지식베이스 검색</div>
@@ -986,7 +976,25 @@ const App = {
         return;
       }
 
-      console.log('✅ Rendering KB documents:', documents.length, '건');
+      // KB 문서 자동 분석 결과 표시
+      const kbInsight = document.getElementById('kbInsight');
+      const kbInsightContent = document.getElementById('kbInsightContent');
+      
+      if (kbInsight && kbInsightContent && documents.length > 0) {
+        const totalDocs = documents.length;
+        const highRelevanceDocs = documents.filter(doc => (doc.score || doc.relevance || 0) >= 0.8).length;
+        const mediumRelevanceDocs = documents.filter(doc => {
+          const score = doc.score || doc.relevance || 0;
+          return score >= 0.6 && score < 0.8;
+        }).length;
+        
+        kbInsightContent.innerHTML = `
+          🎯 평균 유사도: ${Math.round(documents.reduce((sum, doc) => sum + (doc.score || doc.relevance || 0), 0) / totalDocs * 100)}%<br>
+          📊 상태 분포: ${highRelevanceDocs}건 고관련도, ${mediumRelevanceDocs}건 중관련도<br>
+          📚 검색된 문서: ${totalDocs}건의 관련 문서 발견
+        `;
+        kbInsight.style.display = 'block';
+      }
 
       // KB 문서 카드들 생성
       const docCards = documents.map((doc, index) => {
@@ -1062,24 +1070,6 @@ const App = {
       console.log('  - container.offsetWidth:', container.offsetWidth);
       console.log('  - container.style.display:', container.style.display);
       
-      // 강제로 KB 탭을 활성화해보기 (디버깅용)
-      if (kbTabContent && !kbTabContent.classList.contains('active')) {
-        console.log('⚠️ KB 탭이 비활성화 상태입니다. 강제 활성화를 시도합니다.');
-        // 디버깅을 위해 잠시 강제 활성화
-        setTimeout(() => {
-          console.log('🔧 KB 탭 강제 활성화 (5초 후 자동 해제)');
-          kbTabContent.classList.add('active');
-          if (kbTabButton) kbTabButton.classList.add('active');
-          
-          // 5초 후 원래 상태로 복원
-          setTimeout(() => {
-            console.log('🔧 KB 탭 상태 복원');
-            if (!document.querySelector('.tab-button[data-tab="kb"]').classList.contains('active')) {
-              kbTabContent.classList.remove('active');
-            }
-          }, 5000);
-        }, 1000);
-      }
       
       // 탭 카운트 업데이트
       const countElement = document.getElementById('kbDocumentsCount');
@@ -1383,84 +1373,22 @@ const App = {
         loadingOverlay.style.display = 'none';
       }
       
-      // 로딩 완료 시 탭 네비게이션과 카드 리스트 영역 표시
+      // 로딩 완료 시 탭 네비게이션과 탭 콘텐츠 영역 표시
       const tabNavigation = document.getElementById('tabNavigation');
-      const cardListArea = document.getElementById('cardListArea');
+      const tabContentArea = document.getElementById('tabContentArea');
       
       if (tabNavigation) {
         tabNavigation.style.display = 'block';
         console.log('✅ 탭 네비게이션 표시');
       }
       
-      if (cardListArea) {
-        cardListArea.style.display = 'block';
-        console.log('✅ 카드 리스트 영역 표시');
+      if (tabContentArea) {
+        tabContentArea.style.display = 'block';
+        console.log('✅ 탭 콘텐츠 영역 표시');
       }
       
-      // 로딩 완료 후 유사티켓 탭 활성화 보장
-      setTimeout(() => {
-        this.ensureTicketsTabActive();
-      }, 100);
     },
 
-    // 유사티켓 탭이 활성화되도록 보장하는 함수
-    ensureTicketsTabActive() {
-      console.log('🔄 ensureTicketsTabActive 실행');
-      
-      // 현재 활성화된 탭 확인
-      const activeTabContents = document.querySelectorAll('.tab-content.active');
-      const activeTabButtons = document.querySelectorAll('.tab-button.active');
-      
-      console.log('🔍 현재 활성화된 탭 수:', {
-        activeTabContents: activeTabContents.length,
-        activeTabButtons: activeTabButtons.length,
-        contentTabs: Array.from(activeTabContents).map(el => el.getAttribute('data-tab')),
-        buttonTabs: Array.from(activeTabButtons).map(el => el.getAttribute('data-tab'))
-      });
-      
-      // 유사티켓 탭 엘리먼트 확인
-      const ticketsTabContent = document.querySelector('.tab-content[data-tab="tickets"]');
-      const ticketsTabButton = document.querySelector('.tab-button[data-tab="tickets"]');
-      
-      if (!ticketsTabContent || !ticketsTabButton) {
-        console.error('❌ 유사티켓 탭 엘리먼트를 찾을 수 없음');
-        return;
-      }
-      
-      console.log('🔄 전체 탭 상태 리셋 후 유사티켓 탭만 활성화');
-      
-      // 모든 탭 강제 비활성화 (중복 활성화 방지)
-      document.querySelectorAll('.tab-content').forEach(content => {
-        content.classList.remove('active');
-        console.log('🔸 탭 콘텐츠 비활성화:', content.getAttribute('data-tab'));
-      });
-      document.querySelectorAll('.tab-button').forEach(btn => {
-        btn.classList.remove('active');
-        console.log('🔸 탭 버튼 비활성화:', btn.getAttribute('data-tab'));
-      });
-      
-      // 유사티켓 탭만 활성화
-      ticketsTabContent.classList.add('active');
-      ticketsTabButton.classList.add('active');
-      
-      // 최종 상태 확인
-      const finalActiveContents = document.querySelectorAll('.tab-content.active');
-      const finalActiveButtons = document.querySelectorAll('.tab-button.active');
-      
-      console.log('✅ 탭 활성화 완료 - 최종 상태:', {
-        activeContents: finalActiveContents.length,
-        activeButtons: finalActiveButtons.length,
-        activeContentTab: finalActiveContents[0]?.getAttribute('data-tab'),
-        activeButtonTab: finalActiveButtons[0]?.getAttribute('data-tab')
-      });
-      
-      if (finalActiveContents.length !== 1 || finalActiveButtons.length !== 1) {
-        console.error('⚠️ 비정상적인 탭 상태 감지 - 여러 탭이 활성화됨');
-      }
-      
-      // 캐시된 데이터 복원
-      App.ui.refreshTabContent('tickets');
-    },
 
     // 에러 표시
     showError(message) {
@@ -1592,25 +1520,10 @@ const App = {
           console.log('🎯 KB 문서 데이터 상세:', currentData.kbDocuments);
           this.renderKBDocuments(currentData.kbDocuments);
           
-          // 강제로 KB 탭 카운트 업데이트
+          // KB 탭 카운트 업데이트
           const kbCountElement = document.getElementById('kbDocumentsCount');
           if (kbCountElement) {
             kbCountElement.textContent = currentData.kbDocuments.length;
-            console.log('🔢 KB 탭 카운트 강제 업데이트:', currentData.kbDocuments.length);
-            
-            // KB 탭 버튼에 시각적 피드백 추가 (데이터가 있음을 알림)
-            const kbTabButton = document.querySelector('.tab-button[data-tab="kb"]');
-            if (kbTabButton && currentData.kbDocuments.length > 0) {
-              // 잠깐 하이라이트 효과를 줘서 데이터가 로드되었음을 알림
-              kbTabButton.style.animation = 'pulse 2s';
-              console.log('✨ KB 탭 버튼에 데이터 로드 알림 효과 적용');
-              
-              setTimeout(() => {
-                if (kbTabButton.style.animation === 'pulse 2s') {
-                  kbTabButton.style.animation = '';
-                }
-              }, 2000);
-            }
           }
           break;
           
@@ -1649,11 +1562,6 @@ const App = {
             }
           }
           
-          // 데이터 로딩 완료 후 유사티켓 탭이 활성화되도록 보장
-          setTimeout(() => {
-            console.log('🔄 데이터 로딩 완료 후 유사티켓 탭 활성화 확인');
-            this.ensureTicketsTabActive();
-          }, 500);
           
           return { ...currentData, shouldReturn: true };
           
@@ -1707,109 +1615,6 @@ const App = {
       });
     },
 
-    // 탭 전환
-    handleTabSwitch(tabName) {
-      console.log('🔄 탭 전환 시작:', tabName);
-      
-      // 현재 스크롤 위치 저장
-      const mainContent = document.querySelector('.main-content');
-      const currentScrollTop = mainContent ? mainContent.scrollTop : 0;
-      console.log('📍 현재 스크롤 위치:', currentScrollTop);
-      
-      // 전환 전 현재 상태 로깅
-      const beforeActiveContents = document.querySelectorAll('.tab-content.active');
-      const beforeActiveButtons = document.querySelectorAll('.tab-button.active');
-      console.log('🔍 전환 전 활성 탭:', {
-        contentCount: beforeActiveContents.length,
-        buttonCount: beforeActiveButtons.length,
-        contentTabs: Array.from(beforeActiveContents).map(el => el.getAttribute('data-tab')),
-        buttonTabs: Array.from(beforeActiveButtons).map(el => el.getAttribute('data-tab'))
-      });
-      
-      // 스크롤 방지를 위한 추가 처리
-      const preventScroll = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        return false;
-      };
-      
-      // 임시로 스크롤 이벤트 차단
-      if (mainContent) {
-        mainContent.addEventListener('scroll', preventScroll, { passive: false });
-      }
-      
-      // 모든 탭 강제 비활성화
-      document.querySelectorAll('.tab-content').forEach(content => {
-        content.classList.remove('active');
-        console.log('🔸 콘텐츠 비활성화:', content.getAttribute('data-tab'));
-      });
-      
-      document.querySelectorAll('.tab-button').forEach(btn => {
-        btn.classList.remove('active');
-        console.log('🔸 버튼 비활성화:', btn.getAttribute('data-tab'));
-      });
-      
-      // 선택된 탭 엘리먼트 찾기
-      const selectedContent = document.querySelector(`.tab-content[data-tab="${tabName}"]`);
-      const selectedButton = document.querySelector(`.tab-button[data-tab="${tabName}"]`);
-      
-      console.log('🔍 선택된 탭 엘리먼트:', {
-        tabName,
-        selectedContent: !!selectedContent,
-        selectedButton: !!selectedButton
-      });
-      
-      if (!selectedContent || !selectedButton) {
-        console.error('❌ 탭 엘리먼트를 찾을 수 없음:', {
-          tabName,
-          contentFound: !!selectedContent,
-          buttonFound: !!selectedButton
-        });
-        // 스크롤 이벤트 차단 해제
-        if (mainContent) {
-          mainContent.removeEventListener('scroll', preventScroll);
-        }
-        return;
-      }
-      
-      // 선택된 탭만 활성화
-      selectedContent.classList.add('active');
-      selectedButton.classList.add('active');
-      
-      // 스크롤 위치 즉시 복원 및 이벤트 차단 해제
-      setTimeout(() => {
-        if (mainContent) {
-          mainContent.scrollTop = currentScrollTop;
-          console.log('📍 스크롤 위치 복원:', currentScrollTop);
-          // 스크롤 이벤트 차단 해제
-          mainContent.removeEventListener('scroll', preventScroll);
-        }
-      }, 0);
-      
-      // 전환 후 상태 확인
-      const afterActiveContents = document.querySelectorAll('.tab-content.active');
-      const afterActiveButtons = document.querySelectorAll('.tab-button.active');
-      
-      console.log('✅ 탭 전환 완료 - 최종 상태:', {
-        targetTab: tabName,
-        activeContents: afterActiveContents.length,
-        activeButtons: afterActiveButtons.length,
-        activeContentTab: afterActiveContents[0]?.getAttribute('data-tab'),
-        activeButtonTab: afterActiveButtons[0]?.getAttribute('data-tab')
-      });
-      
-      // 비정상 상태 감지
-      if (afterActiveContents.length !== 1 || afterActiveButtons.length !== 1) {
-        console.error('⚠️ 탭 전환 후 비정상 상태:', {
-          expectedActiveCount: 1,
-          actualContentCount: afterActiveContents.length,
-          actualButtonCount: afterActiveButtons.length
-        });
-      }
-      
-      // 캐시된 데이터 복원
-      App.ui.refreshTabContent(tabName);
-    }
   },
 
   // 초기화
@@ -1896,19 +1701,11 @@ const App = {
       
       try {
         await App.api.loadInitialData(App.state.ticketId);
-        // 데이터 로드 완료 후 유사티켓 탭 활성화 보장
-        setTimeout(() => {
-          App.ui.ensureTicketsTabActive();
-        }, 100);
       } catch (error) {
         console.error('초기 데이터 로드 실패:', error);
         App.ui.hideLoading();
         // 백엔드 연결 실패 시에도 기본 UI는 표시
         App.ui.showError('백엔드 서버 연결 실패. 일부 기능이 제한됩니다.');
-        // 오류 발생 시에도 유사티켓 탭은 활성화
-        setTimeout(() => {
-          App.ui.ensureTicketsTabActive();
-        }, 100);
       }
       
     } catch (error) {
@@ -1952,8 +1749,42 @@ const App = {
 
     // 탭 전환 버튼
     document.querySelectorAll('.tab-button').forEach(btn => {
-      btn.addEventListener('click', () => {
-        App.events.handleTabSwitch(btn.dataset.tab);
+      btn.addEventListener('click', (e) => {
+        e.preventDefault(); // 기본 동작 방지
+        e.stopPropagation(); // 이벤트 버블링 방지
+        
+        const tabName = btn.dataset.tab;
+        
+        // 현재 스크롤 위치 저장
+        const scrollPosition = document.querySelector('.app-main').scrollTop;
+        
+        // 모든 탭 강제 비활성화
+        document.querySelectorAll('.tab-content').forEach(content => {
+          content.classList.remove('active');
+          content.style.display = 'none';
+        });
+        document.querySelectorAll('.tab-button').forEach(button => {
+          button.classList.remove('active');
+        });
+        
+        // 선택된 탭만 활성화
+        const selectedContent = document.querySelector(`.tab-content[data-tab="${tabName}"]`);
+        if (selectedContent) {
+          selectedContent.classList.add('active');
+          selectedContent.style.display = 'block';
+        }
+        btn.classList.add('active');
+        
+        // Copilot 탭일 때만 채팅 입력창 표시
+        const chatInput = document.getElementById('chatInputContainer');
+        if (chatInput) {
+          chatInput.style.display = (tabName === 'copilot') ? 'block' : 'none';
+        }
+        
+        // 스크롤 위치 복원 (더 안정적)
+        setTimeout(() => {
+          document.querySelector('.app-main').scrollTop = scrollPosition;
+        }, 0);
       });
     });
 
@@ -2010,57 +1841,11 @@ document.addEventListener('DOMContentLoaded', () => {
   // 모달에서 전달받은 데이터 확인
   const modalData = window.modalData || {};
   
-  // 강화된 탭 초기화 함수
-  function forceTabReset() {
-    console.log('🔄 강화된 탭 상태 초기화 실행');
-    
-    // 모든 탭 강제 비활성화
-    document.querySelectorAll('.tab-content').forEach(content => {
-      content.classList.remove('active');
-      content.style.display = 'none'; // 강제로 숨김
-      console.log('🔸 강제 탭 콘텐츠 비활성화:', content.getAttribute('data-tab'));
-    });
-    document.querySelectorAll('.tab-button').forEach(btn => {
-      btn.classList.remove('active');
-      console.log('🔸 강제 탭 버튼 비활성화:', btn.getAttribute('data-tab'));
-    });
-    
-    // 유사티켓 탭만 활성화
-    const ticketsTabContent = document.querySelector('.tab-content[data-tab="tickets"]');
-    const ticketsTabButton = document.querySelector('.tab-button[data-tab="tickets"]');
-    
-    if (ticketsTabContent && ticketsTabButton) {
-      ticketsTabContent.classList.add('active');
-      ticketsTabContent.style.display = 'block'; // 강제로 표시
-      ticketsTabButton.classList.add('active');
-      console.log('✅ 유사티켓 탭 강제 활성화 완료');
-    } else {
-      console.error('❌ 유사티켓 탭 엘리먼트를 찾을 수 없음');
-    }
+  // 채팅 입력창만 숨기기
+  const chatInput = document.getElementById('chatInputContainer');
+  if (chatInput) {
+    chatInput.style.display = 'none';
   }
-  
-  // DOM 로드 즉시 탭 상태 강제 리셋 및 유사티켓 탭만 활성화
-  console.log('🔄 DOM 로드 - 탭 상태 초기화 시작');
-  forceTabReset();
-  
-  // 추가 보험: 여러 시점에서 탭 상태 강제 리셋
-  setTimeout(() => {
-    console.log('🔄 50ms 후 탭 재확인');
-    forceTabReset();
-  }, 50);
-  
-  setTimeout(() => {
-    console.log('🔄 200ms 후 탭 재확인');
-    forceTabReset();
-  }, 200);
-  
-  setTimeout(() => {
-    console.log('🔄 500ms 후 탭 재확인');
-    forceTabReset();
-    if (window.App && window.App.ui && window.App.ui.ensureTicketsTabActive) {
-      window.App.ui.ensureTicketsTabActive();
-    }
-  }, 500);
   
   // noBackendCall 플래그 확인
   if (modalData.noBackendCall === true) {
@@ -2076,22 +1861,18 @@ document.addEventListener('DOMContentLoaded', () => {
       
       // noBackendCall 모드에서도 탭 네비게이션 표시
       const tabNavigation = document.getElementById('tabNavigation');
-      const cardListArea = document.getElementById('cardListArea');
+      const tabContentArea = document.getElementById('tabContentArea');
       
       if (tabNavigation) {
         tabNavigation.style.display = 'block';
         console.log('✅ noBackendCall 모드 - 탭 네비게이션 표시');
       }
       
-      if (cardListArea) {
-        cardListArea.style.display = 'block';
-        console.log('✅ noBackendCall 모드 - 카드 리스트 영역 표시');
+      if (tabContentArea) {
+        tabContentArea.style.display = 'block';
+        console.log('✅ noBackendCall 모드 - 탭 콘텐츠 영역 표시');
       }
       
-      // 캐시된 데이터 사용 시에도 유사티켓 탭 활성화
-      setTimeout(() => {
-        App.ui.ensureTicketsTabActive();
-      }, 200);
       return;
     }
   }
@@ -2105,22 +1886,18 @@ document.addEventListener('DOMContentLoaded', () => {
       
       // 오류 시에도 탭 네비게이션 표시
       const tabNavigation = document.getElementById('tabNavigation');
-      const cardListArea = document.getElementById('cardListArea');
+      const tabContentArea = document.getElementById('tabContentArea');
       
       if (tabNavigation) {
         tabNavigation.style.display = 'block';
         console.log('✅ 초기화 오류 시 - 탭 네비게이션 표시');
       }
       
-      if (cardListArea) {
-        cardListArea.style.display = 'block';
-        console.log('✅ 초기화 오류 시 - 카드 리스트 영역 표시');
+      if (tabContentArea) {
+        tabContentArea.style.display = 'block';
+        console.log('✅ 초기화 오류 시 - 탭 콘텐츠 영역 표시');
       }
       
-      // 오류 시에도 유사티켓 탭 활성화
-      setTimeout(() => {
-        App.ui.ensureTicketsTabActive();
-      }, 200);
     });
   } else {
     console.warn('FDK가 로드되지 않았습니다. 기본 UI만 작동합니다.');
@@ -2129,21 +1906,17 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // FDK 없이도 탭 네비게이션 표시
     const tabNavigation = document.getElementById('tabNavigation');
-    const cardListArea = document.getElementById('cardListArea');
+    const tabContentArea = document.getElementById('tabContentArea');
     
     if (tabNavigation) {
       tabNavigation.style.display = 'block';
       console.log('✅ FDK 없음 - 탭 네비게이션 표시');
     }
     
-    if (cardListArea) {
-      cardListArea.style.display = 'block';
-      console.log('✅ FDK 없음 - 카드 리스트 영역 표시');
+    if (tabContentArea) {
+      tabContentArea.style.display = 'block';
+      console.log('✅ FDK 없음 - 탭 콘텐츠 영역 표시');
     }
     
-    // FDK 없이도 유사티켓 탭 활성화
-    setTimeout(() => {
-      App.ui.ensureTicketsTabActive();
-    }, 200);
   }
 });
