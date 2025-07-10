@@ -4,12 +4,12 @@
  */
 
 const App = {
-  // 설정
+  // 설정 (환경변수 또는 런타임에서 설정)
   config: {
-    baseURL: 'http://localhost:8000',
-    apiKey: 'Ug9H1cKCZZtZ4haamBy',
-    tenantId: 'wedosoft',
-    domain: 'wedosoft.freshdesk.com'
+    baseURL: window.APP_CONFIG?.baseURL || 'http://localhost:8000',
+    apiKey: window.APP_CONFIG?.apiKey || '',
+    tenantId: window.APP_CONFIG?.tenantId || '',
+    domain: window.APP_CONFIG?.domain || ''
   },
 
   // 현재 상태
@@ -26,6 +26,13 @@ const App = {
       similarTickets: [],
       kbDocuments: [],
       summary: ''
+    },
+    
+    // 유사 티켓 상세 보기 상태
+    ticketDetailView: {
+      isDetailView: false,
+      currentTicketIndex: -1,
+      currentTicketData: null
     },
     
     // 티켓 정보 캐시 (헤더 표시용)
@@ -782,7 +789,7 @@ const App = {
     },
 
     // 유사 티켓 렌더링
-    renderSimilarTickets(tickets) {
+    async renderSimilarTickets(tickets) {
       const container = document.getElementById('similarTicketsContainer');
       if (!container) {
         console.error('❌ similarTicketsContainer not found');
@@ -863,33 +870,49 @@ const App = {
       `;
 
       // 티켓 카드들 생성
-      const ticketCards = filteredTickets.map(ticket => {
+      const ticketCards = await Promise.all(filteredTickets.map(async ticket => {
         console.log('🎫 Processing ticket:', ticket);
         
-        // 실제 데이터 구조에 맞게 필드 매핑
+        // 원본 데이터 구조에 맞게 필드 매핑 (있는 필드만 사용)
         const ticketId = ticket.id || 'N/A';
-        // subject 필드만 사용 (title 제외)
-        const ticketTitle = (ticket.subject && ticket.subject.trim() !== '') ? ticket.subject : '제목 없음';
-        const ticketContent = ticket.content || ticket.description || ticket.excerpt || '내용 없음';
-        const similarity = ticket.similarity_score || ticket.similarity || ticket.score || 0;
-        // 유사도를 백분율로 변환 (0.77 → 77%)
+        const ticketTitle = ticket.subject || '제목 없음';  // subject만 사용
+        const similarity = ticket.similarity_score || ticket.score || 0;
         const similarityPercent = similarity > 1 ? similarity : similarity * 100;
-        const createdAt = ticket.created_at || ticket.createdAt || null;
+        const createdAt = ticket.created_at || ticket.metadata?.created_at || null;
         
         const scoreClass = similarityPercent >= 80 ? 'score-high' : similarityPercent >= 60 ? 'score-medium' : 'score-low';
         const scoreIcon = similarityPercent >= 80 ? '🟢' : similarityPercent >= 60 ? '🟡' : '🔴';
         
-        // 백엔드 데이터 구조에 맞게 매핑
-        const ticketStatus = ticket.ticket_status || ticket.status || 'N/A';
-        const ticketPriority = ticket.priority || '보통';
-        const requester = ticket.requester || '미확인';
-        const assignee = ticket.assignee || '미지정';
+        // 원본 필드만 사용 (백엔드 분석 결과 기반)
+        const priority = ticket.metadata?.priority || ticket.priority || 1;  // 숫자 우선순위
+        const status = ticket.metadata?.status || ticket.status || '미확인';  // 티켓 상태
+        const responderName = ticket.metadata?.agent_name || ticket.metadata?.responder_id || '미지정';
         
-        const statusClass = ticketStatus === 'resolved' ? 'status-resolved' : 
-                           ticketStatus === 'in_progress' ? 'status-progress' : 'status-pending';
-        const priorityIcon = ticketPriority === 'high' || ticketPriority === '높음' ? '🔥' : 
-                            ticketPriority === 'urgent' || ticketPriority === '긴급' ? '🚨' : 
-                            ticketPriority === 'low' || ticketPriority === '낮음' ? '🔵' : '🟠';
+        // 레이블 조회 (원본 숫자값 기반)
+        const ticketForLabels = {
+          priority: priority,
+          status: status
+        };
+        
+        const priorityText = await TicketLabelUtils.getPriorityLabel(ticketForLabels);
+        const statusLabel = await TicketLabelUtils.getStatusLabel(ticketForLabels);
+        
+        // 담당자 이름 가져오기 (메인티켓 방식 재활용)
+        const agentId = ticket.metadata?.responder_id || ticket.metadata?.agent_id;
+        let agentName = responderName;
+        if (agentId && App.state.client) {
+          try {
+            const fetchedAgentName = await TicketLabelUtils.getAgentName(agentId);
+            if (fetchedAgentName) {
+              agentName = fetchedAgentName;
+            }
+          } catch (error) {
+            console.error('Agent 이름 조회 실패:', error);
+          }
+        }
+        
+        const statusClass = (status === 'resolved' || status === 4) ? 'status-resolved' : 
+                           (status === 'in_progress' || status === 2) ? 'status-progress' : 'status-pending';
 
         return `
           <div class="content-card">
@@ -901,16 +924,12 @@ const App = {
               <div class="card-title">
                 ${ticketTitle}
               </div>
-              <div class="card-excerpt">
-                ${ticketContent.length > 150 ? ticketContent.substring(0, 150) + '...' : ticketContent}
-              </div>
               <div class="card-meta">
                 <div class="meta-left">
-                  <span>📅 ${createdAt ? new Date(createdAt).toLocaleDateString('ko-KR') : 'N/A'}</span>
-                  <span class="status-indicator ${statusClass}">${ticketStatus}</span>
-                  <span class="priority-indicator">${priorityIcon} ${ticketPriority}</span>
-                  <span>👤 ${requester}</span>
-                  <span>🎯 ${assignee}</span>
+                  <span>📅 ${createdAt ? new Date(createdAt).toLocaleDateString('ko-KR') : ''}</span>
+                  <span class="status-indicator ${statusClass}">${statusLabel}</span>
+                  <span class="priority-indicator">${priorityText}</span>
+                  ${agentName ? `<span>👤 ${agentName}</span>` : ''}
                 </div>
                 <span>${ticket.relative_time || '시간 미상'}</span>
               </div>
@@ -925,9 +944,9 @@ const App = {
             </div>
           </div>
         `;
-      }).join('');
+      }));
 
-      container.innerHTML = insightPanel + ticketCards;
+      container.innerHTML = insightPanel + ticketCards.join('');
       
       // 탭 카운트 업데이트
       const countElement = document.getElementById('similarTicketsCount');
@@ -1111,7 +1130,7 @@ const App = {
     },
 
     // FDK 모달 표시 (원본의 강화된 로직 적용)
-    async showFDKModal(ticketId, hasCachedData = false) {
+    async showFDKModal(ticketId) {
       try {
         console.log(`🎭 티켓 ${ticketId} 모달 열기 시도`);
         
@@ -1811,6 +1830,95 @@ const App = {
   }
 };
 
+// 메인티켓과 유사티켓용 통합 레이블 조회 (일관성 보장)
+const TicketLabelUtils = {
+  // 우선순위 레이블 가져오기 (원본 숫자값 기반 FDK 조회)
+  async getPriorityLabel(ticketData) {
+    if (!ticketData || !ticketData.priority) return '❌ 우선순위 없음';
+    
+    // FDK 조회 시도
+    if (!App.state.client) {
+      return '❌ FDK 연결 오류';
+    }
+    
+    try {
+      // FDK에서 우선순위 레이블 조회 (메인티켓과 동일한 방식)
+      const priorityOptions = await App.state.client.data.get('priority_options').catch(() => null);
+      let priorityText = '알 수 없음';
+      
+      if (priorityOptions && priorityOptions.length > 0) {
+        const priorityOption = priorityOptions.find(opt => opt.id === ticketData.priority);
+        if (priorityOption && priorityOption.label) {
+          priorityText = priorityOption.label;
+        }
+      }
+      
+      if (priorityText === '알 수 없음') {
+        return `❌ 우선순위 조회 실패 (${ticketData.priority})`;
+      }
+      
+      // 텍스트에 이모지 추가
+      const priorityEmoji = {
+        'Low': '🔵', '낮음': '🔵',
+        'Medium': '😐', '보통': '😐',
+        'High': '🟡', '높음': '🟡',
+        'Urgent': '🔴', '긴급': '🔴'
+      };
+      const emoji = priorityEmoji[priorityText] || '📊';
+      return `${emoji} ${priorityText}`;
+    } catch (error) {
+      console.error('FDK 우선순위 조회 실패:', error);
+      return `❌ 우선순위 조회 실패 (${ticketData.priority})`;
+    }
+  },
+
+  // 상태 레이블 가져오기 (원본 숫자값 기반 FDK 조회)
+  async getStatusLabel(ticketData) {
+    if (!ticketData || !ticketData.status) return '❌ 상태 없음';
+    
+    // FDK 조회 시도
+    if (!App.state.client) {
+      return '❌ FDK 연결 오류';
+    }
+    
+    try {
+      const statusText = await App.ui.getStatusLabel(App.state.client, ticketData.status);
+      
+      // 상태에 이모지 추가
+      const statusEmoji = {
+        '열림': '🟢', 'Open': '🟢',
+        '대기중': '🟡', 'Pending': '🟡', 
+        '해결완료': '✅', 'Resolved': '✅',
+        '종료': '⚪', 'Closed': '⚪',
+        '고객 대기': '🟠',
+        '제3자 대기': '🟣'
+      };
+      const emoji = statusEmoji[statusText] || '📊';
+      return `${emoji} ${statusText}`;
+    } catch (error) {
+      console.error('FDK 상태 조회 실패:', error);
+      return `❌ 상태 조회 실패 (${ticketData.status})`;
+    }
+  },
+
+  // Agent 이름 가져오기 (메인티켓 방식 재활용)
+  async getAgentName(agentId) {
+    if (!App.state.client || !agentId) return null;
+    
+    try {
+      // 메인티켓에서 사용하는 방식과 동일
+      const agentName = await App.ui.getAgentName(agentId, App.state.client);
+      return agentName;
+    } catch (error) {
+      console.error('Agent 이름 조회 실패:', error);
+      return null;
+    }
+  }
+};
+
+// 하위 호환성을 위한 별칭
+const SimilarTicketUtils = TicketLabelUtils;
+
 // 전역으로 노출 (디버깅용 + FDK 이벤트 처리)
 window.App = App;
 
@@ -1937,5 +2045,294 @@ document.addEventListener('DOMContentLoaded', () => {
   } else {
     console.error('FDK가 로드되지 않았습니다.');
     App.ui.showError('FDK 로드 실패. 페이지를 새로고침하세요.');
+  }
+});
+
+// ========== 유사 티켓 상세 보기 함수들 ==========
+
+// 티켓 요약 보기
+async function viewSummary(ticketId) {
+  console.log('🔍 요약 보기 클릭:', ticketId);
+  
+  // 티켓 ID에서 # 제거
+  const cleanTicketId = ticketId.replace('#', '');
+  
+  // 캐시된 유사 티켓 데이터에서 해당 티켓 찾기
+  const tickets = App.state.cachedData.similarTickets;
+  const ticketIndex = tickets.findIndex(ticket => ticket.id == cleanTicketId);
+  
+  if (ticketIndex === -1) {
+    console.error('티켓을 찾을 수 없습니다:', cleanTicketId);
+    return;
+  }
+  
+  await showTicketDetail(ticketIndex);
+}
+
+// 티켓 원본 보기
+function viewOriginal(ticketId) {
+  console.log('📄 원본 보기 클릭:', ticketId);
+  
+  // 티켓 ID에서 # 제거
+  const cleanTicketId = ticketId.replace('#', '');
+  
+  // Freshdesk 티켓 URL 생성
+  const ticketUrl = `https://${App.config.domain}/a/tickets/${cleanTicketId}`;
+  
+  // 새 탭에서 티켓 열기
+  window.open(ticketUrl, '_blank');
+}
+
+// 티켓 상세 정보 표시
+async function showTicketDetail(ticketIndex) {
+  const tickets = App.state.cachedData.similarTickets;
+  
+  if (ticketIndex < 0 || ticketIndex >= tickets.length) {
+    console.error('잘못된 티켓 인덱스:', ticketIndex);
+    return;
+  }
+  
+  const ticket = tickets[ticketIndex];
+  console.log('🎫 티켓 상세 표시:', ticket);
+  
+  // 상태 업데이트
+  App.state.ticketDetailView.isDetailView = true;
+  App.state.ticketDetailView.currentTicketIndex = ticketIndex;
+  App.state.ticketDetailView.currentTicketData = ticket;
+  
+  // 상세 화면 렌더링
+  await renderTicketDetail(ticket, ticketIndex, tickets.length);
+}
+
+// 목록으로 돌아가기
+function goBackToList() {
+  console.log('🔙 목록으로 돌아가기');
+  
+  // 상태 리셋
+  App.state.ticketDetailView.isDetailView = false;
+  App.state.ticketDetailView.currentTicketIndex = -1;
+  App.state.ticketDetailView.currentTicketData = null;
+  
+  // 목록 화면 복원
+  const container = document.getElementById('similarTicketsContainer');
+  const detailContainer = document.getElementById('ticketDetailContainer');
+  
+  if (container && detailContainer) {
+    container.style.display = 'block';
+    detailContainer.style.display = 'none';
+  }
+}
+
+// 이전/다음 티켓으로 이동
+async function navigateToTicket(direction) {
+  const currentIndex = App.state.ticketDetailView.currentTicketIndex;
+  const tickets = App.state.cachedData.similarTickets;
+  
+  if (currentIndex === -1 || !tickets.length) {
+    return;
+  }
+  
+  let newIndex;
+  if (direction === 'prev') {
+    newIndex = currentIndex > 0 ? currentIndex - 1 : tickets.length - 1;
+  } else if (direction === 'next') {
+    newIndex = currentIndex < tickets.length - 1 ? currentIndex + 1 : 0;
+  }
+  
+  console.log('🔄 티켓 이동:', direction, currentIndex, '->', newIndex);
+  await showTicketDetail(newIndex);
+}
+
+// 티켓 상세 화면 렌더링
+async function renderTicketDetail(ticket, currentIndex, totalCount) {
+  const container = document.getElementById('similarTicketsContainer');
+  let detailContainer = document.getElementById('ticketDetailContainer');
+  
+  // 상세 컨테이너가 없으면 생성
+  if (!detailContainer) {
+    detailContainer = document.createElement('div');
+    detailContainer.id = 'ticketDetailContainer';
+    container.parentNode.appendChild(detailContainer);
+  }
+  
+  // 기존 목록 숨기기
+  container.style.display = 'none';
+  detailContainer.style.display = 'block';
+  
+  // 티켓 정보 추출 (원본 필드만 사용)
+  const ticketId = ticket.id || 'N/A';
+  const ticketTitle = ticket.subject || '제목 없음';
+  const ticketContent = ticket.content || '내용 없음';
+  const similarity = ticket.score || ticket.similarity_score || 0;
+  const similarityPercent = similarity > 1 ? similarity : similarity * 100;
+  const createdAt = ticket.metadata?.created_at || ticket.created_at || null;
+  const status = ticket.metadata?.status || ticket.status || '미확인';
+  const priority = ticket.metadata?.priority || ticket.priority || 1;
+  const responderName = ticket.metadata?.agent_name || ticket.metadata?.responder_id || '미지정';
+  
+  // 레이블 조회 (원본 숫자값 기반)
+  const ticketForLabels = {
+    priority: priority,
+    status: status
+  };
+  
+  const priorityText = await TicketLabelUtils.getPriorityLabel(ticketForLabels);
+  const statusLabel = await TicketLabelUtils.getStatusLabel(ticketForLabels);
+  const agentId = ticket.metadata?.responder_id || ticket.metadata?.agent_id;
+  let agentName = null;
+  if (agentId && App.state.client) {
+    try {
+      agentName = await TicketLabelUtils.getAgentName(agentId);
+    } catch (error) {
+      console.error('Agent 이름 조회 실패:', error);
+    }
+  }
+  
+  // 첨부파일 정보
+  const hasAttachments = ticket.has_attachments || false;
+  const attachmentCount = ticket.attachment_count || 0;
+  const attachments = ticket.metadata?.relevant_attachments || [];
+  
+  // 상세 화면 HTML 생성
+  const detailHTML = `
+    <div class="ticket-detail-view">
+      <div class="detail-header">
+        <button class="back-btn" onclick="goBackToList()">
+          ← 뒤로가기
+        </button>
+        <div class="detail-navigation">
+          <button class="nav-btn" onclick="navigateToTicket('prev')" ${totalCount <= 1 ? 'disabled' : ''}>
+            ◀ 이전
+          </button>
+          <span class="nav-info">${currentIndex + 1} / ${totalCount}</span>
+          <button class="nav-btn" onclick="navigateToTicket('next')" ${totalCount <= 1 ? 'disabled' : ''}>
+            다음 ▶
+          </button>
+        </div>
+      </div>
+      
+      <div class="detail-content">
+        <div class="detail-meta">
+          <div class="meta-header">
+            <h2 class="detail-title">#${ticketId} ${ticketTitle}</h2>
+            <div class="similarity-badge ${similarityPercent >= 80 ? 'high' : similarityPercent >= 60 ? 'medium' : 'low'}">
+              ${similarityPercent >= 80 ? '🟢' : similarityPercent >= 60 ? '🟡' : '🔴'} ${Math.round(similarityPercent)}% 유사
+            </div>
+          </div>
+          
+          <div class="meta-grid">
+            <div class="meta-item">
+              <span class="meta-label">📅 생성일:</span>
+              <span class="meta-value">${createdAt ? new Date(createdAt).toLocaleDateString('ko-KR') : 'N/A'}</span>
+            </div>
+            <div class="meta-item">
+              <span class="meta-label">📊 상태:</span>
+              <span class="meta-value status-${status}">${statusLabel}</span>
+            </div>
+            <div class="meta-item">
+              <span class="meta-label">🔥 우선순위:</span>
+              <span class="meta-value">${priorityText}</span>
+            </div>
+            <div class="meta-item">
+              <span class="meta-label">🎯 담당자:</span>
+              <span class="meta-value">${agentName || responderName}</span>
+            </div>
+            ${hasAttachments ? `<div class="meta-item">
+              <span class="meta-label">📎 첨부파일:</span>
+              <span class="meta-value">${attachmentCount}개</span>
+            </div>` : ''}
+          </div>
+        </div>
+        
+        <div class="detail-summary">
+          <h3>📝 티켓 요약</h3>
+          <div class="summary-content">
+            ${markdownToHtml(ticketContent)}
+          </div>
+        </div>
+        
+        ${attachments.length > 0 ? `
+        <div class="detail-attachments">
+          <h3>📎 첨부파일</h3>
+          <div class="attachments-list">
+            ${attachments.map(attachment => `
+              <div class="attachment-item">
+                <span class="attachment-icon">📄</span>
+                <span class="attachment-name">${attachment.name || 'Unknown'}</span>
+                <span class="attachment-size">${attachment.size ? `(${Math.round(attachment.size/1024)}KB)` : ''}</span>
+                ${attachment.url ? `<a href="${attachment.url}" target="_blank" class="attachment-download">다운로드</a>` : ''}
+              </div>
+            `).join('')}
+          </div>
+        </div>
+        ` : ''}
+        
+        <div class="detail-actions">
+          <button class="action-btn primary" onclick="viewOriginal('#${ticketId}')">
+            📄 원본 티켓 보기
+          </button>
+          <button class="action-btn" onclick="goBackToList()">
+            📋 목록으로 돌아가기
+          </button>
+        </div>
+      </div>
+    </div>
+  `;
+  
+  detailContainer.innerHTML = detailHTML;
+}
+
+// 마크다운 to HTML 변환 함수 (updateSummary 로직 재사용)
+function markdownToHtml(text) {
+  if (!text) return '';
+  
+  try {
+    // XML 태그 제거
+    const cleanText = text.replace(/<[^>]+>/g, '');
+    
+    // marked.js 사용 가능한지 확인
+    if (typeof marked !== 'undefined' && marked && typeof marked.parse === 'function') {
+      return marked.parse(cleanText);
+    } else if (typeof marked !== 'undefined' && marked && typeof marked === 'function') {
+      // 구버전 marked.js 대응
+      return marked(cleanText);
+    } else {
+      // marked가 없을 경우 수동 HTML 변환
+      const htmlText = cleanText
+        // 마크다운 변환
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+        .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+        .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+        .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+        .replace(/^- (.+)$/gm, '• $1')
+        .replace(/\n\n/g, '<br><br>')
+        .replace(/\n/g, '<br>');
+      
+      return htmlText;
+    }
+  } catch (error) {
+    console.error('❌ 마크다운 파싱 오류:', error);
+    return text; // 오류 발생 시 원본 텍스트 반환
+  }
+}
+
+// 키보드 이벤트 리스너
+document.addEventListener('keydown', function(event) {
+  // 상세 보기 모드일 때만 키보드 단축키 활성화
+  if (!App.state.ticketDetailView.isDetailView) {
+    return;
+  }
+  
+  switch(event.key) {
+    case 'Escape':
+      goBackToList();
+      break;
+    case 'ArrowLeft':
+      navigateToTicket('prev');
+      break;
+    case 'ArrowRight':
+      navigateToTicket('next');
+      break;
   }
 });

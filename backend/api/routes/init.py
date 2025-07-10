@@ -389,6 +389,20 @@ async def init_vector_only_mode(
             # 검색 결과를 유사 티켓 형식으로 변환 (수동 필터링 불필요)
             raw_similar_tickets = []
             for result in similar_results:
+                # metadata에 기본 정보들을 포함
+                metadata = result.get("extended_metadata", result.get("metadata", {})).copy()
+                
+                # created_at과 status를 metadata에 추가 (벡터DB에서 직접 가져오기)
+                if result.get("created_at"):
+                    metadata["created_at"] = result.get("created_at")
+                if result.get("status"):
+                    metadata["status"] = result.get("status")
+                if result.get("priority"):
+                    metadata["priority"] = result.get("priority")
+                
+                # 불필요한 source 필드 제거
+                metadata.pop("source", None)
+                
                 raw_similar_tickets.append({
                     "id": result.get("original_id") or result["metadata"].get("original_id"),
                     "subject": result.get("subject") or result["metadata"].get("subject", ""),
@@ -397,7 +411,7 @@ async def init_vector_only_mode(
                     "has_attachments": result.get("has_attachments", False),
                     "has_inline_images": result.get("has_inline_images", False),
                     "attachment_count": result.get("attachment_count", 0),
-                    "metadata": result.get("extended_metadata", result.get("metadata", {}))
+                    "metadata": metadata
                 })
                 
             logger.info(f"✅ 유사 티켓 검색 완료: {len(raw_similar_tickets)}개 (현재 티켓 {ticket_id} 자동 제외됨)")
@@ -1038,6 +1052,20 @@ async def init_streaming_vector_only_mode(
                 
                 raw_similar_tickets = []
                 for result in similar_results:
+                    # metadata에 기본 정보들을 포함
+                    metadata = result.get("extended_metadata", result.get("metadata", {})).copy()
+                    
+                    # created_at과 status를 metadata에 추가 (벡터DB에서 직접 가져오기)
+                    if result.get("created_at"):
+                        metadata["created_at"] = result.get("created_at")
+                    if result.get("status"):
+                        metadata["status"] = result.get("status")
+                    if result.get("priority"):
+                        metadata["priority"] = result.get("priority")
+                    
+                    # 불필요한 source 필드 제거
+                    metadata.pop("source", None)
+                    
                     raw_similar_tickets.append({
                         "id": result.get("original_id") or result["metadata"].get("original_id"),
                         "subject": result.get("subject") or result["metadata"].get("subject", ""),
@@ -1046,7 +1074,7 @@ async def init_streaming_vector_only_mode(
                         "has_attachments": result.get("has_attachments", False),
                         "has_inline_images": result.get("has_inline_images", False),
                         "attachment_count": result.get("attachment_count", 0),
-                        "metadata": result.get("extended_metadata", result.get("metadata", {}))
+                        "metadata": metadata
                     })
                 
                 return raw_similar_tickets

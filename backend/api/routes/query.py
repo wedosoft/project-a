@@ -643,7 +643,8 @@ async def query_endpoint(
             source_url=metadata_item.get("source_url", ""),
             relevance_score=relevance_score,
             doc_type=doc_type,
-            platform_metadata=platform_metadata if platform_metadata else None
+            platform_metadata=platform_metadata if platform_metadata else None,
+            metadata=platform_metadata if platform_metadata else None
         )
         structured_docs.append(doc_info)
     
@@ -911,7 +912,8 @@ def _convert_agent_results_to_document_info(search_results: Dict[str, Any]) -> L
                 doc_type=metadata.get("doc_type", "unknown"),
                 tenant_id=metadata.get("tenant_id"),
                 platform=metadata.get("platform"),
-                platform_metadata=metadata  # 전체 메타데이터 포함
+                platform_metadata=metadata,  # 전체 메타데이터 포함
+                metadata=metadata  # 프론트엔드 호환성을 위해 metadata에도 동일한 내용 설정
             )
             
             document_list.append(document_info)

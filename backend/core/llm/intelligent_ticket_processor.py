@@ -148,13 +148,13 @@ Please analyze the following 4 aspects simultaneously and respond in JSON format
 
 1. **Language Detection**: Detect the primary language of the ticket content (ko/en/ja/zh)
 2. **Important Conversation Selection**: Select conversation indices that contain problem-solving processes (max 25 conversations)
-3. **Relevant Attachments**: Select attachment indices that are actually helpful for problem resolution
+3. **Relevant Attachments**: Select attachment indices that are actually helpful for problem resolution (max 3 attachments)
 4. **High-Quality Summary**: Summary including problem situation, root cause analysis, resolution process, and key insights
 
 Analysis Criteria:
 - Language: Determine the main conversation language even if technical terms are mixed
 - Important conversations: Focus on initial problem reporting + resolution process + final results, especially those containing resolution keywords like "solved", "completed", "fixed", "deployed", "resolved", "confirmed"
-- Attachments: Prioritize logs, screenshots, configuration files, and other technically helpful items
+- Attachments: Prioritize logs, screenshots, configuration files, and other technically helpful items (select maximum 3 most relevant)
 - Summary: Reflect chronological flow while focusing on the resolution process
 
 Response Format (JSON):
@@ -209,12 +209,13 @@ IMPORTANT: Please write the summary content in the SAME LANGUAGE as the detected
             # 중요 대화 인덱스 추출
             important_conversations = analysis.get("important_conversations", [])
             
-            # 관련 첨부파일 추출
+            # 관련 첨부파일 추출 (최대 3개로 제한)
             relevant_attachment_indices = analysis.get("relevant_attachments", [])
             all_attachments = ticket_data.get("metadata", {}).get("all_attachments", [])
             relevant_attachments = []
             
-            for idx in relevant_attachment_indices:
+            # 최대 3개만 선택
+            for idx in relevant_attachment_indices[:3]:
                 if 0 <= idx < len(all_attachments):
                     relevant_attachments.append(all_attachments[idx])
             
@@ -319,7 +320,7 @@ IMPORTANT: Please write the summary content in the SAME LANGUAGE as the detected
         return TicketAnalysis(
             language=language,
             important_conversation_indices=important_indices,
-            relevant_attachments=ticket_data.get("metadata", {}).get("all_attachments", [])[:5],
+            relevant_attachments=ticket_data.get("metadata", {}).get("all_attachments", [])[:3],
             summary=summary,
             processing_metadata={"fallback": True, "method": "legacy"}
         )

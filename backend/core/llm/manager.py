@@ -477,7 +477,7 @@ class LLMManager:
                         # 아티클은 메타데이터만 사용하므로 요약 생성하지 않음
                         summarized_ticket = {
                             "id": ticket.get("id"),
-                            "title": ticket.get("subject", ""),
+                            "subject": ticket.get("subject", ""),
                             "content": f"📚 **지식베이스 문서**\n\n**제목**: {ticket.get('subject', '')}\n\n원본 링크에서 확인하세요.",
                             "score": ticket.get("score", 0.0),
                             "metadata": ticket.get("metadata", {})
@@ -527,8 +527,7 @@ class LLMManager:
                 # 결과 구성
                 summarized_ticket = {
                     "id": ticket.get("id"),
-                    "title": ticket.get("subject", ""),
-                    "subject": ticket.get("subject", ""),  # subject 필드도 포함
+                    "subject": ticket.get("subject", ""),  # subject 필드만 사용
                     "content": summary_text,  # YAML 템플릿 기반 마크다운 요약
                     "score": ticket.get("score", 0.0),
                     "metadata": ticket.get("metadata", {})
@@ -541,8 +540,7 @@ class LLMManager:
                 # 실패한 경우 원본 content 사용
                 fallback_ticket = {
                     "id": ticket.get("id"),
-                    "title": ticket.get("subject", ""),
-                    "subject": ticket.get("subject", ""),  # subject 필드도 포함
+                    "subject": ticket.get("subject", ""),  # subject 필드만 사용
                     "content": ticket.get("content", "요약 생성에 실패했습니다.")[:200] + "...",
                     "score": ticket.get("score", 0.0),
                     "metadata": ticket.get("metadata", {})
@@ -596,8 +594,7 @@ class LLMManager:
                 logger.info(f"📚 [병렬 요약 {index+1}] 아티클 ID {ticket.get('id')} - 요약 생성하지 않음")
                 return {
                     "id": ticket.get("id"),
-                    "title": ticket.get("subject", ""),
-                    "subject": ticket.get("subject", ""),  # subject 필드도 포함
+                    "subject": ticket.get("subject", ""),  # subject 필드만 사용
                     "content": f"📚 **지식베이스 문서**\n\n**제목**: {ticket.get('subject', '')}\n\n원본 링크에서 확인하세요.",
                     "score": ticket.get("score", 0.0),
                     "metadata": ticket.get("metadata", {})
@@ -626,25 +623,19 @@ class LLMManager:
             # 메타데이터 강화 (요청자, 담당자, 상태 등)
             enhanced_metadata = ticket.get("metadata", {}).copy()
             
-            # Status 정수값을 라벨로 변환 (동적 매핑 사용)
+            # 원본 status 숫자값 그대로 사용 (프론트에서 레이블 변환)
             original_status = enhanced_metadata.get("status")
-            if status_mapping and original_status is not None:
-                status_label = status_mapping.get(original_status, "미확인")
-            else:
-                status_label = "미확인"
             
             enhanced_metadata.update({
                 "similarity_score": round(ticket.get("score", 0.0), 3),
-                "ticket_status": status_label,
-                "priority": enhanced_metadata.get("priority", "보통"),
-                "requester": enhanced_metadata.get("requester_name") or enhanced_metadata.get("from_email", "미확인"),
-                "assignee": enhanced_metadata.get("agent_name") or enhanced_metadata.get("assigned_agent", "미지정")
+                "status": original_status,  # 원본 숫자값 그대로 전송
+                "priority": enhanced_metadata.get("priority", 1),  # 원본 숫자값 그대로 사용
+                "created_at": enhanced_metadata.get("created_at")  # created_at 필드 추가
             })
             
             return {
                 "id": ticket.get("id"),
-                "title": ticket.get("subject") or ticket.get("title", ""),
-                "subject": ticket.get("subject") or ticket.get("title", ""),  # subject 필드도 포함
+                "subject": ticket.get("subject") or ticket.get("title", ""),  # subject 필드만 사용
                 "content": summary_text,  # 순수 요약 내용만
                 "score": ticket.get("score", 0.0),
                 "metadata": enhanced_metadata  # 강화된 메타데이터
@@ -672,8 +663,7 @@ class LLMManager:
         
         return {
             "id": ticket.get("id"),
-            "title": ticket.get("subject") or ticket.get("title", ""),
-            "subject": ticket.get("subject") or ticket.get("title", ""),  # subject 필드도 포함
+            "subject": ticket.get("subject") or ticket.get("title", ""),  # subject 필드만 사용
             "content": fallback_content,
             "score": ticket.get("score", 0.0),
             "metadata": ticket.get("metadata", {})

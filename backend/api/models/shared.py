@@ -35,6 +35,17 @@ class DocumentInfo(BaseModel):
         default=None,
         description="플랫폼별 추가 메타데이터 (상태, 우선순위 등)"
     )
+    
+    # 프론트엔드 호환성을 위한 metadata 필드
+    metadata: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="프론트엔드 호환성을 위한 메타데이터 (platform_metadata와 동일한 내용)"
+    )
+    
+    def model_post_init(self, __context):
+        """모델 초기화 후 metadata 필드에 platform_metadata 복사"""
+        if self.platform_metadata and not self.metadata:
+            self.metadata = self.platform_metadata.copy()
 
     @field_validator('source_url')
     def ensure_source_url_is_str(cls, v):
