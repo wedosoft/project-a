@@ -120,9 +120,11 @@ const App = {
                 const dataStr = line.slice(6).trim();
                 
                 if (dataStr === '[DONE]') {
+                  const finalData = { summary, similarTickets, kbDocuments };
+                  App.state.cachedData = finalData; // 캐시에 저장
                   App.state.dataLoaded = true;
                   App.ui.hideLoading();
-                  return { summary, similarTickets, kbDocuments };
+                  return finalData;
                 }
                 
                 try {
@@ -134,9 +136,11 @@ const App = {
                     kbDocuments = result.kbDocuments || kbDocuments;
                     
                     if (result.shouldReturn) {
+                      const finalData = { summary, similarTickets, kbDocuments };
+                      App.state.cachedData = finalData; // 캐시에 저장
                       App.state.dataLoaded = true;
                       App.ui.hideLoading();
-                      return { summary, similarTickets, kbDocuments };
+                      return finalData;
                     }
                   }
                 } catch (parseError) {
@@ -147,9 +151,11 @@ const App = {
           }
         }
         
+        const finalData = { summary, similarTickets, kbDocuments };
+        App.state.cachedData = finalData; // 캐시에 저장
         App.state.dataLoaded = true;
         App.ui.hideLoading();
-        return { summary, similarTickets, kbDocuments };
+        return finalData;
         
       } catch (error) {
         App.ui.hideLoading();
@@ -539,9 +545,20 @@ const App = {
       let row1Items = [];
       let row2Items = [];
 
-      // 1줄: 감정상태, 우선순위, 진행상태
+      // 1줄: 요청자, 감정상태, 우선순위
       
-      // 1. 백엔드 감정상태 (백엔드에서 제공하지 않으므로 기본값)
+      // 1. 요청자 (FDK contact data method 우선 사용)
+      let requester = '👤 미확인';
+      if (optimizedData?.contact?.contact?.name) {
+        requester = `👤 ${optimizedData.contact.contact.name}`;
+      } else if (optimizedData?.contact?.name) {
+        requester = `👤 ${optimizedData.contact.name}`;
+      } else if (optimizedData?.ticket?.ticket?.requester_name) {
+        requester = `👤 ${optimizedData.ticket.ticket.requester_name}`;
+      }
+      row1Items.push(`<span class="meta-item">${requester}</span>`);
+
+      // 2. 백엔드 감정상태 (백엔드에서 제공하지 않으므로 기본값)
       if (emotionData && emotionData.emotion) {
         const emotionMap = {
           'positive': '😊 긍정',
@@ -558,7 +575,7 @@ const App = {
         row1Items.push('<span class="meta-item">😐 보통</span>');
       }
 
-      // 2. 우선순위 (통합 유틸리티 사용)
+      // 3. 우선순위 (통합 유틸리티 사용)
       let priority = '❌ 우선순위 없음';
       if (optimizedData?.ticket?.ticket) {
         const ticket = optimizedData.ticket.ticket;
@@ -568,28 +585,14 @@ const App = {
       }
       row1Items.push(`<span class="meta-item">${priority}</span>`);
 
-      // 3. 진행상태 (통합 유틸리티 사용)
-      let status = '❌ 상태 없음';
-      if (optimizedData?.ticket?.ticket) {
-        const ticket = optimizedData.ticket.ticket;
-        console.log('🔍 메인 티켓 상태 처리 - 티켓 데이터:', ticket);
-        status = await TicketLabelUtils.getStatusLabel(ticket);
-        console.log('✅ 메인 티켓 상태 결과:', status);
-      }
-      row1Items.push(`<span class="meta-item">${status}</span>`);
+      // 2줄: 담당자, 담당그룹, 상태
 
-      // 2줄: 요청자, 담당그룹, 담당자
-
-      // 4. 요청자 (FDK contact data method 우선 사용)
-      let requester = '👤 미확인';
-      if (optimizedData?.contact?.contact?.name) {
-        requester = `👤 ${optimizedData.contact.contact.name}`;
-      } else if (optimizedData?.contact?.name) {
-        requester = `👤 ${optimizedData.contact.name}`;
-      } else if (optimizedData?.ticket?.ticket?.requester_name) {
-        requester = `👤 ${optimizedData.ticket.ticket.requester_name}`;
+      // 4. 담당자 (최적화된 agent 데이터 사용)
+      let agent = '👤 미배정';
+      if (optimizedData?.agent?.contact?.name) {
+        agent = `👤 ${optimizedData.agent.contact.name}`;
       }
-      row2Items.push(`<span class="meta-item">${requester}</span>`);
+      row2Items.push(`<span class="meta-item">${agent}</span>`);
 
       // 5. 담당그룹 (FDK group data method 우선 사용)
       let group = '👥 CS팀';
@@ -604,12 +607,15 @@ const App = {
       }
       row2Items.push(`<span class="meta-item">${group}</span>`);
 
-      // 6. 담당자 (최적화된 agent 데이터 사용)
-      let agent = '👤 미배정';
-      if (optimizedData?.agent?.contact?.name) {
-        agent = `👤 ${optimizedData.agent.contact.name}`;
+      // 6. 진행상태 (통합 유틸리티 사용)
+      let status = '❌ 상태 없음';
+      if (optimizedData?.ticket?.ticket) {
+        const ticket = optimizedData.ticket.ticket;
+        console.log('🔍 메인 티켓 상태 처리 - 티켓 데이터:', ticket);
+        status = await TicketLabelUtils.getStatusLabel(ticket);
+        console.log('✅ 메인 티켓 상태 결과:', status);
       }
-      row2Items.push(`<span class="meta-item">${agent}</span>`);
+      row2Items.push(`<span class="meta-item">${status}</span>`);
 
       // HTML 업데이트
       metaRow1.innerHTML = row1Items.join('');
@@ -1635,18 +1641,25 @@ const App = {
         }
       });
       
-      // 초기 데이터 로드 (모달에서만 건너뛰기)
-      const modalData = window.modalData || {};
-      const isModal = modalData.noBackendCall === true;
+      // 초기 데이터 로드 여부 결정
+      let isModal = false;
       
-      console.log('🔍 App.init() 호출됨 - 현재 상태:', {
-        isModal,
-        BACKEND_CALLED: App.state.BACKEND_CALLED,
-        modalData,
-        location: window.location.href,
-        isFrame: window.frameElement !== null,
-        isParent: window.location === window.parent.location
-      });
+      try {
+        // FDK 컨텍스트 확인
+        const ctx = await client.instance.context();
+        isModal = ctx.location === 'modal' && ctx.data?.noBackendCall === true;
+        
+        console.log('🔍 App.init() 호출됨 - 현재 상태:', {
+          isModal,
+          context: ctx.location,
+          BACKEND_CALLED: App.state.BACKEND_CALLED,
+          hasData: !!ctx.data,
+          location: window.location.href
+        });
+      } catch (contextError) {
+        console.log('⚠️ 컨텍스트 확인 실패, 일반 페이지로 간주');
+        isModal = false;
+      }
       
       if (!isModal && !App.state.BACKEND_CALLED) {
         console.log('🔥 페이지 최초 로딩 - 백엔드 호출 실행');
@@ -1654,25 +1667,25 @@ const App = {
         App.ui.showLoading();
         
         try {
-          await App.api.loadInitialData(App.state.ticketId);
+          const data = await App.api.loadInitialData(App.state.ticketId);
+          
+          // 데이터가 성공적으로 로드되면 캐시에 저장됨 (loadInitialData 내부에서 처리)
+          console.log('✅ 초기 데이터 로드 완료');
+          
         } catch (error) {
           console.error('초기 데이터 로드 실패:', error);
           App.ui.hideLoading();
           App.ui.showError('백엔드 서버 연결 실패. 새로고침 버튼을 눌러 다시 시도하세요.');
         }
-      } else {
-        console.log('🚫 백엔드 호출 건너뛰기');
+      } else if (isModal) {
+        console.log('🚫 모달 컨텍스트 - 백엔드 호출 건너뛰기');
         
-        // 모달에서 캐시된 데이터 렌더링
-        if (isModal) {
-          console.log('📂 모달에서 캐시된 데이터 렌더링 시작');
-          
-          // 로딩 숨기기
-          App.ui.hideLoading();
-          
-          // 모달로 전달된 캐시 데이터 사용 (DOMContentLoaded에서 처리됨)
-          console.log('⏳ 모달 캐시 데이터 복원 대기 중...');
-        }
+        // 모달에서는 DOMContentLoaded에서 데이터 복원 처리
+        App.ui.hideLoading();
+        console.log('⏳ 모달 데이터 복원은 DOMContentLoaded에서 처리됨');
+      } else {
+        console.log('📊 이미 백엔드 호출됨 - 캐시된 데이터 사용');
+        App.ui.hideLoading();
       }
       
     } catch (error) {
@@ -1766,11 +1779,13 @@ const App = {
         if (section.classList.contains('collapsed')) {
           // 펼치기
           section.classList.remove('collapsed');
-          toggleBtn.innerHTML = '<span style="font-size: 16px;">⌃</span>';
+          toggleBtn.textContent = '⌃';
+          toggleBtn.title = '요약 접기';
         } else {
           // 접기
           section.classList.add('collapsed');
-          toggleBtn.innerHTML = '<span style="font-size: 16px;">⌄</span>';
+          toggleBtn.textContent = '⌄';
+          toggleBtn.title = '요약 펼치기';
         }
       });
     }
@@ -2130,98 +2145,114 @@ window.refreshData = async function() {
 };
 
 // DOM 로드 완료 시 앱 초기화
-document.addEventListener('DOMContentLoaded', () => {
-  // 모달에서 전달받은 데이터 확인
-  const modalData = window.modalData || {};
-  
+document.addEventListener('DOMContentLoaded', async () => {
   // 채팅 입력창만 숨기기
   const chatInput = document.getElementById('chatInputContainer');
   if (chatInput) {
     chatInput.style.display = 'none';
   }
   
-  // noBackendCall 플래그 확인
-  if (modalData.noBackendCall === true) {
-    console.log('🚫 모달에서 noBackendCall 플래그 감지 - 백엔드 호출 생략');
-    App.state.dataLoaded = true;
-    App.state.BACKEND_CALLED = true; // 백엔드 호출 상태도 true로 설정
-    
-    // 모달에서 캐시된 데이터 복원 시도
-    if (modalData.noBackendCall === true) {
-      console.log('📂 모달 모드 - 캐시된 데이터 복원 시작');
-      console.log('🔍 전달받은 modalData:', modalData);
-      
-      // 캐시된 데이터 복원 (전달받은 데이터 우선, 없으면 기본 메시지)
-      if (modalData.cachedData) {
-        App.state.cachedData = modalData.cachedData;
-        console.log('✅ modalData에서 캐시 데이터 복원');
-      } else {
-        // 기본 데이터 설정
-        App.state.cachedData = {
-          summary: '모달에서 캐시된 데이터를 불러오는 중입니다...',
-          similarTickets: [],
-          kbDocuments: []
-        };
-        console.log('⚠️ modalData.cachedData가 없음 - 기본 데이터 설정');
-      }
-      
-      if (modalData.cachedTicketInfo) {
-        App.state.cachedTicketInfo = modalData.cachedTicketInfo;
-        console.log('✅ modalData에서 티켓 정보 복원');
-      }
-      
-      // 기본 UI 설정
-      App.setupEventListeners();
-      
-      // UI 데이터 복원
-      setTimeout(async () => {
-        // 요약 복원
-        if (App.state.cachedData.summary) {
-          App.ui.updateSummary(App.state.cachedData.summary);
-        }
-        
-        // 유사 티켓 복원
-        if (App.state.cachedData.similarTickets && App.state.cachedData.similarTickets.length > 0) {
-          App.ui.renderSimilarTickets(App.state.cachedData.similarTickets);
-        }
-        
-        // KB 문서 복원
-        if (App.state.cachedData.kbDocuments && App.state.cachedData.kbDocuments.length > 0) {
-          App.ui.renderKBDocuments(App.state.cachedData.kbDocuments);
-        }
-        
-        // 헤더 정보 복원
-        if (App.state.cachedTicketInfo && App.state.cachedTicketInfo.lastUpdated) {
-          await App.ui.updateTicketHeader(App.state.cachedTicketInfo);
-        }
-        
-        console.log('✅ 모달 캐시된 데이터 복원 완료');
-      }, 200);
-      
-      // 탭 네비게이션 표시
-      const tabNavigation = document.getElementById('tabNavigation');
-      const tabContentArea = document.getElementById('tabContentArea');
-      
-      if (tabNavigation) {
-        tabNavigation.style.display = 'block';
-        console.log('✅ 모달 - 탭 네비게이션 표시');
-      }
-      
-      if (tabContentArea) {
-        tabContentArea.style.display = 'block';
-        console.log('✅ 모달 - 탭 콘텐츠 영역 표시');
-      }
-      
-      return;
-    }
-  }
-  
   // FDK가 로드되었는지 확인
   if (typeof app !== 'undefined') {
-    App.init().catch(error => {
-      console.error('앱 초기화 중 오류:', error);
-      App.ui.showError('앱 초기화 실패. 페이지를 새로고침하세요.');
-    });
+    try {
+      // FDK 초기화 및 컨텍스트 확인
+      const client = await app.initialized();
+      const context = await client.instance.context();
+      
+      console.log('🔍 FDK 컨텍스트:', context);
+      
+      // 모달 컨텍스트에서 실행 중인지 확인
+      if (context.location === 'modal' && context.data) {
+        console.log('🎭 모달 컨텍스트 감지 - 전달된 데이터:', context.data);
+        
+        // 모달로 전달된 데이터 처리
+        const modalData = context.data;
+        
+        if (modalData.noBackendCall === true) {
+          console.log('🚫 모달에서 noBackendCall 플래그 감지 - 백엔드 호출 생략');
+          App.state.dataLoaded = true;
+          App.state.BACKEND_CALLED = true;
+          
+          // 캐시된 데이터 복원
+          if (modalData.cachedData) {
+            App.state.cachedData = modalData.cachedData;
+            console.log('✅ 모달 데이터에서 캐시 복원:', App.state.cachedData);
+          } else {
+            // 기본 데이터 설정 - 사용자에게 친화적인 메시지
+            App.state.cachedData = {
+              summary: '📌 **AI 분석 준비 완료**\n\n상단의 새로고침 버튼(🔄)을 클릭하여 티켓 분석을 시작하세요.\n\n분석이 완료되면:\n- 티켓 요약\n- 유사한 해결된 티켓\n- 관련 지식베이스 문서\n\n위 정보들을 확인하실 수 있습니다.',
+              similarTickets: [],
+              kbDocuments: []
+            };
+            console.log('⚠️ 캐시된 데이터가 없음 - 기본 안내 메시지 설정');
+          }
+          
+          if (modalData.cachedTicketInfo) {
+            App.state.cachedTicketInfo = modalData.cachedTicketInfo;
+            console.log('✅ 티켓 정보 복원');
+          }
+          
+          // 기본 UI 설정 - 모달에서는 App.init()이 호출되지 않으므로 수동으로 호출
+          App.setupEventListeners();
+          
+          // UI 데이터 복원
+          setTimeout(async () => {
+            // 요약 복원
+            if (App.state.cachedData.summary) {
+              App.ui.updateSummary(App.state.cachedData.summary);
+            }
+            
+            // 유사 티켓 복원
+            if (App.state.cachedData.similarTickets && App.state.cachedData.similarTickets.length > 0) {
+              App.ui.renderSimilarTickets(App.state.cachedData.similarTickets);
+            }
+            
+            // KB 문서 복원
+            if (App.state.cachedData.kbDocuments && App.state.cachedData.kbDocuments.length > 0) {
+              App.ui.renderKBDocuments(App.state.cachedData.kbDocuments);
+            }
+            
+            // 헤더 정보 복원
+            if (App.state.cachedTicketInfo && App.state.cachedTicketInfo.lastUpdated) {
+              await App.ui.updateTicketHeader(App.state.cachedTicketInfo);
+            }
+            
+            // 로딩 숨기기
+            App.ui.hideLoading();
+            
+            console.log('✅ 모달 캐시된 데이터 복원 완료');
+          }, 200);
+          
+          // 탭 네비게이션 표시
+          const tabNavigation = document.getElementById('tabNavigation');
+          const tabContentArea = document.getElementById('tabContentArea');
+          
+          if (tabNavigation) {
+            tabNavigation.style.display = 'block';
+          }
+          
+          if (tabContentArea) {
+            tabContentArea.style.display = 'block';
+          }
+          
+          return; // 모달에서는 App.init()을 호출하지 않음
+        }
+      }
+      
+      // 일반 페이지 로드 - App.init() 호출
+      App.init().catch(error => {
+        console.error('앱 초기화 중 오류:', error);
+        App.ui.showError('앱 초기화 실패. 페이지를 새로고침하세요.');
+      });
+      
+    } catch (error) {
+      console.error('FDK 초기화 중 오류:', error);
+      // 일반 페이지로 간주하고 App.init() 호출
+      App.init().catch(initError => {
+        console.error('앱 초기화 중 오류:', initError);
+        App.ui.showError('앱 초기화 실패. 페이지를 새로고침하세요.');
+      });
+    }
   } else {
     console.error('FDK가 로드되지 않았습니다.');
     App.ui.showError('FDK 로드 실패. 페이지를 새로고침하세요.');

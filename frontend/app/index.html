@@ -18,6 +18,7 @@
             line-height: 1.5;
             height: 100vh;
             overflow: hidden;
+            border-radius: 12px;
         }
 
         /* === 앱 컨테이너 === */
@@ -27,6 +28,8 @@
             width: 100%;
             height: 100vh;
             padding: 0;
+            border-radius: 12px;
+            overflow: hidden;
         }
 
         /* === 앱 헤더 (완전 고정) === */
@@ -40,7 +43,7 @@
             background: linear-gradient(135deg, #8B5CF6 0%, #3B82F6 100%);
             color: white;
             z-index: 1000;
-            border-radius: 0;
+            border-radius: 12px 12px 0 0;
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -83,21 +86,29 @@
         }
 
         .action-btn {
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            color: white;
-            padding: 6px 10px;
-            border-radius: 6px;
-            font-size: 12px;
-            cursor: pointer;
-            transition: all 0.2s ease;
+            background: rgba(255, 255, 255, 0.15);
+            padding: 4px 10px;
+            border-radius: 16px;
+            font-weight: 500;
             display: flex;
             align-items: center;
-            gap: 4px;
+            justify-content: center;
+            gap: 3px;
+            text-align: center;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            min-height: 24px;
+            font-size: 10px;
+            color: white;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s ease;
         }
 
         .action-btn:hover {
-            background: rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.25);
+            transform: translateY(-1px);
         }
 
         /* === 앱 메인 (스크롤 컨테이너) === */
@@ -106,7 +117,7 @@
             max-width: 900px;
             height: 100vh;
             background: white;
-            border-radius: 0;
+            border-radius: 0 0 12px 12px;
             box-shadow: none;
             border: none;
             margin: 0;
@@ -192,7 +203,7 @@
         }
 
         .summary-content {
-            padding: 8px 16px;
+            padding: 0px 16px 8px 16px;
             transition: all 0.3s ease;
         }
 
@@ -1440,11 +1451,11 @@
                 </div>
             </div>
             <div class="header-actions">
-                <button class="action-btn" id="summaryToggleBtn" title="요약 접기/펼기">
-                    <span style="font-size: 16px;">⌃</span>
+                <button class="action-btn" id="summaryToggleBtn" title="요약 접기/펼치기">
+                    ⌃
                 </button>
                 <button class="action-btn" onclick="refreshData()" title="새로고침">
-                    <i class="fas fa-sync-alt"></i>
+                    ⚡
                 </button>
             </div>
         </header>
@@ -1507,9 +1518,6 @@
                     <div class="summary-actions">
                         <button class="summary-action-btn" onclick="copySummary()">
                             📋 복사
-                        </button>
-                        <button class="summary-action-btn" onclick="regenerateSummary()">
-                            ⚡ 재생성
                         </button>
                     </div>
                 </div>
@@ -1685,25 +1693,31 @@
     <script src="scripts/utils.js"></script>
     <script src="scripts/app.js"></script>
     <script>
-        // FDK 모달 데이터 설정 (모달에서 백엔드 호출 방지)
-        if (typeof app !== 'undefined') {
-            try {
-                // FDK 클라이언트에서 모달 데이터 가져오기
-                app.initialized().then(client => {
-                    return client.instance.context();
-                }).then(context => {
-                    if (context && context.location === 'modal') {
-                        console.log('🎭 모달 컨텍스트 감지 - 백엔드 호출 방지 설정');
-                        window.modalData = { noBackendCall: true };
-                    }
-                }).catch(error => {
-                    console.log('FDK 컨텍스트 가져오기 실패:', error);
-                });
-            } catch (error) {
-                console.log('FDK 초기화 실패:', error);
-            }
+        // 전역 함수들
+        function copySummary() {
+            const summaryText = document.getElementById('summaryText');
+            if (!summaryText) return;
+            
+            // 텍스트만 추출 (HTML 태그 제거)
+            const textContent = summaryText.innerText || summaryText.textContent;
+            
+            // 클립보드에 복사
+            navigator.clipboard.writeText(textContent).then(() => {
+                // 복사 성공 시 버튼 텍스트 임시 변경
+                const btn = event.target.closest('.summary-action-btn');
+                const originalText = btn.innerHTML;
+                btn.innerHTML = '✅ 복사됨';
+                
+                setTimeout(() => {
+                    btn.innerHTML = originalText;
+                }, 2000);
+            }).catch(err => {
+                console.error('복사 실패:', err);
+                alert('복사에 실패했습니다.');
+            });
         }
-        
+    </script>
+    <script>
         // 앱 초기화
         window.addEventListener('load', () => {
             if (!window.App) {
