@@ -151,22 +151,6 @@ describe('Utils 모듈 테스트', () => {
     // Utils 모듈이 이미 로드되어 있음 (window.Utils)
     expect(window.Utils).toBeDefined();
   });
-      safeJsonParse: (jsonString, defaultValue = null) => {
-        try {
-          if (!jsonString || typeof jsonString !== "string") {
-            return defaultValue;
-          }
-          return JSON.parse(jsonString);
-        } catch (error) {
-          return defaultValue;
-        }
-      },
-      
-      safeLocalStorageGet: (key, defaultValue = null) => {
-        try {
-          if (typeof Storage === "undefined") {
-            return defaultValue;
-          }
           const value = localStorage.getItem(key);
           return value !== null ? global.Utils.safeJsonParse(value, defaultValue) : defaultValue;
         } catch (error) {

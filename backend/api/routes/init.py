@@ -400,6 +400,9 @@ async def init_vector_only_mode(
                 if result.get("priority"):
                     metadata["priority"] = result.get("priority")
                 
+                # 디버깅: priority와 status 값 확인
+                logger.debug(f"📊 티켓 {result.get('original_id')}: priority={result.get('priority')}, status={result.get('status')}")
+                
                 # 불필요한 source 필드 제거
                 metadata.pop("source", None)
                 
@@ -411,6 +414,8 @@ async def init_vector_only_mode(
                     "has_attachments": result.get("has_attachments", False),
                     "has_inline_images": result.get("has_inline_images", False),
                     "attachment_count": result.get("attachment_count", 0),
+                    "priority": result.get("priority", 1),  # 최상위 레벨에 priority 추가
+                    "status": result.get("status", 2),      # 최상위 레벨에 status 추가
                     "metadata": metadata
                 })
                 

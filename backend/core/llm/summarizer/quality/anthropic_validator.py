@@ -655,3 +655,81 @@ class AnthropicQualityValidator:
         """검증 캐시 클리어"""
         self.validation_cache.clear()
         logger.info("AnthropicQualityValidator 캐시 클리어 완료")
+    
+    def validate_summary_quality(self, summary: str, original_content: str, content_language: str) -> Dict[str, Any]:
+        """
+        요약 품질 종합 검증 (기존 QualityValidator와 호환성 제공)
+        
+        Args:
+            summary: 검증할 요약
+            original_content: 원본 내용
+            content_language: 콘텐츠 언어
+            
+        Returns:
+            Dict[str, Any]: 검증 결과
+        """
+        try:
+            # 기본 품질 검증
+            basic_score = 0.0
+            issues = []
+            recommendations = []
+            
+            # 1. 길이 검증
+            if len(summary.strip()) < 50:
+                issues.append("요약이 너무 짧습니다 (최소 50자)")
+                basic_score -= 0.3
+            elif len(summary.strip()) > 2000:
+                issues.append("요약이 너무 깁니다 (최대 2000자)")
+                basic_score -= 0.2
+            else:
+                basic_score += 0.3
+            
+            # 2. 구조 검증 (이모지 섹션)
+            required_sections = ["🔍", "💡", "🎯"]
+            found_sections = 0
+            for section in required_sections:
+                if section in summary:
+                    found_sections += 1
+            
+            section_score = found_sections / len(required_sections)
+            basic_score += section_score * 0.4
+            
+            if section_score < 0.5:
+                issues.append("필수 섹션이 부족합니다 (🔍, 💡, 🎯)")
+                recommendations.append("이모지 섹션을 추가하여 구조화하세요")
+            
+            # 3. 내용 충실도 검증
+            if original_content and len(original_content) > 100:
+                content_ratio = len(summary) / len(original_content)
+                if 0.1 <= content_ratio <= 0.5:  # 적절한 요약 비율
+                    basic_score += 0.3
+                else:
+                    issues.append("요약 비율이 부적절합니다")
+                    recommendations.append("요약 길이를 조정하세요")
+            
+            # 최종 점수 계산 (0~1 범위)
+            quality_score = max(0.0, min(1.0, basic_score))
+            
+            return {
+                'quality_score': quality_score,
+                'passed': quality_score >= 0.7,
+                'issues': issues,
+                'recommendations': recommendations,
+                'metrics': {
+                    'length': len(summary),
+                    'sections_found': found_sections,
+                    'total_sections': len(required_sections)
+                },
+                'timestamp': datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"요약 품질 검증 실패: {e}")
+            return {
+                'quality_score': 0.5,  # 기본값
+                'passed': False,
+                'issues': [f"검증 중 오류 발생: {str(e)}"],
+                'recommendations': ["수동으로 요약을 확인하세요"],
+                'metrics': {},
+                'timestamp': datetime.now().isoformat()
+            }

@@ -120,7 +120,7 @@ const App = {
                 
                 try {
                   const data = JSON.parse(dataStr);
-                  const result = App.ui.processStreamData(data, { summary, similarTickets, kbDocuments });
+                  const result = await App.ui.processStreamData(data, { summary, similarTickets, kbDocuments });
                   if (result) {
                     summary = result.summary || summary;
                     similarTickets = result.similarTickets || similarTickets;
@@ -291,23 +291,36 @@ const App = {
           App.state.originalFDKTicket
         );
         
-        // 3. 상태 레이블 가져오기 (FDK 데이터 우선 사용)
-        let statusLabel = null;
-        if (mergedTicketData && mergedTicketData.status) {
-          // 먼저 ticket 데이터에서 status_label 확인
-          statusLabel = ticketData?.ticket?.status_label || 
-                       mergedTicketData.status_label;
+        // 3. 상태 레이블 가져오기 (FDK 전용 조회)
+        console.log('🚨 [CRITICAL] 상태 레이블 가져오기 시작 - 함수 호출 시점:', new Date().toISOString());
+        let statusLabel = '❌ 상태 없음';
+        if (mergedTicketData && mergedTicketData.status !== undefined && mergedTicketData.status !== null) {
+          const statusId = parseInt(mergedTicketData.status);
+          console.log('🚨 mergedTicketData.status:', mergedTicketData.status);
+          console.log('🚨 statusId 변환 결과:', statusId);
           
-          // status_label이 없으면 기본 매핑 사용 (API 호출 방지)
-          if (!statusLabel) {
-            const defaultLabels = {
-              1: '열림',
-              2: '대기중', 
-              3: '해결완료',
-              4: '해결완료',
-              5: '종료'
-            };
-            statusLabel = defaultLabels[mergedTicketData.status] || '알 수 없음';
+          try {
+            const statusOptionsRaw = await client.data.get('status_options').catch(() => null);
+            const statusOptions = statusOptionsRaw?.status_options || statusOptionsRaw;
+            
+            if (!statusOptions || !Array.isArray(statusOptions) || statusOptions.length === 0) {
+              statusLabel = '❌ 옵션 조회 실패';
+            } else {
+              // Freshdesk 숫자값으로 원본 필드에서 매칭
+              const statusOption = statusOptions.find(option => {
+                const optionId = parseInt(option.id || option.value || option);
+                return optionId === statusId;
+              });
+              
+              if (statusOption) {
+                statusLabel = statusOption.label || statusOption.name || statusOption.toString();
+              } else {
+                statusLabel = `❌ 알 수 없는 상태 (${statusId})`;
+              }
+            }
+          } catch (error) {
+            console.error('FDK 상태 조회 실패:', error);
+            statusLabel = '❌ 조회 실패';
           }
         }
         
@@ -329,7 +342,7 @@ const App = {
         console.log('✅ 최적화된 데이터 수집 완료 및 캐시 저장');
         
         // 7. 헤더 업데이트
-        App.ui.updateTicketHeader(optimizedTicketData);
+        await App.ui.updateTicketHeader(optimizedTicketData);
         
       } catch (error) {
         console.error('❌ 최적화된 FDK 데이터 수집 실패:', error);
@@ -351,41 +364,6 @@ const App = {
       return merged;
     },
     
-    // 상태 레이블 가져오기 (캐시 활용)
-    async getStatusLabel(client, statusId) {
-      // 상태 레이블 캐시 확인
-      if (this.statusLabelCache && this.statusLabelCache[statusId]) {
-        return this.statusLabelCache[statusId];
-      }
-      
-      try {
-        // status_options data method 시도 (v3.0에서 사용 가능한 경우)
-        const statusOptions = await client.data.get('status_options').catch(() => null);
-        if (statusOptions && statusOptions.length > 0) {
-          const statusOption = statusOptions.find(opt => opt.id === statusId);
-          if (statusOption) {
-            // 캐시에 저장
-            if (!this.statusLabelCache) this.statusLabelCache = {};
-            this.statusLabelCache[statusId] = statusOption.label;
-            return statusOption.label;
-          }
-        }
-        
-        // 기본값 반환
-        const defaultLabels = {
-          1: '열림',
-          2: '대기중', 
-          3: '해결완료',
-          4: '해결완료',
-          5: '종료'
-        };
-        return defaultLabels[statusId] || '알 수 없음';
-        
-      } catch (error) {
-        console.warn('⚠️ 상태 레이블 조회 실패:', error);
-        return '알 수 없음';
-      }
-    },
     
     // 에이전트 이름 캐시 (성능 최적화)
     agentNameCache: {},
@@ -417,6 +395,34 @@ const App = {
         console.error('❌ getAgentName 오류:', error);
         console.error('❌ 오류 상세:', error.message);
         return `Agent ${agentId}`;
+      }
+    },
+
+    // 그룹 이름 가져오기
+    async getGroupName(groupId, client) {
+      console.log('🔍 getGroupName 호출 시작, groupId:', groupId);
+      
+      try {
+        console.log('🔍 getGroup invokeTemplate 시도 중...');
+        const response = await client.request.invokeTemplate('getGroup', {
+          context: { groupId: groupId }
+        });
+        
+        console.log('✅ getGroup invokeTemplate 성공, response:', response);
+        
+        const group = JSON.parse(response.response);
+        console.log('✅ 그룹 파싱 성공:', group);
+        
+        if (group && group.name) {
+          console.log('✅ 그룹 이름 반환:', group.name);
+          return group.name;
+        } else {
+          console.warn('⚠️ 그룹 응답 구조 이상:', group);
+          return `Group ${groupId}`;
+        }
+      } catch (error) {
+        console.error('🔴 getGroup invokeTemplate 오류:', error);
+        return `Group ${groupId}`;
       }
     },
     
@@ -536,7 +542,7 @@ const App = {
     },
 
     // 최적화된 헤더 업데이트 (data method 결과 활용)
-    updateTicketHeader(optimizedData, emotionData = null) {
+    async updateTicketHeader(optimizedData, emotionData = null) {
       console.log('🔍 updateTicketHeader 호출됨 - optimizedData:', optimizedData);
       console.log('🔍 updateTicketHeader 호출됨 - emotionData:', emotionData);
       
@@ -566,73 +572,115 @@ const App = {
         row1Items.push('<span class="meta-item">😐 보통</span>');
       }
 
-      // 2. 우선순위 (FDK data method 우선 사용)
-      let priority = '😐 보통';
+      // 2. 우선순위 (FDK 전용 조회)
+      let priority = '❌ 우선순위 없음';
       if (optimizedData?.ticket?.ticket) {
         const ticket = optimizedData.ticket.ticket;
         
-        // FDK에서 priority_label이 있으면 우선 사용
-        let priorityText = ticket.priority_label || ticket.priority_name;
-        
-        if (!priorityText && ticket.priority) {
-          const priorityMap = {
-            1: '낮음',
-            2: '보통', 
-            3: '높음',
-            4: '긴급'
-          };
-          priorityText = priorityMap[ticket.priority] || '보통';
+        if (ticket.priority !== undefined && ticket.priority !== null) {
+          const priorityId = parseInt(ticket.priority);
+          
+          if (!App.state.client) {
+            priority = '❌ FDK 오류';
+          } else {
+            try {
+              const priorityOptionsRaw = await App.state.client.data.get('priority_options').catch(() => null);
+              const priorityOptions = priorityOptionsRaw?.priority_options || priorityOptionsRaw;
+              
+              if (!priorityOptions || !Array.isArray(priorityOptions) || priorityOptions.length === 0) {
+                priority = '❌ 옵션 조회 실패';
+              } else {
+                // Freshdesk 숫자값으로 원본 필드에서 매칭
+                const priorityOption = priorityOptions.find(option => {
+                  const optionId = parseInt(option.id || option.value || option);
+                  return optionId === priorityId;
+                });
+                
+                if (priorityOption) {
+                  const priorityText = priorityOption.label || priorityOption.name || priorityOption.toString();
+                  
+                  // 이모지 패턴 매칭
+                  let emoji = '📊';
+                  const lowerText = priorityText.toLowerCase();
+                  if (lowerText.includes('low') || lowerText.includes('낮')) {
+                    emoji = '🔵';
+                  } else if (lowerText.includes('medium') || lowerText.includes('보통') || lowerText.includes('normal')) {
+                    emoji = '😐';
+                  } else if (lowerText.includes('high') || lowerText.includes('높') || lowerText.includes('중요')) {
+                    emoji = '🟡';
+                  } else if (lowerText.includes('urgent') || lowerText.includes('긴급') || lowerText.includes('critical')) {
+                    emoji = '🔴';
+                  }
+                  
+                  priority = `${emoji} ${priorityText}`;
+                } else {
+                  priority = `❌ 알 수 없는 우선순위 (${priorityId})`;
+                }
+              }
+            } catch (error) {
+              console.error('FDK 우선순위 조회 실패:', error);
+              priority = '❌ 조회 실패';
+            }
+          }
         }
-        
-        if (!priorityText) priorityText = '보통';
-        
-        // 텍스트에 이모지 추가
-        const priorityEmoji = {
-          'Low': '🔵', '낮음': '🔵',
-          'Medium': '😐', '보통': '😐',
-          'High': '🟡', '높음': '🟡',
-          'Urgent': '🔴', '긴급': '🔴'
-        };
-        const emoji = priorityEmoji[priorityText] || '😐';
-        priority = `${emoji} ${priorityText}`;
       }
       row1Items.push(`<span class="meta-item">${priority}</span>`);
 
-      // 3. 진행상태 (FDK data method와 백엔드 데이터 통합)
-      let status = '⚪ 알 수 없음';
+      // 3. 진행상태 (FDK 전용 조회)
+      let status = '❌ 상태 없음';
       if (optimizedData?.ticket?.ticket) {
         const ticket = optimizedData.ticket.ticket;
         
-        // 우선순위: FDK status_label > 최적화된 statusLabel > 기본 매핑
-        let statusText = ticket.status_label || 
-                        ticket.status_name ||
-                        optimizedData.statusLabel;
-        
-        if (!statusText && ticket.status) {
-          // 기본 상태 매핑
-          const statusMap = {
-            1: '열림',
-            2: '대기중',
-            3: '해결완료', 
-            4: '해결완료',
-            5: '종료'
-          };
-          statusText = statusMap[ticket.status] || '알 수 없음';
+        if (ticket.status !== undefined && ticket.status !== null) {
+          const statusId = parseInt(ticket.status);
+          
+          if (!App.state.client) {
+            status = '❌ FDK 오류';
+          } else {
+            try {
+              const statusOptionsRaw = await App.state.client.data.get('status_options').catch(() => null);
+              const statusOptions = statusOptionsRaw?.status_options || statusOptionsRaw;
+              
+              if (!statusOptions || !Array.isArray(statusOptions) || statusOptions.length === 0) {
+                status = '❌ 옵션 조회 실패';
+              } else {
+                // Freshdesk 숫자값으로 원본 필드에서 매칭
+                const statusOption = statusOptions.find(option => {
+                  const optionId = parseInt(option.id || option.value || option);
+                  return optionId === statusId;
+                });
+                
+                if (statusOption) {
+                  const statusText = statusOption.label || statusOption.name || statusOption.toString();
+                  
+                  // 이모지 패턴 매칭
+                  let emoji = '⚪';
+                  const lowerText = statusText.toLowerCase();
+                  if (lowerText.includes('open') || lowerText.includes('열림') || lowerText.includes('new')) {
+                    emoji = '🟢';
+                  } else if (lowerText.includes('pending') || lowerText.includes('대기') || lowerText.includes('waiting')) {
+                    emoji = '🟡';
+                  } else if (lowerText.includes('resolved') || lowerText.includes('해결') || lowerText.includes('completed')) {
+                    emoji = '✅';
+                  } else if (lowerText.includes('closed') || lowerText.includes('종료') || lowerText.includes('finished')) {
+                    emoji = '⚪';
+                  } else if (lowerText.includes('customer') || lowerText.includes('고객')) {
+                    emoji = '🟠';
+                  } else if (lowerText.includes('third') || lowerText.includes('제3자') || lowerText.includes('external')) {
+                    emoji = '🟣';
+                  }
+                  
+                  status = `${emoji} ${statusText}`;
+                } else {
+                  status = `❌ 알 수 없는 상태 (${statusId})`;
+                }
+              }
+            } catch (error) {
+              console.error('FDK 상태 조회 실패:', error);
+              status = '❌ 조회 실패';
+            }
+          }
         }
-        
-        if (!statusText) statusText = '알 수 없음';
-        
-        // 상태에 이모지 추가
-        const statusEmoji = {
-          '열림': '🟢', 'Open': '🟢',
-          '대기중': '🟡', 'Pending': '🟡', 
-          '해결완료': '✅', 'Resolved': '✅',
-          '종료': '⚪', 'Closed': '⚪',
-          '고객 대기': '🟠',
-          '제3자 대기': '🟣'
-        };
-        const emoji = statusEmoji[statusText] || '⚪';
-        status = `${emoji} ${statusText}`;
       }
       row1Items.push(`<span class="meta-item">${status}</span>`);
 
@@ -887,6 +935,7 @@ const App = {
         const priority = ticket.metadata?.priority || ticket.priority || 1;  // 숫자 우선순위
         const status = ticket.metadata?.status || ticket.status || '미확인';  // 티켓 상태
         const responderName = ticket.metadata?.agent_name || ticket.metadata?.responder_id || '미지정';
+        
         
         // 레이블 조회 (원본 숫자값 기반)
         const ticketForLabels = {
@@ -1428,7 +1477,7 @@ const App = {
     },
     
     // 스트림 데이터 처리
-    processStreamData(data, currentData) {
+    async processStreamData(data, currentData) {
       console.log('🔄 Processing stream data:', data.type, data);
       switch(data.type) {
         case 'ticket_info':
@@ -1542,7 +1591,7 @@ const App = {
           console.log('😊 감정 분석 데이터 수신:', data);
           if (App.state.cachedTicketInfo && App.state.cachedTicketInfo.lastUpdated) {
             // 캐시된 티켓 데이터와 함께 헤더 업데이트
-            this.updateTicketHeader(App.state.cachedTicketInfo, data);
+            await this.updateTicketHeader(App.state.cachedTicketInfo, data);
           }
           break;
           
@@ -1561,7 +1610,7 @@ const App = {
             const emotionData = data.emotion_data || data.emotion || null;
             if (emotionData) {
               console.log('😊 완료 시점 감정 데이터 업데이트:', emotionData);
-              this.updateTicketHeader(App.state.cachedTicketInfo, emotionData);
+              await this.updateTicketHeader(App.state.cachedTicketInfo, emotionData);
             }
           }
           
@@ -1832,72 +1881,113 @@ const App = {
 
 // 메인티켓과 유사티켓용 통합 레이블 조회 (일관성 보장)
 const TicketLabelUtils = {
-  // 우선순위 레이블 가져오기 (원본 숫자값 기반 FDK 조회)
+  // 우선순위 레이블 가져오기 (원본 필드 조회)
   async getPriorityLabel(ticketData) {
-    if (!ticketData || !ticketData.priority) return '❌ 우선순위 없음';
+    if (!ticketData || (ticketData.priority === undefined && ticketData.priority !== 0)) {
+      return '❌ 우선순위 없음';
+    }
     
-    // FDK 조회 시도
+    const priorityId = parseInt(ticketData.priority);
+    
     if (!App.state.client) {
-      return '❌ FDK 연결 오류';
+      return '❌ FDK 오류';
     }
     
     try {
-      // FDK에서 우선순위 레이블 조회 (메인티켓과 동일한 방식)
-      const priorityOptions = await App.state.client.data.get('priority_options').catch(() => null);
-      let priorityText = '알 수 없음';
+      // 원본 필드에서 priority 옵션 조회
+      const priorityOptionsRaw = await App.state.client.data.get('priority_options').catch(() => null);
+      const priorityOptions = priorityOptionsRaw?.priority_options || priorityOptionsRaw;
       
-      if (priorityOptions && priorityOptions.length > 0) {
-        const priorityOption = priorityOptions.find(opt => opt.id === ticketData.priority);
-        if (priorityOption && priorityOption.label) {
-          priorityText = priorityOption.label;
-        }
+      if (!priorityOptions || !Array.isArray(priorityOptions) || priorityOptions.length === 0) {
+        return '❌ 옵션 조회 실패';
       }
       
-      if (priorityText === '알 수 없음') {
-        return `❌ 우선순위 조회 실패 (${ticketData.priority})`;
+      // Freshdesk 숫자값으로 매칭 (id 필드 사용)
+      const priorityOption = priorityOptions.find(option => {
+        const optionId = parseInt(option.id || option.value || option);
+        return optionId === priorityId;
+      });
+      
+      if (!priorityOption) {
+        return '❌ 매칭 실패';
       }
       
-      // 텍스트에 이모지 추가
-      const priorityEmoji = {
-        'Low': '🔵', '낮음': '🔵',
-        'Medium': '😐', '보통': '😐',
-        'High': '🟡', '높음': '🟡',
-        'Urgent': '🔴', '긴급': '🔴'
-      };
-      const emoji = priorityEmoji[priorityText] || '📊';
+      const priorityText = priorityOption.label || priorityOption.name || priorityOption.toString();
+      
+      // 이모지 패턴 매칭
+      let emoji = '📊';
+      const lowerText = priorityText.toLowerCase();
+      if (lowerText.includes('low') || lowerText.includes('낮')) {
+        emoji = '🔵';
+      } else if (lowerText.includes('medium') || lowerText.includes('보통') || lowerText.includes('normal')) {
+        emoji = '😐';
+      } else if (lowerText.includes('high') || lowerText.includes('높') || lowerText.includes('중요')) {
+        emoji = '🟡';
+      } else if (lowerText.includes('urgent') || lowerText.includes('긴급') || lowerText.includes('critical')) {
+        emoji = '🔴';
+      }
+      
       return `${emoji} ${priorityText}`;
     } catch (error) {
       console.error('FDK 우선순위 조회 실패:', error);
-      return `❌ 우선순위 조회 실패 (${ticketData.priority})`;
+      return '❌ 조회 실패';
     }
   },
 
-  // 상태 레이블 가져오기 (원본 숫자값 기반 FDK 조회)
+  // 상태 레이블 가져오기 (원본 필드 조회)
   async getStatusLabel(ticketData) {
-    if (!ticketData || !ticketData.status) return '❌ 상태 없음';
+    if (!ticketData || (ticketData.status === undefined && ticketData.status !== 0)) {
+      return '❌ 상태 없음';
+    }
     
-    // FDK 조회 시도
+    const statusId = parseInt(ticketData.status);
+    
     if (!App.state.client) {
-      return '❌ FDK 연결 오류';
+      return '❌ FDK 오류';
     }
     
     try {
-      const statusText = await App.ui.getStatusLabel(App.state.client, ticketData.status);
+      // 원본 필드에서 status 옵션 조회
+      const statusOptionsRaw = await App.state.client.data.get('status_options').catch(() => null);
+      const statusOptions = statusOptionsRaw?.status_options || statusOptionsRaw;
       
-      // 상태에 이모지 추가
-      const statusEmoji = {
-        '열림': '🟢', 'Open': '🟢',
-        '대기중': '🟡', 'Pending': '🟡', 
-        '해결완료': '✅', 'Resolved': '✅',
-        '종료': '⚪', 'Closed': '⚪',
-        '고객 대기': '🟠',
-        '제3자 대기': '🟣'
-      };
-      const emoji = statusEmoji[statusText] || '📊';
+      if (!statusOptions || !Array.isArray(statusOptions) || statusOptions.length === 0) {
+        return '❌ 옵션 조회 실패';
+      }
+      
+      // Freshdesk 숫자값으로 매칭 (id 필드 사용)
+      const statusOption = statusOptions.find(option => {
+        const optionId = parseInt(option.id || option.value || option);
+        return optionId === statusId;
+      });
+      
+      if (!statusOption) {
+        return '❌ 매칭 실패';
+      }
+      
+      const statusText = statusOption.label || statusOption.name || statusOption.toString();
+      
+      // 이모지 패턴 매칭
+      let emoji = '⚪';
+      const lowerText = statusText.toLowerCase();
+      if (lowerText.includes('open') || lowerText.includes('열림') || lowerText.includes('new')) {
+        emoji = '🟢';
+      } else if (lowerText.includes('pending') || lowerText.includes('대기') || lowerText.includes('waiting')) {
+        emoji = '🟡';
+      } else if (lowerText.includes('resolved') || lowerText.includes('해결') || lowerText.includes('completed')) {
+        emoji = '✅';
+      } else if (lowerText.includes('closed') || lowerText.includes('종료') || lowerText.includes('finished')) {
+        emoji = '⚪';
+      } else if (lowerText.includes('customer') || lowerText.includes('고객')) {
+        emoji = '🟠';
+      } else if (lowerText.includes('third') || lowerText.includes('제3자') || lowerText.includes('external')) {
+        emoji = '🟣';
+      }
+      
       return `${emoji} ${statusText}`;
     } catch (error) {
       console.error('FDK 상태 조회 실패:', error);
-      return `❌ 상태 조회 실패 (${ticketData.status})`;
+      return '❌ 조회 실패';
     }
   },
 
@@ -1911,6 +2001,19 @@ const TicketLabelUtils = {
       return agentName;
     } catch (error) {
       console.error('Agent 이름 조회 실패:', error);
+      return null;
+    }
+  },
+
+  async getGroupName(groupId) {
+    if (!App.state.client || !groupId) return null;
+    
+    try {
+      // 메인티켓에서 사용하는 방식과 동일
+      const groupName = await App.ui.getGroupName(groupId, App.state.client);
+      return groupName;
+    } catch (error) {
+      console.error('Group 이름 조회 실패:', error);
       return null;
     }
   }
@@ -1994,7 +2097,7 @@ document.addEventListener('DOMContentLoaded', () => {
       App.setupEventListeners();
       
       // UI 데이터 복원
-      setTimeout(() => {
+      setTimeout(async () => {
         // 요약 복원
         if (App.state.cachedData.summary) {
           App.ui.updateSummary(App.state.cachedData.summary);
@@ -2012,7 +2115,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // 헤더 정보 복원
         if (App.state.cachedTicketInfo && App.state.cachedTicketInfo.lastUpdated) {
-          App.ui.updateTicketHeader(App.state.cachedTicketInfo);
+          await App.ui.updateTicketHeader(App.state.cachedTicketInfo);
         }
         
         console.log('✅ 모달 캐시된 데이터 복원 완료');

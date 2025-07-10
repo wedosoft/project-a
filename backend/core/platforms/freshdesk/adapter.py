@@ -62,7 +62,7 @@ class FreshdeskAdapter(PlatformAdapter):
             base_url = f"https://{self.domain}"
         else:
             base_url = f"https://{self.domain}.freshdesk.com"
-        return f"{base_url}/api/v2"
+        return base_url
     
     async def __aenter__(self):
         """Async context manager 진입"""
@@ -154,7 +154,7 @@ class FreshdeskAdapter(PlatformAdapter):
                 if since_date:
                     params["updated_since"] = since_date
                 
-                batch_tickets = await self.fetch_with_retry(f"{self.base_url}/tickets", params)
+                batch_tickets = await self.fetch_with_retry(f"{self.base_url}/api/v2/tickets", params)
                 
                 if not batch_tickets:
                     break
@@ -317,7 +317,7 @@ class FreshdeskAdapter(PlatformAdapter):
             Optional[Dict]: 티켓 상세 정보 (정규화된 형태)
         """
         try:
-            response = await self.fetch_with_retry(f"{self.base_url}/tickets/{ticket_id}")
+            response = await self.fetch_with_retry(f"{self.base_url}/api/v2/tickets/{ticket_id}")
             await asyncio.sleep(self.request_delay)
             
             if response:
@@ -348,7 +348,7 @@ class FreshdeskAdapter(PlatformAdapter):
             while page <= max_pages:
                 params = {"page": page, "per_page": 30}  # Freshdesk 기본값
                 conversations = await self.fetch_with_retry(
-                    f"{self.base_url}/tickets/{ticket_id}/conversations", 
+                    f"{self.base_url}/api/v2/tickets/{ticket_id}/conversations", 
                     params
                 )
                 
@@ -387,7 +387,7 @@ class FreshdeskAdapter(PlatformAdapter):
         
         try:
             # 1. 티켓 자체 첨부파일 수집
-            ticket_detail = await self.fetch_with_retry(f"{self.base_url}/tickets/{ticket_id}")
+            ticket_detail = await self.fetch_with_retry(f"{self.base_url}/api/v2/tickets/{ticket_id}")
             if ticket_detail and "attachments" in ticket_detail:
                 for att in ticket_detail["attachments"]:
                     normalized_att = self._normalize_attachment_data(att)
@@ -419,7 +419,7 @@ class FreshdeskAdapter(PlatformAdapter):
         try:
             # 첨부파일이 티켓에 직접 연결된 경우
             if ticket_id and not conversation_id:
-                response = await self.fetch_with_retry(f"{self.base_url}/tickets/{ticket_id}")
+                response = await self.fetch_with_retry(f"{self.base_url}/api/v2/tickets/{ticket_id}")
                 
                 # 티켓 첨부파일에서 해당 ID 찾기
                 if "attachments" in response:
@@ -429,7 +429,7 @@ class FreshdeskAdapter(PlatformAdapter):
             
             # 대화에 첨부된 파일인 경우
             elif conversation_id:
-                response = await self.fetch_with_retry(f"{self.base_url}/conversations/{conversation_id}")
+                response = await self.fetch_with_retry(f"{self.base_url}/api/v2/conversations/{conversation_id}")
                 
                 # 대화 첨부파일에서 해당 ID 찾기
                 if "attachments" in response:
@@ -603,8 +603,12 @@ class FreshdeskAdapter(PlatformAdapter):
             url = f"{self.base_url}/api/v2/ticket_fields"
             response = await self.fetch_with_retry(url)
             
-            # ticket_fields에서 status 필드 찾기
-            ticket_fields = response.get("ticket_fields", [])
+            # ticket_fields는 배열을 직접 반환
+            if isinstance(response, list):
+                ticket_fields = response
+            else:
+                ticket_fields = response.get("ticket_fields", [])
+            
             status_field = None
             
             for field in ticket_fields:
