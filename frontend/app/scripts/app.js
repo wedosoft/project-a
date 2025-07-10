@@ -49,7 +49,14 @@ const App = {
     backendTicketData: null,
     
     // FDK에서 받은 원본 티켓 데이터 (추가 정보 수집용)
-    originalFDKTicket: null
+    originalFDKTicket: null,
+    
+    // FDK 옵션 캐시 (성능 최적화)
+    fdkOptionsCache: {
+      priorityOptions: null,
+      statusOptions: null,
+      lastFetched: null
+    }
   },
 
   // API 통신
@@ -291,37 +298,16 @@ const App = {
           App.state.originalFDKTicket
         );
         
-        // 3. 상태 레이블 가져오기 (FDK 전용 조회)
+        // 3. 상태 레이블 가져오기 (통합 유틸리티 사용)
         console.log('🚨 [CRITICAL] 상태 레이블 가져오기 시작 - 함수 호출 시점:', new Date().toISOString());
         let statusLabel = '❌ 상태 없음';
         if (mergedTicketData && mergedTicketData.status !== undefined && mergedTicketData.status !== null) {
-          const statusId = parseInt(mergedTicketData.status);
           console.log('🚨 mergedTicketData.status:', mergedTicketData.status);
-          console.log('🚨 statusId 변환 결과:', statusId);
+          console.log('🚨 TicketLabelUtils 사용하여 상태 레이블 가져오기');
           
-          try {
-            const statusOptionsRaw = await client.data.get('status_options').catch(() => null);
-            const statusOptions = statusOptionsRaw?.status_options || statusOptionsRaw;
-            
-            if (!statusOptions || !Array.isArray(statusOptions) || statusOptions.length === 0) {
-              statusLabel = '❌ 옵션 조회 실패';
-            } else {
-              // Freshdesk 숫자값으로 원본 필드에서 매칭
-              const statusOption = statusOptions.find(option => {
-                const optionId = parseInt(option.id || option.value || option);
-                return optionId === statusId;
-              });
-              
-              if (statusOption) {
-                statusLabel = statusOption.label || statusOption.name || statusOption.toString();
-              } else {
-                statusLabel = `❌ 알 수 없는 상태 (${statusId})`;
-              }
-            }
-          } catch (error) {
-            console.error('FDK 상태 조회 실패:', error);
-            statusLabel = '❌ 조회 실패';
-          }
+          // 통합 유틸리티 사용 (캐싱 및 fallback 포함)
+          statusLabel = await TicketLabelUtils.getStatusLabel(mergedTicketData);
+          console.log('✅ 상태 레이블 결과:', statusLabel);
         }
         
         // 4. 에이전트 정보 처리 (API 호출 필요)
@@ -572,115 +558,23 @@ const App = {
         row1Items.push('<span class="meta-item">😐 보통</span>');
       }
 
-      // 2. 우선순위 (FDK 전용 조회)
+      // 2. 우선순위 (통합 유틸리티 사용)
       let priority = '❌ 우선순위 없음';
       if (optimizedData?.ticket?.ticket) {
         const ticket = optimizedData.ticket.ticket;
-        
-        if (ticket.priority !== undefined && ticket.priority !== null) {
-          const priorityId = parseInt(ticket.priority);
-          
-          if (!App.state.client) {
-            priority = '❌ FDK 오류';
-          } else {
-            try {
-              const priorityOptionsRaw = await App.state.client.data.get('priority_options').catch(() => null);
-              const priorityOptions = priorityOptionsRaw?.priority_options || priorityOptionsRaw;
-              
-              if (!priorityOptions || !Array.isArray(priorityOptions) || priorityOptions.length === 0) {
-                priority = '❌ 옵션 조회 실패';
-              } else {
-                // Freshdesk 숫자값으로 원본 필드에서 매칭
-                const priorityOption = priorityOptions.find(option => {
-                  const optionId = parseInt(option.id || option.value || option);
-                  return optionId === priorityId;
-                });
-                
-                if (priorityOption) {
-                  const priorityText = priorityOption.label || priorityOption.name || priorityOption.toString();
-                  
-                  // 이모지 패턴 매칭
-                  let emoji = '📊';
-                  const lowerText = priorityText.toLowerCase();
-                  if (lowerText.includes('low') || lowerText.includes('낮')) {
-                    emoji = '🔵';
-                  } else if (lowerText.includes('medium') || lowerText.includes('보통') || lowerText.includes('normal')) {
-                    emoji = '😐';
-                  } else if (lowerText.includes('high') || lowerText.includes('높') || lowerText.includes('중요')) {
-                    emoji = '🟡';
-                  } else if (lowerText.includes('urgent') || lowerText.includes('긴급') || lowerText.includes('critical')) {
-                    emoji = '🔴';
-                  }
-                  
-                  priority = `${emoji} ${priorityText}`;
-                } else {
-                  priority = `❌ 알 수 없는 우선순위 (${priorityId})`;
-                }
-              }
-            } catch (error) {
-              console.error('FDK 우선순위 조회 실패:', error);
-              priority = '❌ 조회 실패';
-            }
-          }
-        }
+        console.log('🔍 메인 티켓 우선순위 처리 - 티켓 데이터:', ticket);
+        priority = await TicketLabelUtils.getPriorityLabel(ticket);
+        console.log('✅ 메인 티켓 우선순위 결과:', priority);
       }
       row1Items.push(`<span class="meta-item">${priority}</span>`);
 
-      // 3. 진행상태 (FDK 전용 조회)
+      // 3. 진행상태 (통합 유틸리티 사용)
       let status = '❌ 상태 없음';
       if (optimizedData?.ticket?.ticket) {
         const ticket = optimizedData.ticket.ticket;
-        
-        if (ticket.status !== undefined && ticket.status !== null) {
-          const statusId = parseInt(ticket.status);
-          
-          if (!App.state.client) {
-            status = '❌ FDK 오류';
-          } else {
-            try {
-              const statusOptionsRaw = await App.state.client.data.get('status_options').catch(() => null);
-              const statusOptions = statusOptionsRaw?.status_options || statusOptionsRaw;
-              
-              if (!statusOptions || !Array.isArray(statusOptions) || statusOptions.length === 0) {
-                status = '❌ 옵션 조회 실패';
-              } else {
-                // Freshdesk 숫자값으로 원본 필드에서 매칭
-                const statusOption = statusOptions.find(option => {
-                  const optionId = parseInt(option.id || option.value || option);
-                  return optionId === statusId;
-                });
-                
-                if (statusOption) {
-                  const statusText = statusOption.label || statusOption.name || statusOption.toString();
-                  
-                  // 이모지 패턴 매칭
-                  let emoji = '⚪';
-                  const lowerText = statusText.toLowerCase();
-                  if (lowerText.includes('open') || lowerText.includes('열림') || lowerText.includes('new')) {
-                    emoji = '🟢';
-                  } else if (lowerText.includes('pending') || lowerText.includes('대기') || lowerText.includes('waiting')) {
-                    emoji = '🟡';
-                  } else if (lowerText.includes('resolved') || lowerText.includes('해결') || lowerText.includes('completed')) {
-                    emoji = '✅';
-                  } else if (lowerText.includes('closed') || lowerText.includes('종료') || lowerText.includes('finished')) {
-                    emoji = '⚪';
-                  } else if (lowerText.includes('customer') || lowerText.includes('고객')) {
-                    emoji = '🟠';
-                  } else if (lowerText.includes('third') || lowerText.includes('제3자') || lowerText.includes('external')) {
-                    emoji = '🟣';
-                  }
-                  
-                  status = `${emoji} ${statusText}`;
-                } else {
-                  status = `❌ 알 수 없는 상태 (${statusId})`;
-                }
-              }
-            } catch (error) {
-              console.error('FDK 상태 조회 실패:', error);
-              status = '❌ 조회 실패';
-            }
-          }
-        }
+        console.log('🔍 메인 티켓 상태 처리 - 티켓 데이터:', ticket);
+        status = await TicketLabelUtils.getStatusLabel(ticket);
+        console.log('✅ 메인 티켓 상태 결과:', status);
       }
       row1Items.push(`<span class="meta-item">${status}</span>`);
 
@@ -1689,6 +1583,10 @@ const App = {
       // FDK 원본 티켓 데이터도 별도 보관
       App.state.originalFDKTicket = basicTicketData.ticket;
       
+      // FDK 옵션 미리 가져오기 (캐싱)
+      console.log('🔄 Pre-fetching FDK options for better performance...');
+      await TicketLabelUtils.getCachedOptions();
+      
       // 기본 헤더 업데이트 (최소한의 정보라도 표시)
       await App.ui.collectOptimizedTicketData();
       
@@ -1881,7 +1779,180 @@ const App = {
 
 // 메인티켓과 유사티켓용 통합 레이블 조회 (일관성 보장)
 const TicketLabelUtils = {
-  // 우선순위 레이블 가져오기 (원본 필드 조회)
+  // 옵션 캐시 유효시간 (5분)
+  CACHE_EXPIRY_MS: 5 * 60 * 1000,
+  
+  // 우선순위 기본 매핑 (Freshdesk 표준)
+  PRIORITY_DEFAULTS: {
+    1: { emoji: '🔵', label: 'Low' },
+    2: { emoji: '😐', label: 'Medium' },
+    3: { emoji: '🟡', label: 'High' },
+    4: { emoji: '🔴', label: 'Urgent' }
+  },
+  
+  // 상태 기본 매핑 (Freshdesk 표준)
+  STATUS_DEFAULTS: {
+    2: { emoji: '🟢', label: 'Open' },
+    3: { emoji: '🟡', label: 'Pending' },
+    4: { emoji: '✅', label: 'Resolved' },
+    5: { emoji: '⚪', label: 'Closed' },
+    6: { emoji: '🟠', label: 'Waiting on Customer' },
+    7: { emoji: '🟣', label: 'Waiting on Third Party' }
+  },
+  
+  // 캐시된 옵션 가져오기 (ticket_fields 우선 사용)
+  async getCachedOptions() {
+    const cache = App.state.fdkOptionsCache;
+    const now = Date.now();
+    
+    // 캐시가 유효한 경우
+    if (cache.lastFetched && (now - cache.lastFetched) < this.CACHE_EXPIRY_MS) {
+      console.log('✅ Using cached FDK options (age:', Math.round((now - cache.lastFetched) / 1000), 'seconds)');
+      return {
+        priorityOptions: cache.priorityOptions,
+        statusOptions: cache.statusOptions
+      };
+    }
+    
+    // 캐시가 없거나 만료된 경우 새로 가져오기
+    if (!App.state.client) {
+      console.warn('⚠️ FDK client not available for fetching options');
+      return null;
+    }
+    
+    try {
+      console.log('🔄 Fetching fresh FDK options (trying ticket_fields first)...');
+      
+      // ticket_fields를 먼저 시도 (더 상세한 레이블 정보 포함)
+      let priorityOptions = [];
+      let statusOptions = [];
+      
+      try {
+        // API 직접 호출로 한국어 레이블 가져오기
+        const [priorityFieldRaw, statusFieldRaw] = await Promise.all([
+          App.state.client.request.invokeTemplate('getTicketField', {
+            context: { fieldType: 'default_priority' }
+          }).catch(() => null),
+          App.state.client.request.invokeTemplate('getTicketField', {
+            context: { fieldType: 'default_status' }
+          }).catch(() => null)
+        ]);
+        
+        console.log('🔍 Priority field API 응답:', priorityFieldRaw);
+        console.log('🔍 Status field API 응답:', statusFieldRaw);
+        
+        // Priority 옵션 파싱
+        if (priorityFieldRaw && priorityFieldRaw.response) {
+          const priorityField = JSON.parse(priorityFieldRaw.response);
+          if (priorityField && priorityField.choices) {
+            // choices는 {"Low": 1, "Medium": 2, "High": 3, "Urgent": 4} 형태
+            priorityOptions = Object.entries(priorityField.choices).map(([label, id]) => ({
+              id: id,
+              label: label,
+              value: id
+            }));
+            console.log('✅ Found priority options from API:', priorityOptions);
+          }
+        }
+        
+        // Status 옵션 파싱
+        if (statusFieldRaw && statusFieldRaw.response) {
+          const statusField = JSON.parse(statusFieldRaw.response);
+          if (statusField && statusField.choices) {
+            // choices는 배열 형태로 각 항목이 [id, "English", "한국어"] 구조
+            statusOptions = statusField.choices.map(choice => {
+              const [id, english, korean] = choice;
+              return {
+                id: parseInt(id),
+                label: korean || english, // 한국어 우선, 없으면 영어
+                english: english,
+                korean: korean,
+                value: parseInt(id)
+              };
+            });
+            console.log('✅ Found status options from API:', statusOptions);
+          }
+        }
+      } catch (error) {
+        console.warn('⚠️ API 직접 호출 실패, ticket_fields로 fallback:', error);
+        
+        // Fallback: 기존 ticket_fields 방식
+        try {
+          const ticketFieldsRaw = await App.state.client.data.get('ticket_fields').catch(() => null);
+          console.log('🔍 ticket_fields 응답:', ticketFieldsRaw);
+          
+          if (ticketFieldsRaw && ticketFieldsRaw.ticket_fields) {
+            const fields = ticketFieldsRaw.ticket_fields;
+            
+            // priority 필드 찾기
+            const priorityField = fields.find(field => field.name === 'priority' || field.label === 'Priority');
+            if (priorityField && priorityField.choices && priorityOptions.length === 0) {
+              priorityOptions = priorityField.choices;
+              console.log('✅ Found priority options from ticket_fields:', priorityOptions);
+            }
+            
+            // status 필드 찾기  
+            const statusField = fields.find(field => field.name === 'status' || field.label === 'Status');
+            if (statusField && statusField.choices && statusOptions.length === 0) {
+              statusOptions = statusField.choices;
+              console.log('✅ Found status options from ticket_fields:', statusOptions);
+            }
+          }
+        } catch (fallbackError) {
+          console.warn('⚠️ ticket_fields 조회도 실패:', fallbackError);
+        }
+      }
+      
+      // ticket_fields에서 못 가져온 경우 기존 방식 사용
+      if (priorityOptions.length === 0 || statusOptions.length === 0) {
+        console.log('🔄 Fallback to priority_options and status_options...');
+        const [priorityOptionsRaw, statusOptionsRaw] = await Promise.all([
+          App.state.client.data.get('priority_options').catch(err => {
+            console.error('❌ Priority options fetch error:', err);
+            return null;
+          }),
+          App.state.client.data.get('status_options').catch(err => {
+            console.error('❌ Status options fetch error:', err);
+            return null;
+          })
+        ]);
+        
+        if (priorityOptions.length === 0) {
+          priorityOptions = priorityOptionsRaw?.priority_options || priorityOptionsRaw || [];
+        }
+        if (statusOptions.length === 0) {
+          statusOptions = statusOptionsRaw?.status_options || statusOptionsRaw || [];
+        }
+      }
+      
+      // 캐시 업데이트
+      cache.priorityOptions = priorityOptions;
+      cache.statusOptions = statusOptions;
+      cache.lastFetched = now;
+      
+      console.log('✅ FDK options cached successfully');
+      console.log('📊 Priority options count:', cache.priorityOptions.length);
+      console.log('📊 Status options count:', cache.statusOptions.length);
+      
+      // 디버그: 실제 옵션 내용 확인
+      if (cache.priorityOptions.length > 0) {
+        console.log('🔍 Sample priority option:', cache.priorityOptions[0]);
+      }
+      if (cache.statusOptions.length > 0) {
+        console.log('🔍 Sample status option:', cache.statusOptions[0]);
+      }
+      
+      return {
+        priorityOptions: cache.priorityOptions,
+        statusOptions: cache.statusOptions
+      };
+    } catch (error) {
+      console.error('❌ Failed to fetch FDK options:', error);
+      return null;
+    }
+  },
+  
+  // 우선순위 레이블 가져오기 (캐시 활용)
   async getPriorityLabel(ticketData) {
     if (!ticketData || (ticketData.priority === undefined && ticketData.priority !== 0)) {
       return '❌ 우선순위 없음';
@@ -1889,52 +1960,57 @@ const TicketLabelUtils = {
     
     const priorityId = parseInt(ticketData.priority);
     
-    if (!App.state.client) {
-      return '❌ FDK 오류';
+    // 숫자 ID 기반 이모지 매핑 (Freshdesk 표준)
+    const emojiMap = this.PRIORITY_DEFAULTS[priorityId];
+    const emoji = emojiMap ? emojiMap.emoji : '📊';
+    
+    // 캐시된 옵션 가져오기
+    const cachedOptions = await this.getCachedOptions();
+    
+    if (!cachedOptions || !cachedOptions.priorityOptions || cachedOptions.priorityOptions.length === 0) {
+      // 캐시 실패 시 기본값 사용
+      const defaultPriority = this.PRIORITY_DEFAULTS[priorityId];
+      if (defaultPriority) {
+        console.log(`⚠️ Using default priority label for ID ${priorityId}`);
+        return `${emoji} ${defaultPriority.label}`;
+      }
+      return `${emoji} Priority ${priorityId}`;
     }
     
-    try {
-      // 원본 필드에서 priority 옵션 조회
-      const priorityOptionsRaw = await App.state.client.data.get('priority_options').catch(() => null);
-      const priorityOptions = priorityOptionsRaw?.priority_options || priorityOptionsRaw;
-      
-      if (!priorityOptions || !Array.isArray(priorityOptions) || priorityOptions.length === 0) {
-        return '❌ 옵션 조회 실패';
+    // FDK 옵션에서 매칭 (ticket_fields와 기존 방식 모두 지원)
+    const priorityOption = cachedOptions.priorityOptions.find(option => {
+      // ticket_fields의 choices 구조: {id, value, label}
+      // 기존 구조: {id, label} 또는 {value, name}
+      const optionId = parseInt(option.id || option.value || option);
+      return optionId === priorityId;
+    });
+    
+    if (!priorityOption) {
+      // FDK에서 못 찾은 경우 기본값 사용
+      const defaultPriority = this.PRIORITY_DEFAULTS[priorityId];
+      if (defaultPriority) {
+        return `${emoji} ${defaultPriority.label}`;
       }
-      
-      // Freshdesk 숫자값으로 매칭 (id 필드 사용)
-      const priorityOption = priorityOptions.find(option => {
-        const optionId = parseInt(option.id || option.value || option);
-        return optionId === priorityId;
-      });
-      
-      if (!priorityOption) {
-        return '❌ 매칭 실패';
-      }
-      
-      const priorityText = priorityOption.label || priorityOption.name || priorityOption.toString();
-      
-      // 이모지 패턴 매칭
-      let emoji = '📊';
-      const lowerText = priorityText.toLowerCase();
-      if (lowerText.includes('low') || lowerText.includes('낮')) {
-        emoji = '🔵';
-      } else if (lowerText.includes('medium') || lowerText.includes('보통') || lowerText.includes('normal')) {
-        emoji = '😐';
-      } else if (lowerText.includes('high') || lowerText.includes('높') || lowerText.includes('중요')) {
-        emoji = '🟡';
-      } else if (lowerText.includes('urgent') || lowerText.includes('긴급') || lowerText.includes('critical')) {
-        emoji = '🔴';
-      }
-      
-      return `${emoji} ${priorityText}`;
-    } catch (error) {
-      console.error('FDK 우선순위 조회 실패:', error);
-      return '❌ 조회 실패';
+      return `${emoji} Priority ${priorityId}`;
     }
+    
+    // 다국어 레이블 처리 (한국어 우선, 없으면 영어)
+    let priorityText = '';
+    if (priorityOption.korean && priorityOption.korean.trim()) {
+      priorityText = priorityOption.korean;
+    } else if (priorityOption.label && priorityOption.label.trim()) {
+      priorityText = priorityOption.label;
+    } else if (priorityOption.english && priorityOption.english.trim()) {
+      priorityText = priorityOption.english;
+    } else {
+      priorityText = priorityOption.name || priorityOption.value || priorityOption.toString();
+    }
+    
+    console.log(`🔍 Found priority label for ID ${priorityId}:`, priorityText);
+    return `${emoji} ${priorityText}`;
   },
 
-  // 상태 레이블 가져오기 (원본 필드 조회)
+  // 상태 레이블 가져오기 (캐시 활용)
   async getStatusLabel(ticketData) {
     if (!ticketData || (ticketData.status === undefined && ticketData.status !== 0)) {
       return '❌ 상태 없음';
@@ -1942,53 +2018,54 @@ const TicketLabelUtils = {
     
     const statusId = parseInt(ticketData.status);
     
-    if (!App.state.client) {
-      return '❌ FDK 오류';
+    // 숫자 ID 기반 이모지 매핑 (Freshdesk 표준)
+    const emojiMap = this.STATUS_DEFAULTS[statusId];
+    const emoji = emojiMap ? emojiMap.emoji : '⚪';
+    
+    // 캐시된 옵션 가져오기
+    const cachedOptions = await this.getCachedOptions();
+    
+    if (!cachedOptions || !cachedOptions.statusOptions || cachedOptions.statusOptions.length === 0) {
+      // 캐시 실패 시 기본값 사용
+      const defaultStatus = this.STATUS_DEFAULTS[statusId];
+      if (defaultStatus) {
+        console.log(`⚠️ Using default status label for ID ${statusId}`);
+        return `${emoji} ${defaultStatus.label}`;
+      }
+      return `${emoji} Status ${statusId}`;
     }
     
-    try {
-      // 원본 필드에서 status 옵션 조회
-      const statusOptionsRaw = await App.state.client.data.get('status_options').catch(() => null);
-      const statusOptions = statusOptionsRaw?.status_options || statusOptionsRaw;
-      
-      if (!statusOptions || !Array.isArray(statusOptions) || statusOptions.length === 0) {
-        return '❌ 옵션 조회 실패';
+    // FDK 옵션에서 매칭 (ticket_fields와 기존 방식 모두 지원)
+    const statusOption = cachedOptions.statusOptions.find(option => {
+      // ticket_fields의 choices 구조: {id, value, label}
+      // 기존 구조: {id, label} 또는 {value, name}
+      const optionId = parseInt(option.id || option.value || option);
+      return optionId === statusId;
+    });
+    
+    if (!statusOption) {
+      // FDK에서 못 찾은 경우 기본값 사용
+      const defaultStatus = this.STATUS_DEFAULTS[statusId];
+      if (defaultStatus) {
+        return `${emoji} ${defaultStatus.label}`;
       }
-      
-      // Freshdesk 숫자값으로 매칭 (id 필드 사용)
-      const statusOption = statusOptions.find(option => {
-        const optionId = parseInt(option.id || option.value || option);
-        return optionId === statusId;
-      });
-      
-      if (!statusOption) {
-        return '❌ 매칭 실패';
-      }
-      
-      const statusText = statusOption.label || statusOption.name || statusOption.toString();
-      
-      // 이모지 패턴 매칭
-      let emoji = '⚪';
-      const lowerText = statusText.toLowerCase();
-      if (lowerText.includes('open') || lowerText.includes('열림') || lowerText.includes('new')) {
-        emoji = '🟢';
-      } else if (lowerText.includes('pending') || lowerText.includes('대기') || lowerText.includes('waiting')) {
-        emoji = '🟡';
-      } else if (lowerText.includes('resolved') || lowerText.includes('해결') || lowerText.includes('completed')) {
-        emoji = '✅';
-      } else if (lowerText.includes('closed') || lowerText.includes('종료') || lowerText.includes('finished')) {
-        emoji = '⚪';
-      } else if (lowerText.includes('customer') || lowerText.includes('고객')) {
-        emoji = '🟠';
-      } else if (lowerText.includes('third') || lowerText.includes('제3자') || lowerText.includes('external')) {
-        emoji = '🟣';
-      }
-      
-      return `${emoji} ${statusText}`;
-    } catch (error) {
-      console.error('FDK 상태 조회 실패:', error);
-      return '❌ 조회 실패';
+      return `${emoji} Status ${statusId}`;
     }
+    
+    // 다국어 레이블 처리 (한국어 우선, 없으면 영어)
+    let statusText = '';
+    if (statusOption.korean && statusOption.korean.trim()) {
+      statusText = statusOption.korean;
+    } else if (statusOption.label && statusOption.label.trim()) {
+      statusText = statusOption.label;
+    } else if (statusOption.english && statusOption.english.trim()) {
+      statusText = statusOption.english;
+    } else {
+      statusText = statusOption.name || statusOption.value || statusOption.toString();
+    }
+    
+    console.log(`🔍 Found status label for ID ${statusId}:`, statusText);
+    return `${emoji} ${statusText}`;
   },
 
   // Agent 이름 가져오기 (메인티켓 방식 재활용)

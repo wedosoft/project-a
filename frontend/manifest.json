@@ -29,7 +29,11 @@
       "events": {},
       "functions": {},
       "requests": {
-        "getAgent": {}
+        "getAgent": {},
+        "getGroup": {},
+        "getTicketField": {},
+        "backendApi": {},
+        "backendApiPost": {}
       }
     }
   },
