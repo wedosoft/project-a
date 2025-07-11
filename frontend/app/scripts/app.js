@@ -26,6 +26,9 @@ const App = {
     currentMode: 'smart', // 'smart' or 'free'
     client: null, // FDK 클라이언트 객체
     
+    // 대화 히스토리 (맥락 유지용)
+    chatHistory: [],
+    
     // 로드된 데이터 캐시 (탭 전환 시 사라지지 않도록)
     cachedData: {
       similarTickets: [],
@@ -248,53 +251,226 @@ const App = {
 
     // 채팅 쿼리 전송
     async sendChatQuery(query, mode = 'smart') {
-      const response = await fetch(`${App.config.baseURL}/query`, {
+      // 최근 10개의 대화만 전송 (성능 최적화)
+      const recentHistory = App.state.chatHistory.slice(-10);
+      
+      let requestBody;
+      
+      // 자유 모드일 때는 간단한 LLM 직접 응답 요청
+      if (mode === 'free') {
+        requestBody = {
+          query: query,
+          agent_mode: true,
+          stream_response: true,
+          chat_history: recentHistory,
+          force_intent: 'general',  // 자유 모드 명시
+          // 자유 모드를 위한 최소 설정
+          ticket_id: null,
+          top_k: 0,  // 검색 비활성화
+          search_types: [],  // 검색 타입 없음
+          use_hybrid_search: false,
+          enable_intent_analysis: false,
+          enable_llm_enrichment: false,
+          rerank_results: false
+        };
+        
+        console.log('💭 자유 모드 요청 전송:', requestBody);
+      } else {
+        // 스마트 모드일 때는 기존 방식대로 RAG 검색 포함
+        requestBody = {
+          query: query,
+          ticket_id: App.state.ticketId ? String(App.state.ticketId) : null,
+          top_k: 3,
+          type: ["tickets", "solutions", "images", "attachments"],
+          intent: "answer",
+          search_types: ["ticket", "kb"],
+          min_similarity: 0.5,
+          agent_mode: true,
+          stream_response: true,
+          chat_history: recentHistory,
+          use_hybrid_search: true,
+          enable_intent_analysis: true,
+          enable_llm_enrichment: true,
+          rerank_results: true,
+          agent_context: {
+            ticket: App.state.backendTicketData,
+            mode: 'smart'
+          }
+        };
+        
+        console.log('🎯 스마트 모드 요청 전송:', requestBody);
+      }
+      
+      console.log('📡 현재 모드:', mode, 'RAG 검색:', mode === 'smart');
+      console.log('💬 대화 히스토리:', recentHistory.length, '개');
+      
+      const response = await fetch(`${App.config.baseURL}/query?stream=true`, {
         method: 'POST',
         headers: this.getHeaders(),
-        body: JSON.stringify({
-          query: query,
-          agent_mode: mode === 'smart',
-          stream_response: true,
-          ticket_id: App.state.ticketId
-        })
+        body: JSON.stringify(requestBody)
       });
 
       if (!response.ok) {
         throw new Error(`API 오류: ${response.status}`);
       }
 
-      // 스트리밍 응답 처리
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let messageId = Date.now();
+      // 타임아웃 설정 (30초)
+      let timeoutId = null;
+      const setupTimeout = () => {
+        timeoutId = setTimeout(() => {
+          App.ui.hideTypingIndicator();
+          App.ui.addChatMessage('assistant', '응답 시간이 초과되었습니다. 다시 시도해주세요.', Date.now());
+        }, 30000);
+      };
+      
+      // 응답이 스트리밍인지 일반 JSON인지 확인
+      const contentType = response.headers.get('content-type');
+      
+      if (contentType && contentType.includes('event-stream')) {
+        // 스트리밍 응답 처리
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let messageId = Date.now();
+        let fullContent = '';
+        let messageCreated = false;
 
-      // 메시지 컨테이너 생성
-      App.ui.addChatMessage('assistant', '', messageId);
+        // 즉시 타이핑 인디케이터 표시
+        App.ui.showTypingIndicator();
+        
+        // 타임아웃 설정
+        setupTimeout();
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop();
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop();
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            if (data === '[DONE]') continue;
-            
-            try {
-              const event = JSON.parse(data);
-              if (event.type === 'content' && event.content) {
-                App.ui.updateChatMessage(messageId, event.content);
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
+              if (data === '[DONE]') continue;
+              
+              try {
+                const event = JSON.parse(data);
+                console.log('📨 SSE 이벤트 수신:', event);
+                
+                // progress 이벤트는 무시
+                if (event.type === 'progress') {
+                  continue;
+                }
+                
+                // 실제 컨텐츠가 있는지 확인
+                const hasContent = (
+                  (event.type === 'content' && event.content) ||
+                  (event.type === 'message' && event.message) ||
+                  (event.content && !event.type)
+                );
+                
+                // 처음 컨텐츠가 오면 타이핑 인디케이터 제거하고 메시지 생성
+                if (!messageCreated && hasContent) {
+                  App.ui.hideTypingIndicator();
+                  App.ui.addChatMessage('assistant', '', messageId);
+                  messageCreated = true;
+                }
+                
+                // 다양한 이벤트 타입 처리
+                if (event.type === 'content' && event.content) {
+                  fullContent += event.content;
+                  if (messageCreated) {
+                    App.ui.updateChatMessage(messageId, fullContent, false);
+                  }
+                } else if (event.type === 'message' && event.message) {
+                  // 백엔드가 message 타입으로 보낼 수도 있음
+                  fullContent += event.message;
+                  if (messageCreated) {
+                    App.ui.updateChatMessage(messageId, fullContent, false);
+                  }
+                } else if (event.type === 'complete') {
+                  // complete 이벤트 처리 - ai_summary만 사용
+                  if (event.data?.ai_summary) {
+                    fullContent = event.data.ai_summary;
+                    if (messageCreated) {
+                      App.ui.updateChatMessage(messageId, fullContent, false);
+                    }
+                  }
+                  // message는 무시 (백엔드의 불필요한 메시지 방지)
+                } else if (event.content) {
+                  // type 없이 content만 있는 경우
+                  fullContent += event.content;
+                  if (messageCreated) {
+                    App.ui.updateChatMessage(messageId, fullContent, false);
+                  }
+                }
+              } catch (e) {
+                console.error('SSE 파싱 오류:', e, 'data:', data);
               }
-            } catch (e) {
-              // JSON 파싱 실패 시 무시
             }
           }
         }
+        
+        // 타임아웃 취소
+        if (timeoutId) clearTimeout(timeoutId);
+        
+        // 메시지가 생성되지 않았거나 컨텐츠가 없는 경우 처리
+        if (!messageCreated) {
+          App.ui.hideTypingIndicator();
+          App.ui.addChatMessage('assistant', '응답을 받을 수 없습니다.', messageId);
+          App.state.chatHistory.push({ role: 'assistant', content: '응답을 받을 수 없습니다.' });
+        } else if (!fullContent) {
+          App.ui.updateChatMessage(messageId, '응답이 비어있습니다.', true);
+          App.state.chatHistory.push({ role: 'assistant', content: '응답이 비어있습니다.' });
+        } else {
+          // 정상적인 응답을 히스토리에 추가
+          App.state.chatHistory.push({ role: 'assistant', content: fullContent });
+        }
+        
+        // 스트리밍 완료 후 확실하게 하단으로 스크롤
+        App.ui.scrollToBottom(true);
+        
+        // iframe 환경에서 추가 보장
+        setTimeout(() => App.ui.scrollToBottom(true), 100);
+        setTimeout(() => App.ui.scrollToBottom(true), 300);
+        setTimeout(() => App.ui.scrollToBottom(true), 500);
+      } else {
+        // 즉시 타이핑 인디케이터 표시
+        App.ui.showTypingIndicator();
+        
+        // 타임아웃 설정
+        setupTimeout();
+        
+        // 일반 JSON 응답 처리
+        const result = await response.json();
+        const messageId = Date.now();
+        
+        // 타이핑 인디케이터 제거
+        App.ui.hideTypingIndicator();
+        
+        // 타임아웃 취소
+        if (timeoutId) clearTimeout(timeoutId);
+        
+        if (result.answer) {
+          // 스트리밍 효과를 위해 천천히 타이핑
+          App.ui.addChatMessage('assistant', '', messageId, true);
+          await App.ui.typeMessage(messageId, result.answer);
+          App.ui.updateChatMessage(messageId, result.answer, true);
+          // 히스토리에 추가
+          App.state.chatHistory.push({ role: 'assistant', content: result.answer });
+        } else {
+          App.ui.addChatMessage('assistant', '응답을 받을 수 없습니다.', messageId);
+          App.state.chatHistory.push({ role: 'assistant', content: '응답을 받을 수 없습니다.' });
+        }
+        
+        // 응답 완료 후 확실하게 하단으로 스크롤
+        App.ui.scrollToBottom(true);
+        
+        // iframe 환경에서 추가 보장
+        setTimeout(() => App.ui.scrollToBottom(true), 100);
+        setTimeout(() => App.ui.scrollToBottom(true), 300);
+        setTimeout(() => App.ui.scrollToBottom(true), 500);
       }
     }
   },
@@ -430,7 +606,7 @@ const App = {
       } catch (error) {
         console.error('❌ getAgentName 오류:', error);
         console.error('❌ 오류 상세:', error.message);
-        return `Agent ${agentId}`;
+        return 'Unassigned';
       }
     },
 
@@ -458,7 +634,7 @@ const App = {
         }
       } catch (error) {
         console.error('🔴 getGroup invokeTemplate 오류:', error);
-        return `Group ${groupId}`;
+        return 'Unassigned';
       }
     },
     
@@ -644,10 +820,10 @@ const App = {
       let agent = null;
       if (optimizedData?.agent?.contact?.name) {
         agent = `👤 ${optimizedData.agent.contact.name}`;
+      } else {
+        agent = '👤 Unassigned';
       }
-      if (agent) {
-        row2Items.push(`<span class="meta-item">${agent}</span>`);
-      }
+      row2Items.push(`<span class="meta-item">${agent}</span>`);
 
       // 5. 담당그룹 (FDK group data method 우선 사용)
       let group = null;
@@ -659,10 +835,10 @@ const App = {
         group = `👥 ${optimizedData.group.group_name}`;
       } else if (optimizedData?.ticket?.ticket?.group_name) {
         group = `👥 ${optimizedData.ticket.ticket.group_name}`;
+      } else {
+        group = '👥 Unassigned';
       }
-      if (group) {
-        row2Items.push(`<span class="meta-item">${group}</span>`);
-      }
+      row2Items.push(`<span class="meta-item">${group}</span>`);
 
       // 6. 진행상태 (통합 유틸리티 사용)
       let status = null;
@@ -964,7 +1140,6 @@ const App = {
         
         // 일괄 조회된 담당자/요청자 이름 사용
         const agentName = ticket.responderName || responderName || null;
-        const requesterDisplayName = ticket.requesterName || null;
         
         const statusClass = (status === 'resolved' || status === 4) ? 'status-resolved' : 
                            (status === 'in_progress' || status === 2) ? 'status-progress' : 'status-pending';
@@ -984,8 +1159,7 @@ const App = {
                   <span>📅 ${createdAt ? new Date(createdAt).toLocaleDateString('ko-KR') : ''}</span>
                   <span class="status-indicator ${statusClass}">${statusLabel}</span>
                   <span class="priority-indicator">${priorityText}</span>
-                  ${agentName ? `<span>👨‍💼 ${agentName}</span>` : ''}
-                  ${requesterDisplayName ? `<span>👤 ${requesterDisplayName}</span>` : ''}
+                  <span>👨‍💼 ${agentName || 'Unassigned'}</span>
                 </div>
                 ${ticket.relative_time ? `<span>${ticket.relative_time}</span>` : ''}
               </div>
@@ -1080,23 +1254,19 @@ const App = {
               <div class="card-title">
                 ${docTitle}
               </div>
-              <div class="card-excerpt">
-                ${doc.description || doc.content || '내용 정보가 없습니다.'}
-              </div>
               <div class="card-meta">
                 <div class="meta-left">
                   <span>📅 ${createdAt ? new Date(createdAt).toLocaleDateString('ko-KR') : '날짜 없음'}</span>
                   <span class="status-indicator status-resolved">KB문서</span>
-                  <span>📂 ${doc.category || '일반'}</span>
+                  <span>📂 ${doc.category || doc.folder_path || doc.path || '일반'}</span>
                 </div>
-                <span>URL: ${docUrl.length > 30 ? docUrl.substring(0, 30) + '...' : docUrl}</span>
               </div>
               <div class="card-actions">
-                <button class="card-btn primary" onclick="viewKBSummary('${docId}')">
-                  👁️ 요약보기
-                </button>
-                <button class="card-btn" onclick="window.open('${docUrl}', '_blank')">
+                <button class="card-btn primary" onclick="window.open('${docUrl}', '_blank')">
                   📄 원본보기
+                </button>
+                <button class="card-btn" onclick="copyToClipboard('${docUrl}', this)">
+                  📋 복사하기
                 </button>
               </div>
             </div>
@@ -1146,8 +1316,8 @@ const App = {
     },
 
 
-    // 채팅 메시지 추가
-    addChatMessage(role, content, messageId) {
+    // 채팅 메시지 추가 (스트리밍 지원)
+    addChatMessage(role, content, messageId, isStreaming = false) {
       const container = document.getElementById('chatResults');
       if (!container) return;
 
@@ -1162,27 +1332,246 @@ const App = {
         minute: '2-digit' 
       });
       
+      const messageTextClass = isStreaming ? 'message-text streaming' : 'message-text';
+      
       messageDiv.innerHTML = `
         <div class="message-avatar">${avatar}</div>
         <div class="message-content">
-          <div class="message-text">${marked ? marked.parse(content) : content}</div>
+          <div class="${messageTextClass}">${marked ? marked.parse(content) : content}</div>
           <div class="message-time">${timeString}</div>
         </div>
       `;
-      container.appendChild(messageDiv);
-      container.scrollTop = container.scrollHeight;
+      // 하단 여백 요소를 찾아서 메시지 앞에 삽입
+      const spacer = container.querySelector('div[style*="height: 100px"]');
+      if (spacer) {
+        container.insertBefore(messageDiv, spacer);
+      } else {
+        container.appendChild(messageDiv);
+      }
+      
+      // 강제 스크롤 (새 메시지 추가시)
+      this.scrollToBottom(true);
+      
+      // iframe 환경에서 추가 보장
+      setTimeout(() => this.scrollToBottom(true), 100);
+      setTimeout(() => this.scrollToBottom(true), 300);
     },
 
     // 채팅 메시지 업데이트 (스트리밍)
-    updateChatMessage(messageId, content) {
+    updateChatMessage(messageId, content, isComplete = false) {
       const messageText = document.querySelector(`#msg-${messageId} .message-text`);
-      if (messageText && marked) {
-        messageText.innerHTML = marked.parse(content);
+      if (messageText) {
+        // 내용 업데이트
+        if (marked) {
+          messageText.innerHTML = marked.parse(content);
+        } else {
+          messageText.textContent = content;
+        }
+        
+        // 스트리밍 완료시 클래스 제거
+        if (isComplete) {
+          messageText.classList.remove('streaming');
+        }
+        
+        // 스트리밍 중에는 하단에 있을 때만 스크롤
+        const container = document.getElementById('chatResults');
+        if (container) {
+          const scrollHeight = container.scrollHeight;
+          const scrollTop = container.scrollTop;
+          const clientHeight = container.clientHeight;
+          const isNearBottom = scrollHeight - scrollTop - clientHeight < 150;
+          
+          // 사용자가 하단 근처에 있을 때만 자동 스크롤
+          if (isNearBottom) {
+            this.scrollToBottom();
+          }
+        }
+      }
+    },
+
+    // 타이핑 인디케이터 표시
+    showTypingIndicator() {
+      const container = document.getElementById('chatResults');
+      if (!container) return;
+      
+      // 이미 타이핑 인디케이터가 있으면 제거
+      this.hideTypingIndicator();
+      
+      const typingDiv = document.createElement('div');
+      typingDiv.className = 'typing-indicator';
+      typingDiv.id = 'typingIndicator';
+      typingDiv.innerHTML = `
+        <div class="message-avatar">🤖</div>
+        <div class="typing-dots">
+          <div class="typing-dot"></div>
+          <div class="typing-dot"></div>
+          <div class="typing-dot"></div>
+        </div>
+      `;
+      container.appendChild(typingDiv);
+      
+      // 타이핑 인디케이터가 보이도록 스크롤
+      this.scrollToBottom();
+    },
+
+    // 타이핑 인디케이터 제거
+    hideTypingIndicator() {
+      const typingDiv = document.getElementById('typingIndicator');
+      if (typingDiv) {
+        typingDiv.remove();
+      }
+    },
+
+    // 메시지 타이핑 효과
+    async typeMessage(messageId, text, speed = 30) {
+      const messageText = document.querySelector(`#msg-${messageId} .message-text`);
+      if (!messageText) return;
+      
+      let currentText = '';
+      const chars = text.split('');
+      
+      for (let i = 0; i < chars.length; i++) {
+        currentText += chars[i];
+        messageText.innerHTML = marked ? marked.parse(currentText) : currentText;
+        
         const container = document.getElementById('chatResults');
         if (container) {
           container.scrollTop = container.scrollHeight;
         }
+        
+        // 다음 문자까지 짧은 대기
+        await new Promise(resolve => setTimeout(resolve, speed));
       }
+    },
+
+    // iframe 환경에 최적화된 강력한 스크롤 시스템
+    scrollToBottom(force = false) {
+      const container = document.getElementById('chatResults');
+      if (!container) return;
+      
+      // 스크롤 실행 함수
+      const performScroll = () => {
+        // 방법 1: 최대값으로 직접 설정
+        container.scrollTop = 999999;
+        
+        // 방법 2: scrollHeight 사용
+        container.scrollTop = container.scrollHeight;
+        
+        // 방법 3: scrollTo 사용
+        if (container.scrollTo) {
+          container.scrollTo(0, 999999);
+        }
+        
+        // 방법 4: 마지막 요소로 스크롤
+        const messages = container.querySelectorAll('.chat-message');
+        if (messages.length > 0) {
+          const lastMessage = messages[messages.length - 1];
+          lastMessage.scrollIntoView({ block: 'end', behavior: 'auto' });
+        }
+      };
+      
+      // 즉시 실행
+      performScroll();
+      
+      // 강제 스크롤인 경우 여러 번 실행
+      if (force) {
+        // 브라우저 렌더링 후 재실행
+        requestAnimationFrame(() => {
+          performScroll();
+          requestAnimationFrame(performScroll);
+        });
+        
+        // 다양한 타이밍으로 재실행
+        [0, 10, 50, 100, 200, 500].forEach(delay => {
+          setTimeout(performScroll, delay);
+        });
+      }
+    },
+    
+    // 스크롤 관찰자 초기화 (MutationObserver 사용)
+    initScrollObserver() {
+      const container = document.getElementById('chatResults');
+      if (!container) return;
+      
+      // 자동 스크롤 여부 추적
+      let shouldAutoScroll = true;
+      let userScrollTimeout = null;
+      
+      // 스크롤 이벤트 리스너
+      container.addEventListener('scroll', () => {
+        const scrollHeight = container.scrollHeight;
+        const scrollTop = container.scrollTop;
+        const clientHeight = container.clientHeight;
+        const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+        const isNearBottom = distanceFromBottom < 100;
+        
+        // 스크롤 투 바텀 버튼 표시/숨김
+        const scrollBtn = document.getElementById('scrollToBottomBtn');
+        if (scrollBtn) {
+          // 스크롤이 가능한 경우에만 버튼 표시
+          if (scrollHeight > clientHeight && !isNearBottom) {
+            scrollBtn.style.display = 'flex';
+          } else {
+            scrollBtn.style.display = 'none';
+          }
+        }
+        
+        // 사용자가 위로 스크롤했는지 감지
+        if (!isNearBottom) {
+          shouldAutoScroll = false;
+          clearTimeout(userScrollTimeout);
+          
+          // 3초 후 자동 스크롤 다시 활성화
+          userScrollTimeout = setTimeout(() => {
+            if (distanceFromBottom < 200) {
+              shouldAutoScroll = true;
+            }
+          }, 3000);
+        } else {
+          shouldAutoScroll = true;
+        }
+      });
+      
+      // DOM 변경 감지하여 자동 스크롤
+      const observer = new MutationObserver((mutations) => {
+        // 채팅 컨테이너에 변경사항이 있는지 확인
+        let hasRelevantChange = false;
+        
+        for (const mutation of mutations) {
+          // 새 노드가 추가되었거나
+          if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+            hasRelevantChange = true;
+            break;
+          }
+          // 텍스트 내용이 변경되었을 때
+          if (mutation.type === 'characterData') {
+            hasRelevantChange = true;
+            break;
+          }
+        }
+        
+        if (!hasRelevantChange) return;
+        
+        // AI 응답 중이거나 shouldAutoScroll이 true일 때만 자동 스크롤
+        const isAIResponding = container.querySelector('.typing-indicator') !== null ||
+                             container.querySelector('.message-text.streaming') !== null;
+        
+        if (shouldAutoScroll || isAIResponding) {
+          // 즉시 스크롤
+          this.scrollToBottom(true);
+        }
+      });
+      
+      // 채팅 컨테이너의 변경사항 관찰
+      observer.observe(container, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+        attributes: true // 속성 변경도 감지
+      });
+      
+      // 전역 observer 저장 (cleanup용)
+      this.scrollObserver = observer;
     },
 
     // FDK 모달 표시 (원본의 강화된 로직 적용)
@@ -1770,17 +2159,26 @@ const App = {
   // 이벤트 핸들러
   events: {
     // 채팅 전송
-    async handleSendMessage() {
+    async handleSendMessage(queryText) {
       const input = document.getElementById('chatInput');
       const sendButton = document.getElementById('sendButton');
       
-      if (!input || !input.value.trim()) return;
+      // queryText가 전달되면 사용, 아니면 input에서 가져오기
+      const query = queryText || (input ? input.value.trim() : '');
+      
+      if (!query) return;
 
-      const query = input.value.trim();
-      input.value = '';
+      // 입력창 비우기
+      if (input) {
+        input.value = '';
+        input.style.height = 'auto';
+      }
       
       // 사용자 메시지 표시
       App.ui.addChatMessage('user', query, Date.now());
+      
+      // 대화 히스토리에 추가
+      App.state.chatHistory.push({ role: 'user', content: query });
       
       // 버튼 비활성화
       if (sendButton) {
@@ -1790,6 +2188,8 @@ const App = {
       try {
         await App.api.sendChatQuery(query, App.state.currentMode);
       } catch (error) {
+        console.error('채팅 전송 오류:', error);
+        App.ui.hideTypingIndicator();
         App.ui.showError('메시지 전송 실패: ' + error.message);
       } finally {
         if (sendButton) {
@@ -2004,7 +2404,7 @@ const App = {
         // Copilot 탭일 때만 채팅 입력창 표시
         const chatInput = document.getElementById('chatInputContainer');
         if (chatInput) {
-          chatInput.style.display = (tabName === 'copilot') ? 'block' : 'none';
+          chatInput.style.display = (tabName === 'copilot') ? 'flex' : 'none';
         }
         
         // 스크롤 위치 복원 (더 안정적)
@@ -2153,11 +2553,9 @@ class TicketMetadataService {
     
     tickets.forEach(ticket => {
       const responderId = ticket.metadata?.responder_id || ticket.metadata?.agent_id;
-      const requesterId = ticket.metadata?.requester_id;
       const groupId = ticket.metadata?.group_id;
       
       if (responderId) userIds.push(responderId);
-      if (requesterId) userIds.push(requesterId);
       if (groupId) groupIds.push(groupId);
     });
     
@@ -2174,15 +2572,10 @@ class TicketMetadataService {
       const enriched = { ...ticket };
       
       const responderId = ticket.metadata?.responder_id || ticket.metadata?.agent_id;
-      const requesterId = ticket.metadata?.requester_id;
       const groupId = ticket.metadata?.group_id;
       
       if (responderId && userNames[responderId]) {
         enriched.responderName = userNames[responderId];
-      }
-      
-      if (requesterId && userNames[requesterId]) {
-        enriched.requesterName = userNames[requesterId];
       }
       
       if (groupId && groupNames[groupId]) {
@@ -2585,6 +2978,34 @@ document.addEventListener('DOMContentLoaded', async () => {
   const chatInput = document.getElementById('chatInputContainer');
   if (chatInput) {
     chatInput.style.display = 'none';
+  }
+  
+  // 스크롤 관찰자 초기화
+  App.ui.initScrollObserver();
+  
+  // iframe 환경 감지 및 특별 처리
+  if (window.self !== window.top) {
+    console.log('🌐 iframe 환경 감지 - 스크롤 최적화 활성화');
+    
+    // iframe에서 focus 이벤트와 함께 스크롤 처리
+    window.addEventListener('focus', () => {
+      setTimeout(() => {
+        const container = document.getElementById('chatResults');
+        if (container) {
+          App.ui.scrollToBottom(true);
+        }
+      }, 100);
+    });
+    
+    // visibility change 이벤트 처리
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) {
+        const container = document.getElementById('chatResults');
+        if (container) {
+          App.ui.scrollToBottom(true);
+        }
+      }
+    });
   }
   
   // FDK가 로드되었는지 확인

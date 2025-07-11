@@ -191,7 +191,6 @@ async def query_endpoint(
             processing_time = (time.time() - start_time) * 1000
             
             # DocumentInfo 목록 생성
-            from ..models.shared import DocumentInfo
             document_infos = []
             
             documents = search_results.get("documents", [])
@@ -240,17 +239,20 @@ async def query_endpoint(
         if req.stream_response:
             async def stream_agent_response():
                 try:
+                    # force_intent를 orchestrator에 전달
                     async for chunk in anthropic_orchestrator.execute_agent_search(
                         query=req.query,
                         tenant_id=tenant_id,
                         platform=platform,
-                        stream=True
+                        stream=True,
+                        chat_history=req.chat_history,
+                        force_intent=req.force_intent,  # 추가
+                        skip_rag=req.force_intent == 'general' or req.top_k == 0  # 자유 모드일 때 RAG 스킵
                     ):
                         # 표준 스트리밍 이벤트 구조로 변환
                         if chunk.get("type") == "final":
                             # 최종 결과를 완료 이벤트로 변환
                             complete_event = StreamEventBuilder.create_complete_event(
-                                message="AI 분석이 완료되었습니다",
                                 final_data=chunk
                             )
                             yield format_sse_event(complete_event)
@@ -299,7 +301,8 @@ async def query_endpoint(
                 query=req.query,
                 tenant_id=tenant_id,
                 platform=platform,
-                stream=False
+                stream=False,
+                chat_history=req.chat_history
             )
             
             # 최종 결과만 추출

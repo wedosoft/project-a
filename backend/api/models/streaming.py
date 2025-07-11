@@ -150,7 +150,6 @@ class StreamEventBuilder:
     
     @staticmethod
     def create_complete_event(
-        message: str = "처리가 완료되었습니다",
         final_data: Dict[str, Any] = None,
         **kwargs
     ) -> StreamEvent:
@@ -158,7 +157,6 @@ class StreamEventBuilder:
         return StreamEvent(
             type=StreamEventType.COMPLETE,
             stage=StreamStage.COMPLETE,
-            message=message,
             progress=100,
             data=final_data,
             **kwargs

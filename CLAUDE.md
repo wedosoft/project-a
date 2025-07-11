@@ -106,3 +106,10 @@ https://developers.freshworks.com/docs/app-sdk/v3.0/common/advanced-interfaces/r
 
 ## Key Development Commands
 
+## Freshdesk API Headers
+
+### Standard API Request Headers
+- X-Tenant-ID: wedosoft
+- X-Platform: freshdesk
+- X-Domain: weodosft.freshdesk.com
+- 모든 엔드포인트의 엔드포인트 필수 헤더입니다. 인지하세요.

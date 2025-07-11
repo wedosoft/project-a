@@ -19,6 +19,12 @@ class QueryRequest(BaseModel):
     tenant_id: Optional[str] = Field(default=None, description="테넌트 ID (헤더에서 자동 추출)")
     platform: Optional[str] = Field(default=None, description="플랫폼 ID (헤더에서 자동 추출)")
     
+    # 대화 히스토리 (대화 맥락 유지용)
+    chat_history: Optional[List[Dict[str, str]]] = Field(
+        default=None, 
+        description="이전 대화 내용 [{role: 'user'|'assistant', content: '...'}]"
+    )
+    
     # 현재 처리 중인 티켓 ID (platform-neutral original_id)
     ticket_id: Optional[str] = Field(default=None, description="플랫폼 원본 티켓 ID")
     

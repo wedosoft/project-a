@@ -125,6 +125,8 @@
             overflow-x: hidden;
             padding-top: 80px; /* 헤더 높이만큼 */
             position: relative;
+            display: flex;
+            flex-direction: column;
         }
 
         /* === AI 요약 섹션 === */
@@ -301,20 +303,30 @@
 
         /* === 탭 콘텐츠 영역 === */
         .tab-content-area {
-            padding: 0px 20px 100px 20px; /* 탭 네비게이션이 sticky이므로 상단 패딩 제거 */
-            height: calc(100vh - 300px); /* 고정 높이 설정 */
-            overflow: hidden; /* 넘치는 콘텐츠 숨김 */
+            padding: 0px 20px 0px 20px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            margin-bottom: 175px; /* 채팅 입력창(80px) + 푸터(87px) + 여백 */
         }
 
         .tab-content {
             display: none;
             padding-top: 16px;
-            height: calc(100vh - 300px); /* 각 탭 컨텐츠 높이 조정 */
-            overflow-y: auto; /* 개별 탭 스크롤 */
+            flex: 1;
+            overflow: hidden;
+            position: relative;
         }
 
         .tab-content.active {
-            display: block;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        /* Copilot 탭은 패딩 없음 */
+        .tab-content[data-tab="copilot"] {
+            padding: 0;
         }
 
         /* === 인사이트 패널 === */
@@ -504,39 +516,47 @@
         }
 
         .mode-label.active {
-            color: #8B5CF6;
+            color: #374151;
             font-weight: 600;
         }
 
         .ios-toggle {
             position: relative;
-            width: 42px;
-            height: 24px;
+            width: 56px;
+            height: 28px;
             background: #e5e7eb;
-            border-radius: 12px;
+            border-radius: 14px;
             cursor: pointer;
-            transition: all 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
+            transition: background 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
             flex-shrink: 0;
+            box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
         }
 
-        .ios-toggle.active {
-            background: #8B5CF6;
+        .ios-toggle.free-mode {
+            background: linear-gradient(135deg, #8B5CF6 0%, #3B82F6 100%);
         }
+
 
         .toggle-slider {
             position: absolute;
-            top: 2px;
-            left: 2px;
-            width: 20px;
-            height: 20px;
+            top: 3px;
+            left: 3px;
+            width: 22px;
+            height: 22px;
             background: white;
             border-radius: 50%;
-            transition: all 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s cubic-bezier(0.4, 0.0, 0.2, 1);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            will-change: transform;
+            transform-origin: center;
         }
 
-        .ios-toggle.active .toggle-slider {
-            transform: translateX(18px);
+        .ios-toggle .toggle-slider {
+            transform: translateX(0);
+        }
+
+        .ios-toggle.free-mode .toggle-slider {
+            transform: translateX(28px);
         }
 
         .mode-description {
@@ -547,23 +567,95 @@
             flex-shrink: 0;
         }
 
+        /* === 인라인 모드 토글 === */
+        .mode-toggle-inline {
+            display: flex;
+            align-items: center;
+            margin-right: 12px;
+        }
+
+        .mode-toggle-inline .mode-toggle-section {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .mode-toggle-inline .mode-label {
+            font-size: 12px;
+            color: #9ca3af;
+            transition: color 0.2s;
+        }
+
+        .mode-toggle-inline .mode-label.active {
+            color: #374151;
+        }
+
+        .mode-toggle-inline .ios-toggle {
+            width: 48px;
+            height: 24px;
+            border-radius: 12px;
+        }
+
+        .mode-toggle-inline .toggle-slider {
+            width: 18px;
+            height: 18px;
+            top: 3px;
+            left: 3px;
+        }
+
+        .mode-toggle-inline .ios-toggle.free-mode .toggle-slider {
+            transform: translateX(24px);
+        }
+
         .chat-container {
             display: flex;
             flex-direction: column;
             background: white;
-            height: calc(100vh - 300px); /* 고정 높이 조정 */
-            max-height: 600px; /* 최대 높이 제한 */
-            overflow: hidden; /* 넘치는 콘텐츠 숨김 */
+            position: relative;
+            flex: 1;
+            min-height: 0;
+            width: 100%;
+            overflow: hidden;
         }
 
         .chat-messages {
             flex: 1;
             overflow-y: auto;
-            padding: 16px 20px 200px 20px; /* 하단 패딩 증가 */
+            overflow-x: hidden;
+            padding: 20px;
             display: flex;
             flex-direction: column;
             gap: 16px;
-            min-height: 0; /* flex item이 넘치지 않도록 */
+            min-height: 0;
+            position: relative;
+            -webkit-overflow-scrolling: touch;
+        }
+        
+        /* 스크롤바 스타일 개선 */
+        .chat-messages::-webkit-scrollbar {
+            width: 6px;
+        }
+        
+        .chat-messages::-webkit-scrollbar-track {
+            background: #f3f4f6;
+            border-radius: 3px;
+        }
+        
+        .chat-messages::-webkit-scrollbar-thumb {
+            background: #d1d5db;
+            border-radius: 3px;
+        }
+        
+        .chat-messages::-webkit-scrollbar-thumb:hover {
+            background: #9ca3af;
+        }
+        
+        .chat-messages .chat-message:first-child {
+            margin-top: 0;
+        }
+        
+        .chat-messages .chat-message:last-child {
+            margin-bottom: 80px; /* 입력창 높이만큼 여백 */
         }
 
         .chat-message {
@@ -618,6 +710,24 @@
             color: #374151;
             word-wrap: break-word;
         }
+        
+        /* 스트리밍 중인 메시지 표시 */
+        .message-text.streaming::after {
+            content: '●';
+            color: #8B5CF6;
+            font-size: 10px;
+            margin-left: 4px;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 0.4;
+            }
+            50% {
+                opacity: 1;
+            }
+        }
 
         .chat-message.user .message-text {
             background: linear-gradient(135deg, #8B5CF6 0%, #3B82F6 100%);
@@ -640,31 +750,128 @@
             text-align: left;
         }
 
-        /* === 채팅 입력 영역 === */
+        /* === 타이핑 인디케이터 === */
+        .typing-indicator {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            padding: 8px 0;
+        }
+
+        .typing-indicator .message-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: #e5e7eb;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+        }
+
+        .typing-dots {
+            display: flex;
+            gap: 4px;
+            padding: 12px 16px;
+            background: #f9fafb;
+            border-radius: 18px 18px 18px 4px;
+        }
+
+        .typing-dot {
+            width: 8px;
+            height: 8px;
+            background: #9ca3af;
+            border-radius: 50%;
+            animation: typingDot 1.4s infinite;
+        }
+
+        .typing-dot:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .typing-dot:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes typingDot {
+            0%, 60%, 100% {
+                opacity: 0.3;
+                transform: scale(0.8);
+            }
+            30% {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+
+        /* === Claude 스타일 채팅 입력 영역 === */
         .chat-input-container {
             position: fixed;
-            bottom: 0; /* 하단 푸터 바로 위 */
+            bottom: 87px;
             left: 0;
             right: 0;
             width: 100%;
+            padding: 16px 20px;
+            background: #f6f7f9;
             border-top: 1px solid #e5e7eb;
-            padding: 12px 16px;
-            background: #fafbfc;
-            z-index: 1001; /* 푸터보다 위에 */
-            box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
+            border-bottom: 1px solid #e5e7eb;
+            z-index: 1001;
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            gap: 0;
+        }
+
+        .chat-input-box {
+            width: 100%;
+            max-width: 900px;
+            display: flex;
+            align-items: flex-end;
+            gap: 8px;
+        }
+
+        .input-controls {
+            display: flex;
+            gap: 4px;
+            padding-bottom: 8px;
+        }
+
+        .control-button {
+            width: 32px;
+            height: 32px;
+            border: none;
+            background: #ffffff;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        }
+
+        .control-button:hover {
+            background: #f0f1f3;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .control-button svg {
+            width: 18px;
+            height: 18px;
+            stroke: #6b7280;
         }
 
         .chat-input-wrapper {
+            flex: 1;
             display: flex;
-            align-items: flex-end;
-            gap: 12px;
+            align-items: center;
             background: white;
-            border: 1px solid #e5e7eb;
-            border-radius: 24px;
-            padding: 8px 16px;
+            border: 1px solid #d1d5db;
+            border-radius: 16px;
+            padding: 12px 16px;
             transition: all 0.2s;
-            max-width: 900px;
-            margin: 0 auto;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
         }
 
         .chat-input-wrapper:focus-within {
@@ -677,44 +884,111 @@
             border: none;
             outline: none;
             resize: none;
-            font-size: 14px;
+            font-size: 15px;
             line-height: 1.5;
-            color: #374151;
+            color: #1f2937;
             background: transparent;
-            padding: 8px 0;
-            max-height: 100px;
-            font-family: inherit;
+            padding: 0;
+            max-height: 120px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
 
         #chatInput::placeholder {
             color: #9ca3af;
         }
 
-        .send-button {
-            background: linear-gradient(135deg, #8B5CF6 0%, #3B82F6 100%);
+        .input-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-left: 12px;
+        }
+
+        .toggle-button {
+            height: 32px;
+            padding: 0 12px;
             border: none;
-            border-radius: 50%;
-            width: 36px;
-            height: 36px;
+            background: #f0f1f3;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            position: relative;
+            font-size: 13px;
+            font-weight: 500;
+            color: #374151;
+            white-space: nowrap;
+        }
+
+        .toggle-button:hover {
+            background: #e1e4e8;
+        }
+
+        .toggle-indicator {
+            font-size: 14px;
+        }
+
+        /* 스크롤 투 바텀 버튼 */
+        .scroll-to-bottom {
+            position: absolute;
+            bottom: 100px; /* 입력창 위로 올림 */
+            right: 20px;
+            width: 40px;
+            height: 40px;
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 20px;
+            display: none; /* 기본적으로 숨김 */
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            transition: all 0.2s;
+            z-index: 100;
+            opacity: 0.9;
+        }
+
+        .scroll-to-bottom:hover {
+            background: #f3f4f6;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            opacity: 1;
+        }
+
+        .scroll-to-bottom svg {
+            color: #6b7280;
+        }
+
+        .send-button {
+            width: 32px;
+            height: 32px;
+            border: none;
+            background: #1f2937;
+            border-radius: 8px;
             display: flex;
             align-items: center;
             justify-content: center;
             cursor: pointer;
             transition: all 0.2s;
             color: white;
-            flex-shrink: 0;
         }
 
-        .send-button:hover {
-            transform: scale(1.05);
-            box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+        .send-button:hover:not(:disabled) {
+            background: #374151;
+            transform: translateY(-1px);
         }
 
         .send-button:disabled {
             background: #e5e7eb;
             cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
+        }
+
+        .send-button svg {
+            width: 16px;
+            height: 16px;
+            stroke-width: 2.5;
         }
 
         /* === 하단 푸터 === */
@@ -1577,21 +1851,6 @@
 
                 <!-- Copilot 탭 -->
                 <div class="tab-content" data-tab="copilot">
-                    <div class="chat-mode-toggle">
-                        <div class="mode-toggle-container">
-                            <div class="mode-toggle-section">
-                                <span class="mode-label active" data-mode="smart">🎯 스마트 모드</span>
-                                <div class="ios-toggle" onclick="toggleChatMode()">
-                                    <div class="toggle-slider"></div>
-                                </div>
-                                <span class="mode-label" data-mode="free">💭 자유 모드</span>
-                            </div>
-                            <div class="mode-description">
-                                <span id="mode-desc">티켓 정보와 관련 문서를 기반으로 답변합니다</span>
-                            </div>
-                        </div>
-                    </div>
-
                     <div class="chat-container">
                         <div class="chat-messages" id="chatResults">
                             <div class="chat-message assistant">
@@ -1603,31 +1862,45 @@
                                     <div class="message-time">방금 전</div>
                                 </div>
                             </div>
+                            <!-- 스크롤 공간 확보를 위한 빈 요소 -->
+                            <div style="height: 100px; flex-shrink: 0;"></div>
                         </div>
+                        <!-- 스크롤 투 바텀 버튼 -->
+                        <button class="scroll-to-bottom" id="scrollToBottomBtn" onclick="scrollToBottom()" style="display: none;">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 5v14m0 0l-7-7m7 7l7-7" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                        </button>
                     </div>
                 </div>
             </div>
         </main>
     </div>
 
-    <!-- 채팅 입력 영역 -->
+    <!-- Claude 스타일 채팅 입력 영역 -->
     <div class="chat-input-container" id="chatInputContainer" style="display: none;">
-        <div class="chat-input-wrapper">
-            <textarea 
-                id="chatInput" 
-                placeholder="메시지를 입력하세요..." 
-                rows="1"
-                onkeydown="handleChatKeydown(event)"
-                oninput="adjustTextareaHeight(this)"
-                oncompositionstart="handleCompositionStart(event)"
-                oncompositionend="handleCompositionEnd(event)"
-            ></textarea>
-            <button class="send-button" onclick="if(!isSendingMessage) sendMessage()" id="sendButton">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="m22 2-7 20-4-9-9-4Z"/>
-                    <path d="M22 2 11 13"/>
-                </svg>
-            </button>
+        <div class="chat-input-box">
+            <div class="chat-input-wrapper">
+                <textarea 
+                    id="chatInput" 
+                    placeholder="메시지를 입력하세요..." 
+                    rows="1"
+                    onkeydown="handleChatKeydown(event)"
+                    oninput="adjustTextareaHeight(this)"
+                    oncompositionstart="handleCompositionStart(event)"
+                    oncompositionend="handleCompositionEnd(event)"
+                ></textarea>
+                <div class="input-actions">
+                    <button class="toggle-button" onclick="window.toggleChatMode && window.toggleChatMode()" title="모드 전환">
+                        <span class="toggle-indicator" id="modeIndicator">🎯 스마트</span>
+                    </button>
+                    <button class="send-button" onclick="if(!isSendingMessage) sendMessage()" id="sendButton">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                            <path d="M5 10l7-7m0 0l7 7m-7-7v18" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -1716,6 +1989,135 @@
                 alert('복사에 실패했습니다.');
             });
         }
+
+        // 스마트/자유 모드 토글
+        window.toggleChatMode = function() {
+            const currentMode = App.state.currentMode;
+            const newMode = currentMode === 'smart' ? 'free' : 'smart';
+            
+            // 상태 업데이트
+            App.events.handleModeSwitch(newMode);
+            
+            // 모드 인디케이터 업데이트
+            const modeIndicator = document.getElementById('modeIndicator');
+            const toggleButton = modeIndicator?.parentElement;
+            
+            if (modeIndicator) {
+                if (newMode === 'free') {
+                    modeIndicator.textContent = '💭 자유';
+                    if (toggleButton) {
+                        toggleButton.title = '자유 대화 모드 - 일반적인 질문에 자유롭게 답변합니다';
+                        toggleButton.style.background = '#e0e7ff';
+                    }
+                } else {
+                    modeIndicator.textContent = '🎯 스마트';
+                    if (toggleButton) {
+                        toggleButton.title = '스마트 대화 모드 - 티켓 정보와 관련 문서를 기반으로 답변합니다';
+                        toggleButton.style.background = '#f0f1f3';
+                    }
+                }
+            }
+        }
+
+        // URL 클립보드에 복사
+        function copyToClipboard(url, button) {
+            navigator.clipboard.writeText(url).then(() => {
+                const originalText = button.innerHTML;
+                button.innerHTML = '✅ 복사됨';
+                button.disabled = true;
+                
+                setTimeout(() => {
+                    button.innerHTML = originalText;
+                    button.disabled = false;
+                }, 2000);
+            }).catch(err => {
+                console.error('복사 실패:', err);
+                alert('URL 복사에 실패했습니다.');
+            });
+        }
+
+        // 채팅 키보드 이벤트 처리
+        let isComposing = false;
+        
+        function handleChatKeydown(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                if (!isComposing) {
+                    event.preventDefault();
+                    sendMessage();
+                }
+            }
+        }
+
+        function handleCompositionStart(event) {
+            isComposing = true;
+        }
+
+        function handleCompositionEnd(event) {
+            isComposing = false;
+            // 한글 입력 완료 후 입력창 상태 확인
+            const input = document.getElementById('chatInput');
+            if (input && input.value.trim() === '') {
+                input.value = '';
+            }
+        }
+
+        function adjustTextareaHeight(textarea) {
+            textarea.style.height = 'auto';
+            textarea.style.height = textarea.scrollHeight + 'px';
+        }
+
+        let isSendingMessage = false;
+        
+        function sendMessage() {
+            // 한글 조합 중이면 리턴
+            if (isComposing) return;
+            
+            const input = document.getElementById('chatInput');
+            const query = input.value.trim();
+            
+            if (!query || isSendingMessage) return;
+            
+            // 입력창 비우기
+            setTimeout(() => {
+                input.value = '';
+                adjustTextareaHeight(input);
+            }, 0);
+            
+            isSendingMessage = true;
+            App.events.handleSendMessage(query).finally(() => {
+                isSendingMessage = false;
+            });
+        }
+
+        // iframe 환경을 위한 강화된 스크롤 투 바텀
+        function scrollToBottom() {
+            const chatMessages = document.getElementById('chatResults');
+            if (chatMessages) {
+                // requestAnimationFrame을 사용하여 브라우저 렌더링 사이클에 맞춰 실행
+                requestAnimationFrame(() => {
+                    chatMessages.scrollTop = chatMessages.scrollHeight + 100;
+                    
+                    // iframe 환경에서 추가 보장
+                    setTimeout(() => {
+                        chatMessages.scrollTop = chatMessages.scrollHeight + 100;
+                    }, 50);
+                });
+            }
+        }
+
+        // 스크롤 이벤트 리스너 초기화 (MutationObserver 기능은 app.js에서 처리)
+        function initScrollListener() {
+            const chatMessages = document.getElementById('chatResults');
+            const scrollBtn = document.getElementById('scrollToBottomBtn');
+            
+            if (chatMessages && scrollBtn) {
+                // 기본 스크롤 이벤트만 처리 (더 복잡한 로직은 app.js에서)
+                chatMessages.addEventListener('scroll', () => {
+                    const isAtBottom = chatMessages.scrollHeight - chatMessages.scrollTop - chatMessages.clientHeight < 100;
+                    scrollBtn.style.display = isAtBottom ? 'none' : 'flex';
+                });
+            }
+        }
     </script>
     <script>
         // 앱 초기화
@@ -1730,6 +2132,9 @@
             } else {
                 console.error('❌ marked.js 라이브러리가 로드되지 않았습니다!');
             }
+            
+            // 스크롤 리스너 초기화
+            initScrollListener();
         });
     </script>
 </body>

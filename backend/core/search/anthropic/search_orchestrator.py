@@ -108,7 +108,10 @@ class AnthropicSearchOrchestrator:
                                  query: str, 
                                  tenant_id: str,
                                  platform: str = "freshdesk",
-                                 stream: bool = False) -> AsyncGenerator[Dict[str, Any], None]:
+                                 stream: bool = False,
+                                 chat_history: List[Dict[str, str]] = None,
+                                 force_intent: Optional[str] = None,
+                                 skip_rag: bool = False) -> AsyncGenerator[Dict[str, Any], None]:
         """
         상담원 검색을 실행하고 결과를 반환합니다
         
@@ -122,27 +125,45 @@ class AnthropicSearchOrchestrator:
             Dict[str, Any]: 검색 결과 청크
         """
         try:
-            logger.info(f"상담원 검색 시작: '{query[:50]}...' (tenant: {tenant_id})")
+            logger.info(f"상담원 검색 시작: '{query[:50]}...' (tenant: {tenant_id}, skip_rag: {skip_rag}, force_intent: {force_intent})")
+            
+            # skip_rag가 True면 RAG 검색 없이 직접 LLM 응답
+            if skip_rag:
+                logger.info("자유 모드: RAG 검색을 건너뛰고 직접 LLM 응답 생성")
+                direct_response = await self._generate_direct_llm_response(query, chat_history)
+                
+                final_result = {
+                    "type": "final",
+                    "search_context": {
+                        "intent": "general",
+                        "urgency": "general",
+                        "keywords": [],
+                        "response_type": "direct_llm",
+                        "mode": "free"
+                    },
+                    "ai_summary": direct_response,
+                    "structured_response": direct_response,
+                    "search_results": {"documents": [], "metadatas": [], "ids": [], "distances": []},
+                    "total_results": 0,
+                    "quality_score": 0.9
+                }
+                
+                if stream:
+                    yield {"type": "content", "content": direct_response}
+                yield final_result
+                return
             
             # 1. 의도 분석
-            if stream:
-                yield {"type": "analysis", "content": "검색 의도를 분석하고 있습니다..."}
-            
             context = await self.intent_analyzer.analyze_search_intent(query)
             
-            if stream:
-                yield {
-                    "type": "analysis_complete",
-                    "content": f"의도: {context.intent}, 우선순위: {context.urgency}"
-                }
+            # force_intent가 있으면 덮어쓰기
+            if force_intent:
+                context.intent = force_intent
             
             # 의도 분석에 따른 처리 방식 결정
             if context.intent == "general" and any(keyword in context.clean_query.lower() for keyword in ["안녕", "hello", "hi", "어떻게", "무엇"]):
                 # 일반 대화나 인사말의 경우 RAG 없이 LLM 직접 응답
-                if stream:
-                    yield {"type": "generating", "content": "일반적인 질문에 답변하고 있습니다..."}
-                
-                direct_response = await self._generate_direct_llm_response(context.clean_query)
+                direct_response = await self._generate_direct_llm_response(context.clean_query, chat_history)
                 
                 final_result = {
                     "type": "final",
@@ -158,18 +179,13 @@ class AnthropicSearchOrchestrator:
                 }
                 
                 if stream:
-                    yield {"type": "response", "content": direct_response}
-                    yield final_result
-                else:
-                    yield final_result
+                    yield {"type": "content", "content": direct_response}
+                yield final_result
                 return
             
             # 고급 검색 엔진 활용 가능성 검토
             enhanced_context = await self.enhanced_search.analyze_enhanced_query(context.clean_query)
             if enhanced_context.search_type in ["attachment", "category", "solution"]:
-                if stream:
-                    yield {"type": "enhanced_search", "content": f"{enhanced_context.search_type} 전반용 검색을 시작합니다..."}
-                
                 # 고급 검색 실행
                 enhanced_results = await self.enhanced_search.execute_enhanced_search(
                     context=enhanced_context,
@@ -181,8 +197,6 @@ class AnthropicSearchOrchestrator:
                 if enhanced_results.get("total_results", 0) > 0:
                     # 고급 검색 결과가 있으면 기본 검색 대신 사용
                     search_results = enhanced_results
-                    if stream:
-                        yield {"type": "enhanced_complete", "content": f"{enhanced_context.search_type} 전반용 검색 완료: {search_results.get('total_results', 0)}개 결과"}
                 else:
                     # 고급 검색 결과가 없으면 기본 검색으로 폴백
                     search_results = await self._perform_vector_search(context, tenant_id, platform)
@@ -193,14 +207,17 @@ class AnthropicSearchOrchestrator:
             # 2. 벡터 검색 실행 (이미 위에서 처리됨)
             if not self.vector_db:
                 logger.error("VectorDB가 초기화되지 않음")
-                if stream:
-                    yield {"type": "error", "content": "검색 시스템이 초기화되지 않았습니다."}
+                error_result = {
+                    "type": "final",
+                    "error": "검색 시스템이 초기화되지 않았습니다.",
+                    "ai_summary": "검색 시스템에 문제가 발생했습니다. 잠시 후 다시 시도해주세요.",
+                    "search_results": {"documents": [], "metadatas": [], "ids": [], "distances": []},
+                    "total_results": 0
+                }
+                yield error_result
                 return
             
             logger.info(f"VectorDB 인스턴스 확인: {type(self.vector_db)}")
-            
-            if stream and "search_results" not in locals():
-                yield {"type": "search", "content": "관련 문서를 검색하고 있습니다..."}
             
             # 벡터 검색 실행 (이미 위에서 처리되지 않은 경우만)
             if "search_results" not in locals():
@@ -257,25 +274,19 @@ class AnthropicSearchOrchestrator:
                 }
 
             # 4. 결과 최적화 및 구조화
-            if stream:
-                yield {"type": "processing", "content": "검색 결과를 분석하고 있습니다..."}
-            
             enhanced_results = await self._enhance_results(search_results, context)
             
             # 4. Constitutional AI 응답 생성
             structured_response = ""
             if self.llm_manager and search_results.get('documents'):
-                if stream:
-                    yield {"type": "generating", "content": "상담원 맞춤 응답을 생성하고 있습니다..."}
-                
                 logger.info("Constitutional AI 응답 생성 시작")
                 structured_response = await self._generate_constitutional_response(
-                    enhanced_results, context
+                    enhanced_results, context, chat_history
                 )
                 logger.info("Constitutional AI 응답 생성 완료")
                 
                 if stream:
-                    yield {"type": "response", "content": structured_response}
+                    yield {"type": "content", "content": structured_response}
             else:
                 structured_response = "검색 결과를 확인해주세요."
             
@@ -651,7 +662,8 @@ class AnthropicSearchOrchestrator:
     
     async def _generate_constitutional_response(self, 
                                               results: Dict[str, Any], 
-                                              context: SearchContext) -> str:
+                                              context: SearchContext,
+                                              chat_history: List[Dict[str, str]] = None) -> str:
         """
         Constitutional AI 원칙을 적용한 구조화된 응답을 생성합니다
         
@@ -684,7 +696,14 @@ class AnthropicSearchOrchestrator:
             
             # LLM 호출
             if self.llm_manager:
-                messages = [{"role": "user", "content": prompt}]
+                # 대화 히스토리 포함
+                messages = []
+                if chat_history:
+                    # 이전 대화 추가
+                    messages.extend(chat_history)
+                # 현재 쿼리 추가
+                messages.append({"role": "user", "content": prompt})
+                
                 response = await self.llm_manager.generate(
                     messages=messages,
                     provider=LLMProvider.ANTHROPIC, 
@@ -706,7 +725,7 @@ class AnthropicSearchOrchestrator:
             logger.error(f"Constitutional AI 응답 생성 실패: {e}")
             return f"응답 생성 중 오류가 발생했습니다: {str(e)[:100]}... 검색된 문서를 직접 확인해 주세요."
     
-    async def _generate_direct_llm_response(self, query: str) -> str:
+    async def _generate_direct_llm_response(self, query: str, chat_history: List[Dict[str, str]] = None) -> str:
         """
         RAG 없이 LLM에 직접 질문하여 응답을 생성합니다 (일반 대화용)
         
@@ -733,7 +752,12 @@ class AnthropicSearchOrchestrator:
 
             # LLM 호출
             if self.llm_manager:
-                messages = [{"role": "user", "content": prompt}]
+                # 대화 히스토리 포함
+                messages = []
+                if chat_history:
+                    messages.extend(chat_history)
+                messages.append({"role": "user", "content": prompt})
+                
                 response = await self.llm_manager.generate(
                     messages=messages,
                     provider=LLMProvider.ANTHROPIC,
