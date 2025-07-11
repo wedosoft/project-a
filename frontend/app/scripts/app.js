@@ -15,9 +15,14 @@ const App = {
   // 현재 상태
   state: {
     ticketId: null,
-    isLoading: false,
+    
+    // 데이터 로딩 상태 (세분화)
+    loadingState: 'idle', // 'idle', 'loading', 'success', 'error'
+    isLoading: false, // 하위 호환성을 위해 유지
     BACKEND_CALLED: false, // 백엔드 호출 여부 - 한 번 호출되면 절대 다시 호출 안함
     dataLoaded: false, // 초기 데이터 로드 완료 여부
+    loadingError: null, // 로딩 에러 정보
+    
     currentMode: 'smart', // 'smart' or 'free'
     client: null, // FDK 클라이언트 객체
     
@@ -56,7 +61,10 @@ const App = {
       priorityOptions: null,
       statusOptions: null,
       lastFetched: null
-    }
+    },
+    
+    // 메타데이터 서비스 인스턴스
+    metadataService: null
   },
 
   // API 통신
@@ -81,7 +89,10 @@ const App = {
         return App.state.cachedData;
       }
       
+      // 로딩 상태 시작
       App.state.BACKEND_CALLED = true;
+      App.state.loadingState = 'loading';
+      App.state.loadingError = null;
       console.log('🔥 페이지 최초 로딩 - 백엔드 호출 시작');
       
       const url = `${App.config.baseURL}/init/${ticketId}?stream=true`;
@@ -123,6 +134,7 @@ const App = {
                   const finalData = { summary, similarTickets, kbDocuments };
                   App.state.cachedData = finalData; // 캐시에 저장
                   App.state.dataLoaded = true;
+                  App.state.loadingState = 'success';
                   App.ui.hideLoading();
                   return finalData;
                 }
@@ -139,6 +151,7 @@ const App = {
                       const finalData = { summary, similarTickets, kbDocuments };
                       App.state.cachedData = finalData; // 캐시에 저장
                       App.state.dataLoaded = true;
+                      App.state.loadingState = 'success';
                       App.ui.hideLoading();
                       return finalData;
                     }
@@ -154,10 +167,14 @@ const App = {
         const finalData = { summary, similarTickets, kbDocuments };
         App.state.cachedData = finalData; // 캐시에 저장
         App.state.dataLoaded = true;
+        App.state.loadingState = 'success';
         App.ui.hideLoading();
         return finalData;
         
       } catch (error) {
+        // 에러 상태 설정
+        App.state.loadingState = 'error';
+        App.state.loadingError = error.message || '백엔드 서버 연결 실패';
         App.ui.hideLoading();
         console.error('백엔드 호출 실패:', error);
         App.ui.showError('백엔드 서버 연결 실패. 새로고침 버튼을 눌러 다시 시도하세요.');
@@ -183,16 +200,43 @@ const App = {
         // 캐시 업데이트
         App.state.cachedData = data;
         
-        // UI 업데이트
+        // UI 업데이트 (순차적 안전 렌더링)
+        console.log('🔄 UI 순차 렌더링 시작...');
+        
+        // 1. 요약 업데이트
         if (data.summary) {
-          App.ui.updateSummary(data.summary);
+          try {
+            App.ui.updateSummary(data.summary);
+            console.log('✅ 요약 렌더링 완료');
+          } catch (error) {
+            console.error('❌ 요약 렌더링 실패:', error);
+            App.ui.showRenderError('summaryContainer', '요약을 표시하는 중 오류가 발생했습니다.');
+          }
         }
+        
+        // 2. 유사 티켓 렌더링
         if (data.similarTickets) {
-          App.ui.renderSimilarTickets(data.similarTickets);
+          try {
+            await App.ui.renderSimilarTickets(data.similarTickets);
+            console.log('✅ 유사 티켓 렌더링 완료');
+          } catch (error) {
+            console.error('❌ 유사 티켓 렌더링 실패:', error);
+            App.ui.showRenderError('similarTicketsContainer', '유사 티켓을 표시하는 중 오류가 발생했습니다.');
+          }
         }
+        
+        // 3. KB 문서 렌더링
         if (data.kbDocuments) {
-          App.ui.renderKBDocuments(data.kbDocuments);
+          try {
+            App.ui.renderKBDocuments(data.kbDocuments);
+            console.log('✅ KB 문서 렌더링 완료');
+          } catch (error) {
+            console.error('❌ KB 문서 렌더링 실패:', error);
+            App.ui.showRenderError('kbDocumentsContainer', 'KB 문서를 표시하는 중 오류가 발생했습니다.');
+          }
         }
+        
+        console.log('✅ UI 순차 렌더링 완료');
         
         console.log('✅ 새로고침 완료');
         
@@ -548,7 +592,7 @@ const App = {
       // 1줄: 요청자, 감정상태, 우선순위
       
       // 1. 요청자 (FDK contact data method 우선 사용)
-      let requester = '👤 미확인';
+      let requester = null;
       if (optimizedData?.contact?.contact?.name) {
         requester = `👤 ${optimizedData.contact.contact.name}`;
       } else if (optimizedData?.contact?.name) {
@@ -556,7 +600,9 @@ const App = {
       } else if (optimizedData?.ticket?.ticket?.requester_name) {
         requester = `👤 ${optimizedData.ticket.ticket.requester_name}`;
       }
-      row1Items.push(`<span class="meta-item">${requester}</span>`);
+      if (requester) {
+        row1Items.push(`<span class="meta-item">${requester}</span>`);
+      }
 
       // 2. 백엔드 감정상태 (백엔드에서 제공하지 않으므로 기본값)
       if (emotionData && emotionData.emotion) {
@@ -576,26 +622,35 @@ const App = {
       }
 
       // 3. 우선순위 (통합 유틸리티 사용)
-      let priority = '❌ 우선순위 없음';
+      let priority = null;
       if (optimizedData?.ticket?.ticket) {
         const ticket = optimizedData.ticket.ticket;
         console.log('🔍 메인 티켓 우선순위 처리 - 티켓 데이터:', ticket);
-        priority = await TicketLabelUtils.getPriorityLabel(ticket);
-        console.log('✅ 메인 티켓 우선순위 결과:', priority);
+        try {
+          priority = await TicketLabelUtils.getPriorityLabel(ticket);
+          console.log('✅ 메인 티켓 우선순위 결과:', priority);
+        } catch (error) {
+          console.error('⚠️ 우선순위 조회 실패:', error);
+          priority = '📊 우선순위';
+        }
       }
-      row1Items.push(`<span class="meta-item">${priority}</span>`);
+      if (priority) {
+        row1Items.push(`<span class="meta-item">${priority}</span>`);
+      }
 
       // 2줄: 담당자, 담당그룹, 상태
 
       // 4. 담당자 (최적화된 agent 데이터 사용)
-      let agent = '👤 미배정';
+      let agent = null;
       if (optimizedData?.agent?.contact?.name) {
         agent = `👤 ${optimizedData.agent.contact.name}`;
       }
-      row2Items.push(`<span class="meta-item">${agent}</span>`);
+      if (agent) {
+        row2Items.push(`<span class="meta-item">${agent}</span>`);
+      }
 
       // 5. 담당그룹 (FDK group data method 우선 사용)
-      let group = '👥 CS팀';
+      let group = null;
       if (optimizedData?.group?.group?.name) {
         group = `👥 ${optimizedData.group.group.name}`;
       } else if (optimizedData?.group?.name) {
@@ -605,17 +660,26 @@ const App = {
       } else if (optimizedData?.ticket?.ticket?.group_name) {
         group = `👥 ${optimizedData.ticket.ticket.group_name}`;
       }
-      row2Items.push(`<span class="meta-item">${group}</span>`);
+      if (group) {
+        row2Items.push(`<span class="meta-item">${group}</span>`);
+      }
 
       // 6. 진행상태 (통합 유틸리티 사용)
-      let status = '❌ 상태 없음';
+      let status = null;
       if (optimizedData?.ticket?.ticket) {
         const ticket = optimizedData.ticket.ticket;
         console.log('🔍 메인 티켓 상태 처리 - 티켓 데이터:', ticket);
-        status = await TicketLabelUtils.getStatusLabel(ticket);
-        console.log('✅ 메인 티켓 상태 결과:', status);
+        try {
+          status = await TicketLabelUtils.getStatusLabel(ticket);
+          console.log('✅ 메인 티켓 상태 결과:', status);
+        } catch (error) {
+          console.error('⚠️ 상태 조회 실패:', error);
+          status = '⚪ 상태';
+        }
       }
-      row2Items.push(`<span class="meta-item">${status}</span>`);
+      if (status) {
+        row2Items.push(`<span class="meta-item">${status}</span>`);
+      }
 
       // HTML 업데이트
       metaRow1.innerHTML = row1Items.join('');
@@ -699,9 +763,15 @@ const App = {
       }
       
       // 로딩 메시지 업데이트
+      this.updateLoadingMessage(message);
+    },
+
+    // 로딩 메시지 업데이트
+    updateLoadingMessage(message) {
       const loadingSubtitle = document.querySelector('.loading-subtitle');
       if (loadingSubtitle && message) {
         loadingSubtitle.textContent = message;
+        console.log('📝 로딩 메시지 업데이트:', message);
       }
     },
 
@@ -785,14 +855,25 @@ const App = {
       }
 
       console.log('✅ Rendering similar tickets:', filteredTickets.length, '건');
+      
+      // 메타데이터 일괄 조회
+      let enrichedTickets = filteredTickets;
+      if (App.state.metadataService) {
+        try {
+          enrichedTickets = await App.state.metadataService.enrichSimilarTickets(filteredTickets);
+          console.log('✅ 티켓 메타데이터 인리치 완료');
+        } catch (error) {
+          console.error('⚠️ 메타데이터 일괄 조회 실패:', error);
+        }
+      }
 
       // 인사이트 패널 생성 (실제 데이터 구조에 맞게)
-      const avgSimilarity = filteredTickets.reduce((sum, t) => {
+      const avgSimilarity = enrichedTickets.reduce((sum, t) => {
         const similarity = t.similarity_score || t.similarity || t.score || 0;
         const similarityPercent = similarity > 1 ? similarity : similarity * 100;
         return sum + similarityPercent;
-      }, 0) / filteredTickets.length;
-      const resolvedCount = filteredTickets.filter(t => {
+      }, 0) / enrichedTickets.length;
+      const resolvedCount = enrichedTickets.filter(t => {
         // Freshdesk 상태 ID 기반 체크 (4 = resolved)
         const statusId = t.status_id || t.status;
         const statusLabel = t.ticket_status || '';
@@ -804,7 +885,7 @@ const App = {
                statusLabel.toLowerCase().includes('resolved') ||
                statusLabel.toLowerCase().includes('해결');
       }).length;
-      const activeCount = filteredTickets.length - resolvedCount;
+      const activeCount = enrichedTickets.length - resolvedCount;
       
       const insightPanel = `
         <div class="insight-panel">
@@ -812,17 +893,58 @@ const App = {
           <div class="insight-content">
             🎯 평균 유사도: ${Math.round(avgSimilarity)}%<br>
             📊 상태 분포: ${resolvedCount}건 해결완료, ${activeCount}건 진행중<br>
-            📋 검색된 티켓: ${filteredTickets.length}건의 유사 사례 발견
+            📋 검색된 티켓: ${enrichedTickets.length}건의 유사 사례 발견
           </div>
         </div>
       `;
 
-      // 티켓 카드들 생성
-      const ticketCards = await Promise.all(filteredTickets.map(async ticket => {
+      // 레이블 일괄 조회 최적화
+      console.log('🔄 레이블 일괄 조회 시작...');
+      
+      // 1단계: 모든 티켓의 priority와 status 값 수집
+      const priorityIds = new Set();
+      const statusIds = new Set();
+      
+      enrichedTickets.forEach(ticket => {
+        const priority = ticket.metadata?.priority || ticket.priority;
+        const status = ticket.metadata?.status || ticket.status;
+        
+        if (priority !== undefined && priority !== null) {
+          priorityIds.add(parseInt(priority));
+        }
+        if (status !== undefined && status !== null) {
+          statusIds.add(parseInt(status));
+        }
+      });
+      
+      console.log(`🔍 수집된 고유 ID - Priority: ${Array.from(priorityIds)}, Status: ${Array.from(statusIds)}`);
+      
+      // 2단계: 레이블 일괄 조회 및 캐싱
+      const labelCache = {
+        priority: new Map(),
+        status: new Map()
+      };
+      
+      // Priority 레이블 일괄 조회
+      for (const priorityId of priorityIds) {
+        const priorityText = await TicketLabelUtils.getPriorityLabel({ priority: priorityId });
+        labelCache.priority.set(priorityId, priorityText);
+      }
+      
+      // Status 레이블 일괄 조회
+      for (const statusId of statusIds) {
+        const statusText = await TicketLabelUtils.getStatusLabel({ status: statusId });
+        labelCache.status.set(statusId, statusText);
+      }
+      
+      console.log(`✅ 레이블 캐싱 완료 - Priority: ${labelCache.priority.size}개, Status: ${labelCache.status.size}개`);
+      
+      // 티켓 카드들 생성 (캐시된 레이블 사용)
+      const ticketCards = enrichedTickets.map(ticket => {
         console.log('🎫 Processing ticket:', ticket);
         
         // 원본 데이터 구조에 맞게 필드 매핑 (있는 필드만 사용)
-        const ticketId = ticket.id || 'N/A';
+        const ticketId = ticket.id;
         const ticketTitle = ticket.subject || '제목 없음';  // subject만 사용
         const similarity = ticket.similarity_score || ticket.score || 0;
         const similarityPercent = similarity > 1 ? similarity : similarity * 100;
@@ -832,33 +954,17 @@ const App = {
         const scoreIcon = similarityPercent >= 80 ? '🟢' : similarityPercent >= 60 ? '🟡' : '🔴';
         
         // 원본 필드만 사용 (백엔드 분석 결과 기반)
-        const priority = ticket.metadata?.priority || ticket.priority || 1;  // 숫자 우선순위
-        const status = ticket.metadata?.status || ticket.status || '미확인';  // 티켓 상태
-        const responderName = ticket.metadata?.agent_name || ticket.metadata?.responder_id || '미지정';
+        const priority = ticket.metadata?.priority || ticket.priority;
+        const status = ticket.metadata?.status || ticket.status;
+        const responderName = ticket.metadata?.agent_name || ticket.metadata?.responder_id;
         
+        // 캐시된 레이블 사용 (API 호출 없음)
+        const priorityText = labelCache.priority.get(parseInt(priority)) || '❌ 우선순위 없음';
+        const statusLabel = labelCache.status.get(parseInt(status)) || '❌ 상태 없음';
         
-        // 레이블 조회 (원본 숫자값 기반)
-        const ticketForLabels = {
-          priority: priority,
-          status: status
-        };
-        
-        const priorityText = await TicketLabelUtils.getPriorityLabel(ticketForLabels);
-        const statusLabel = await TicketLabelUtils.getStatusLabel(ticketForLabels);
-        
-        // 담당자 이름 가져오기 (메인티켓 방식 재활용)
-        const agentId = ticket.metadata?.responder_id || ticket.metadata?.agent_id;
-        let agentName = responderName;
-        if (agentId && App.state.client) {
-          try {
-            const fetchedAgentName = await TicketLabelUtils.getAgentName(agentId);
-            if (fetchedAgentName) {
-              agentName = fetchedAgentName;
-            }
-          } catch (error) {
-            console.error('Agent 이름 조회 실패:', error);
-          }
-        }
+        // 일괄 조회된 담당자/요청자 이름 사용
+        const agentName = ticket.responderName || responderName || null;
+        const requesterDisplayName = ticket.requesterName || null;
         
         const statusClass = (status === 'resolved' || status === 4) ? 'status-resolved' : 
                            (status === 'in_progress' || status === 2) ? 'status-progress' : 'status-pending';
@@ -878,9 +984,10 @@ const App = {
                   <span>📅 ${createdAt ? new Date(createdAt).toLocaleDateString('ko-KR') : ''}</span>
                   <span class="status-indicator ${statusClass}">${statusLabel}</span>
                   <span class="priority-indicator">${priorityText}</span>
-                  ${agentName ? `<span>👤 ${agentName}</span>` : ''}
+                  ${agentName ? `<span>👨‍💼 ${agentName}</span>` : ''}
+                  ${requesterDisplayName ? `<span>👤 ${requesterDisplayName}</span>` : ''}
                 </div>
-                <span>${ticket.relative_time || '시간 미상'}</span>
+                ${ticket.relative_time ? `<span>${ticket.relative_time}</span>` : ''}
               </div>
               <div class="card-actions">
                 <button class="card-btn primary" onclick="viewSummary('#${ticketId}')">
@@ -893,15 +1000,15 @@ const App = {
             </div>
           </div>
         `;
-      }));
+      });
 
       container.innerHTML = insightPanel + ticketCards.join('');
       
       // 탭 카운트 업데이트
       const countElement = document.getElementById('similarTicketsCount');
       if (countElement) {
-        countElement.textContent = filteredTickets.length;
-        console.log('✅ 유사 티켓 탭 카운트 업데이트:', filteredTickets.length);
+        countElement.textContent = enrichedTickets.length;
+        console.log('✅ 유사 티켓 탭 카운트 업데이트:', enrichedTickets.length);
       } else {
         console.error('❌ similarTicketsCount 엘리먼트를 찾을 수 없음');
       }
@@ -978,7 +1085,7 @@ const App = {
               </div>
               <div class="card-meta">
                 <div class="meta-left">
-                  <span>📅 ${createdAt ? new Date(createdAt).toLocaleDateString('ko-KR') : 'N/A'}</span>
+                  <span>📅 ${createdAt ? new Date(createdAt).toLocaleDateString('ko-KR') : '날짜 없음'}</span>
                   <span class="status-indicator status-resolved">KB문서</span>
                   <span>📂 ${doc.category || '일반'}</span>
                 </div>
@@ -1118,32 +1225,52 @@ const App = {
           };
         }
         
-        // 모달 설정 구성 (자동 백엔드 호출 금지, 새로고침 버튼만 허용)
+        // 현재 로딩 상태에 따른 모달 데이터 구성
+        const currentLoadingState = App.state.loadingState;
+        const isLoading = currentLoadingState === 'loading';
+        const isSuccess = currentLoadingState === 'success';
+        const isError = currentLoadingState === 'error';
+        const hasData = App.state.dataLoaded && App.state.cachedData;
+        
+        console.log(`🎭 모달 데이터 준비 - 로딩상태: ${currentLoadingState}, 데이터있음: ${hasData}`);
+        
+        // 모달 설정 구성 (로딩 상태에 따른 적절한 UI 표시)
         const modalConfig = {
           title: "Copilot Canvas - AI 상담사 지원",
           template: "index.html",
           data: {
             ticketId: ticketId,
             ticket: ticket,
-            hasCachedData: App.state.dataLoaded,
             timestamp: new Date().toISOString(),
-            noBackendCall: true, // 모달에서 자동 백엔드 호출 금지
-            usePreloadedData: true, // 캐시 데이터만 사용
-            // 캐시된 데이터 전달
-            cachedData: App.state.cachedData,
+            // 성공 상태일 때만 백엔드 호출 금지, 나머지는 허용
+            noBackendCall: isSuccess && hasData,
+            
+            // 로딩 상태 정보 (세분화)
+            loadingState: currentLoadingState,
+            hasCachedData: hasData,
+            
+            // 캐시된 데이터 전달 (상태에 따라)
+            cachedData: isSuccess && hasData ? App.state.cachedData : { similarTickets: [], kbDocuments: [], summary: '' },
             cachedTicketInfo: App.state.cachedTicketInfo,
-            // 새로고침 버튼 허용
-            allowRefresh: true,
-            // 로딩 상태 정보
-            loadingStatus: { status: 'ready' },
+            
+            // 에러 정보
+            loadingError: App.state.loadingError,
+            
+            // UI 상태 플래그
+            isLoading: isLoading,
+            isSuccess: isSuccess,
+            isError: isError,
+            isReady: isSuccess && hasData,
+            
+            // 새로고침 허용 (에러 시에만)
+            allowRefresh: isError,
+            
+            // 레거시 호환
+            loadingStatus: { status: isSuccess ? 'ready' : isLoading ? 'loading' : 'error' },
             globalData: {},
-            streamingStatus: { is_streaming: false },
-            hasError: false,
-            errorMessage: null,
-            // 상태별 플래그
-            isLoading: false,
-            isReady: true,
-            isPartiallyLoaded: false
+            streamingStatus: { is_streaming: isLoading },
+            hasError: isError,
+            errorMessage: isError ? App.state.loadingError : null
           },
           size: {
             width: "900px",
@@ -1344,12 +1471,22 @@ const App = {
 
 
     // 에러 표시
-    showError(message) {
+    showError(message, isPermantError = false) {
       console.error('앱 에러:', message);
       
       const errorDiv = document.createElement('div');
       errorDiv.className = 'error-toast';
-      errorDiv.textContent = message;
+      
+      // 새로고침 버튼 추가
+      const refreshButton = isPermantError ? '' : '<button onclick="refreshData()" style="margin-left: 10px; padding: 2px 8px; background: #721c24; color: white; border: none; border-radius: 3px; cursor: pointer;">새로고침</button>';
+      
+      errorDiv.innerHTML = `
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <span>${message}</span>
+          ${refreshButton}
+        </div>
+      `;
+      
       errorDiv.style.cssText = `
         position: fixed;
         top: 20px;
@@ -1360,7 +1497,7 @@ const App = {
         border-radius: 4px;
         border: 1px solid #f5c6cb;
         z-index: 9999;
-        max-width: 300px;
+        max-width: 400px;
       `;
       
       if (document.body) {
@@ -1373,6 +1510,86 @@ const App = {
         }, 5000);
       } else {
         console.error('document.body가 없음:', message);
+      }
+    },
+
+    // 렌더링 에러 표시 (특정 컨테이너에)
+    showRenderError(containerId, message) {
+      console.error(`렌더링 에러 (${containerId}):`, message);
+      
+      const container = document.getElementById(containerId);
+      if (!container) {
+        console.error(`❌ 컨테이너를 찾을 수 없음: ${containerId}`);
+        return;
+      }
+      
+      container.innerHTML = `
+        <div class="error-panel">
+          <div class="error-icon">❌</div>
+          <div class="error-title">렌더링 오류</div>
+          <div class="error-message">${message}</div>
+          <button class="error-retry-btn" onclick="App.api.refreshData()">다시 시도</button>
+        </div>
+      `;
+      
+      // 에러 패널 스타일 적용
+      const errorPanel = container.querySelector('.error-panel');
+      if (errorPanel) {
+        errorPanel.style.cssText = `
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          padding: 40px 20px;
+          text-align: center;
+          background: #f8f9fa;
+          border: 1px solid #dee2e6;
+          border-radius: 8px;
+          color: #6c757d;
+        `;
+        
+        const errorIcon = errorPanel.querySelector('.error-icon');
+        if (errorIcon) {
+          errorIcon.style.cssText = `
+            font-size: 48px;
+            margin-bottom: 16px;
+          `;
+        }
+        
+        const errorTitle = errorPanel.querySelector('.error-title');
+        if (errorTitle) {
+          errorTitle.style.cssText = `
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #dc3545;
+          `;
+        }
+        
+        const errorMessage = errorPanel.querySelector('.error-message');
+        if (errorMessage) {
+          errorMessage.style.cssText = `
+            font-size: 14px;
+            margin-bottom: 20px;
+            line-height: 1.5;
+          `;
+        }
+        
+        const retryBtn = errorPanel.querySelector('.error-retry-btn');
+        if (retryBtn) {
+          retryBtn.style.cssText = `
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.2s;
+          `;
+          retryBtn.onmouseover = () => retryBtn.style.background = '#0056b3';
+          retryBtn.onmouseout = () => retryBtn.style.background = '#007bff';
+        }
       }
     },
     
@@ -1396,7 +1613,15 @@ const App = {
           // 백엔드에서 전체 요약을 한 번에 보내므로 바로 표시
           currentData.summary = data.content || '';
           App.state.cachedData.summary = currentData.summary; // 캐시에 저장
-          this.updateSummary(currentData.summary);
+          
+          // 안전한 렌더링 (에러 격리)
+          try {
+            this.updateSummary(currentData.summary);
+            console.log('✅ 요약 업데이트 완료');
+          } catch (error) {
+            console.error('❌ 요약 업데이트 실패:', error);
+            this.showRenderError('summaryContainer', '티켓 요약을 표시하는 중 오류가 발생했습니다.');
+          }
           break;
           
         case 'similar_tickets':
@@ -1442,7 +1667,15 @@ const App = {
           App.state.cachedData.similarTickets = currentData.similarTickets;
           console.log('💾 유사티켓 캐시 저장 완료:', App.state.cachedData.similarTickets.length, '건');
           console.log('🎯 Processing similar tickets:', currentData.similarTickets.length, '건');
-          this.renderSimilarTickets(currentData.similarTickets);
+          
+          // 안전한 렌더링 (에러 격리)
+          try {
+            await this.renderSimilarTickets(currentData.similarTickets);
+            console.log('✅ 유사 티켓 렌더링 완료');
+          } catch (error) {
+            console.error('❌ 유사 티켓 렌더링 실패:', error);
+            this.showRenderError('similarTicketsContainer', '유사 티켓을 표시하는 중 오류가 발생했습니다.');
+          }
           
           // If we found KB docs mixed in, add them to KB documents
           if (mixedInKBDocs.length > 0) {
@@ -1471,7 +1704,15 @@ const App = {
           console.log('💾 KB문서 캐시 저장 완료:', App.state.cachedData.kbDocuments.length, '건');
           console.log('🎯 Processing KB documents:', currentData.kbDocuments.length, '건');
           console.log('🎯 KB 문서 데이터 상세:', currentData.kbDocuments);
-          this.renderKBDocuments(currentData.kbDocuments);
+          
+          // 안전한 렌더링 (에러 격리)
+          try {
+            this.renderKBDocuments(currentData.kbDocuments);
+            console.log('✅ KB 문서 렌더링 완료');
+          } catch (error) {
+            console.error('❌ KB 문서 렌더링 실패:', error);
+            this.showRenderError('kbDocumentsContainer', 'KB 문서를 표시하는 중 오류가 발생했습니다.');
+          }
           
           // KB 탭 카운트 업데이트
           const kbCountElement = document.getElementById('kbDocumentsCount');
@@ -1578,6 +1819,9 @@ const App = {
       const client = await app.initialized();
       App.state.client = client; // 클라이언트 객체 저장
       
+      // 메타데이터 서비스 초기화
+      App.state.metadataService = new TicketMetadataService(client);
+      
       // 티켓 ID 먼저 가져오기
       const basicTicketData = await client.data.get('ticket');
       App.state.ticketId = basicTicketData.ticket.id;
@@ -1589,9 +1833,15 @@ const App = {
       // FDK 원본 티켓 데이터도 별도 보관
       App.state.originalFDKTicket = basicTicketData.ticket;
       
-      // FDK 옵션 미리 가져오기 (캐싱)
+      // FDK 옵션 미리 가져오기 (캐싱) - 실패 시에도 계속 진행
       console.log('🔄 Pre-fetching FDK options for better performance...');
-      await TicketLabelUtils.getCachedOptions();
+      try {
+        await TicketLabelUtils.getCachedOptions();
+        console.log('✅ FDK 옵션 캐싱 성공');
+      } catch (error) {
+        console.error('⚠️ FDK 옵션 조회 실패:', error);
+        // 실패해도 계속 진행
+      }
       
       // 기본 헤더 업데이트 (최소한의 정보라도 표시)
       await App.ui.collectOptimizedTicketData();
@@ -1667,7 +1917,7 @@ const App = {
         App.ui.showLoading();
         
         try {
-          const data = await App.api.loadInitialData(App.state.ticketId);
+          await App.api.loadInitialData(App.state.ticketId);
           
           // 데이터가 성공적으로 로드되면 캐시에 저장됨 (loadInitialData 내부에서 처리)
           console.log('✅ 초기 데이터 로드 완료');
@@ -1792,27 +2042,183 @@ const App = {
   }
 };
 
+// 티켓 메타데이터 일괄 조회 서비스
+class TicketMetadataService {
+  constructor(client) {
+    this.client = client;
+    this.cache = new Map();
+  }
+
+  // 사용자 ID들을 일괄로 조회
+  async batchFetchUsers(userIds) {
+    if (!userIds || userIds.length === 0) return {};
+    
+    const uniqueIds = [...new Set(userIds.filter(id => id))];
+    const results = {};
+    const toFetch = [];
+    
+    // 캐시 확인
+    for (const id of uniqueIds) {
+      const cached = this.cache.get(`user_${id}`);
+      if (cached) {
+        results[id] = cached;
+      } else {
+        toFetch.push(id);
+      }
+    }
+    
+    // 캐시에 없는 것들만 조회
+    if (toFetch.length > 0) {
+      console.log(`🔍 사용자 ${toFetch.length}명 일괄 조회 시작`);
+      
+      // 병렬 조회
+      const fetchPromises = toFetch.map(async (userId) => {
+        try {
+          const response = await this.client.request.invokeTemplate('getAgent', {
+            context: { agentId: userId }
+          });
+          const agent = JSON.parse(response.response);
+          const name = agent?.contact?.name || null;
+          
+          if (name) {
+            this.cache.set(`user_${userId}`, name);
+            results[userId] = name;
+          }
+        } catch (error) {
+          console.error(`⚠️ 사용자 ${userId} 조회 실패:`, error);
+        }
+      });
+      
+      await Promise.all(fetchPromises);
+    }
+    
+    return results;
+  }
+  
+  // 그룹 ID들을 일괄로 조회
+  async batchFetchGroups(groupIds) {
+    if (!groupIds || groupIds.length === 0) return {};
+    
+    const uniqueIds = [...new Set(groupIds.filter(id => id))];
+    const results = {};
+    const toFetch = [];
+    
+    // 캐시 확인
+    for (const id of uniqueIds) {
+      const cached = this.cache.get(`group_${id}`);
+      if (cached) {
+        results[id] = cached;
+      } else {
+        toFetch.push(id);
+      }
+    }
+    
+    // 캐시에 없는 것들만 조회
+    if (toFetch.length > 0) {
+      console.log(`🔍 그룹 ${toFetch.length}개 일괄 조회 시작`);
+      
+      // 병렬 조회
+      const fetchPromises = toFetch.map(async (groupId) => {
+        try {
+          const response = await this.client.request.invokeTemplate('getGroup', {
+            context: { groupId: groupId }
+          });
+          const group = JSON.parse(response.response);
+          const name = group?.name || null;
+          
+          if (name) {
+            this.cache.set(`group_${groupId}`, name);
+            results[groupId] = name;
+          }
+        } catch (error) {
+          console.error(`⚠️ 그룹 ${groupId} 조회 실패:`, error);
+        }
+      });
+      
+      await Promise.all(fetchPromises);
+    }
+    
+    return results;
+  }
+  
+  // 유사 티켓들의 모든 메타데이터 일괄 조회
+  async enrichSimilarTickets(tickets) {
+    if (!tickets || tickets.length === 0) return tickets;
+    
+    console.log(`🚀 유사 티켓 ${tickets.length}건 메타데이터 일괄 조회 시작`);
+    
+    // 모든 ID 수집
+    const userIds = [];
+    const groupIds = [];
+    
+    tickets.forEach(ticket => {
+      const responderId = ticket.metadata?.responder_id || ticket.metadata?.agent_id;
+      const requesterId = ticket.metadata?.requester_id;
+      const groupId = ticket.metadata?.group_id;
+      
+      if (responderId) userIds.push(responderId);
+      if (requesterId) userIds.push(requesterId);
+      if (groupId) groupIds.push(groupId);
+    });
+    
+    // 일괄 조회
+    const [userNames, groupNames] = await Promise.all([
+      this.batchFetchUsers(userIds),
+      this.batchFetchGroups(groupIds)
+    ]);
+    
+    console.log(`✅ 메타데이터 조회 완료 - 사용자: ${Object.keys(userNames).length}, 그룹: ${Object.keys(groupNames).length}`);
+    
+    // 티켓에 메타데이터 추가
+    return tickets.map(ticket => {
+      const enriched = { ...ticket };
+      
+      const responderId = ticket.metadata?.responder_id || ticket.metadata?.agent_id;
+      const requesterId = ticket.metadata?.requester_id;
+      const groupId = ticket.metadata?.group_id;
+      
+      if (responderId && userNames[responderId]) {
+        enriched.responderName = userNames[responderId];
+      }
+      
+      if (requesterId && userNames[requesterId]) {
+        enriched.requesterName = userNames[requesterId];
+      }
+      
+      if (groupId && groupNames[groupId]) {
+        enriched.groupName = groupNames[groupId];
+      }
+      
+      return enriched;
+    });
+  }
+  
+  // 캐시 초기화
+  clearCache() {
+    this.cache.clear();
+  }
+}
+
 // 메인티켓과 유사티켓용 통합 레이블 조회 (일관성 보장)
 const TicketLabelUtils = {
   // 옵션 캐시 유효시간 (5분)
   CACHE_EXPIRY_MS: 5 * 60 * 1000,
   
-  // 우선순위 기본 매핑 (Freshdesk 표준)
-  PRIORITY_DEFAULTS: {
-    1: { emoji: '🔵', label: 'Low' },
-    2: { emoji: '😐', label: 'Medium' },
-    3: { emoji: '🟡', label: 'High' },
-    4: { emoji: '🔴', label: 'Urgent' }
+  // 이모지 매핑 (숫자 ID 기반)
+  PRIORITY_EMOJIS: {
+    1: '🔵',  // Low
+    2: '😐',  // Medium
+    3: '🟡',  // High
+    4: '🔴'   // Urgent
   },
   
-  // 상태 기본 매핑 (Freshdesk 표준)
-  STATUS_DEFAULTS: {
-    2: { emoji: '🟢', label: 'Open' },
-    3: { emoji: '🟡', label: 'Pending' },
-    4: { emoji: '✅', label: 'Resolved' },
-    5: { emoji: '⚪', label: 'Closed' },
-    6: { emoji: '🟠', label: 'Waiting on Customer' },
-    7: { emoji: '🟣', label: 'Waiting on Third Party' }
+  STATUS_EMOJIS: {
+    2: '🟢',  // Open
+    3: '🟡',  // Pending
+    4: '✅',  // Resolved
+    5: '⚪',  // Closed
+    6: '🟠',  // Waiting on Customer
+    7: '🟣'   // Waiting on Third Party
   },
   
   // 캐시된 옵션 가져오기 (ticket_fields 우선 사용)
@@ -1967,146 +2373,175 @@ const TicketLabelUtils = {
     }
   },
   
-  // 우선순위 레이블 가져오기 (캐시 활용)
+  // 우선순위 레이블 가져오기 (개선된 ID 매칭 방식)
   async getPriorityLabel(ticketData) {
     if (!ticketData || (ticketData.priority === undefined && ticketData.priority !== 0)) {
-      return '❌ 우선순위 없음';
+      return '❌ 우선순위 정보 없음';
     }
     
     const priorityId = parseInt(ticketData.priority);
-    
-    // 숫자 ID 기반 이모지 매핑 (Freshdesk 표준)
-    const emojiMap = this.PRIORITY_DEFAULTS[priorityId];
-    const emoji = emojiMap ? emojiMap.emoji : '📊';
+    const emoji = this.PRIORITY_EMOJIS[priorityId] || '📊';
     
     // 캐시된 옵션 가져오기
     const cachedOptions = await this.getCachedOptions();
     
-    if (!cachedOptions || !cachedOptions.priorityOptions || cachedOptions.priorityOptions.length === 0) {
-      // 캐시 실패 시 기본값 사용
-      const defaultPriority = this.PRIORITY_DEFAULTS[priorityId];
-      if (defaultPriority) {
-        console.log(`⚠️ Using default priority label for ID ${priorityId}`);
-        return `${emoji} ${defaultPriority.label}`;
+    if (!cachedOptions || !cachedOptions.priorityOptions || !Array.isArray(cachedOptions.priorityOptions) || cachedOptions.priorityOptions.length === 0) {
+      // FDK 조회 실패 시 명확한 에러 메시지
+      console.error(`❌ FDK 우선순위 옵션 조회 실패 - Priority ID: ${priorityId}`);
+      return `❌ 우선순위 조회 실패 (ID: ${priorityId})`;
+    }
+    
+    console.log(`🔍 우선순위 레이블 조회 - ID: ${priorityId}, 옵션 수: ${cachedOptions.priorityOptions.length}`);
+    
+    // ID 기반 매칭 (배열 인덱스 대신 실제 ID로 매칭)
+    let priorityOption = null;
+    let priorityText = null;
+    
+    // 다양한 형태의 옵션 구조 지원
+    for (const option of cachedOptions.priorityOptions) {
+      if (typeof option === 'string') {
+        // 단순 문자열 배열인 경우 인덱스 기반 매칭 (기존 방식 유지)
+        const index = cachedOptions.priorityOptions.indexOf(option);
+        if (index === priorityId - 1) {  // Freshdesk priority는 1부터 시작
+          priorityOption = option;
+          priorityText = option;
+          break;
+        }
+      } else if (option && typeof option === 'object') {
+        // 객체 형태인 경우 ID 또는 value로 매칭
+        if (option.id === priorityId || option.value === priorityId) {
+          priorityOption = option;
+          priorityText = option.label || option.name || option.korean || option.english || option.toString();
+          break;
+        }
       }
-      return `${emoji} Priority ${priorityId}`;
     }
     
-    // FDK 옵션에서 매칭 (ticket_fields와 기존 방식 모두 지원)
-    const priorityOption = cachedOptions.priorityOptions.find(option => {
-      // ticket_fields의 choices 구조: {id, value, label}
-      // 기존 구조: {id, label} 또는 {value, name}
-      const optionId = parseInt(option.id || option.value || option);
-      return optionId === priorityId;
-    });
-    
-    if (!priorityOption) {
-      // FDK에서 못 찾은 경우 기본값 사용
-      const defaultPriority = this.PRIORITY_DEFAULTS[priorityId];
-      if (defaultPriority) {
-        return `${emoji} ${defaultPriority.label}`;
-      }
-      return `${emoji} Priority ${priorityId}`;
+    // 매칭 실패 시 명확한 에러 메시지
+    if (!priorityOption || !priorityText) {
+      console.error(`❌ 우선순위 ID ${priorityId}에 해당하는 옵션을 찾을 수 없음`);
+      console.error('🔍 사용 가능한 옵션:', cachedOptions.priorityOptions);
+      return `❌ 우선순위 매칭 실패 (ID: ${priorityId})`;
     }
     
-    // 다국어 레이블 처리 (한국어 우선, 없으면 영어)
-    let priorityText = '';
-    if (priorityOption.korean && priorityOption.korean.trim()) {
-      priorityText = priorityOption.korean;
-    } else if (priorityOption.label && priorityOption.label.trim()) {
-      priorityText = priorityOption.label;
-    } else if (priorityOption.english && priorityOption.english.trim()) {
-      priorityText = priorityOption.english;
-    } else {
-      priorityText = priorityOption.name || priorityOption.value || priorityOption.toString();
-    }
-    
-    console.log(`🔍 Found priority label for ID ${priorityId}:`, priorityText);
+    console.log(`✅ 우선순위 레이블 찾음 - ID: ${priorityId} → ${priorityText}`);
     return `${emoji} ${priorityText}`;
   },
 
-  // 상태 레이블 가져오기 (캐시 활용)
+  // 상태 레이블 가져오기 (개선된 ID 매칭 방식)
   async getStatusLabel(ticketData) {
     if (!ticketData || (ticketData.status === undefined && ticketData.status !== 0)) {
-      return '❌ 상태 없음';
+      return '❌ 상태 정보 없음';
     }
     
     const statusId = parseInt(ticketData.status);
-    
-    // 숫자 ID 기반 이모지 매핑 (Freshdesk 표준)
-    const emojiMap = this.STATUS_DEFAULTS[statusId];
-    const emoji = emojiMap ? emojiMap.emoji : '⚪';
+    const emoji = this.STATUS_EMOJIS[statusId] || '⚪';
     
     // 캐시된 옵션 가져오기
     const cachedOptions = await this.getCachedOptions();
     
-    if (!cachedOptions || !cachedOptions.statusOptions || cachedOptions.statusOptions.length === 0) {
-      // 캐시 실패 시 기본값 사용
-      const defaultStatus = this.STATUS_DEFAULTS[statusId];
-      if (defaultStatus) {
-        console.log(`⚠️ Using default status label for ID ${statusId}`);
-        return `${emoji} ${defaultStatus.label}`;
+    if (!cachedOptions || !cachedOptions.statusOptions || !Array.isArray(cachedOptions.statusOptions) || cachedOptions.statusOptions.length === 0) {
+      // FDK 조회 실패 시 명확한 에러 메시지
+      console.error(`❌ FDK 상태 옵션 조회 실패 - Status ID: ${statusId}`);
+      return `❌ 상태 조회 실패 (ID: ${statusId})`;
+    }
+    
+    console.log(`🔍 상태 레이블 조회 - ID: ${statusId}, 옵션 수: ${cachedOptions.statusOptions.length}`);
+    
+    // ID 기반 매칭 (배열 인덱스 대신 실제 ID로 매칭)
+    let statusOption = null;
+    let statusText = null;
+    
+    // 다양한 형태의 옵션 구조 지원
+    for (const option of cachedOptions.statusOptions) {
+      if (typeof option === 'string') {
+        // 단순 문자열 배열인 경우 인덱스 기반 매칭 (기존 방식 유지)
+        const index = cachedOptions.statusOptions.indexOf(option);
+        if (index === statusId - 2) {  // Freshdesk status는 보통 2부터 시작
+          statusOption = option;
+          statusText = option;
+          break;
+        }
+      } else if (option && typeof option === 'object') {
+        // 객체 형태인 경우 ID 또는 value로 매칭
+        if (option.id === statusId || option.value === statusId) {
+          statusOption = option;
+          // 한국어 우선, 없으면 영어, 최후에 다른 필드들
+          statusText = option.korean || option.label || option.name || option.english || option.toString();
+          break;
+        }
+      } else if (Array.isArray(option)) {
+        // [id, "English", "한국어"] 배열 형태인 경우
+        const [id, english, korean] = option;
+        if (parseInt(id) === statusId) {
+          statusOption = option;
+          statusText = korean || english || id.toString();
+          break;
+        }
       }
-      return `${emoji} Status ${statusId}`;
     }
     
-    // FDK 옵션에서 매칭 (ticket_fields와 기존 방식 모두 지원)
-    const statusOption = cachedOptions.statusOptions.find(option => {
-      // ticket_fields의 choices 구조: {id, value, label}
-      // 기존 구조: {id, label} 또는 {value, name}
-      const optionId = parseInt(option.id || option.value || option);
-      return optionId === statusId;
-    });
-    
-    if (!statusOption) {
-      // FDK에서 못 찾은 경우 기본값 사용
-      const defaultStatus = this.STATUS_DEFAULTS[statusId];
-      if (defaultStatus) {
-        return `${emoji} ${defaultStatus.label}`;
-      }
-      return `${emoji} Status ${statusId}`;
+    // 매칭 실패 시 명확한 에러 메시지
+    if (!statusOption || !statusText) {
+      console.error(`❌ 상태 ID ${statusId}에 해당하는 옵션을 찾을 수 없음`);
+      console.error('🔍 사용 가능한 옵션:', cachedOptions.statusOptions);
+      return `❌ 상태 매칭 실패 (ID: ${statusId})`;
     }
     
-    // 다국어 레이블 처리 (한국어 우선, 없으면 영어)
-    let statusText = '';
-    if (statusOption.korean && statusOption.korean.trim()) {
-      statusText = statusOption.korean;
-    } else if (statusOption.label && statusOption.label.trim()) {
-      statusText = statusOption.label;
-    } else if (statusOption.english && statusOption.english.trim()) {
-      statusText = statusOption.english;
-    } else {
-      statusText = statusOption.name || statusOption.value || statusOption.toString();
-    }
-    
-    console.log(`🔍 Found status label for ID ${statusId}:`, statusText);
+    console.log(`✅ 상태 레이블 찾음 - ID: ${statusId} → ${statusText}`);
     return `${emoji} ${statusText}`;
   },
 
-  // Agent 이름 가져오기 (메인티켓 방식 재활용)
+  // Agent 이름 가져오기 (에러 처리 개선)
   async getAgentName(agentId) {
-    if (!App.state.client || !agentId) return null;
+    if (!App.state.client) {
+      console.error('❌ FDK 클라이언트가 준비되지 않음');
+      return '❌ FDK 클라이언트 없음';
+    }
+    
+    if (!agentId) {
+      return '❌ 담당자 정보 없음';
+    }
     
     try {
       // 메인티켓에서 사용하는 방식과 동일
       const agentName = await App.ui.getAgentName(agentId, App.state.client);
+      
+      if (!agentName) {
+        console.error(`❌ 담당자 ID ${agentId}에 대한 이름 조회 실패`);
+        return `❌ 담당자 조회 실패 (ID: ${agentId})`;
+      }
+      
       return agentName;
     } catch (error) {
-      console.error('Agent 이름 조회 실패:', error);
-      return null;
+      console.error(`❌ 담당자 이름 조회 중 오류 - ID: ${agentId}`, error);
+      return `❌ 담당자 조회 오류 (ID: ${agentId})`;
     }
   },
 
   async getGroupName(groupId) {
-    if (!App.state.client || !groupId) return null;
+    if (!App.state.client) {
+      console.error('❌ FDK 클라이언트가 준비되지 않음');
+      return '❌ FDK 클라이언트 없음';
+    }
+    
+    if (!groupId) {
+      return '❌ 그룹 정보 없음';
+    }
     
     try {
       // 메인티켓에서 사용하는 방식과 동일
       const groupName = await App.ui.getGroupName(groupId, App.state.client);
+      
+      if (!groupName) {
+        console.error(`❌ 그룹 ID ${groupId}에 대한 이름 조회 실패`);
+        return `❌ 그룹 조회 실패 (ID: ${groupId})`;
+      }
+      
       return groupName;
     } catch (error) {
-      console.error('Group 이름 조회 실패:', error);
-      return null;
+      console.error(`❌ 그룹 이름 조회 중 오류 - ID: ${groupId}`, error);
+      return `❌ 그룹 조회 오류 (ID: ${groupId})`;
     }
   }
 };
@@ -2168,23 +2603,50 @@ document.addEventListener('DOMContentLoaded', async () => {
         // 모달로 전달된 데이터 처리
         const modalData = context.data;
         
+        // 티켓 ID 복원
+        if (modalData.ticketId) {
+          App.state.ticketId = modalData.ticketId;
+          console.log('✅ 모달에서 티켓 ID 복원:', App.state.ticketId);
+        }
+        
         if (modalData.noBackendCall === true) {
           console.log('🚫 모달에서 noBackendCall 플래그 감지 - 백엔드 호출 생략');
-          App.state.dataLoaded = true;
+          
+          // 전달받은 로딩 상태 정보 복원
+          App.state.loadingState = modalData.loadingState || 'idle';
+          App.state.loadingError = modalData.loadingError || null;
+          App.state.dataLoaded = modalData.hasCachedData || false;
           App.state.BACKEND_CALLED = true;
           
-          // 캐시된 데이터 복원
-          if (modalData.cachedData) {
+          console.log(`🎭 모달 상태 복원 - loadingState: ${App.state.loadingState}, dataLoaded: ${App.state.dataLoaded}`);
+          
+          // 캐시된 데이터 복원 또는 상태에 따른 메시지 설정
+          if (modalData.cachedData && App.state.loadingState === 'success') {
             App.state.cachedData = modalData.cachedData;
             console.log('✅ 모달 데이터에서 캐시 복원:', App.state.cachedData);
           } else {
-            // 기본 데이터 설정 - 사용자에게 친화적인 메시지
+            // 로딩 상태에 따른 메시지 설정
+            let statusMessage = '';
+            
+            switch (App.state.loadingState) {
+              case 'loading':
+                statusMessage = '🤖 **AI 분석 진행 중...**\n\n현재 티켓 데이터를 분석하고 있습니다.\n잠시만 기다려주세요.\n\n📊 분석 중인 항목:\n- 티켓 내용 분석\n- 유사 티켓 검색\n- 관련 지식베이스 검색';
+                break;
+              case 'error':
+                statusMessage = `❌ **데이터 로딩 실패**\n\n${App.state.loadingError || '백엔드 서버 연결에 실패했습니다.'}\n\n🔄 상단의 새로고침 버튼을 클릭하여 다시 시도하세요.`;
+                break;
+              case 'idle':
+              default:
+                statusMessage = '📌 **AI 분석 준비 완료**\n\n상단의 새로고침 버튼(🔄)을 클릭하여 티켓 분석을 시작하세요.\n\n분석이 완료되면:\n- 티켓 요약\n- 유사한 해결된 티켓\n- 관련 지식베이스 문서\n\n위 정보들을 확인하실 수 있습니다.';
+                break;
+            }
+            
             App.state.cachedData = {
-              summary: '📌 **AI 분석 준비 완료**\n\n상단의 새로고침 버튼(🔄)을 클릭하여 티켓 분석을 시작하세요.\n\n분석이 완료되면:\n- 티켓 요약\n- 유사한 해결된 티켓\n- 관련 지식베이스 문서\n\n위 정보들을 확인하실 수 있습니다.',
+              summary: statusMessage,
               similarTickets: [],
               kbDocuments: []
             };
-            console.log('⚠️ 캐시된 데이터가 없음 - 기본 안내 메시지 설정');
+            console.log(`🎭 모달 상태별 메시지 설정 (${App.state.loadingState}):`, statusMessage.substring(0, 50) + '...');
           }
           
           if (modalData.cachedTicketInfo) {
@@ -2195,30 +2657,40 @@ document.addEventListener('DOMContentLoaded', async () => {
           // 기본 UI 설정 - 모달에서는 App.init()이 호출되지 않으므로 수동으로 호출
           App.setupEventListeners();
           
-          // UI 데이터 복원
+          // 로딩 상태에 따른 UI 처리
           setTimeout(async () => {
-            // 요약 복원
+            // 로딩 중인 경우 로딩 모달 표시
+            if (App.state.loadingState === 'loading') {
+              App.ui.showLoading();
+              App.ui.updateLoadingMessage('AI 분석이 진행 중입니다...');
+            } else {
+              App.ui.hideLoading();
+            }
+            
+            // 요약 항상 표시 (상태 메시지 포함)
             if (App.state.cachedData.summary) {
               App.ui.updateSummary(App.state.cachedData.summary);
             }
             
-            // 유사 티켓 복원
-            if (App.state.cachedData.similarTickets && App.state.cachedData.similarTickets.length > 0) {
-              App.ui.renderSimilarTickets(App.state.cachedData.similarTickets);
+            // 성공 상태일 때만 실제 데이터 렌더링
+            if (App.state.loadingState === 'success') {
+              // 유사 티켓 복원
+              if (App.state.cachedData.similarTickets && App.state.cachedData.similarTickets.length > 0) {
+                App.ui.renderSimilarTickets(App.state.cachedData.similarTickets);
+              }
+              
+              // KB 문서 복원
+              if (App.state.cachedData.kbDocuments && App.state.cachedData.kbDocuments.length > 0) {
+                App.ui.renderKBDocuments(App.state.cachedData.kbDocuments);
+              }
+              
+              // 헤더 정보 복원
+              if (App.state.cachedTicketInfo && App.state.cachedTicketInfo.lastUpdated) {
+                await App.ui.updateTicketHeader(App.state.cachedTicketInfo);
+              }
             }
             
-            // KB 문서 복원
-            if (App.state.cachedData.kbDocuments && App.state.cachedData.kbDocuments.length > 0) {
-              App.ui.renderKBDocuments(App.state.cachedData.kbDocuments);
-            }
-            
-            // 헤더 정보 복원
-            if (App.state.cachedTicketInfo && App.state.cachedTicketInfo.lastUpdated) {
-              await App.ui.updateTicketHeader(App.state.cachedTicketInfo);
-            }
-            
-            // 로딩 숨기기
-            App.ui.hideLoading();
+            console.log(`🎭 모달 UI 복원 완료 - 상태: ${App.state.loadingState}`);
             
             console.log('✅ 모달 캐시된 데이터 복원 완료');
           }, 200);
@@ -2377,9 +2849,9 @@ async function renderTicketDetail(ticket, currentIndex, totalCount) {
   const similarity = ticket.score || ticket.similarity_score || 0;
   const similarityPercent = similarity > 1 ? similarity : similarity * 100;
   const createdAt = ticket.metadata?.created_at || ticket.created_at || null;
-  const status = ticket.metadata?.status || ticket.status || '미확인';
-  const priority = ticket.metadata?.priority || ticket.priority || 1;
-  const responderName = ticket.metadata?.agent_name || ticket.metadata?.responder_id || '미지정';
+  const status = ticket.metadata?.status || ticket.status;
+  const priority = ticket.metadata?.priority || ticket.priority;
+  const responderName = ticket.metadata?.agent_name || ticket.metadata?.responder_id;
   
   // 레이블 조회 (원본 숫자값 기반)
   const ticketForLabels = {
@@ -2434,7 +2906,7 @@ async function renderTicketDetail(ticket, currentIndex, totalCount) {
           <div class="meta-grid">
             <div class="meta-item">
               <span class="meta-label">📅 생성일:</span>
-              <span class="meta-value">${createdAt ? new Date(createdAt).toLocaleDateString('ko-KR') : 'N/A'}</span>
+              <span class="meta-value">${createdAt ? new Date(createdAt).toLocaleDateString('ko-KR') : '정보 없음'}</span>
             </div>
             <div class="meta-item">
               <span class="meta-label">📊 상태:</span>
@@ -2469,7 +2941,7 @@ async function renderTicketDetail(ticket, currentIndex, totalCount) {
             ${attachments.map(attachment => `
               <div class="attachment-item">
                 <span class="attachment-icon">📄</span>
-                <span class="attachment-name">${attachment.name || 'Unknown'}</span>
+                <span class="attachment-name">${attachment.name || '파일명 없음'}</span>
                 <span class="attachment-size">${attachment.size ? `(${Math.round(attachment.size/1024)}KB)` : ''}</span>
                 ${attachment.url ? `<a href="${attachment.url}" target="_blank" class="attachment-download">다운로드</a>` : ''}
               </div>
