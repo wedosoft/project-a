@@ -285,6 +285,70 @@ class OptimizedFreshdeskFetcher:
         logger.info(f"총 {len(ranges)}개의 날짜 범위로 분할되었습니다. ({start_date} ~ {end_date}, {days_per_chunk}일 단위)")
         return ranges
 
+    async def fetch_tickets_batch(self, ticket_ids: List[str], batch_size: int = 10) -> Dict[str, Dict]:
+        """
+        N+1 쿼리 문제 해결: 여러 티켓을 배치로 처리
+        
+        Args:
+            ticket_ids: 티켓 ID 목록
+            batch_size: 배치 크기 (동시 요청 수)
+            
+        Returns:
+            Dict[str, Dict]: 티켓 ID를 키로 하는 티켓 데이터 딕셔너리
+        """
+        logger.info(f"배치 티켓 수집 시작 - 총 {len(ticket_ids)}개, 배치 크기: {batch_size}")
+        
+        results = {}
+        semaphore = asyncio.Semaphore(batch_size)
+        
+        async def fetch_single_ticket(ticket_id: str) -> None:
+            async with semaphore:
+                try:
+                    detail = await self.fetch_ticket_detail_raw(ticket_id)
+                    if detail:
+                        results[ticket_id] = detail
+                except Exception as e:
+                    logger.error(f"티켓 {ticket_id} 수집 실패: {e}")
+        
+        # 모든 티켓을 동시에 처리 (semaphore로 동시성 제어)
+        tasks = [fetch_single_ticket(ticket_id) for ticket_id in ticket_ids]
+        await asyncio.gather(*tasks, return_exceptions=True)
+        
+        logger.info(f"배치 티켓 수집 완료 - 성공: {len(results)}/{len(ticket_ids)}개")
+        return results
+
+    async def fetch_conversations_batch(self, ticket_ids: List[str], batch_size: int = 5) -> Dict[str, List[Dict]]:
+        """
+        N+1 쿼리 문제 해결: 여러 티켓의 대화를 배치로 처리
+        
+        Args:
+            ticket_ids: 티켓 ID 목록
+            batch_size: 배치 크기 (대화는 더 무거우므로 작은 배치)
+            
+        Returns:
+            Dict[str, List[Dict]]: 티켓 ID를 키로 하는 대화 목록 딕셔너리
+        """
+        logger.info(f"배치 대화 수집 시작 - 총 {len(ticket_ids)}개, 배치 크기: {batch_size}")
+        
+        results = {}
+        semaphore = asyncio.Semaphore(batch_size)
+        
+        async def fetch_single_conversations(ticket_id: str) -> None:
+            async with semaphore:
+                try:
+                    conversations = await self.fetch_conversations_raw(ticket_id)
+                    results[ticket_id] = conversations or []
+                except Exception as e:
+                    logger.error(f"티켓 {ticket_id} 대화 수집 실패: {e}")
+                    results[ticket_id] = []
+        
+        # 모든 대화를 동시에 처리 (semaphore로 동시성 제어)
+        tasks = [fetch_single_conversations(ticket_id) for ticket_id in ticket_ids]
+        await asyncio.gather(*tasks, return_exceptions=True)
+        
+        logger.info(f"배치 대화 수집 완료 - 성공: {len([v for v in results.values() if v])}개")
+        return results
+
     async def fetch_ticket_detail_raw(self, ticket_id: str) -> Optional[Dict]:
         """
         티켓 상세정보를 raw 형태로 수집

@@ -105,7 +105,7 @@ async def get_tenant_id(
     Returns:
         str: 테넌트 ID
     """
-    logger.info(f"X-Tenant-ID 헤더 사용: {x_tenant_id}")
+    # 보안을 위해 헤더 값 로깅 제거
     return x_tenant_id
 
 
@@ -123,9 +123,9 @@ async def get_platform(
     """
     platform = x_platform.lower()
     if platform != "freshdesk":
-        logger.warning(f"지원하지 않는 플랫폼 요청: {platform}, freshdesk로 설정")
+        logger.warning("지원하지 않는 플랫폼 요청, freshdesk로 설정")
         platform = "freshdesk"
-    logger.info(f"X-Platform 헤더 사용: {platform} (Freshdesk 전용)")
+    # 보안을 위해 헤더 값 로깅 제거
     return platform
 
 
@@ -141,7 +141,7 @@ async def get_api_key(
     Returns:
         str: API 키
     """
-    logger.info("X-API-Key 헤더 사용")
+    # 보안을 위해 API 키 로깅 완전 제거
     return x_api_key
 
 
@@ -157,7 +157,7 @@ async def get_domain(
     Returns:
         str: 도메인
     """
-    logger.info(f"X-Domain 헤더 사용: {x_domain}")
+    # 보안을 위해 헤더 값 로깅 제거
     return x_domain
 
 
@@ -189,6 +189,7 @@ async def get_tenant_config(
     헤더에서 테넌트 정보를 받아 TenantConfig 객체를 생성합니다.
     
     멀티테넌트 환경에서 각 요청별로 테넌트 설정을 제공하는 핵심 함수입니다.
+    API 키 검증도 수행합니다.
     
     Args:
         tenant_id: X-Tenant-ID 헤더
@@ -199,6 +200,10 @@ async def get_tenant_config(
     Returns:
         TenantConfig: 테넌트별 설정 객체
     """
+    # API 키 검증
+    from .auth import validate_api_key
+    validate_api_key(tenant_id, api_key, domain)
+    
     tenant_manager = get_tenant_manager()
     
     # 헤더 기반 설정 생성 (멀티테넌트의 핵심)
@@ -209,7 +214,7 @@ async def get_tenant_config(
         api_key=api_key
     )
     
-    logger.info(f"테넌트 설정 로드 완료: {tenant_id} ({platform})")
+    logger.debug("테넌트 설정 로드 완료")
     return tenant_config
 
 

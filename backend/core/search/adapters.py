@@ -524,11 +524,8 @@ class InitHybridAdapter:
             # 생성된 요약의 구조 확인
             if summary and len(summary) > 100:
                 has_sections = any(section in summary for section in ["🔍 문제 현황", "💡 원인 분석", "⚡ 해결 진행상황", "🎯 중요 인사이트"])
-                if has_sections:
-                    self.logger.info("✅ [조회 티켓] ticket_view 4개 섹션 구조 정상 생성")
-                else:
-                    self.logger.warning("⚠️ [조회 티켓] ticket_view 구조가 적용되지 않음")
-                    self.logger.warning(f"생성된 요약 미리보기: {summary[:300]}...")
+                if not has_sections:
+                    self.logger.debug("ticket_view 4개 섹션 구조 검증 실패")
             
             self.logger.info("✅ [조회 티켓] ticket_view 템플릿 기반 프리미엄 요약 생성 완료")
             return summary

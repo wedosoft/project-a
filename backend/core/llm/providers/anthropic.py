@@ -27,11 +27,7 @@ class AnthropicProvider(BaseLLMProvider):
     def __init__(self, api_key: str, **kwargs):
         super().__init__(api_key, **kwargs)
         self.client = anthropic.AsyncAnthropic(api_key=api_key)
-        self._available_models = [
-            "claude-3-haiku-20240307",
-            "claude-3-sonnet-20240229",
-            "claude-3-opus-20240229"
-        ]
+        self._available_models = None  # 레지스트리에서 동적으로 로드
     
     @property
     def provider_type(self) -> LLMProvider:
@@ -39,7 +35,45 @@ class AnthropicProvider(BaseLLMProvider):
     
     @property
     def available_models(self) -> List[str]:
+        """레지스트리에서 사용 가능한 모델 목록 반환"""
+        if self._available_models is None:
+            try:
+                from ..registry import get_model_registry
+                registry = get_model_registry()
+                models = registry.get_available_models(
+                    provider="anthropic",
+                    include_deprecated=False
+                )
+                self._available_models = [model.name for model in models]
+            except Exception as e:
+                logger.warning(f"Failed to load models from registry: {e}")
+                # 폴백: 기본 모델 목록
+                self._available_models = [
+                    "claude-3-haiku-20240307",
+                    "claude-3-sonnet-20240229",
+                    "claude-3-opus-20240229",
+                    "claude-3-5-haiku-20241022"
+                ]
         return self._available_models
+    
+    def _get_default_model(self) -> str:
+        """레지스트리에서 기본 모델 반환"""
+        try:
+            from ..registry import get_model_registry
+            import os
+            registry = get_model_registry()
+            environment = os.getenv('ENVIRONMENT', 'development')
+            env_config = registry.get_environment_config(environment)
+            
+            if env_config and env_config.default_provider == "anthropic":
+                return env_config.default_chat_model
+            
+            # 환경 설정이 없으면 첫 번째 사용 가능한 모델 사용
+            models = self.available_models
+            return models[0] if models else "claude-3-haiku-20240307"
+        except Exception as e:
+            logger.warning(f"Failed to get default model from registry: {e}")
+            return "claude-3-haiku-20240307"
     
     @retry(
         retry=retry_if_exception_type((
@@ -67,7 +101,7 @@ class AnthropicProvider(BaseLLMProvider):
                     user_messages.append(msg)
             
             response = await self.client.messages.create(
-                model=request.model or "claude-3-haiku-20240307",
+                model=request.model or self._get_default_model(),
                 max_tokens=request.max_tokens or 1024,
                 temperature=request.temperature or 0.7,
                 system=system_message,
@@ -95,7 +129,7 @@ class AnthropicProvider(BaseLLMProvider):
             
             return LLMResponse(
                 provider=self.provider_type,
-                model=request.model or "claude-3-haiku-20240307",
+                model=request.model or self._get_default_model(),
                 content="",
                 latency_ms=latency_ms,
                 success=False,
@@ -116,7 +150,7 @@ class AnthropicProvider(BaseLLMProvider):
                     user_messages.append(msg)
             
             async with self.client.messages.stream(
-                model=request.model or "claude-3-haiku-20240307",
+                model=request.model or self._get_default_model(),
                 max_tokens=request.max_tokens or 1024,
                 temperature=request.temperature or 0.7,
                 system=system_message,

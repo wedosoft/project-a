@@ -19,6 +19,9 @@ class ConfigManager:
     
     def _load_configs(self) -> Dict[str, Any]:
         """환경변수에서 설정 로드 - 모델 레지스트리 통합"""
+        # 새로운 constants에서 모델 설정 가져오기
+        from core.constants import ModelConfig, ConversationFilterConfig, APILimits
+        
         # 모델 레지스트리에서 환경별 기본값 가져오기
         try:
             from ..registry import get_model_registry
@@ -51,67 +54,101 @@ class ConfigManager:
                 "heavy": os.getenv("LLM_HEAVY_MODEL", "gemini-1.5-pro"),
             },
             "use_cases": {
-                "summarization": {
-                    "provider": os.getenv("SUMMARIZATION_MODEL_PROVIDER", default_provider),
-                    "model": os.getenv("SUMMARIZATION_MODEL_NAME", default_chat_model),
-                    "max_tokens": int(os.getenv("SUMMARIZATION_MAX_TOKENS", "1000")),
-                    "temperature": float(os.getenv("SUMMARIZATION_TEMPERATURE", "0.1"))
-                },
+                # 메인 티켓 요약 (새로운 환경변수 사용)
                 "ticket_view": {
-                    "provider": os.getenv("TICKET_VIEW_MODEL_PROVIDER", default_provider),
-                    "model": os.getenv("TICKET_VIEW_MODEL_NAME", default_chat_model),
-                    "max_tokens": int(os.getenv("TICKET_VIEW_MAX_TOKENS", "1200")),
-                    "temperature": float(os.getenv("TICKET_VIEW_TEMPERATURE", "0.05"))
+                    "provider": self._extract_provider(ModelConfig.MAIN_TICKET_MODEL),
+                    "model": self._extract_model_name(ModelConfig.MAIN_TICKET_MODEL),
+                    "max_tokens": ModelConfig.MAIN_TICKET_MAX_TOKENS,
+                    "temperature": ModelConfig.MAIN_TICKET_TEMPERATURE
                 },
+                # 유사 티켓 요약
                 "ticket_similar": {
-                    "provider": os.getenv("TICKET_SIMILAR_MODEL_PROVIDER", default_provider),
-                    "model": os.getenv("TICKET_SIMILAR_MODEL_NAME", default_chat_model),
-                    "max_tokens": int(os.getenv("TICKET_SIMILAR_MAX_TOKENS", "800")),
-                    "temperature": float(os.getenv("TICKET_SIMILAR_TEMPERATURE", "0.1"))
+                    "provider": self._extract_provider(ModelConfig.SIMILAR_TICKET_MODEL),
+                    "model": self._extract_model_name(ModelConfig.SIMILAR_TICKET_MODEL),
+                    "max_tokens": ModelConfig.SIMILAR_TICKET_MAX_TOKENS,
+                    "temperature": ModelConfig.SIMILAR_TICKET_TEMPERATURE
                 },
+                # 레거시 호환성을 위한 summarization
+                "summarization": {
+                    "provider": self._extract_provider(ModelConfig.MAIN_TICKET_MODEL),
+                    "model": self._extract_model_name(ModelConfig.MAIN_TICKET_MODEL),
+                    "max_tokens": ModelConfig.MAIN_TICKET_MAX_TOKENS,
+                    "temperature": ModelConfig.MAIN_TICKET_TEMPERATURE
+                },
+                # 쿼리 응답
                 "question_answering": {
-                    "provider": os.getenv("QA_MODEL_PROVIDER", default_provider),
-                    "model": os.getenv("QA_MODEL_NAME", default_chat_model),
-                    "max_tokens": int(os.getenv("QA_MAX_TOKENS", "2000")),
-                    "temperature": float(os.getenv("QA_TEMPERATURE", "0.2"))
+                    "provider": self._extract_provider(ModelConfig.QUERY_RESPONSE_MODEL),
+                    "model": self._extract_model_name(ModelConfig.QUERY_RESPONSE_MODEL),
+                    "max_tokens": ModelConfig.QUERY_RESPONSE_MAX_TOKENS,
+                    "temperature": ModelConfig.QUERY_RESPONSE_TEMPERATURE
                 },
+                # 대화형 채팅 (쿼리 응답과 동일 설정 사용)
                 "chat": {
-                    "provider": os.getenv("CHAT_MODEL_PROVIDER", default_provider),
-                    "model": os.getenv("CHAT_MODEL_NAME", default_chat_model),
-                    "max_tokens": int(os.getenv("CHAT_MAX_TOKENS", "1000")),
-                    "temperature": float(os.getenv("CHAT_TEMPERATURE", "0.3"))
+                    "provider": self._extract_provider(ModelConfig.QUERY_RESPONSE_MODEL),
+                    "model": self._extract_model_name(ModelConfig.QUERY_RESPONSE_MODEL),
+                    "max_tokens": ModelConfig.QUERY_RESPONSE_MAX_TOKENS,
+                    "temperature": ModelConfig.QUERY_RESPONSE_TEMPERATURE
                 },
+                # 분석 (쿼리 응답과 동일하지만 더 많은 토큰)
                 "analysis": {
-                    "provider": os.getenv("ANALYSIS_MODEL_PROVIDER", default_provider),
-                    "model": os.getenv("ANALYSIS_MODEL_NAME", default_chat_model),
-                    "max_tokens": int(os.getenv("ANALYSIS_MAX_TOKENS", "4000")),
-                    "temperature": float(os.getenv("ANALYSIS_TEMPERATURE", "0.1"))
+                    "provider": self._extract_provider(ModelConfig.QUERY_RESPONSE_MODEL),
+                    "model": self._extract_model_name(ModelConfig.QUERY_RESPONSE_MODEL),
+                    "max_tokens": 4000,  # 분석은 더 긴 응답 필요
+                    "temperature": ModelConfig.QUERY_RESPONSE_TEMPERATURE
                 },
                 "embedding": {
                     "provider": os.getenv("EMBEDDING_MODEL_PROVIDER", "openai"),
                     "model": os.getenv("EMBEDDING_MODEL_NAME", default_embedding_model),
                     "dimensions": int(os.getenv("EMBEDDING_DIMENSIONS", "3072"))
                 },
+                # 실시간 처리 (메인 티켓과 동일)
                 "realtime": {
-                    "provider": os.getenv("REALTIME_MODEL_PROVIDER", default_provider),
-                    "model": os.getenv("REALTIME_MODEL_NAME", default_chat_model),
-                    "max_tokens": int(os.getenv("REALTIME_MAX_TOKENS", "1000")),
-                    "temperature": float(os.getenv("REALTIME_TEMPERATURE", "0.2"))
+                    "provider": self._extract_provider(ModelConfig.MAIN_TICKET_MODEL),
+                    "model": self._extract_model_name(ModelConfig.MAIN_TICKET_MODEL),
+                    "max_tokens": ModelConfig.MAIN_TICKET_MAX_TOKENS,
+                    "temperature": ModelConfig.MAIN_TICKET_TEMPERATURE
                 },
+                # 배치 처리 (유사 티켓과 동일)
                 "batch": {
-                    "provider": os.getenv("BATCH_MODEL_PROVIDER", default_provider),
-                    "model": os.getenv("BATCH_MODEL_NAME", default_chat_model),
-                    "max_tokens": int(os.getenv("BATCH_MAX_TOKENS", "2000")),
-                    "temperature": float(os.getenv("BATCH_TEMPERATURE", "0.1"))
+                    "provider": self._extract_provider(ModelConfig.SIMILAR_TICKET_MODEL),
+                    "model": self._extract_model_name(ModelConfig.SIMILAR_TICKET_MODEL),
+                    "max_tokens": ModelConfig.SIMILAR_TICKET_MAX_TOKENS,
+                    "temperature": ModelConfig.SIMILAR_TICKET_TEMPERATURE
+                },
+                # 대화 필터링
+                "conversation_filter": {
+                    "provider": self._extract_provider(ModelConfig.CONVERSATION_FILTER_MODEL),
+                    "model": self._extract_model_name(ModelConfig.CONVERSATION_FILTER_MODEL),
+                    "max_tokens": ModelConfig.CONVERSATION_FILTER_MAX_TOKENS,
+                    "temperature": ModelConfig.CONVERSATION_FILTER_TEMPERATURE
                 }
             },
             "conversation_filtering": {
-                "enabled": os.getenv("ENABLE_CONVERSATION_FILTERING", "true").lower() == "true",
-                "mode": os.getenv("CONVERSATION_FILTERING_MODE", "conservative"),
-                "token_budget": int(os.getenv("CONVERSATION_TOKEN_BUDGET", "12000")),
-                "importance_threshold": float(os.getenv("CONVERSATION_IMPORTANCE_THRESHOLD", "0.4")),
+                "enabled": ConversationFilterConfig.ENABLED,
+                "mode": ConversationFilterConfig.FILTERING_MODE,
+                "token_budget": ConversationFilterConfig.TOKEN_BUDGET,
+                "importance_threshold": ConversationFilterConfig.IMPORTANCE_THRESHOLD,
             }
         }
+    
+    def _extract_provider(self, model_string: str) -> str:
+        """모델 문자열에서 프로바이더 추출 (예: 'openai/gpt-4' -> 'openai')"""
+        if "/" in model_string:
+            return model_string.split("/")[0]
+        # 기본 프로바이더 추론
+        if model_string.startswith("gpt"):
+            return "openai"
+        elif model_string.startswith("claude"):
+            return "anthropic"
+        elif model_string.startswith("gemini"):
+            return "gemini"
+        return "openai"  # 기본값
+    
+    def _extract_model_name(self, model_string: str) -> str:
+        """모델 문자열에서 모델명 추출 (예: 'openai/gpt-4' -> 'gpt-4')"""
+        if "/" in model_string:
+            return model_string.split("/")[1]
+        return model_string
     
     def get_provider_config(self, provider: LLMProvider) -> Optional[ProviderConfig]:
         """제공자 설정 반환"""
@@ -183,6 +220,26 @@ class ConfigManager:
         
         provider_name = config.get("provider", "openai")
         model_name = config.get("model", "gpt-3.5-turbo")
+        
+        # 레지스트리에서 모델 검증 및 deprecation 확인
+        try:
+            from ..registry import get_model_registry
+            registry = get_model_registry()
+            
+            model_spec = registry.get_model(provider_name, model_name)
+            if model_spec:
+                if model_spec.deprecated:
+                    logger.warning(f"Model {model_name} is deprecated. Replacement: {model_spec.replacement}")
+                    # 대체 모델이 있다면 자동으로 사용
+                    if model_spec.replacement:
+                        replacement_model = registry.get_model(provider_name, model_spec.replacement)
+                        if replacement_model and not replacement_model.deprecated:
+                            logger.info(f"Auto-migrating from {model_name} to {model_spec.replacement}")
+                            model_name = model_spec.replacement
+            else:
+                logger.warning(f"Model {provider_name}:{model_name} not found in registry")
+        except Exception as e:
+            logger.debug(f"Registry validation skipped: {e}")
         
         # 문자열을 LLMProvider enum으로 변환
         provider_map = {

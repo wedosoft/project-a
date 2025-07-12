@@ -58,7 +58,7 @@ class ProviderRouter:
         # 가중치 기반 선택
         selected_provider = self._weighted_selection(healthy_providers, request)
         
-        logger.info(f"선택된 제공자: {selected_provider.value}")
+        logger.debug(f"선택된 제공자: {selected_provider.value}")
         return selected_provider, healthy_providers[selected_provider]
     
     async def _is_provider_healthy(self, provider_type: LLMProvider, provider_instance: Any) -> bool:

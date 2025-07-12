@@ -460,6 +460,7 @@ class QdrantAdapter(VectorDBInterface):
         platform: Optional[str] = None,  # 플랫폼 필터링 (freshdesk, zendesk 등)
         doc_type: str = None,  # 문서 타입 필터링 (ticket, article)
         has_attachments: Optional[bool] = None,  # 첨부파일 필터링
+        exclude_id: Optional[str] = None,  # 제외할 문서 ID
         **kwargs  # 추가 필터 파라미터들
     ) -> Dict[str, Any]:
         """
@@ -503,6 +504,13 @@ class QdrantAdapter(VectorDBInterface):
                 FieldCondition(key="has_attachments", match=MatchValue(value=has_attachments))
             )
         
+        # exclude_id 필터 추가 (must_not 조건)
+        must_not_conditions = []
+        if exclude_id:
+            must_not_conditions.append(
+                FieldCondition(key="original_id", match=MatchValue(value=str(exclude_id)))
+            )
+        
         # 추가 필터 처리 (kwargs)
         for key, value in kwargs.items():
             if value is not None and key not in ["tenant_id", "platform", "doc_type", "has_attachments"]:
@@ -520,7 +528,10 @@ class QdrantAdapter(VectorDBInterface):
         logger.debug(f"검색 요청: tenant_id={tenant_id}, top_k={top_k}")
         
         # 모든 필터를 Qdrant 쿼리에 적용
-        search_filter = Filter(must=filter_conditions)
+        search_filter = Filter(
+            must=filter_conditions,
+            must_not=must_not_conditions if must_not_conditions else None
+        )
         
         try:
             logger.debug(f"Qdrant 검색 시도: {top_k}개 문서")
@@ -1637,7 +1648,7 @@ async def generate_realtime_summary(
         logger.error(f"실시간 요약 생성 중 오류: {e}")
         return f"요약 생성 중 오류가 발생했습니다: {str(e)}"
 
-async def search_vector_db_only(
+async def search_vector_db(
     query: str,
     tenant_id: str,
     platform: str = "freshdesk", 
@@ -1711,10 +1722,11 @@ async def search_vector_db_only(
             doc_type_filter = doc_types[0] if doc_types else None
             search_response = vector_db.search(
                 query_embedding=query_embedding,
-                top_k=limit,
+                top_k=limit,  # exclude_id 필터링은 Qdrant 레벨에서 처리되므로 조정 불필요
                 tenant_id=tenant_id,
                 platform=platform,
-                doc_type=doc_type_filter
+                doc_type=doc_type_filter,
+                exclude_id=exclude_id  # exclude_id 파라미터 전달
             )
             all_results = search_response.get("results", []) if isinstance(search_response, dict) else search_response
         else:
@@ -1724,10 +1736,11 @@ async def search_vector_db_only(
             for doc_type in doc_types:
                 search_response = vector_db.search(
                     query_embedding=query_embedding,
-                    top_k=results_per_type,  # 타입별 제한으로 전체 성능 향상
+                    top_k=results_per_type,  # exclude_id 필터링은 Qdrant 레벨에서 처리되므로 조정 불필요
                     tenant_id=tenant_id,
                     platform=platform,
-                    doc_type=doc_type
+                    doc_type=doc_type,
+                    exclude_id=exclude_id  # exclude_id 파라미터 전달
                 )
                 doc_results = search_response.get("results", []) if isinstance(search_response, dict) else search_response
                 all_results.extend(doc_results)
@@ -1739,16 +1752,7 @@ async def search_vector_db_only(
         # 검색 결과 사용 (이미 all_results에 저장됨)
         search_results = all_results
         
-        # 🔧 FIX: exclude_id로 지정된 티켓을 결과에서 제외 (자기 자신 제외)
-        if exclude_id:
-            original_count = len(search_results)
-            search_results = [
-                result for result in search_results 
-                if str(result.get("original_id", "")) != str(exclude_id)
-            ]
-            filtered_count = len(search_results)
-            if original_count != filtered_count:
-                logger.debug(f"🚫 제외 ID {exclude_id} 필터링 완료: {original_count}건 → {filtered_count}건")
+        # exclude_id 필터링은 이미 Qdrant 쿼리 레벨에서 처리됨 (중복 필터링 제거)
         
         # 결과 포맷팅 최적화 (불필요한 루프와 로깅 최소화)
         formatted_results = []

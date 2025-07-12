@@ -316,9 +316,9 @@ async def detect_content_language_llm(content: str, ui_language: str = 'ko') -> 
     Returns:
         Detected or preferred language code
     """
-    # 매우 짧은 텍스트는 UI 언어 사용
+    # 매우 짧은 텍스트는 UI 언어 사용 (로그 레벨을 debug로 변경)
     if not content or len(content.strip()) < 20:
-        logger.debug(f"짧은 콘텐츠({len(content)}자) - UI 언어 '{ui_language}' 적용")
+        # 로그 레벨을 debug로 변경하여 노이즈 감소
         return ui_language
     
     # 🚀 하이브리드 접근: 규칙 기반 먼저 시도, 애매할 때만 LLM 사용
@@ -402,8 +402,7 @@ def detect_content_language(content: str, ui_language: str = 'ko') -> str:
         Detected or preferred language code
     """
     if not content or len(content.strip()) < 30:
-        # 매우 짧은 텍스트만 UI 언어를 우선 적용
-        logger.debug(f"짧은 콘텐츠({len(content)}자) - UI 언어 '{ui_language}' 적용")
+        # 매우 짧은 텍스트만 UI 언어를 우선 적용 (로그 제거)
         return ui_language
     
     # 간단한 규칙 기반 감지 (폴백용)
@@ -411,7 +410,6 @@ def detect_content_language(content: str, ui_language: str = 'ko') -> str:
     total_chars = len(content)
     
     if korean_chars > total_chars * 0.3:  # 30% 이상이 한글이면 한국어
-        logger.debug(f"규칙 기반 한국어 감지: {korean_chars}/{total_chars} ({korean_chars/total_chars:.2f})")
         return 'ko'
     
     # 영어 키워드 체크
@@ -420,11 +418,9 @@ def detect_content_language(content: str, ui_language: str = 'ko') -> str:
     english_matches = sum(1 for word in english_words if f' {word} ' in f' {content_lower} ')
     
     if english_matches >= 3:  # 영어 키워드 3개 이상
-        logger.debug(f"규칙 기반 영어 감지: {english_matches}개 키워드 매칭")
         return 'en'
     
     # 기본값은 UI 언어
-    logger.debug(f"규칙 기반 감지 실패 - UI 언어 '{ui_language}' 적용")
     return ui_language
 
 

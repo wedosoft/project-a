@@ -712,8 +712,7 @@ class AnthropicSearchOrchestrator:
                 )
                 
                 if response and response.success:
-                    logger.info(f"Constitutional AI 응답 성공: {len(response.content)}자")
-                    logger.info(f"Constitutional AI 응답 미리보기: {response.content[:200]}...")
+                    logger.debug(f"Constitutional AI 응답 성공: {len(response.content)}자")
                     return response.content
                 else:
                     logger.warning(f"LLM 응답 실패: {response.error if response else 'No response'}")

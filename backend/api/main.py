@@ -39,9 +39,6 @@ os.environ['PYTHONPATH'] = str(backend_dir)
 # 환경변수 로드 (애플리케이션 시작 시 최우선 로드)
 load_dotenv()
 
-# 🧠 Anthropic 시스템 상태 확인
-anthropic_enabled = os.getenv('ENABLE_ANTHROPIC_PROMPTS', 'false').lower() == 'true'
-print(f"🧠 Anthropic 프롬프트 엔지니어링: {'✅ 활성화' if anthropic_enabled else '❌ 비활성화'}")
 print(f"📁 Backend 경로: {backend_dir}")
 print(f"🐍 Python 경로 설정 완료")
 
@@ -49,6 +46,7 @@ print(f"🐍 Python 경로 설정 완료")
 from core.container import get_container
 from core.errors import ErrorHandlingMiddleware, get_error_handler
 from core.middleware import PerformanceMiddleware
+from api.rate_limit import RateLimitMiddleware, global_limiter
 
 # 분리된 라우터들 import
 from api.routes import (
@@ -132,7 +130,10 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# 성능 최적화 미들웨어 추가 (가장 먼저)
+# Rate Limiting 미들웨어 추가 (가장 먼저)
+app.add_middleware(RateLimitMiddleware, limiter=global_limiter)
+
+# 성능 최적화 미들웨어 추가
 app.add_middleware(PerformanceMiddleware, enable_detailed_logging=True)
 
 # 에러 핸들링 미들웨어 추가
