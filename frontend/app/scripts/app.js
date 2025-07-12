@@ -7,9 +7,9 @@ const App = {
   // 설정 (환경변수 또는 런타임에서 설정)
   config: {
     baseURL: window.APP_CONFIG?.baseURL || 'http://localhost:8000',
-    apiKey: window.APP_CONFIG?.apiKey || '',
-    tenantId: window.APP_CONFIG?.tenantId || '',
-    domain: window.APP_CONFIG?.domain || ''
+    apiKey: '', // iparams에서 로드
+    tenantId: '', // iparams에서 로드
+    domain: '' // iparams에서 로드
   },
 
   // 현재 상태
@@ -22,6 +22,9 @@ const App = {
     BACKEND_CALLED: false, // 백엔드 호출 여부 - 한 번 호출되면 절대 다시 호출 안함
     dataLoaded: false, // 초기 데이터 로드 완료 여부
     loadingError: null, // 로딩 에러 정보
+    
+    // 싱글톤 Promise 관리
+    initPromise: null, // 진행 중인 초기화 Promise
     
     currentMode: 'smart', // 'smart' or 'free'
     client: null, // FDK 클라이언트 객체
@@ -84,19 +87,61 @@ const App = {
     },
 
 
-    // 초기 데이터 로드 - 페이지 최초 로딩 시에만 호출
+    // 초기 데이터 로드 - 싱글톤 패턴으로 한 번만 호출
     async loadInitialData(ticketId) {
-      // 이미 호출했으면 캐시 반환
-      if (App.state.BACKEND_CALLED) {
-        console.log('🚫 백엔드 이미 호출됨 - 캐시 반환');
+      // 이미 완료되었으면 캐시 반환
+      if (App.state.dataLoaded && App.state.cachedData) {
+        console.log('✅ 이미 로드 완료 - 캐시 데이터 반환');
         return App.state.cachedData;
       }
       
-      // 로딩 상태 시작
+      // 진행 중인 Promise가 있으면 재사용
+      if (App.state.initPromise) {
+        console.log('⏳ 이미 로딩 중 - 기존 Promise 재사용');
+        return App.state.initPromise;
+      }
+      
+      // 새로운 로딩 시작
+      console.log('🔥 백엔드 초기화 시작 - ticketId:', ticketId);
+      
+      // Promise 생성 및 저장
+      App.state.initPromise = this._performInitialLoad(ticketId);
+      
+      try {
+        const result = await App.state.initPromise;
+        return result;
+      } catch (error) {
+        // 에러 시 Promise 초기화
+        App.state.initPromise = null;
+        throw error;
+      }
+    },
+    
+    // 실제 백엔드 호출 수행
+    async _performInitialLoad(ticketId) {
+      // sessionStorage에서 캐시 확인 (iframe 간 공유)
+      const cacheKey = `copilot_init_${ticketId}`;
+      const cachedStr = sessionStorage.getItem(cacheKey);
+      
+      if (cachedStr) {
+        try {
+          const cached = JSON.parse(cachedStr);
+          // 5분 이내 캐시만 사용
+          if (cached.timestamp && Date.now() - cached.timestamp < 5 * 60 * 1000) {
+            console.log('💾 SessionStorage 캐시 사용');
+            App.state.cachedData = cached.data;
+            App.state.dataLoaded = true;
+            App.state.loadingState = 'success';
+            return cached.data;
+          }
+        } catch (e) {
+          console.warn('캐시 파싱 실패:', e);
+        }
+      }
+      
       App.state.BACKEND_CALLED = true;
       App.state.loadingState = 'loading';
       App.state.loadingError = null;
-      console.log('🔥 페이지 최초 로딩 - 백엔드 호출 시작');
       
       const url = `${App.config.baseURL}/init/${ticketId}?stream=true`;
       
@@ -171,6 +216,18 @@ const App = {
         App.state.cachedData = finalData; // 캐시에 저장
         App.state.dataLoaded = true;
         App.state.loadingState = 'success';
+        
+        // sessionStorage에 저장 (iframe 간 공유)
+        try {
+          const cacheKey = `copilot_init_${ticketId}`;
+          sessionStorage.setItem(cacheKey, JSON.stringify({
+            data: finalData,
+            timestamp: Date.now()
+          }));
+        } catch (e) {
+          console.warn('SessionStorage 저장 실패:', e);
+        }
+        
         App.ui.hideLoading();
         return finalData;
         
@@ -178,6 +235,7 @@ const App = {
         // 에러 상태 설정
         App.state.loadingState = 'error';
         App.state.loadingError = error.message || '백엔드 서버 연결 실패';
+        App.state.initPromise = null; // Promise 초기화
         App.ui.hideLoading();
         console.error('백엔드 호출 실패:', error);
         App.ui.showError('백엔드 서버 연결 실패. 새로고침 버튼을 눌러 다시 시도하세요.');
@@ -189,9 +247,19 @@ const App = {
     async refreshData() {
       console.log('🔄 사용자 새로고침 버튼 클릭 - 백엔드 재호출');
       
-      // 강제로 백엔드 호출 플래그 리셋
+      // 상태 초기화
       App.state.BACKEND_CALLED = false;
       App.state.dataLoaded = false;
+      App.state.initPromise = null; // Promise 초기화
+      App.state.cachedData = {}; // 캐시 클리어
+      
+      // sessionStorage 캐시 제거
+      try {
+        const cacheKey = `copilot_init_${App.state.ticketId}`;
+        sessionStorage.removeItem(cacheKey);
+      } catch (e) {
+        console.warn('SessionStorage 제거 실패:', e);
+      }
       
       // 로딩 표시
       App.state.isLoading = true;
@@ -2217,6 +2285,30 @@ const App = {
     try {
       // FDK 클라이언트 초기화
       const client = await app.initialized();
+      
+      // iparams 로드
+      try {
+        const iparams = await client.iparams.get();
+        App.config.domain = iparams.freshdesk_domain || '';
+        App.config.apiKey = iparams.freshdesk_api_key || '';
+        
+        // 도메인에서 tenant ID 안전하게 추출
+        if (App.config.domain) {
+          const domainParts = App.config.domain.split('.');
+          if (domainParts.length > 0) {
+            App.config.tenantId = domainParts[0];
+          }
+        }
+        
+        // 보안을 위해 API 키는 로그에 출력하지 않음
+        console.log('✅ iparams 로드 완료:', { 
+          domain: App.config.domain, 
+          tenantId: App.config.tenantId,
+          apiKeyLoaded: !!App.config.apiKey
+        });
+      } catch (paramError) {
+        console.error('❌ iparams 로드 실패:', paramError);
+      }
       App.state.client = client; // 클라이언트 객체 저장
       
       // 메타데이터 서비스 초기화
@@ -2401,11 +2493,7 @@ const App = {
         }
         btn.classList.add('active');
         
-        // Copilot 탭일 때만 채팅 입력창 표시
-        const chatInput = document.getElementById('chatInputContainer');
-        if (chatInput) {
-          chatInput.style.display = (tabName === 'copilot') ? 'flex' : 'none';
-        }
+        // 채팅 입력창은 이제 Copilot 탭 내부에 있으므로 별도 제어 불필요
         
         // 스크롤 위치 복원 (더 안정적)
         setTimeout(() => {
@@ -2420,6 +2508,8 @@ const App = {
       summaryToggleBtn.addEventListener('click', () => {
         const section = document.getElementById('summarySection');
         const toggleBtn = document.getElementById('summaryToggleBtn');
+        const tabNavigation = document.querySelector('.tab-navigation');
+        const tabContentArea = document.querySelector('.tab-content-area');
         
         if (!section || !toggleBtn) {
           console.error('Summary section or toggle button not found');
@@ -2431,13 +2521,52 @@ const App = {
           section.classList.remove('collapsed');
           toggleBtn.textContent = '⌃';
           toggleBtn.title = '요약 접기';
+          
+          // 탭 네비게이션 위치 복원
+          if (tabNavigation) {
+            tabNavigation.classList.remove('fixed');
+            tabNavigation.style.position = '';
+            tabNavigation.style.top = '';
+          }
+          
+          // 탭 콘텐츠 영역 여백 복원
+          if (tabContentArea) {
+            tabContentArea.style.marginTop = '';
+          }
         } else {
           // 접기
           section.classList.add('collapsed');
           toggleBtn.textContent = '⌄';
           toggleBtn.title = '요약 펼치기';
+          
+          // 탭 네비게이션을 헤더 바로 아래로 고정
+          if (tabNavigation) {
+            tabNavigation.classList.add('fixed');
+            
+            // 탭 콘텐츠 영역에 탭 네비게이션 높이만큼 여백 추가
+            if (tabContentArea) {
+              const navHeight = tabNavigation.offsetHeight;
+              tabContentArea.style.marginTop = navHeight + 'px';
+            }
+          }
         }
+        
+        // 채팅 관련 요소 높이는 CSS에서 처리
       });
+    }
+    
+    // 초기 상태 설정
+    const tabNavigation = document.querySelector('.tab-navigation');
+    const tabContentArea = document.querySelector('.tab-content-area');
+    
+    // 탭 네비게이션 초기 상태 확인 (fixed 클래스 제거)
+    if (tabNavigation) {
+      tabNavigation.classList.remove('fixed');
+    }
+    
+    // 탭 콘텐츠 영역 마진 초기화
+    if (tabContentArea) {
+      tabContentArea.style.marginTop = '';
     }
   }
 };
@@ -2974,11 +3103,7 @@ window.refreshData = async function() {
 
 // DOM 로드 완료 시 앱 초기화
 document.addEventListener('DOMContentLoaded', async () => {
-  // 채팅 입력창만 숨기기
-  const chatInput = document.getElementById('chatInputContainer');
-  if (chatInput) {
-    chatInput.style.display = 'none';
-  }
+  // 채팅 입력창은 이제 Copilot 탭 내부에 있으므로 초기 숨김 불필요
   
   // 스크롤 관찰자 초기화
   App.ui.initScrollObserver();
@@ -3206,6 +3331,8 @@ async function showTicketDetail(ticketIndex) {
   
   // 상세 화면 렌더링
   await renderTicketDetail(ticket, ticketIndex, tickets.length);
+  
+  // 스크롤 위치 이동 제거 - 현재 위치 유지
 }
 
 // 목록으로 돌아가기
@@ -3225,6 +3352,8 @@ function goBackToList() {
     container.style.display = 'block';
     detailContainer.style.display = 'none';
   }
+  
+  // 스크롤 위치 유지 (초기화하지 않음)
 }
 
 // 이전/다음 티켓으로 이동
@@ -3259,9 +3388,12 @@ async function renderTicketDetail(ticket, currentIndex, totalCount) {
     container.parentNode.appendChild(detailContainer);
   }
   
+  // 스타일 설정
+  detailContainer.style.display = 'block';
+  detailContainer.style.padding = '0';
+  
   // 기존 목록 숨기기
   container.style.display = 'none';
-  detailContainer.style.display = 'block';
   
   // 티켓 정보 추출 (원본 필드만 사용)
   const ticketId = ticket.id || 'N/A';

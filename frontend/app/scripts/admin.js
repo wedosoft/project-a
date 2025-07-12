@@ -17,7 +17,7 @@
 class AdminConsole {
   constructor() {
     this.baseURL = this.getBackendURL();
-    this.authHeaders = this.getAuthHeaders();
+    this.authHeaders = null; // 나중에 초기화
     this.refreshInterval = null;
     this.init();
   }
@@ -32,23 +32,46 @@ class AdminConsole {
   /**
    * 🔐 인증 헤더 설정
    */
-  getAuthHeaders() {
+  async getAuthHeaders() {
+    // FDK를 통해 안전하게 iparams 가져오기
+    let freshdesk_domain = '';
+    let freshdesk_api_key = '';
+    let tenant_id = '';
+    
+    try {
+      const client = await app.initialized();
+      const iparams = await client.iparams.get();
+      freshdesk_domain = iparams.freshdesk_domain || '';
+      freshdesk_api_key = iparams.freshdesk_api_key || '';
+      
+      // 도메인에서 tenant ID 안전하게 추출
+      if (freshdesk_domain) {
+        const domainParts = freshdesk_domain.split('.');
+        if (domainParts.length > 0) {
+          tenant_id = domainParts[0];
+        }
+      }
+    } catch (error) {
+      console.error('iparams 로드 실패:', error);
+    }
+    
     return {
       'Content-Type': 'application/json',
-      'X-Tenant-ID': 'wedosoft',
+      'X-Tenant-ID': tenant_id,
       'X-Platform': 'freshdesk',
-      'X-Domain': 'wedosoft.freshdesk.com',
-      'X-API-Key': 'Ug9H1cKCZZtZ4haamBy',
-      'X-Client-Version': '2.0.0-admin',
-      // ngrok 헤더 추가
-      'ngrok-skip-browser-warning': 'true'
+      'X-Domain': freshdesk_domain,
+      'X-API-Key': freshdesk_api_key,
+      'X-Client-Version': '2.0.0-admin'
     };
   }
 
   /**
    * 🚀 초기화
    */
-  init() {
+  async init() {
+    // 헤더 초기화
+    this.authHeaders = await this.getAuthHeaders();
+    
     this.setupEventListeners();
     this.loadInitialData();
     this.startAutoRefresh();

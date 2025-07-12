@@ -115,15 +115,15 @@
         .app-main {
             width: 100%;
             max-width: 900px;
-            height: 100vh;
+            height: calc(100vh - 200px); /* 헤더(80px)와 푸터(120px) 높이 제외 */
             background: white;
-            border-radius: 0 0 12px 12px;
+            border-radius: 0;
             box-shadow: none;
             border: none;
             margin: 0;
-            overflow-y: auto;
+            margin-top: 80px; /* 헤더 공간 확보 */
+            overflow-y: auto; /* 메인 컨테이너가 스크롤 */
             overflow-x: hidden;
-            padding-top: 80px; /* 헤더 높이만큼 */
             position: relative;
             display: flex;
             flex-direction: column;
@@ -135,6 +135,7 @@
             border-bottom: 1px solid #e5e7eb;
             transition: all 0.3s ease;
             z-index: 997; /* 탭 네비게이션보다 낮게 설정 */
+            flex-shrink: 0; /* 크기 고정 */
         }
 
         .summary-section.collapsed {
@@ -148,10 +149,6 @@
             min-height: 0 !important;
         }
         
-        /* summary section이 collapsed될 때 탭 네비게이션이 헤더에 바로 붙도록 설정 */
-        .summary-section.collapsed + .tab-navigation {
-            top: 0px; /* 헤더 바로 아래로 이동 */
-        }
 
         .summary-section.expanded {
             max-height: 500px;
@@ -226,24 +223,27 @@
             white-space: pre-wrap;
         }
 
-        /* === 탭 네비게이션 (sticky) === */
+        /* === 탭 네비게이션 === */
         .tab-navigation {
             background-color: #ffffff;
             border-bottom: 1px solid #e5e7eb;
             padding: 0;
-            position: sticky;
-            top: 80px; /* 헤더 높이만큼 오프셋 */
-            left: 0;
-            right: 0;
+            position: relative; /* 기본적으로 relative */
             width: 100%;
             max-width: 900px;
             margin: 0 auto;
-            z-index: 999; /* summary section보다 높게 설정 */
+            z-index: 999;
             border-top: 1px solid #e5e7eb;
-            transition: top 0.3s ease; /* 부드러운 위치 전환 */
-            /* sticky 포지션 강화 */
-            -webkit-position: sticky;
-            will-change: transform; /* 성능 최적화 */
+        }
+        
+        /* 요약 접었을 때 탭 네비게이션 고정 */
+        .tab-navigation.fixed {
+            position: fixed;
+            top: 80px;
+            left: 0;
+            right: 0;
+            max-width: 900px;
+            margin: 0 auto;
         }
 
         .tab-list {
@@ -303,30 +303,34 @@
 
         /* === 탭 콘텐츠 영역 === */
         .tab-content-area {
-            padding: 0px 20px 0px 20px;
             flex: 1;
             display: flex;
             flex-direction: column;
+            min-height: 0;
             overflow: hidden;
-            margin-bottom: 175px; /* 채팅 입력창(80px) + 푸터(87px) + 여백 */
         }
 
         .tab-content {
             display: none;
-            padding-top: 16px;
+            padding: 16px 20px 20px 20px;
+            overflow-y: auto;
             flex: 1;
-            overflow: hidden;
-            position: relative;
         }
 
         .tab-content.active {
-            display: flex;
-            flex-direction: column;
+            display: block; /* flex 대신 block으로 변경 */
         }
         
         /* Copilot 탭은 패딩 없음 */
         .tab-content[data-tab="copilot"] {
             padding: 0;
+            display: none;
+            height: 100%;
+        }
+        
+        .tab-content[data-tab="copilot"].active {
+            display: flex;
+            flex-direction: column;
         }
 
         /* === 인사이트 패널 === */
@@ -612,8 +616,7 @@
             flex-direction: column;
             background: white;
             position: relative;
-            flex: 1;
-            min-height: 0;
+            height: 100%;
             width: 100%;
             overflow: hidden;
         }
@@ -623,6 +626,7 @@
             overflow-y: auto;
             overflow-x: hidden;
             padding: 20px;
+            padding-bottom: 200px; /* 입력창과 푸터 공간 확보 */
             display: flex;
             flex-direction: column;
             gap: 16px;
@@ -655,7 +659,7 @@
         }
         
         .chat-messages .chat-message:last-child {
-            margin-bottom: 80px; /* 입력창 높이만큼 여백 */
+            margin-bottom: 20px; /* 적절한 여백 */
         }
 
         .chat-message {
@@ -807,19 +811,18 @@
         /* === Claude 스타일 채팅 입력 영역 === */
         .chat-input-container {
             position: fixed;
-            bottom: 87px;
+            bottom: 120px; /* 푸터 높이만큼 위로 */
             left: 0;
             right: 0;
             width: 100%;
             padding: 16px 20px;
             background: #f6f7f9;
             border-top: 1px solid #e5e7eb;
-            border-bottom: 1px solid #e5e7eb;
-            z-index: 1001;
             display: flex;
             align-items: flex-end;
             justify-content: center;
             gap: 0;
+            z-index: 100;
         }
 
         .chat-input-box {
@@ -932,9 +935,9 @@
 
         /* 스크롤 투 바텀 버튼 */
         .scroll-to-bottom {
-            position: absolute;
-            bottom: 100px; /* 입력창 위로 올림 */
-            right: 20px;
+            position: fixed;
+            bottom: 210px; /* 입력창 위로 */
+            right: 30px;
             width: 40px;
             height: 40px;
             background: white;
@@ -946,7 +949,7 @@
             cursor: pointer;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
             transition: all 0.2s;
-            z-index: 100;
+            z-index: 90;
             opacity: 0.9;
         }
 
@@ -999,8 +1002,9 @@
             bottom: 0;
             left: 0;
             right: 0;
+            width: 100%;
             z-index: 1000;
-            margin-top: 60px; /* 채팅 입력창 높이만큼 여백 */
+            border-radius: 0 0 12px 12px;
         }
 
         .feedback-section {
@@ -1131,6 +1135,8 @@
             overflow: hidden;
             margin-bottom: 16px;
             position: relative;
+            display: flex;
+            flex-direction: column;
         }
 
         .progress-bar-fill {
@@ -1393,15 +1399,26 @@
         /* === 티켓 상세 보기 스타일 === */
         #ticketDetailContainer {
             display: none;
-            padding: 20px;
+            height: 100%;
+            overflow-y: auto;
+            overflow-x: hidden;
             background: white;
-            border-radius: 12px;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-            margin-bottom: 20px;
         }
 
+        /* 티켓 상세 컨테이너 */
+        #ticketDetailContainer {
+            overflow-y: auto;
+            overflow-x: hidden;
+            height: auto;
+            min-height: 400px;
+            max-height: calc(100vh - 300px);
+        }
+        
         .ticket-detail-view {
             max-width: 100%;
+            padding: 20px;
+            padding-bottom: 60px; /* 하단 여백 추가 */
+            min-height: 100%;
         }
 
         .detail-header {
@@ -1863,7 +1880,7 @@
                                 </div>
                             </div>
                             <!-- 스크롤 공간 확보를 위한 빈 요소 -->
-                            <div style="height: 100px; flex-shrink: 0;"></div>
+                            <div style="height: 20px; flex-shrink: 0;"></div>
                         </div>
                         <!-- 스크롤 투 바텀 버튼 -->
                         <button class="scroll-to-bottom" id="scrollToBottomBtn" onclick="scrollToBottom()" style="display: none;">
@@ -1871,64 +1888,65 @@
                                 <path d="M12 5v14m0 0l-7-7m7 7l7-7" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>
                         </button>
+                        
+                        <!-- Claude 스타일 채팅 입력 영역 -->
+                        <div class="chat-input-container" id="chatInputContainer">
+                            <div class="chat-input-box">
+                                <div class="chat-input-wrapper">
+                                    <textarea 
+                                        id="chatInput" 
+                                        placeholder="메시지를 입력하세요..." 
+                                        rows="1"
+                                        onkeydown="handleChatKeydown(event)"
+                                        oninput="adjustTextareaHeight(this)"
+                                        oncompositionstart="handleCompositionStart(event)"
+                                        oncompositionend="handleCompositionEnd(event)"
+                                    ></textarea>
+                                    <div class="input-actions">
+                                        <button class="toggle-button" onclick="window.toggleChatMode && window.toggleChatMode()" title="모드 전환">
+                                            <span class="toggle-indicator" id="modeIndicator">🎯 스마트</span>
+                                        </button>
+                                        <button class="send-button" onclick="if(!isSendingMessage) sendMessage()" id="sendButton">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                                <path d="M5 10l7-7m0 0l7 7m-7-7v18" stroke-linecap="round" stroke-linejoin="round"/>
+                                            </svg>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
-        </main>
-    </div>
+            
+            <!-- 앱 푸터 -->
+            <div class="app-footer">
+                <div class="feedback-section">
+                    <div class="feedback-question">이 AI 분석이 도움이 되었나요?</div>
+                    <div class="feedback-actions">
+                        <button class="feedback-btn thumbs-up" onclick="submitFeedback('positive')">
+                            👍 도움됨
+                        </button>
+                        <button class="feedback-btn thumbs-down" onclick="submitFeedback('negative')">
+                            👎 개선필요
+                        </button>
+                    </div>
+                </div>
 
-    <!-- Claude 스타일 채팅 입력 영역 -->
-    <div class="chat-input-container" id="chatInputContainer" style="display: none;">
-        <div class="chat-input-box">
-            <div class="chat-input-wrapper">
-                <textarea 
-                    id="chatInput" 
-                    placeholder="메시지를 입력하세요..." 
-                    rows="1"
-                    onkeydown="handleChatKeydown(event)"
-                    oninput="adjustTextareaHeight(this)"
-                    oncompositionstart="handleCompositionStart(event)"
-                    oncompositionend="handleCompositionEnd(event)"
-                ></textarea>
-                <div class="input-actions">
-                    <button class="toggle-button" onclick="window.toggleChatMode && window.toggleChatMode()" title="모드 전환">
-                        <span class="toggle-indicator" id="modeIndicator">🎯 스마트</span>
-                    </button>
-                    <button class="send-button" onclick="if(!isSendingMessage) sendMessage()" id="sendButton">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                            <path d="M5 10l7-7m0 0l7 7m-7-7v18" stroke-linecap="round" stroke-linejoin="round"/>
-                        </svg>
-                    </button>
+                <div class="performance-footer" id="performanceFooter">
+                    <div class="perf-item">
+                        🕒 처리시간: <span id="processingTime">-</span>
+                    </div>
+                    <div class="perf-item">
+                        📊 품질점수: <span id="qualityScore">-</span>
+                    </div>
+                    <div class="perf-item">
+                        🔍 검색결과: <span id="searchResults">-</span>
+                    </div>
                 </div>
             </div>
-        </div>
-    </div>
-
-    <!-- 앱 푸터 -->
-    <div class="app-footer">
-        <div class="feedback-section">
-            <div class="feedback-question">이 AI 분석이 도움이 되었나요?</div>
-            <div class="feedback-actions">
-                <button class="feedback-btn thumbs-up" onclick="submitFeedback('positive')">
-                    👍 도움됨
-                </button>
-                <button class="feedback-btn thumbs-down" onclick="submitFeedback('negative')">
-                    👎 개선필요
-                </button>
-            </div>
-        </div>
-
-        <div class="performance-footer" id="performanceFooter">
-            <div class="perf-item">
-                🕒 처리시간: <span id="processingTime">-</span>
-            </div>
-            <div class="perf-item">
-                📊 품질점수: <span id="qualityScore">-</span>
-            </div>
-            <div class="perf-item">
-                🔍 검색결과: <span id="searchResults">-</span>
-            </div>
-        </div>
+            
+        </main>
     </div>
 
     <!-- 스크립트 -->
