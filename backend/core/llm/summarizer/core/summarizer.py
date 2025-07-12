@@ -137,19 +137,13 @@ class CoreSummarizer:
                 ui_language=ui_language
             )
             
-            # 조회 티켓 프롬프트 디버깅 로그
+            # 프롬프트 검증만 수행 (로그 출력 제거)
             if content_type == "ticket_view":
-                logger.info(f"\n📝 [조회 티켓 프롬프트 디버깅]")
-                logger.info(f"System Prompt 길이: {len(system_prompt)} 문자")
-                logger.info(f"System Prompt 미리보기: {system_prompt[:300]}...")
-                logger.info(f"User Prompt 길이: {len(user_prompt)} 문자")
-                # 한국어/영어 섹션 타이틀 모두 체크
+                # 한국어/영어 섹션 타이틀 검증 (로그 없이)
                 korean_sections = "🔍 문제 현황" in system_prompt or "💡 원인 분석" in system_prompt
                 english_sections = "🔍 Problem Overview" in system_prompt or "💡 Root Cause" in system_prompt
-                if korean_sections or english_sections:
-                    logger.info("✅ ticket_view 템플릿 구조 확인됨")
-                else:
-                    logger.warning("⚠️ ticket_view 템플릿 구조가 누락됨!")
+                if not (korean_sections or english_sections):
+                    logger.debug("ticket_view 템플릿 구조 검증 실패")
             
             # 5. Generate summary using LLM
             # 메시지 검증

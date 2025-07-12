@@ -532,10 +532,10 @@ class SQLiteDatabase:
             SELECT usage_type, usage_date, SUM(usage_count) as total_usage
             FROM usage_logs 
             WHERE tenant_id = ? 
-            AND usage_date >= date('now', '-{} days')
-        """.format(days)
+            AND usage_date >= date('now', '-' || ? || ' days')
+        """
         
-        params = [tenant_id]
+        params = [tenant_id, days]
         
         if usage_type:
             query += " AND usage_type = ?"

@@ -216,7 +216,11 @@ class PerformanceMiddleware(BaseHTTPMiddleware):
             raise error
     
     def _log_request(self, metrics: RequestMetrics):
-        """요청 로깅"""
+        """요청 로깅 (헬스체크 제외)"""
+        # 헬스체크는 로그에서 제외 (노이즈 방지)
+        if metrics.path == "/health":
+            return
+            
         if metrics.status_code >= 400:
             log_level = logging.WARNING
             emoji = "⚠️"

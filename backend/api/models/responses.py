@@ -241,7 +241,7 @@ class AgentResponse(BaseModel):
     updated_at: datetime = Field(description="수정 시간")
     
     class Config:
-        orm_mode = True
+        from_attributes = True  # Pydantic V2 스타일
 
 
 class AgentListResponse(BaseModel):

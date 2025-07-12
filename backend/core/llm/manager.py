@@ -67,7 +67,6 @@ class LLMManager:
         # 캐시
         self.response_cache = TTLCache(maxsize=1000, ttl=3600)
         self.embedding_cache = TTLCache(maxsize=1000, ttl=3600)
-        self.status_mapping_cache = TTLCache(maxsize=10, ttl=7200)  # 2시간 캐시
         
         # 초기화
         self._initialize_providers()
@@ -79,34 +78,59 @@ class LLMManager:
         logger.info(f"LLMManager 초기화 완료 - {len(self.providers)}개 제공자 로드됨")
     
     def _initialize_providers(self):
-        """제공자들 초기화"""
+        """제공자들 초기화 - 레지스트리 기반"""
+        from .registry import get_model_registry
+        registry = get_model_registry()
         
-        # OpenAI
-        openai_key = os.getenv("OPENAI_API_KEY")
-        if openai_key:
-            try:
-                self.providers[LLMProvider.OPENAI] = OpenAIProvider(openai_key)
-                logger.debug("OpenAI Provider 초기화 완료")
-            except Exception as e:
-                logger.error(f"OpenAI Provider 초기화 실패: {e}")
+        # 레지스트리에서 사용 가능한 제공자 확인
+        available_providers = set()
+        for model in registry.get_available_models(include_deprecated=False):
+            available_providers.add(model.provider)
         
-        # Anthropic
-        anthropic_key = os.getenv("ANTHROPIC_API_KEY")
-        if anthropic_key:
-            try:
-                self.providers[LLMProvider.ANTHROPIC] = AnthropicProvider(anthropic_key)
-                logger.debug("Anthropic Provider 초기화 완료")
-            except Exception as e:
-                logger.error(f"Anthropic Provider 초기화 실패: {e}")
+        # 각 제공자에 대해 초기화 시도
+        provider_classes = {
+            "openai": (LLMProvider.OPENAI, OpenAIProvider),
+            "anthropic": (LLMProvider.ANTHROPIC, AnthropicProvider),
+            "gemini": (LLMProvider.GEMINI, GeminiProvider)
+        }
         
-        # Gemini
-        gemini_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-        if gemini_key:
+        for provider_name in available_providers:
+            if provider_name not in provider_classes:
+                logger.warning(f"Unknown provider in registry: {provider_name}")
+                continue
+                
+            provider_enum, provider_class = provider_classes[provider_name]
+            
+            # API 키 확인
+            api_key = self._get_api_key(provider_name)
+            if not api_key:
+                logger.warning(f"No API key found for {provider_name}")
+                continue
+                
             try:
-                self.providers[LLMProvider.GEMINI] = GeminiProvider(gemini_key)
-                logger.debug("Gemini Provider 초기화 완료")
+                self.providers[provider_enum] = provider_class(api_key)
+                logger.debug(f"{provider_name.capitalize()} Provider 초기화 완료")
             except Exception as e:
-                logger.error(f"Gemini Provider 초기화 실패: {e}")
+                logger.error(f"{provider_name.capitalize()} Provider 초기화 실패: {e}")
+    
+    def _get_api_key(self, provider_name: str) -> Optional[str]:
+        """제공자별 API 키 조회"""
+        env_var_map = {
+            "openai": "OPENAI_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY",
+            "gemini": ["GOOGLE_API_KEY", "GEMINI_API_KEY"]
+        }
+        
+        env_vars = env_var_map.get(provider_name, [])
+        if isinstance(env_vars, str):
+            env_vars = [env_vars]
+            
+        for env_var in env_vars:
+            api_key = os.getenv(env_var)
+            if api_key:
+                return api_key
+        
+        return None
     
     async def generate(self, 
                       messages: List[Dict[str, str]], 
@@ -262,7 +286,7 @@ class LLMManager:
             # AI 처리 정보 업데이트  
             updated_metadata = TenantMetadataNormalizer.update_ai_processing_info(
                 tenant_metadata, 
-                model_used="claude-3-5-haiku-20241022",  # 실제 사용된 모델로 업데이트
+                model_used="unknown",  # 요약 생성 후 모델 정보 추출 필요
                 quality_score=4.0  # 기본 품질 점수
             )
             
@@ -315,17 +339,6 @@ class LLMManager:
         import asyncio
         import os
         
-        # 상태 매핑 정보 가져오기
-        status_mapping = {}
-        if platform_config:
-            try:
-                platform_name = platform_config.get("platform", "freshdesk")
-                status_mapping = await self.get_status_mapping(platform_name, platform_config)
-                logger.info(f"상태 매핑 로드 완료: {len(status_mapping)}개")
-            except Exception as e:
-                logger.warning(f"상태 매핑 로드 실패, 기본값 사용: {e}")
-                status_mapping = {2: "Open", 3: "Pending", 4: "Resolved", 5: "Closed"}
-        
         # 병렬 처리 활성화 확인
         enable_parallel = os.getenv("ENABLE_PARALLEL_PROCESSING", "true").lower() == "true"
         enable_batch = os.getenv("ENABLE_BATCH_SUMMARIES", "true").lower() == "true"
@@ -335,18 +348,31 @@ class LLMManager:
         if enable_batch and len(similar_tickets) >= 2:
             logger.info(f"🚀 [배치 처리] 유사 티켓 {len(similar_tickets)}개 배치 요약 시작")
             try:
-                batch_summarizer = BatchSummarizer(self.providers[0])  # 첫 번째 프로바이더 사용
+                # 첫 번째 사용 가능한 프로바이더 찾기
+                first_provider = None
+                if self.providers:
+                    # Dictionary에서 첫 번째 프로바이더 가져오기
+                    first_provider = next(iter(self.providers.values()), None)
+                    logger.info(f"🔧 [배치 처리] 프로바이더 선택: {type(first_provider).__name__ if first_provider else 'None'}")
+                
+                if not first_provider:
+                    raise ValueError("사용 가능한 LLM 프로바이더가 없습니다")
+                
+                batch_summarizer = BatchSummarizer(first_provider)
+                logger.info(f"🚀 [배치 처리] BatchSummarizer 생성 완료")
+                
                 return await batch_summarizer.generate_batch_summaries(
                     similar_tickets, 
                     ui_language,
                     max_batch_size=5
                 )
             except Exception as e:
-                logger.error(f"❌ [배치 처리] 실패, 병렬 처리로 폴백: {e}")
+                logger.error(f"❌ [배치 처리] 실패: {str(e)}", exc_info=True)
+                logger.info(f"🔄 [배치 처리] 병렬 처리로 폴백")
         
         if not enable_parallel or len(similar_tickets) <= 1:
             # 순차 처리 (기존 로직)
-            return await self._generate_similar_tickets_sequential(similar_tickets, ui_language, status_mapping)
+            return await self._generate_similar_tickets_sequential(similar_tickets, ui_language)
         
         # 병렬 처리
         logger.info(f"🚀 [병렬 처리] 유사 티켓 {len(similar_tickets)}개 병렬 요약 시작 (최대 동시 실행: {max_concurrent}개)")
@@ -356,7 +382,7 @@ class LLMManager:
         
         async def process_ticket_with_semaphore(ticket, index):
             async with semaphore:
-                return await self._generate_single_ticket_summary(ticket, index, ui_language, status_mapping)
+                return await self._generate_single_ticket_summary(ticket, index, ui_language)
         
         # 모든 티켓에 대해 병렬 작업 생성
         tasks = [
@@ -387,7 +413,7 @@ class LLMManager:
         
         return summarized_tickets
 
-    async def _generate_similar_tickets_sequential(self, similar_tickets: List[Dict[str, Any]], ui_language: str = "ko", status_mapping: Dict[int, str] = None) -> List[Dict[str, Any]]:
+    async def _generate_similar_tickets_sequential(self, similar_tickets: List[Dict[str, Any]], ui_language: str = "ko") -> List[Dict[str, Any]]:
         """
         유사 티켓들에 대한 요약 생성 (순차 처리 - 기존 로직)
         """
@@ -504,6 +530,12 @@ class LLMManager:
                     content_type = "ticket_similar"
                     logger.info(f"🎫 [티켓] 티켓 ID {ticket.get('id')} - ticket_similar 템플릿 사용")
                     
+                    # 요약 생성 전 디버깅
+                    logger.info(f"🎯 유사 티켓 {ticket.get('id')} 요약 생성 시작")
+                    logger.info(f"  - content_type: {content_type}")
+                    logger.info(f"  - ui_language: {ui_language}")
+                    logger.info(f"  - description 길이: {len(ticket_data_for_summary.get('description_text', ''))}")
+                    
                     summary_result = await generate_smart_summary(
                         content=ticket_data_for_summary.get("description_text", ""),
                         content_type=content_type,  # doc_type에 따라 올바른 템플릿 사용
@@ -518,6 +550,7 @@ class LLMManager:
                     # 요약 결과 검증
                     if summary_result and summary_result.strip():
                         summary_text = f"{summary_result}\n\n**🎯 유사도**: {ticket.get('score', 0.0):.3f}"
+                        logger.info(f"✅ 유사 티켓 {ticket.get('id')} 요약 생성 성공 - 길이: {len(summary_text)}")
                     else:
                         logger.warning(f"Empty summary result for ticket {ticket.get('id')}, using fallback")
                         ticket_title = ticket.get("subject", "제목 없음")
@@ -565,7 +598,7 @@ class LLMManager:
         logger.info(f"🎯 [유사 티켓 요약] 완료: {len(summarized_tickets)}건 처리")
         return summarized_tickets
 
-    async def _generate_single_ticket_summary(self, ticket: Dict[str, Any], index: int, ui_language: str = "ko", status_mapping: Dict[int, str] = None) -> Dict[str, Any]:
+    async def _generate_single_ticket_summary(self, ticket: Dict[str, Any], index: int, ui_language: str = "ko") -> Dict[str, Any]:
         """
         개별 티켓에 대한 요약 생성 (병렬 처리용)
         
@@ -664,24 +697,27 @@ class LLMManager:
     def _create_fallback_ticket(self, ticket: Dict[str, Any]) -> Dict[str, Any]:
         """
         요약 생성에 실패한 티켓에 대한 폴백 결과 생성
+        프로젝트 원칙: fallback시 기본값 사용하지 않고 오류를 명확히 표시
         
         Args:
             ticket: 원본 티켓 정보
             
         Returns:
-            폴백 티켓 정보
+            오류를 명확히 표시한 티켓 정보
         """
-        ticket_title = ticket.get("subject", "제목 없음")
-        ticket_content = ticket.get("content", "")
-        
-        fallback_content = f"## 🔍 {ticket_title}\n\n**유사 문제**: {ticket_content[:300] if ticket_content else '내용 없음'}...\n\n**🎯 유사도**: {ticket.get('score', 0.0):.3f}"
+        ticket_id = ticket.get("id", "unknown")
+        logger.error(f"❌ [요약 생성 실패] 티켓 {ticket_id} 요약 생성 실패")
         
         return {
-            "id": ticket.get("id"),
-            "subject": ticket.get("subject") or ticket.get("title", ""),  # subject 필드만 사용
-            "content": fallback_content,
+            "id": ticket_id,
+            "subject": ticket.get("subject", ""),
+            "content": f"[오류] 티켓 요약 생성에 실패했습니다. (티켓 ID: {ticket_id})",
             "score": ticket.get("score", 0.0),
-            "metadata": ticket.get("metadata", {})
+            "metadata": {
+                **ticket.get("metadata", {}),
+                "error": True,
+                "error_message": "LLM 요약 생성 실패"
+            }
         }
     
     # KB 문서 요약 함수 제거 - 아티클은 메타데이터만 사용하기로 결정
@@ -1277,48 +1313,36 @@ class LLMManager:
         # 기본값
         return '📎'  # 일반 첨부파일
     
-    async def get_status_mapping(self, platform: str, config: Dict[str, Any]) -> Dict[int, str]:
+    def check_model_deprecation(self) -> List[Dict[str, Any]]:
         """
-        플랫폼에서 상태 매핑 정보를 가져옵니다.
+        현재 사용 중인 모델들의 deprecation 상태 확인
         
-        Args:
-            platform: 플랫폼 이름 (예: "freshdesk")
-            config: 플랫폼 설정 정보
-            
         Returns:
-            Dict[int, str]: 상태 ID와 라벨의 매핑
+            List of deprecated models currently in use
         """
-        cache_key = f"status_mapping_{platform}_{config.get('domain', '')}"
+        from .registry import get_model_registry
+        registry = get_model_registry()
         
-        # 캐시에서 확인
-        if cache_key in self.status_mapping_cache:
-            logger.debug(f"상태 매핑 캐시 히트: {cache_key}")
-            return self.status_mapping_cache[cache_key]
+        deprecated_in_use = []
         
-        try:
-            if platform == "freshdesk":
-                from core.platforms.freshdesk.adapter import FreshdeskAdapter
-                
-                async with FreshdeskAdapter(config) as adapter:
-                    status_mapping = await adapter.fetch_status_mapping()
-                    
-                # 캐시에 저장
-                self.status_mapping_cache[cache_key] = status_mapping
-                logger.info(f"상태 매핑 캐시 저장: {len(status_mapping)}개 상태")
-                return status_mapping
-            else:
-                logger.warning(f"지원하지 않는 플랫폼: {platform}")
-                return {}
-                
-        except Exception as e:
-            logger.error(f"상태 매핑 가져오기 실패: {e}")
-            # 기본 매핑 반환
-            return {
-                2: "Open",
-                3: "Pending", 
-                4: "Resolved",
-                5: "Closed"
-            }
+        # 각 use case별로 확인
+        for use_case, config in self.config_manager.configs["use_cases"].items():
+            provider = config.get("provider")
+            model = config.get("model")
+            
+            if provider and model:
+                model_spec = registry.get_model(provider, model)
+                if model_spec and model_spec.deprecated:
+                    deprecated_in_use.append({
+                        "use_case": use_case,
+                        "provider": provider,
+                        "model": model,
+                        "deprecation_date": model_spec.deprecation_date,
+                        "replacement": model_spec.replacement,
+                        "migration_guide": model_spec.migration_guide
+                    })
+        
+        return deprecated_in_use
 
 # 전역 싱글톤 인스턴스 (편의성 제공)
 _global_llm_manager = None

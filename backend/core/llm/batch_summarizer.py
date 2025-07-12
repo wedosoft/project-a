@@ -9,6 +9,8 @@ import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
+from .models.base import LLMRequest
+
 logger = logging.getLogger(__name__)
 
 
@@ -72,8 +74,18 @@ class BatchSummarizer:
         
         # LLM 호출
         try:
-            response = await self.llm_client.create(
-                model="gpt-4o-mini",
+            # 프로바이더에 맞는 모델 선택
+            model = "gpt-4o-mini"  # 기본값
+            if hasattr(self.llm_client, 'provider_type'):
+                provider_type = str(self.llm_client.provider_type)
+                if 'anthropic' in provider_type.lower():
+                    model = "claude-3-haiku-20240307"
+                elif 'gemini' in provider_type.lower():
+                    model = "gemini-1.5-flash"
+            
+            # LLMRequest 객체 생성
+            request = LLMRequest(
+                model=model,
                 messages=[
                     {
                         "role": "system",
@@ -88,8 +100,18 @@ class BatchSummarizer:
                 max_tokens=2000
             )
             
+            # generate 메서드 호출
+            response = await self.llm_client.generate(request)
+            
+            # 응답 성공 여부 확인
+            if not response.success:
+                logger.error(f"LLM 응답 실패: {response.error}")
+                raise Exception(f"LLM 응답 실패: {response.error}")
+                
+            logger.info(f"✅ [배치 요약] LLM 응답 성공 - 모델: {response.model}")
+            
             # 응답 파싱
-            content = response.choices[0].message.content
+            content = response.content  # LLMResponse에서 content 직접 접근
             summaries = self._parse_batch_response(content, batch)
             
             return summaries
@@ -217,22 +239,18 @@ Be specific about technical issues and clear about general inquiries."""
             return [self._create_fallback_summary(ticket) for ticket in original_batch]
     
     def _create_fallback_summary(self, ticket: Dict[str, Any]) -> Dict[str, Any]:
-        """폴백 요약을 생성합니다"""
+        """폴백 요약을 생성합니다 - 오류를 명확히 표시"""
         
-        content = ticket.get('content', '')
-        if len(content) > 200:
-            summary = content[:200] + "..."
-        else:
-            summary = content or "요약을 생성할 수 없습니다."
-            
+        ticket_id = ticket.get('id', 'unknown')
+        logger.error(f"❌ [요약 생성 실패] 티켓 {ticket_id} 요약 생성 실패")
+        
+        # 프로젝트 원칙: fallback시 기본값 사용하지 않고 오류를 명확히 표시
         return {
             **ticket,
-            'content': summary,
+            'content': f"[오류] 티켓 요약 생성에 실패했습니다. (티켓 ID: {ticket_id})",
             'summary_metadata': {
-                'key_points': ["요약 생성 실패"],
-                'status': '알 수 없음',
-                'urgency': '보통',
-                'generated_at': datetime.now().isoformat(),
-                'is_fallback': True
+                'error': True,
+                'error_message': 'LLM 요약 생성 실패',
+                'generated_at': datetime.now().isoformat()
             }
         }

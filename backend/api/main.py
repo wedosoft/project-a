@@ -46,6 +46,7 @@ print(f"🐍 Python 경로 설정 완료")
 from core.container import get_container
 from core.errors import ErrorHandlingMiddleware, get_error_handler
 from core.middleware import PerformanceMiddleware
+from api.rate_limit import RateLimitMiddleware, global_limiter
 
 # 분리된 라우터들 import
 from api.routes import (
@@ -129,7 +130,10 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# 성능 최적화 미들웨어 추가 (가장 먼저)
+# Rate Limiting 미들웨어 추가 (가장 먼저)
+app.add_middleware(RateLimitMiddleware, limiter=global_limiter)
+
+# 성능 최적화 미들웨어 추가
 app.add_middleware(PerformanceMiddleware, enable_detailed_logging=True)
 
 # 에러 핸들링 미들웨어 추가

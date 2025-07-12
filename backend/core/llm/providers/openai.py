@@ -27,12 +27,7 @@ class OpenAIProvider(BaseLLMProvider):
     def __init__(self, api_key: str, **kwargs):
         super().__init__(api_key, **kwargs)
         self.client = openai.AsyncOpenAI(api_key=api_key)
-        self._available_models = [
-            "gpt-3.5-turbo",
-            "gpt-4",
-            "gpt-4-turbo",
-            "gpt-4o-mini"
-        ]
+        self._available_models = None  # 레지스트리에서 동적으로 로드
     
     @property
     def provider_type(self) -> LLMProvider:
@@ -40,6 +35,25 @@ class OpenAIProvider(BaseLLMProvider):
     
     @property
     def available_models(self) -> List[str]:
+        """레지스트리에서 사용 가능한 모델 목록 반환"""
+        if self._available_models is None:
+            try:
+                from ..registry import get_model_registry
+                registry = get_model_registry()
+                models = registry.get_available_models(
+                    provider="openai",
+                    include_deprecated=False
+                )
+                self._available_models = [model.name for model in models]
+            except Exception as e:
+                logger.warning(f"Failed to load models from registry: {e}")
+                # 폴백: 기본 모델 목록
+                self._available_models = [
+                    "gpt-3.5-turbo",
+                    "gpt-4",
+                    "gpt-4-turbo",
+                    "gpt-4o-mini"
+                ]
         return self._available_models
     
     @retry(

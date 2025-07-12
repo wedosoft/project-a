@@ -132,3 +132,6 @@ https://developers.freshworks.com/docs/app-sdk/v3.0/common/advanced-interfaces/r
        * 원문 파일 3개 이하: 그대로 반환
        * 3개 초과: LLM이 판단
      - 다국어 및 복잡한 환경에서의 통합 판단 요청
+
+## 파이썬 테스트 환경
+- 파이썬 실행은 backend/venv에서 하세요. 꼭 기억해두세요.

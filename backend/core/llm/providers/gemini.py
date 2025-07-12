@@ -27,12 +27,8 @@ class GeminiProvider(BaseLLMProvider):
     def __init__(self, api_key: str, **kwargs):
         super().__init__(api_key, **kwargs)
         genai.configure(api_key=api_key)
-        self.client = genai.GenerativeModel('gemini-1.5-flash-latest')
-        self._available_models = [
-            "gemini-1.5-flash-latest",
-            "gemini-1.5-pro",
-            "gemini-pro"
-        ]
+        self.client = None  # 모델별로 동적 생성
+        self._available_models = None  # 레지스트리에서 동적으로 로드
     
     @property
     def provider_type(self) -> LLMProvider:
@@ -40,7 +36,44 @@ class GeminiProvider(BaseLLMProvider):
     
     @property
     def available_models(self) -> List[str]:
+        """레지스트리에서 사용 가능한 모델 목록 반환"""
+        if self._available_models is None:
+            try:
+                from ..registry import get_model_registry
+                registry = get_model_registry()
+                models = registry.get_available_models(
+                    provider="gemini",
+                    include_deprecated=False
+                )
+                self._available_models = [model.name for model in models]
+            except Exception as e:
+                logger.warning(f"Failed to load models from registry: {e}")
+                # 폴백: 기본 모델 목록
+                self._available_models = [
+                    "gemini-1.5-flash",
+                    "gemini-1.5-flash-latest",
+                    "gemini-1.5-pro"
+                ]
         return self._available_models
+    
+    def _get_default_model(self) -> str:
+        """레지스트리에서 기본 모델 반환"""
+        try:
+            from ..registry import get_model_registry
+            import os
+            registry = get_model_registry()
+            environment = os.getenv('ENVIRONMENT', 'development')
+            env_config = registry.get_environment_config(environment)
+            
+            if env_config and env_config.default_provider == "gemini":
+                return env_config.default_chat_model
+            
+            # 환경 설정이 없으면 첫 번째 사용 가능한 모델 사용
+            models = self.available_models
+            return models[0] if models else "gemini-1.5-flash-latest"
+        except Exception as e:
+            logger.warning(f"Failed to get default model from registry: {e}")
+            return "gemini-1.5-flash-latest"
     
     @retry(
         retry=retry_if_exception_type((
@@ -57,6 +90,12 @@ class GeminiProvider(BaseLLMProvider):
         start_time = time.time()
         
         try:
+            # 모델별로 클라이언트 생성
+            model_name = request.model or self._get_default_model()
+            if self.client is None or getattr(self, '_current_model', None) != model_name:
+                self.client = genai.GenerativeModel(model_name)
+                self._current_model = model_name
+            
             # 메시지들을 Gemini 형식으로 변환
             contents = []
             system_instruction = ""

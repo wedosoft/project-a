@@ -12,7 +12,7 @@ import os
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -25,6 +25,7 @@ from ..dependencies import (
     get_domain,
     get_api_key
 )
+from ..rate_limit import heavy_limiter
 
 # 로거 설정
 logger = logging.getLogger(__name__)
@@ -152,465 +153,93 @@ async def init_endpoint(
     ui_language: str = "ko",
 ) -> InitResponse:
     """
-    티켓 초기화 엔드포인트 메인 함수
+    티켓 초기화 엔드포인트 - 서비스 클래스로 리팩토링됨
     
-    Vector DB에서 검색하고 모든 요약을 실시간으로 생성합니다.
+    복잡한 로직을 TicketInitializationService로 위임합니다.
     """
     start_time = time.time()
     
     try:
-        # 1. 실시간 Freshdesk API로 현재 티켓 정보 조회
-        from core.platforms.freshdesk.fetcher import fetch_ticket_details
-        from core.database.vectordb import search_vector_db
+        # 서비스 클래스 사용으로 리팩토링
+        from core.services.init_service import ticket_init_service, InitializationRequest
         
-        logger.info(f"티켓 {ticket_id} 실시간 조회 시작 (도메인: {domain})")
+        logger.info(f"티켓 {ticket_id} 초기화 시작 - 서비스 레이어 사용")
         
-        # 실시간 Freshdesk API 호출 (에러 처리 개선)
-        ticket_data = None
-        try:
-            ticket_data = await fetch_ticket_details(
-                ticket_id=int(ticket_id),
-                domain=domain,
-                api_key=api_key
-            )
-        except Exception as e:
-            logger.warning(f"Freshdesk API 호출 실패, 기본 티켓 데이터로 진행: {str(e)}")
-            # Freshdesk API 실패 시 기본 티켓 데이터 생성
-            ticket_data = {
-                "id": int(ticket_id),
-                "subject": f"티켓 #{ticket_id}",
-                "description_text": "Freshdesk 연결 오류로 인해 상세 정보를 가져올 수 없습니다.",
-                "status": "open",
-                "priority": "medium",
-                "conversations": [],
-                "attachments": []
-            }
-        
-        if not ticket_data:
-            raise HTTPException(status_code=404, detail=f"티켓 ID {ticket_id} 데이터를 처리할 수 없습니다.")
-        
-        logger.info(f"티켓 {ticket_id} 실시간 조회 완료 - 제목: {ticket_data.get('subject', 'N/A')}")
-        
-        # 티켓 내용 구성 (제목 + 설명 + 대화내역)
-        ticket_content_parts = []
-        if ticket_data.get("subject"):
-            ticket_content_parts.append(f"제목: {ticket_data['subject']}")
-        if ticket_data.get("description_text"):
-            ticket_content_parts.append(f"설명: {ticket_data['description_text']}")
-        elif ticket_data.get("description"):
-            ticket_content_parts.append(f"설명: {ticket_data['description']}")
-        
-        # LLM 기반 통합 지능형 처리 (Beta)
-        use_intelligent_processing = ticket_data.get("conversations") and len(ticket_data.get("conversations", [])) > 10
-        
-        if use_intelligent_processing:
-            try:
-                from core.llm.intelligent_ticket_processor import get_intelligent_processor
-                
-                logger.info(f"🧠 LLM 통합 지능형 처리 시작 - 대화 수: {len(ticket_data.get('conversations', []))}")
-                
-                # 통합 분석 수행
-                intelligent_processor = get_intelligent_processor()
-                analysis = await intelligent_processor.process_ticket_intelligently(ticket_data, ui_language)
-                
-                # 최적화된 콘텐츠 생성
-                ticket_content = intelligent_processor.get_optimized_ticket_content(ticket_data, analysis)
-                
-                logger.info(f"✅ 지능형 처리 완료 - 언어: {analysis.language}, "
-                           f"선별 대화: {len(analysis.important_conversation_indices)}개, "
-                           f"관련 첨부파일: {len(analysis.relevant_attachments)}개")
-                
-                # 분석 결과를 메타데이터에 추가
-                if "metadata" not in ticket_data:
-                    ticket_data["metadata"] = {}
-                
-                ticket_data["metadata"]["intelligent_analysis"] = {
-                    "language": analysis.language,
-                    "selected_conversations": len(analysis.important_conversation_indices),
-                    "relevant_attachments": len(analysis.relevant_attachments)
-                }
-                
-                # 관련 첨부파일을 메타데이터에 설정 (기존 첨부파일 선별 로직 대체)
-                if analysis.relevant_attachments:
-                    ticket_data["metadata"]["relevant_attachments"] = analysis.relevant_attachments
-                
-            except Exception as e:
-                logger.warning(f"⚠️ 지능형 처리 실패, 기존 방식으로 폴백: {e}")
-                use_intelligent_processing = False
-        
-        # 기존 방식 (폴백 또는 짧은 대화)
-        if not use_intelligent_processing:
-            # 대화내역 추가 (스마트 필터링 사용)
-            if ticket_data.get("conversations"):
-                conversations = ticket_data["conversations"]
-                total_conversations = len(conversations)
-                
-                ticket_content_parts.append(f"대화내역 (총 {total_conversations}개):")
-                
-                # 대화 필터링 캐싱
-                import hashlib
-                import json
-                import redis.asyncio as redis
-                
-                conv_hash = hashlib.md5(str([c.get('body_text', '')[:100] for c in conversations]).encode()).hexdigest()[:16]
-                filter_cache_key = f"{tenant_id}:conv_filter:{ticket_id}:{conv_hash}:{total_conversations}"
-                
-                redis_url = os.getenv("REDIS_URL")
-                redis_client = None
-                cached_filter_result = None
-                
-                if redis_url:
-                    try:
-                        redis_client = redis.from_url(redis_url, decode_responses=True)
-                        cached_filter_result = await redis_client.get(filter_cache_key)
-                        if cached_filter_result:
-                            cached_data = json.loads(cached_filter_result)
-                            selected_indices = cached_data['indices']
-                            filter_metadata = cached_data['metadata']
-                            logger.info(f"🤖 [캐시 히트] 대화 필터링 결과: {filter_metadata}")
-                    except Exception as e:
-                        logger.warning(f"대화 필터 캐시 조회 실패: {e}")
-                
-                if not cached_filter_result:
-                    # 스마트 대화 필터 사용
-                    smart_filter = SmartConversationFilter(max_conversations=20, max_chars_per_conv=1000)
-                    selected_indices, filter_metadata = smart_filter.filter_conversations(
-                        conversations, 
-                        ticket_metadata=ticket_data.get("metadata", {})
-                    )
-                    
-                    # 필터링 결과 로깅
-                    logger.info(f"🤖 스마트 필터링 결과: {filter_metadata}")
-                    
-                    # 캐시 저장
-                    if redis_client:
-                        try:
-                            cache_data = {
-                                'indices': selected_indices,
-                                'metadata': filter_metadata
-                            }
-                            await redis_client.setex(
-                                filter_cache_key,
-                                7200,  # 2시간 TTL
-                                json.dumps(cache_data)
-                            )
-                            logger.info(f"💾 [캐시 저장] 대화 필터링 결과 캐시됨")
-                        except Exception as e:
-                            logger.warning(f"대화 필터 캐시 저장 실패: {e}")
-                        finally:
-                            await redis_client.close()
-                
-                # 포맷팅된 대화 추가
-                smart_filter = SmartConversationFilter(max_conversations=20, max_chars_per_conv=1000)
-                formatted_conversations = smart_filter.format_conversations(conversations, selected_indices)
-                ticket_content_parts.extend(formatted_conversations)
-            
-            ticket_content = "\n".join(ticket_content_parts)
-        
-        # 병렬 처리를 위한 작업 정의
-        import asyncio
-        
-        llm_manager = get_llm_manager()
-        
-        # 2. 병렬 실행할 작업들 정의
-        async def generate_summary_task():
-            """티켓 요약 생성 작업 (캐싱 적용)"""
-            if not include_summary:
-                return None
-            
-            # 요약 캐시 키 생성
-            import hashlib
-            import json
-            summary_content_hash = hashlib.md5(str(ticket_data).encode()).hexdigest()[:16]
-            summary_cache_key = f"{tenant_id}:ticket_summary:{platform}:{ticket_id}:{summary_content_hash}"
-            
-            # Redis 캐시 확인
-            import redis.asyncio as redis
-            redis_url = os.getenv("REDIS_URL")
-            redis_client = None
-            
-            if redis_url:
-                try:
-                    redis_client = redis.from_url(redis_url, decode_responses=True)
-                    cached_summary = await redis_client.get(summary_cache_key)
-                    if cached_summary:
-                        logger.info(f"🎯 [캐시 히트] 테넌트 {tenant_id} 티켓 {ticket_id} 요약")
-                        await redis_client.close()
-                        return cached_summary
-                except Exception as e:
-                    logger.warning(f"요약 캐시 조회 실패: {e}")
-                    redis_client = None
-                
-            logger.info(f"🎯 [실시간 티켓 요약] 티켓 {ticket_id} AI 요약 생성 시작")
-            logger.info(f"    제목: {ticket_data.get('subject', 'N/A')}")
-            logger.info(f"    대화수: {len(ticket_data.get('conversations', []))}개, 첨부파일: {len(ticket_data.get('attachments', []))}개")
-            
-            try:
-                summary_result_dict = await llm_manager.generate_ticket_summary(ticket_data)
-                summary_result = summary_result_dict.get("summary", "요약 생성 실패")
-                
-                logger.info(f"✅ [실시간 티켓 요약] 티켓 {ticket_id} YAML 템플릿 기반 요약 완료 ({len(summary_result)}자)")
-                logger.info(f"\n📄 [조회 티켓 요약] \n{summary_result}")
-                
-                # Redis 캐시에 저장 (1시간 TTL)
-                if redis_client and summary_result:
-                    try:
-                        cache_ttl = 3600  # 1시간
-                        await redis_client.setex(
-                            summary_cache_key,
-                            cache_ttl,
-                            summary_result
-                        )
-                        logger.info(f"💾 [캐시 저장] 테넌트 {tenant_id} 티켓 {ticket_id} 요약 캐시됨 (TTL: {cache_ttl}초)")
-                    except Exception as e:
-                        logger.warning(f"요약 캐시 저장 실패: {e}")
-                    finally:
-                        await redis_client.close()
-                
-                return summary_result
-                
-            except Exception as e:
-                error_msg = f"YAML 템플릿 기반 요약 생성 중 오류 발생: {str(e)}"
-                logger.error(f"❌ [실시간 티켓 요약] 티켓 {ticket_id} YAML 템플릿 요약 생성 실패: {e}")
-                return error_msg
-
-        async def search_similar_tickets_task():
-            """유사 티켓 검색 작업 (멀티테넌트 Redis 캐시 적용)"""
-            if not include_similar_tickets:
-                return []
-            
-            # 멀티테넌트 캐시 키 생성 (테넌트 격리)
-            import hashlib
-            search_content_hash = hashlib.md5(ticket_content.encode()).hexdigest()[:16]
-            cache_key = f"{tenant_id}:similar_tickets:{platform}:{ticket_id}:{search_content_hash}:{top_k_tickets}"
-            
-            # Redis 캐시 확인 (환경변수 기반 URL 사용)
-            import redis.asyncio as redis
-            import json
-            redis_url = os.getenv("REDIS_URL")
-            redis_client = None
-            
-            if redis_url:
-                try:
-                    redis_client = redis.from_url(redis_url, decode_responses=True)
-                    cached_result = await redis_client.get(cache_key)
-                    if cached_result:
-                        cached_data = json.loads(cached_result)
-                        logger.info(f"🎯 [Redis 캐시 히트] 테넌트 {tenant_id} 유사 티켓: {len(cached_data)}건")
-                        await redis_client.close()
-                        return cached_data
-                except Exception as e:
-                    logger.warning(f"Redis 캐시 조회 실패: {e}")
-                    redis_client = None
-                
-            logger.info(f"🔍 [Redis 캐시 미스] 테넌트 {tenant_id} 유사 티켓 검색 시작 (최대 {top_k_tickets}건)")
-            # 스마트 벡터 검색 - 자기 자신 자동 제외
-            similar_results = await search_vector_db(
-                query=ticket_content,
-                tenant_id=tenant_id,
-                platform=platform,
-                doc_types=["ticket"],
-                limit=top_k_tickets,  # 정확한 개수만 요청 (데이터베이스 레벨에서 필터링됨)
-                exclude_id=ticket_id  # 자기 자신 제외 (벡터 DB 레벨에서 처리)
-            )
-            
-            # 검색 결과를 유사 티켓 형식으로 변환 (수동 필터링 불필요)
-            raw_similar_tickets = []
-            for result in similar_results:
-                # metadata에 기본 정보들을 포함
-                metadata = result.get("extended_metadata", result.get("metadata", {})).copy()
-                
-                # created_at과 status를 metadata에 추가 (벡터DB에서 직접 가져오기)
-                if result.get("created_at"):
-                    metadata["created_at"] = result.get("created_at")
-                if result.get("status"):
-                    metadata["status"] = result.get("status")
-                if result.get("priority"):
-                    metadata["priority"] = result.get("priority")
-                
-                # 디버깅: priority와 status 값 확인
-                logger.debug(f"📊 티켓 {result.get('original_id')}: priority={result.get('priority')}, status={result.get('status')}")
-                
-                # 불필요한 source 필드 제거
-                metadata.pop("source", None)
-                
-                raw_similar_tickets.append({
-                    "id": result.get("original_id") or result["metadata"].get("original_id"),
-                    "subject": result.get("subject") or result["metadata"].get("subject", ""),
-                    "content": result.get("content", ""),
-                    "score": result["score"],
-                    "has_attachments": result.get("has_attachments", False),
-                    "has_inline_images": result.get("has_inline_images", False),
-                    "attachment_count": result.get("attachment_count", 0),
-                    "priority": result.get("priority", 1),  # 최상위 레벨에 priority 추가
-                    "status": result.get("status", 2),      # 최상위 레벨에 status 추가
-                    "metadata": metadata
-                })
-                
-            logger.info(f"✅ 유사 티켓 검색 완료: {len(raw_similar_tickets)}개 (현재 티켓 {ticket_id} 자동 제외됨)")
-            
-            # Redis 캐시에 결과 저장 (1시간 TTL)
-            if redis_client and raw_similar_tickets:
-                try:
-                    cache_ttl = 3600  # 1시간
-                    await redis_client.setex(
-                        cache_key,
-                        cache_ttl,
-                        json.dumps(raw_similar_tickets, default=str)
-                    )
-                    logger.info(f"💾 [Redis 캐시 저장] 테넌트 {tenant_id} 유사 티켓 캐시됨 (TTL: {cache_ttl}초)")
-                except Exception as e:
-                    logger.warning(f"Redis 캐시 저장 실패: {e}")
-                finally:
-                    await redis_client.close()
-            
-            return raw_similar_tickets
-
-        async def search_kb_documents_task():
-            """KB 문서 검색 작업 (멀티테넌트 Redis 캐시 적용)"""
-            if not include_kb_docs:
-                return []
-            
-            # 멀티테넌트 캐시 키 생성 (테넌트 격리)
-            import hashlib
-            search_content_hash = hashlib.md5(ticket_content.encode()).hexdigest()[:16]
-            cache_key = f"{tenant_id}:kb_documents:{platform}:{search_content_hash}:{top_k_kb}"
-            
-            # Redis 캐시 확인
-            import redis.asyncio as redis
-            import json
-            redis_url = os.getenv("REDIS_URL")
-            redis_client = None
-            
-            if redis_url:
-                try:
-                    redis_client = redis.from_url(redis_url, decode_responses=True)
-                    cached_result = await redis_client.get(cache_key)
-                    if cached_result:
-                        cached_data = json.loads(cached_result)
-                        logger.info(f"🎯 [Redis 캐시 히트] 테넌트 {tenant_id} KB 문서: {len(cached_data)}건")
-                        await redis_client.close()
-                        return cached_data
-                except Exception as e:
-                    logger.warning(f"Redis 캐시 조회 실패: {e}")
-                    redis_client = None
-                
-            logger.info(f"🔍 [Redis 캐시 미스] 테넌트 {tenant_id} KB 문서 검색 시작 (최대 {top_k_kb}건)")
-            kb_results = await search_vector_db(
-                query=ticket_content,
-                tenant_id=tenant_id,
-                platform=platform,
-                doc_types=["article"],
-                limit=top_k_kb
-            )
-            
-            # KB 문서는 메타데이터만 반환
-            kb_documents = []
-            for result in kb_results:
-                kb_documents.append({
-                    "id": result.get("original_id") or result["metadata"].get("original_id"),
-                    "title": result.get("title") or result["metadata"].get("title", ""),
-                    "url": f"https://{domain}/a/solutions/articles/{result.get('original_id')}",
-                    "score": result["score"],
-                    "created_at": result.get("created_at", ""),
-                    "updated_at": result.get("updated_at", ""),
-                })
-            logger.info(f"✅ KB 문서 검색 완료: {len(kb_documents)}건")
-            
-            # Redis 캐시에 결과 저장 (2시간 TTL - KB는 변경이 적음)
-            if redis_client and kb_documents:
-                try:
-                    cache_ttl = 7200  # 2시간
-                    await redis_client.setex(
-                        cache_key,
-                        cache_ttl,
-                        json.dumps(kb_documents, default=str)
-                    )
-                    logger.info(f"💾 [Redis 캐시 저장] 테넌트 {tenant_id} KB 문서 캐시됨 (TTL: {cache_ttl}초)")
-                except Exception as e:
-                    logger.warning(f"Redis 캐시 저장 실패: {e}")
-                finally:
-                    await redis_client.close()
-            
-            return kb_documents
-
-        # 3. 1단계: 티켓 요약과 벡터 검색을 병렬로 실행
-        logger.info("🚀 [병렬 처리] 1단계: 티켓 요약 + 벡터 검색 병렬 실행 시작")
-        parallel_stage1_start = time.time()
-        
-        summary_text, raw_similar_tickets, kb_documents = await asyncio.gather(
-            generate_summary_task(),
-            search_similar_tickets_task(), 
-            search_kb_documents_task()
+        # 요청 객체 생성
+        request = InitializationRequest(
+            ticket_id=ticket_id,
+            tenant_id=tenant_id,
+            platform=platform,
+            domain=domain,
+            api_key=api_key,
+            include_summary=include_summary,
+            include_kb_docs=include_kb_docs,
+            include_similar_tickets=include_similar_tickets,
+            top_k_tickets=top_k_tickets,
+            top_k_kb=top_k_kb,
+            ui_language=ui_language
         )
         
-        parallel_stage1_time = time.time() - parallel_stage1_start
-        logger.info(f"⏱️ [병렬 처리] 1단계 완료 - 소요시간: {parallel_stage1_time:.2f}초")
+        # 서비스 레이어에서 처리
+        result = await ticket_init_service.initialize_ticket(request)
         
-        # 성능 최적화: 조회 티켓 요약본 로깅을 DEBUG 레벨로 제한
-        if summary_text and summary_text.strip():
-            logger.info(f"✅ [조회 티켓 요약] 완료 - {len(summary_text)}자")
-            # DEBUG 레벨에서만 전체 요약 내용 로깅
-            if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(f"📄 [조회 티켓 최종 요약본] \n{summary_text[:500]}...")
-
-        # 4. 2단계: 유사 티켓 요약 생성 (병렬 처리)
-        similar_tickets = []
-        if raw_similar_tickets:
-            logger.info("🚀 [병렬 처리] 2단계: 유사 티켓 요약 병렬 생성 시작")
-            parallel_stage2_start = time.time()
-            
-            # 플랫폼 설정 구성
-            platform_config = {
-                "platform": platform,
-                "domain": domain,
-                "api_key": api_key,
-                "tenant_id": tenant_id
-            }
-            
-            similar_tickets = await llm_manager.generate_similar_ticket_summaries(raw_similar_tickets, ui_language, platform_config)
-            
-            parallel_stage2_time = time.time() - parallel_stage2_start
-            logger.info(f"⏱️ [병렬 처리] 2단계 완료 - 유사 티켓 {len(similar_tickets)}건, 소요시간: {parallel_stage2_time:.2f}초")
-            
-            # 성능 최적화: 상세 요약 로깅을 DEBUG 레벨로 제한
-            logger.info(f"✅ [유사 티켓 요약] {len(similar_tickets)}건 완료")
-            
-            # DEBUG 레벨에서만 상세 로깅
-            if logger.isEnabledFor(logging.DEBUG):
-                for i, ticket in enumerate(similar_tickets, 1):
-                    ticket_summary = ticket.get('content', '요약없음')[:100] + "..."  # 요약 내용 제한
-                    logger.debug(f"📄 [유사 티켓 {i}] ID: {ticket.get('id')} - {ticket_summary}")
+        # InitResponse 객체로 변환 (현재 구조에 맞게)
+        summary_text = None
+        if result.ticket_summary:
+            summary_text = result.ticket_summary.summary if hasattr(result.ticket_summary, 'summary') else str(result.ticket_summary)
         
-        execution_time = time.time() - start_time
+        # 유사 티켓을 Dict 형태로 변환
+        similar_tickets_dict = []
+        if result.similar_tickets:
+            for ticket in result.similar_tickets:
+                if hasattr(ticket, '__dict__'):
+                    similar_tickets_dict.append(ticket.__dict__)
+                else:
+                    similar_tickets_dict.append(ticket)
         
-        logger.info(f"✅ 초기화 완료: {ticket_id}, 실행시간: {execution_time:.2f}초")
+        # KB 문서를 Dict 형태로 변환  
+        kb_docs_dict = []
+        if result.kb_documents:
+            for doc in result.kb_documents:
+                if hasattr(doc, '__dict__'):
+                    kb_docs_dict.append(doc.__dict__)
+                else:
+                    kb_docs_dict.append(doc)
         
-        return InitResponse(
+        processing_time = time.time() - start_time
+        
+        response = InitResponse(
             success=True,
             ticket_id=ticket_id,
             tenant_id=tenant_id,
             platform=platform,
             summary=summary_text,
-            similar_tickets=similar_tickets,
-            kb_documents=kb_documents,
-            execution_time=execution_time,
-            search_quality_score=0.95  # 일관된 품질
+            similar_tickets=similar_tickets_dict,
+            kb_documents=kb_docs_dict,
+            execution_time=processing_time,
+            search_quality_score=0.8  # 기본값
         )
         
-    except Exception as e:
-        execution_time = time.time() - start_time
-        logger.error(f"초기화 실패: {ticket_id}, 오류: {str(e)}")
+        logger.info(f"티켓 초기화 완료 - ID: {ticket_id}, 소요시간: {processing_time:.2f}초")
         
+        return response
+        
+    except Exception as e:
+        processing_time = time.time() - start_time
+        logger.error(f"티켓 초기화 실패 - ID: {ticket_id}, 오류: {e}, 소요시간: {processing_time:.2f}초")
+        
+        # 오류 응답 생성
         return InitResponse(
             success=False,
             ticket_id=ticket_id,
             tenant_id=tenant_id,
             platform=platform,
-            error=str(e),
-            execution_time=execution_time
+            summary=None,
+            similar_tickets=[],
+            kb_documents=[],
+            execution_time=processing_time,
+            error=str(e)
         )
-
 async def init_legacy_hybrid_mode(
     ticket_id: str,
     tenant_id: str,
@@ -1049,7 +678,6 @@ async def init_streaming_mode(
                             logger.info(f"✅ [조회 티켓] ticket_view 4개 섹션 구조 정상 생성 ({lang})")
                     
                     logger.info(f"✅ [조회 티켓 최우선] ticket_view 템플릿 기반 요약 생성 완료 ({len(summary_text)}문자)")
-                    logger.info(f"\n📄 [조회 티켓 요약] \n{summary_text}")
                     
                     return summary_text
                     
@@ -1059,7 +687,7 @@ async def init_streaming_mode(
                     subject = ticket_data.get("subject", "제목 없음")
                     description = ticket_data.get("description_text") or ticket_data.get("description", "")
                     fallback_summary = f"## 🎫 {subject}\n\n**문제 상황**: {description[:200]}...\n\n**오류**: {str(e)}"
-                    logger.info(f"\n📄 [조회 티켓 요약 - 폴백] \n{fallback_summary}")
+                    logger.debug(f"폴백 요약 사용")
                     return fallback_summary
 
             async def streaming_search_similar_task():
@@ -1076,6 +704,8 @@ async def init_streaming_mode(
                     limit=3,  # 스트리밍 모드에서는 3개 고정
                     exclude_id=ticket_id  # 자기 자신 제외 (벡터 DB 레벨에서 처리)
                 )
+                
+                logger.info(f"🔍 유사 티켓 검색 결과: {len(similar_results)}개")
                 
                 raw_similar_tickets = []
                 for result in similar_results:
@@ -1135,7 +765,10 @@ async def init_streaming_mode(
             async def streaming_similar_summaries_task(raw_tickets):
                 """스트리밍용 유사 티켓 요약 생성 작업"""
                 if not raw_tickets:
+                    logger.info("📭 유사 티켓이 없어 요약 생성 건너뜀")
                     return []
+                
+                logger.info(f"📝 유사 티켓 {len(raw_tickets)}개 요약 생성 시작")
                     
                 # 플랫폼 설정 구성
                 platform_config = {
@@ -1145,7 +778,9 @@ async def init_streaming_mode(
                     "tenant_id": tenant_id
                 }
                 
-                return await llm_manager.generate_similar_ticket_summaries(raw_tickets, ui_language, platform_config)
+                summaries = await llm_manager.generate_similar_ticket_summaries(raw_tickets, ui_language, platform_config)
+                logger.info(f"✅ 유사 티켓 요약 생성 완료: {len(summaries)}개")
+                return summaries
 
             # 요약 생성 시작 알림
             yield f"data: {json.dumps(send_progress('analysis', 30, 'AI 요약 생성 중...', start_time))}\n\n"

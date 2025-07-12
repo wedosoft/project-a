@@ -227,28 +227,33 @@ class ErrorHandlingMiddleware(BaseHTTPMiddleware):
         """요청 처리 및 에러 핸들링"""
         request_id = f"req_{int(time.time() * 1000000)}"  # 고유한 요청 ID 생성
         
-        # 요청 정보 로깅
+        # 헬스체크는 로그에서 제외 (노이즈 방지)
+        is_health_check = request.url.path == "/health"
+        
+        # 요청 정보 로깅 (헬스체크 제외)
         start_time = time.time()
-        logger.info(
-            f"요청 시작: {request.method} {request.url.path}",
-            extra={"request_id": request_id}
-        )
+        if not is_health_check:
+            logger.info(
+                f"요청 시작: {request.method} {request.url.path}",
+                extra={"request_id": request_id}
+            )
         
         try:
             # 요청 처리
             response = await call_next(request)
             
-            # 성공 응답 로깅
+            # 성공 응답 로깅 (헬스체크 제외)
             process_time = time.time() - start_time
-            logger.info(
-                f"요청 완료: {request.method} {request.url.path} - "
-                f"{response.status_code} ({process_time:.3f}s)",
-                extra={
-                    "request_id": request_id,
-                    "status_code": response.status_code,
-                    "process_time": process_time
-                }
-            )
+            if not is_health_check:
+                logger.info(
+                    f"요청 완료: {request.method} {request.url.path} - "
+                    f"{response.status_code} ({process_time:.3f}s)",
+                    extra={
+                        "request_id": request_id,
+                        "status_code": response.status_code,
+                        "process_time": process_time
+                    }
+                )
             
             return response
             

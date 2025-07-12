@@ -1,4 +1,4 @@
-# Freshdesk Custom App 백엔드 서비스
+# Freshdesk Custom App 백엔드 서비스 - 최적화된 환경설정
 # 프로젝트 규칙 및 가이드라인: /PROJECT_RULES.md 참조
 #version: "3.8"
 services:
@@ -9,31 +9,146 @@ services:
     image: backend
     container_name: project-a
     environment:
-      # 로그 레벨 설정 (디버깅을 위해 INFO로 임시 변경)
-      - LOG_LEVEL=INFO
-      # 표준화된 환경변수 사용
+      # =================================================================
+      # 서버 설정
+      # =================================================================
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - DEBUG=${DEBUG:-false}
+      - HOST=${HOST:-0.0.0.0}
+      - PORT=${PORT:-8000}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      
+      # =================================================================
+      # 데이터베이스 설정
+      # =================================================================
+      - DATABASE_TYPE=${DATABASE_TYPE:-sqlite}
+      - SQLITE_DATA_DIR=${SQLITE_DATA_DIR:-./core/data}
+      
+      # =================================================================
+      # Freshdesk 설정
+      # =================================================================
       - TENANT_ID=${TENANT_ID}
       - FRESHDESK_API_KEY=${FRESHDESK_API_KEY}
       - FRESHDESK_DOMAIN=${FRESHDESK_DOMAIN}
-      #- DEFAULT_TENANT_ID=${DEFAULT_TENANT_ID}
-      # LLM API 키들
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
-      # LLM 모델 설정 (새로운 명명 규칙)
-      - TICKET_VIEW_MODEL_PROVIDER=${TICKET_VIEW_MODEL_PROVIDER}
-      - TICKET_VIEW_MODEL_NAME=${TICKET_VIEW_MODEL_NAME}
-      - TICKET_VIEW_MAX_TOKENS=${TICKET_VIEW_MAX_TOKENS}
-      - TICKET_VIEW_TEMPERATURE=${TICKET_VIEW_TEMPERATURE}
-      - TICKET_SIMILAR_MODEL_PROVIDER=${TICKET_SIMILAR_MODEL_PROVIDER}
-      - TICKET_SIMILAR_MODEL_NAME=${TICKET_SIMILAR_MODEL_NAME}
-      - TICKET_SIMILAR_MAX_TOKENS=${TICKET_SIMILAR_MAX_TOKENS}
-      - TICKET_SIMILAR_TEMPERATURE=${TICKET_SIMILAR_TEMPERATURE}
-      - ENABLE_LLM_SUMMARY_GENERATION=${ENABLE_LLM_SUMMARY_GENERATION}
-      # Qdrant Cloud 사용 (로컬 Qdrant 서비스 제거됨)
+      
+      # =================================================================
+      # 보안 설정
+      # =================================================================
+      - JWT_SECRET=${JWT_SECRET}
+      - SESSION_TIMEOUT_HOURS=${SESSION_TIMEOUT_HOURS:-24}
+      
+      # =================================================================
+      # 성능 설정
+      # =================================================================
+      - CONNECTION_POOL_SIZE=${CONNECTION_POOL_SIZE:-20}
+      - QUERY_TIMEOUT=${QUERY_TIMEOUT:-30}
+      - API_RATE_LIMIT_GLOBAL=${API_RATE_LIMIT_GLOBAL:-1000}
+      
+      # =================================================================
+      # 벡터 데이터베이스 (Qdrant)
+      # =================================================================
       - QDRANT_URL=${QDRANT_URL}
       - QDRANT_API_KEY=${QDRANT_API_KEY}
-      # Redis 설정 (필요시)
+      
+      # =================================================================
+      # LLM API 키
+      # =================================================================
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - PERPLEXITY_API_KEY=${PERPLEXITY_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      
+      # =================================================================
+      # LLM 타임아웃 설정
+      # =================================================================
+      - LLM_GLOBAL_TIMEOUT=${LLM_GLOBAL_TIMEOUT:-8.0}
+      - LLM_FAST_TIMEOUT=${LLM_FAST_TIMEOUT:-5.0}
+      - LLM_SLOW_TIMEOUT=${LLM_SLOW_TIMEOUT:-10.0}
+      
+      # =================================================================
+      # 유연한 모델 설정 시스템
+      # =================================================================
+      - MAIN_TICKET_MODEL=${MAIN_TICKET_MODEL:-openai/gpt-4o-mini}
+      - MAIN_TICKET_MAX_TOKENS=${MAIN_TICKET_MAX_TOKENS:-800}
+      - MAIN_TICKET_TEMPERATURE=${MAIN_TICKET_TEMPERATURE:-0.1}
+      - SIMILAR_TICKET_MODEL=${SIMILAR_TICKET_MODEL:-anthropic/claude-3-haiku-20240307}
+      - SIMILAR_TICKET_MAX_TOKENS=${SIMILAR_TICKET_MAX_TOKENS:-600}
+      - SIMILAR_TICKET_TEMPERATURE=${SIMILAR_TICKET_TEMPERATURE:-0.2}
+      - QUERY_RESPONSE_MODEL=${QUERY_RESPONSE_MODEL:-anthropic/claude-3-5-sonnet-20241022}
+      - QUERY_RESPONSE_MAX_TOKENS=${QUERY_RESPONSE_MAX_TOKENS:-2000}
+      - QUERY_RESPONSE_TEMPERATURE=${QUERY_RESPONSE_TEMPERATURE:-0.3}
+      - CONVERSATION_FILTER_MODEL=${CONVERSATION_FILTER_MODEL:-gemini/gemini-1.5-flash}
+      - CONVERSATION_FILTER_MAX_TOKENS=${CONVERSATION_FILTER_MAX_TOKENS:-1000}
+      - CONVERSATION_FILTER_TEMPERATURE=${CONVERSATION_FILTER_TEMPERATURE:-0.1}
+      - ENABLE_MODEL_FALLBACK=${ENABLE_MODEL_FALLBACK:-true}
+      - MODEL_FALLBACK_CHAIN=${MODEL_FALLBACK_CHAIN:-anthropic,openai,gemini}
+      
+      # =================================================================
+      # 임베딩 설정
+      # =================================================================
+      - USE_MULTILINGUAL_EMBEDDING=${USE_MULTILINGUAL_EMBEDDING:-true}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-text-embedding-3-large}
+      - USE_GPU_FIRST=${USE_GPU_FIRST:-true}
+      - GPU_FALLBACK_TO_OPENAI=${GPU_FALLBACK_TO_OPENAI:-true}
+      - ENABLE_EMBEDDING_CACHE=${ENABLE_EMBEDDING_CACHE:-true}
+      
+      # =================================================================
+      # 벡터 DB 설정
+      # =================================================================
+      - ENABLE_FULL_STREAMING_MODE=${ENABLE_FULL_STREAMING_MODE:-true}
+      - SIMILAR_TICKETS_MAX_COUNT=${SIMILAR_TICKETS_MAX_COUNT:-3}
+      - KB_DOCUMENTS_DISPLAY_MODE=${KB_DOCUMENTS_DISPLAY_MODE:-full}
+      - STREAMING_CHUNK_SIZE=${STREAMING_CHUNK_SIZE:-1024}
+      - STREAMING_TIMEOUT=${STREAMING_TIMEOUT:-8.0}
+      
+      # =================================================================
+      # 대화 필터링 설정
+      # =================================================================
+      - ENABLE_CONVERSATION_FILTERING=${ENABLE_CONVERSATION_FILTERING:-true}
+      - CONVERSATION_TOKEN_BUDGET=${CONVERSATION_TOKEN_BUDGET:-12000}
+      - CONVERSATION_IMPORTANCE_THRESHOLD=${CONVERSATION_IMPORTANCE_THRESHOLD:-0.4}
+      - CONVERSATION_FILTERING_MODE=${CONVERSATION_FILTERING_MODE:-conservative}
+      
+      # =================================================================
+      # 캐싱 설정
+      # =================================================================
+      - CACHE_TTL_DEFAULT=${CACHE_TTL_DEFAULT:-3600}
+      - CACHE_TTL_TICKET_CONTEXT=${CACHE_TTL_TICKET_CONTEXT:-3600}
+      - CACHE_TTL_TICKET_SUMMARY=${CACHE_TTL_TICKET_SUMMARY:-1800}
+      - CACHE_TTL_LLM_RESPONSE=${CACHE_TTL_LLM_RESPONSE:-7200}
+      - CACHE_TTL_VECTOR_SEARCH=${CACHE_TTL_VECTOR_SEARCH:-1800}
+      
+      # =================================================================
+      # 배치 처리 설정
+      # =================================================================
+      - DEFAULT_BATCH_SIZE=${DEFAULT_BATCH_SIZE:-50}
+      - MAX_BATCH_SIZE=${MAX_BATCH_SIZE:-100}
+      - LLM_BATCH_SIZE=${LLM_BATCH_SIZE:-20}
+      
+      # =================================================================
+      # Rate Limiting
+      # =================================================================
+      - RATE_LIMIT_GLOBAL_PER_MINUTE=${RATE_LIMIT_GLOBAL_PER_MINUTE:-1000}
+      - RATE_LIMIT_API_PER_MINUTE=${RATE_LIMIT_API_PER_MINUTE:-100}
+      - RATE_LIMIT_HEAVY_PER_MINUTE=${RATE_LIMIT_HEAVY_PER_MINUTE:-20}
+      
+      # =================================================================
+      # 실시간 기능 설정
+      # =================================================================
+      - REALTIME_SUMMARY_BASIC_ONLY=${REALTIME_SUMMARY_BASIC_ONLY:-true}
+      
+      # =================================================================
+      # 기타 설정
+      # =================================================================
+      - LLM_MAX_RETRIES=${LLM_MAX_RETRIES:-1}
+      - PROCESS_ATTACHMENTS=${PROCESS_ATTACHMENTS:-true}
+      - MAX_CONCURRENT_REQUESTS=${MAX_CONCURRENT_REQUESTS:-10}
+      
+      # =================================================================
+      # Redis 설정
+      # =================================================================
       - REDIS_URL=redis://redis:6379/0
       - REDIS_HOST=redis
       - REDIS_PORT=6379
@@ -55,11 +170,25 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes
+    command: >
+      redis-server 
+      --appendonly yes 
+      --maxmemory 512mb 
+      --maxmemory-policy allkeys-lru
+      --tcp-keepalive 60
+      --timeout 300
+      --save 900 1
+      --save 300 10
+      --save 60 10000
     restart: unless-stopped
-    # Redis 설정 (메모리 정책 등)
     sysctls:
       - net.core.somaxconn=1024
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
 volumes:
   redis_data:
