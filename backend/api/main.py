@@ -51,7 +51,7 @@ from core.errors import ErrorHandlingMiddleware, get_error_handler
 from core.middleware import PerformanceMiddleware
 
 # 분리된 라우터들 import
-from .routes import (
+from api.routes import (
     init_router,
     query_router,
     reply_router,
@@ -60,12 +60,12 @@ from .routes import (
     metrics_router,
     attachments_router
 )
-from .routes.agents import router as agents_router
-from .routes.licenses import router as licenses_router
-from .routes.admin_system import router as admin_system_router
+from api.routes.agents import router as agents_router
+from api.routes.licenses import router as licenses_router
+from api.routes.admin_system import router as admin_system_router
 
 # 하위 호환성을 위한 기존 라우터 유지 (추후 제거 예정)
-from .freshdesk_attachments import router as freshdesk_attachments_router
+from api.freshdesk_attachments import router as freshdesk_attachments_router
 
 # 환경변수에서 로그 레벨 읽기 (기본값: INFO)
 log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
