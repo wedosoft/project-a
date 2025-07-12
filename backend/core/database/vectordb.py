@@ -1637,7 +1637,7 @@ async def generate_realtime_summary(
         logger.error(f"실시간 요약 생성 중 오류: {e}")
         return f"요약 생성 중 오류가 발생했습니다: {str(e)}"
 
-async def search_vector_db_only(
+async def search_vector_db(
     query: str,
     tenant_id: str,
     platform: str = "freshdesk", 

@@ -39,7 +39,7 @@ from core.database.vectordb import (
     process_ticket_to_vector_db,
     process_article_to_vector_db,
     generate_realtime_summary,
-    search_vector_db_only,
+    search_vector_db,
     get_vector_db_stats
 )
 # [DEPRECATED] integrator 기능 제거됨 - Vector DB 단독 모드

@@ -39,9 +39,6 @@ os.environ['PYTHONPATH'] = str(backend_dir)
 # 환경변수 로드 (애플리케이션 시작 시 최우선 로드)
 load_dotenv()
 
-# 🧠 Anthropic 시스템 상태 확인
-anthropic_enabled = os.getenv('ENABLE_ANTHROPIC_PROMPTS', 'false').lower() == 'true'
-print(f"🧠 Anthropic 프롬프트 엔지니어링: {'✅ 활성화' if anthropic_enabled else '❌ 비활성화'}")
 print(f"📁 Backend 경로: {backend_dir}")
 print(f"🐍 Python 경로 설정 완료")
 

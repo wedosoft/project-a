@@ -18,7 +18,7 @@ from pydantic import BaseModel
 
 from core.llm.manager import get_llm_manager
 from core.database.vectordb import vector_db
-from core.search.adapters import InitHybridAdapter
+from core.utils.smart_conversation_filter import SmartConversationFilter
 from ..dependencies import (
     get_tenant_id,
     get_platform,
@@ -110,68 +110,35 @@ async def get_initial_context(
     # 스트리밍 모드 처리
     if stream:
         # 스트리밍 응답
-        enable_full_streaming = os.getenv("ENABLE_FULL_STREAMING_MODE", "true") == "true"
-        
-        if enable_full_streaming:
-            return await init_streaming_vector_only_mode(
-                ticket_id=ticket_id,
-                tenant_id=tenant_id,
-                platform=platform,
-                domain=domain,
-                api_key=api_key,
-                include_similar=include_similar_tickets,
-                include_kb=include_kb_docs,
-                retry_reason=retry_reason,
-                ui_language=ui_language
-            )
-        else:
-            return await init_streaming_hybrid_mode(
-                ticket_id=ticket_id,
-                tenant_id=tenant_id,
-                platform=platform,
-                domain=domain,
-                api_key=api_key,
-                include_similar=include_similar_tickets,
-                include_kb=include_kb_docs,
-                retry_reason=retry_reason,
-                ui_language=ui_language
-            )
+        return await init_streaming_mode(
+            ticket_id=ticket_id,
+            tenant_id=tenant_id,
+            platform=platform,
+            domain=domain,
+            api_key=api_key,
+            include_similar=include_similar_tickets,
+            include_kb=include_kb_docs,
+            retry_reason=retry_reason,
+            ui_language=ui_language
+        )
     else:
         # 일반 JSON 응답
-        enable_full_streaming = os.getenv("ENABLE_FULL_STREAMING_MODE", "true") == "true"
-        
-        if enable_full_streaming:
-            # 🚀 신규: Vector DB 단독 + 풀 스트리밍 모드
-            logger.info(f"🚀 Vector DB 단독 모드로 초기화 시작: {ticket_id}")
-            return await init_vector_only_mode(
-                ticket_id=ticket_id,
-                tenant_id=tenant_id,
-                platform=platform,
-                api_key=api_key,
-                domain=domain,
-                include_summary=include_summary,
-                include_kb_docs=include_kb_docs,
-                include_similar_tickets=include_similar_tickets,
-                top_k_tickets=top_k_tickets,
-                top_k_kb=top_k_kb
-            )
-        else:
-            # 🔒 기존: 하이브리드 모드 (100% 보존)
-            logger.info(f"🔒 하이브리드 모드로 초기화 시작: {ticket_id}")
-            return await init_legacy_hybrid_mode(
-                ticket_id=ticket_id,
-                tenant_id=tenant_id,
-                platform=platform,
-                api_key=api_key,
-                domain=domain,
-                include_summary=include_summary,
-                include_kb_docs=include_kb_docs,
-                include_similar_tickets=include_similar_tickets,
-                top_k_tickets=top_k_tickets,
-                top_k_kb=top_k_kb
-            )
+        logger.info(f"🚀 초기화 시작: {ticket_id}")
+        return await init_endpoint(
+            ticket_id=ticket_id,
+            tenant_id=tenant_id,
+            platform=platform,
+            api_key=api_key,
+            domain=domain,
+            include_summary=include_summary,
+            include_kb_docs=include_kb_docs,
+            include_similar_tickets=include_similar_tickets,
+            top_k_tickets=top_k_tickets,
+            top_k_kb=top_k_kb,
+            ui_language=ui_language
+        )
 
-async def init_vector_only_mode(
+async def init_endpoint(
     ticket_id: str,
     tenant_id: str,
     platform: str,
@@ -182,18 +149,19 @@ async def init_vector_only_mode(
     include_similar_tickets: bool = True,
     top_k_tickets: int = 3,
     top_k_kb: int = 3,
+    ui_language: str = "ko",
 ) -> InitResponse:
     """
-    🚀 신규 Vector DB 단독 + 풀 스트리밍 초기화 모드
+    티켓 초기화 엔드포인트 메인 함수
     
-    Vector DB에서만 검색하고 모든 요약을 실시간으로 생성합니다.
+    Vector DB에서 검색하고 모든 요약을 실시간으로 생성합니다.
     """
     start_time = time.time()
     
     try:
         # 1. 실시간 Freshdesk API로 현재 티켓 정보 조회
         from core.platforms.freshdesk.fetcher import fetch_ticket_details
-        from core.database.vectordb import search_vector_db_only
+        from core.database.vectordb import search_vector_db
         
         logger.info(f"티켓 {ticket_id} 실시간 조회 시작 (도메인: {domain})")
         
@@ -272,48 +240,70 @@ async def init_vector_only_mode(
         
         # 기존 방식 (폴백 또는 짧은 대화)
         if not use_intelligent_processing:
-            # 대화내역 추가 (기존 로직 유지)
+            # 대화내역 추가 (스마트 필터링 사용)
             if ticket_data.get("conversations"):
                 conversations = ticket_data["conversations"]
                 total_conversations = len(conversations)
                 
                 ticket_content_parts.append(f"대화내역 (총 {total_conversations}개):")
                 
-                # 개선된 선별 로직 (해결과정 중심)
-                if total_conversations <= 15:
-                    # 15개 이하: 모든 대화 포함 (문자 제한만 확장)
-                    for i, conv in enumerate(conversations, 1):
-                        if conv.get("body_text"):
-                            content = conv['body_text'][:1000]  # 800→1000자로 확장
-                            ticket_content_parts.append(f"대화 {i}: {content}{'...' if len(conv['body_text']) > 1000 else ''}")
-                else:
-                    # 15개 초과: 구간별 스마트 선별
-                    selected_indices = []
+                # 대화 필터링 캐싱
+                import hashlib
+                import json
+                import redis.asyncio as redis
+                
+                conv_hash = hashlib.md5(str([c.get('body_text', '')[:100] for c in conversations]).encode()).hexdigest()[:16]
+                filter_cache_key = f"{tenant_id}:conv_filter:{ticket_id}:{conv_hash}:{total_conversations}"
+                
+                redis_url = os.getenv("REDIS_URL")
+                redis_client = None
+                cached_filter_result = None
+                
+                if redis_url:
+                    try:
+                        redis_client = redis.from_url(redis_url, decode_responses=True)
+                        cached_filter_result = await redis_client.get(filter_cache_key)
+                        if cached_filter_result:
+                            cached_data = json.loads(cached_filter_result)
+                            selected_indices = cached_data['indices']
+                            filter_metadata = cached_data['metadata']
+                            logger.info(f"🤖 [캐시 히트] 대화 필터링 결과: {filter_metadata}")
+                    except Exception as e:
+                        logger.warning(f"대화 필터 캐시 조회 실패: {e}")
+                
+                if not cached_filter_result:
+                    # 스마트 대화 필터 사용
+                    smart_filter = SmartConversationFilter(max_conversations=20, max_chars_per_conv=1000)
+                    selected_indices, filter_metadata = smart_filter.filter_conversations(
+                        conversations, 
+                        ticket_metadata=ticket_data.get("metadata", {})
+                    )
                     
-                    # 1. 초반 3개 (문제 제기)
-                    selected_indices.extend(list(range(min(3, total_conversations))))
+                    # 필터링 결과 로깅
+                    logger.info(f"🤖 스마트 필터링 결과: {filter_metadata}")
                     
-                    # 2. 해결 키워드 포함 대화 우선 선별
-                    resolution_keywords = ["해결", "완료", "수정", "배포", "진행", "확인", "solved", "completed", "fixed", "deployed", "resolved", "confirmed"]
-                    for idx, conv in enumerate(conversations):
-                        if idx not in selected_indices and len(selected_indices) < 20:  # 최대 20개
-                            body = conv.get("body_text", "").lower()
-                            if any(keyword in body for keyword in resolution_keywords):
-                                selected_indices.append(idx)
-                    
-                    # 3. 후반 5개 (최종 결과)
-                    final_indices = list(range(max(0, total_conversations - 5), total_conversations))
-                    for idx in final_indices:
-                        if idx not in selected_indices:
-                            selected_indices.append(idx)
-                    
-                    # 4. 인덱스 정렬 후 대화 구성
-                    selected_indices = sorted(set(selected_indices))
-                    for idx in selected_indices:
-                        conv = conversations[idx]
-                        if conv.get("body_text"):
-                            content = conv['body_text'][:1000]  # 700→1000자로 확장
-                            ticket_content_parts.append(f"대화 {idx+1}: {content}{'...' if len(conv['body_text']) > 1000 else ''}")
+                    # 캐시 저장
+                    if redis_client:
+                        try:
+                            cache_data = {
+                                'indices': selected_indices,
+                                'metadata': filter_metadata
+                            }
+                            await redis_client.setex(
+                                filter_cache_key,
+                                7200,  # 2시간 TTL
+                                json.dumps(cache_data)
+                            )
+                            logger.info(f"💾 [캐시 저장] 대화 필터링 결과 캐시됨")
+                        except Exception as e:
+                            logger.warning(f"대화 필터 캐시 저장 실패: {e}")
+                        finally:
+                            await redis_client.close()
+                
+                # 포맷팅된 대화 추가
+                smart_filter = SmartConversationFilter(max_conversations=20, max_chars_per_conv=1000)
+                formatted_conversations = smart_filter.format_conversations(conversations, selected_indices)
+                ticket_content_parts.extend(formatted_conversations)
             
             ticket_content = "\n".join(ticket_content_parts)
         
@@ -324,9 +314,32 @@ async def init_vector_only_mode(
         
         # 2. 병렬 실행할 작업들 정의
         async def generate_summary_task():
-            """티켓 요약 생성 작업"""
+            """티켓 요약 생성 작업 (캐싱 적용)"""
             if not include_summary:
                 return None
+            
+            # 요약 캐시 키 생성
+            import hashlib
+            import json
+            summary_content_hash = hashlib.md5(str(ticket_data).encode()).hexdigest()[:16]
+            summary_cache_key = f"{tenant_id}:ticket_summary:{platform}:{ticket_id}:{summary_content_hash}"
+            
+            # Redis 캐시 확인
+            import redis.asyncio as redis
+            redis_url = os.getenv("REDIS_URL")
+            redis_client = None
+            
+            if redis_url:
+                try:
+                    redis_client = redis.from_url(redis_url, decode_responses=True)
+                    cached_summary = await redis_client.get(summary_cache_key)
+                    if cached_summary:
+                        logger.info(f"🎯 [캐시 히트] 테넌트 {tenant_id} 티켓 {ticket_id} 요약")
+                        await redis_client.close()
+                        return cached_summary
+                except Exception as e:
+                    logger.warning(f"요약 캐시 조회 실패: {e}")
+                    redis_client = None
                 
             logger.info(f"🎯 [실시간 티켓 요약] 티켓 {ticket_id} AI 요약 생성 시작")
             logger.info(f"    제목: {ticket_data.get('subject', 'N/A')}")
@@ -338,6 +351,21 @@ async def init_vector_only_mode(
                 
                 logger.info(f"✅ [실시간 티켓 요약] 티켓 {ticket_id} YAML 템플릿 기반 요약 완료 ({len(summary_result)}자)")
                 logger.info(f"\n📄 [조회 티켓 요약] \n{summary_result}")
+                
+                # Redis 캐시에 저장 (1시간 TTL)
+                if redis_client and summary_result:
+                    try:
+                        cache_ttl = 3600  # 1시간
+                        await redis_client.setex(
+                            summary_cache_key,
+                            cache_ttl,
+                            summary_result
+                        )
+                        logger.info(f"💾 [캐시 저장] 테넌트 {tenant_id} 티켓 {ticket_id} 요약 캐시됨 (TTL: {cache_ttl}초)")
+                    except Exception as e:
+                        logger.warning(f"요약 캐시 저장 실패: {e}")
+                    finally:
+                        await redis_client.close()
                 
                 return summary_result
                 
@@ -377,7 +405,7 @@ async def init_vector_only_mode(
                 
             logger.info(f"🔍 [Redis 캐시 미스] 테넌트 {tenant_id} 유사 티켓 검색 시작 (최대 {top_k_tickets}건)")
             # 스마트 벡터 검색 - 자기 자신 자동 제외
-            similar_results = await search_vector_db_only(
+            similar_results = await search_vector_db(
                 query=ticket_content,
                 tenant_id=tenant_id,
                 platform=platform,
@@ -468,7 +496,7 @@ async def init_vector_only_mode(
                     redis_client = None
                 
             logger.info(f"🔍 [Redis 캐시 미스] 테넌트 {tenant_id} KB 문서 검색 시작 (최대 {top_k_kb}건)")
-            kb_results = await search_vector_db_only(
+            kb_results = await search_vector_db(
                 query=ticket_content,
                 tenant_id=tenant_id,
                 platform=platform,
@@ -556,7 +584,7 @@ async def init_vector_only_mode(
         
         execution_time = time.time() - start_time
         
-        logger.info(f"✅ Vector DB 단독 초기화 완료: {ticket_id}, 실행시간: {execution_time:.2f}초")
+        logger.info(f"✅ 초기화 완료: {ticket_id}, 실행시간: {execution_time:.2f}초")
         
         return InitResponse(
             success=True,
@@ -567,12 +595,12 @@ async def init_vector_only_mode(
             similar_tickets=similar_tickets,
             kb_documents=kb_documents,
             execution_time=execution_time,
-            search_quality_score=0.95  # Vector DB 단독은 일관된 품질
+            search_quality_score=0.95  # 일관된 품질
         )
         
     except Exception as e:
         execution_time = time.time() - start_time
-        logger.error(f"Vector DB 단독 초기화 실패: {ticket_id}, 오류: {str(e)}")
+        logger.error(f"초기화 실패: {ticket_id}, 오류: {str(e)}")
         
         return InitResponse(
             success=False,
@@ -656,7 +684,7 @@ async def init_legacy_hybrid_mode(
         logger.info(f"🔍 추출된 description_text: {description_text[:100]}...")
         
         # 벡터 단독 검색 실행
-        from core.database.vectordb import search_vector_db_only
+        from core.database.vectordb import search_vector_db
         
         # 티켓 내용 구성
         ticket_content_parts = []
@@ -688,7 +716,7 @@ async def init_legacy_hybrid_mode(
         async def search_similar_tickets():
             if not include_similar_tickets:
                 return []
-            similar_results = await search_vector_db_only(
+            similar_results = await search_vector_db(
                 query=ticket_content,
                 tenant_id=tenant_id,
                 platform=platform,
@@ -710,7 +738,7 @@ async def init_legacy_hybrid_mode(
         async def search_kb_documents():
             if not include_kb_docs:
                 return []
-            kb_results = await search_vector_db_only(
+            kb_results = await search_vector_db(
                 query=ticket_content,
                 tenant_id=tenant_id,
                 platform=platform,
@@ -885,7 +913,7 @@ async def init_legacy_hybrid_mode(
 
 
 
-async def init_streaming_vector_only_mode(
+async def init_streaming_mode(
     ticket_id: str,
     tenant_id: str,
     platform: str,
@@ -897,19 +925,18 @@ async def init_streaming_vector_only_mode(
     ui_language: str = "ko"
 ) -> StreamingResponse:
     """
-    신규: Vector DB 단독 + 풀 스트리밍 모드
-    - Vector DB에서만 데이터 검색
+    스트리밍 모드 초기화 함수
+    - Vector DB에서 데이터 검색
     - 실시간 요약 생성 (단계별 스트리밍)
-    - SQL DB 접근 없음
     """
     
     async def generate_stream():
         try:
             start_time = time.time()
-            logger.info(f"Vector DB 단독 스트리밍 초기화 시작 - ticket_id: {ticket_id}, tenant_id: {tenant_id}")
+            logger.info(f"스트리밍 초기화 시작 - ticket_id: {ticket_id}, tenant_id: {tenant_id}")
             
-            # Vector DB 단독 스트리밍 초기화 실행
-            from core.database.vectordb import search_vector_db_only
+            # 스트리밍 초기화 실행
+            from core.database.vectordb import search_vector_db
             from core.llm.manager import get_llm_manager
             
             # 진행률 업데이트 함수 (예상시간 계산 포함)
@@ -935,7 +962,7 @@ async def init_streaming_vector_only_mode(
                 return result
             
             # 시작
-            yield f"data: {json.dumps(send_progress('init', 0, 'Vector DB 단독 초기화 시작'))}\n\n"
+            yield f"data: {json.dumps(send_progress('init', 0, '초기화 시작'))}\n\n"
             
             # 1. 실시간 Freshdesk API로 현재 티켓 정보 조회
             yield f"data: {json.dumps(send_progress('ticket_fetch', 10, '현재 티켓 정보 조회 중', start_time))}\n\n"
@@ -980,27 +1007,22 @@ async def init_streaming_vector_only_mode(
             elif ticket_data.get("description"):
                 ticket_content_parts.append(f"설명: {ticket_data['description']}")
             
-            # 대화내역 추가 (스트리밍에서도 개선된 로직 적용)
+            # 대화내역 추가 (스트리밍에서도 스마트 필터링 사용)
             if ticket_data.get("conversations"):
                 conversations = ticket_data["conversations"]
                 total_conversations = len(conversations)
                 ticket_content_parts.append(f"대화내역 (총 {total_conversations}개):")
                 
-                # 스트리밍용 간소화된 선별 (성능 고려)
-                if total_conversations <= 10:
-                    for i, conv in enumerate(conversations[:10], 1):  # 최대 10개
-                        if conv.get("body_text"):
-                            content = conv['body_text'][:500]  # 스트리밍은 500자로 제한
-                            ticket_content_parts.append(f"대화 {i}: {content}{'...' if len(conv['body_text']) > 500 else ''}")
-                else:
-                    # 초반 2개 + 후반 8개 (빠른 처리를 위해 단순화)
-                    selected_indices = list(range(2)) + list(range(max(0, total_conversations - 8), total_conversations))
-                    selected_indices = sorted(set(selected_indices))
-                    for idx in selected_indices:
-                        conv = conversations[idx]
-                        if conv.get("body_text"):
-                            content = conv['body_text'][:500]
-                            ticket_content_parts.append(f"대화 {idx+1}: {content}{'...' if len(conv['body_text']) > 500 else ''}")
+                # 스마트 필터 사용 (스트리밍용은 경량화)
+                smart_filter = SmartConversationFilter(max_conversations=15, max_chars_per_conv=500)
+                selected_indices, filter_metadata = smart_filter.filter_conversations(
+                    conversations,
+                    ticket_metadata=ticket_data.get("metadata", {})
+                )
+                
+                # 포맷팅된 대화 추가
+                formatted_conversations = smart_filter.format_conversations(conversations, selected_indices)
+                ticket_content_parts.extend(formatted_conversations)
             
             ticket_content = "\n".join(ticket_content_parts)
             
@@ -1046,12 +1068,12 @@ async def init_streaming_vector_only_mode(
                     return []
                     
                 # 스마트 벡터 검색 - 자기 자신 자동 제외 (스트리밍용)
-                similar_results = await search_vector_db_only(
+                similar_results = await search_vector_db(
                     query=ticket_content,
                     tenant_id=tenant_id,
                     platform=platform,
                     doc_types=["ticket"],
-                    limit=3,  # 정확한 개수만 요청 (데이터베이스 레벨에서 필터링됨)
+                    limit=3,  # 스트리밍 모드에서는 3개 고정
                     exclude_id=ticket_id  # 자기 자신 제외 (벡터 DB 레벨에서 처리)
                 )
                 
@@ -1089,7 +1111,7 @@ async def init_streaming_vector_only_mode(
                 if not include_kb:
                     return []
                     
-                kb_results = await search_vector_db_only(
+                kb_results = await search_vector_db(
                     query=ticket_content,
                     tenant_id=tenant_id,
                     platform=platform,
@@ -1109,16 +1131,43 @@ async def init_streaming_vector_only_mode(
                     })
                 
                 return kb_documents
+            
+            async def streaming_similar_summaries_task(raw_tickets):
+                """스트리밍용 유사 티켓 요약 생성 작업"""
+                if not raw_tickets:
+                    return []
+                    
+                # 플랫폼 설정 구성
+                platform_config = {
+                    "platform": platform,
+                    "domain": domain,
+                    "api_key": api_key,
+                    "tenant_id": tenant_id
+                }
+                
+                return await llm_manager.generate_similar_ticket_summaries(raw_tickets, ui_language, platform_config)
 
-            # 1단계: 요약 생성 시작 알림
+            # 요약 생성 시작 알림
             yield f"data: {json.dumps(send_progress('analysis', 30, 'AI 요약 생성 중...', start_time))}\n\n"
             
-            # 1단계: 요약과 검색을 병렬로 실행
-            summary_text, raw_similar_tickets, kb_documents = await asyncio.gather(
-                streaming_summary_task(),
-                streaming_search_similar_task(),
-                streaming_search_kb_task()
-            )
+            # 모든 작업을 동시에 시작 (진정한 병렬 처리)
+            # 1. 티켓 요약
+            summary_task = asyncio.create_task(streaming_summary_task())
+            
+            # 2. 유사 티켓 검색 및 요약
+            async def search_and_summarize_similar():
+                raw_tickets = await streaming_search_similar_task()
+                if raw_tickets:
+                    return await streaming_similar_summaries_task(raw_tickets), raw_tickets
+                return [], []
+            
+            similar_task = asyncio.create_task(search_and_summarize_similar())
+            
+            # 3. KB 문서 검색
+            kb_task = asyncio.create_task(streaming_search_kb_task())
+            
+            # 티켓 요약 먼저 완료 대기
+            summary_text = await summary_task
             
             # 요약 완료 진행률
             yield f"data: {json.dumps(send_progress('analysis_complete', 50, 'AI 요약 생성 완료', start_time))}\n\n"
@@ -1131,27 +1180,22 @@ async def init_streaming_vector_only_mode(
             }
             yield f"data: {json.dumps(summary_chunk)}\n\n"
             
-            # 2단계: 유사 티켓 요약 생성 (병렬 처리)
-            if raw_similar_tickets:
+            # 나머지 작업들 완료 대기
+            (similar_tickets, raw_similar_tickets), kb_documents = await asyncio.gather(
+                similar_task,
+                kb_task
+            )
+            
+            # 유사 티켓 결과 전송
+            if similar_tickets:
                 yield f"data: {json.dumps(send_progress('similar_tickets', 70, f'유사 티켓 검색 완료 ({len(raw_similar_tickets)}건)', start_time))}\n\n"
+                yield f"data: {json.dumps(send_progress('similar_processing', 85, '유사 티켓 요약 생성 완료', start_time))}\n\n"
                 
-                # 플랫폼 설정 구성
-            platform_config = {
-                "platform": platform,
-                "domain": domain,
-                "api_key": api_key,
-                "tenant_id": tenant_id
-            }
-            
-            similar_tickets = await llm_manager.generate_similar_ticket_summaries(raw_similar_tickets, ui_language, platform_config)
-            
-            yield f"data: {json.dumps(send_progress('similar_processing', 85, '유사 티켓 요약 생성 완료', start_time))}\n\n"
-            
-            similar_chunk = {
-                "type": "similar_tickets",
-                "content": similar_tickets
-            }
-            yield f"data: {json.dumps(similar_chunk)}\n\n"
+                similar_chunk = {
+                    "type": "similar_tickets",
+                    "content": similar_tickets
+                }
+                yield f"data: {json.dumps(similar_chunk)}\n\n"
             
             # KB 문서 결과 전송
             if kb_documents:
@@ -1168,10 +1212,10 @@ async def init_streaming_vector_only_mode(
             
             # 완료 로깅
             streaming_execution_time = time.time() - start_time
-            logger.info(f"Vector DB 단독 스트리밍 초기화 완료 - ticket_id: {ticket_id}, 총 실행시간: {streaming_execution_time:.2f}초")
+            logger.info(f"스트리밍 초기화 완료 - ticket_id: {ticket_id}, 총 실행시간: {streaming_execution_time:.2f}초")
                 
         except Exception as e:
-            logger.error(f"Vector DB 단독 스트리밍 초기화 실패: {e}")
+            logger.error(f"스트리밍 초기화 실패: {e}")
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
     
     return StreamingResponse(
@@ -1186,113 +1230,3 @@ async def init_streaming_vector_only_mode(
     )
 
 
-async def init_streaming_hybrid_mode(
-    ticket_id: str,
-    tenant_id: str,
-    platform: str,
-    domain: str,
-    api_key: str,
-    include_similar: bool,
-    include_kb: bool,
-    retry_reason: Optional[str]
-) -> StreamingResponse:
-    """
-    기존: 하이브리드 검색 + 스트리밍 요약 모드 (legacy)
-    - 기존 하이브리드 검색 로직 사용
-    - SQL + Vector DB 조합
-    - 100% 기존 로직 보존
-    """
-    
-    async def generate_stream():
-        try:
-            start_time = time.time()
-            logger.info(f"하이브리드 스트리밍 초기화 시작 - ticket_id: {ticket_id}, tenant_id: {tenant_id}")
-            
-            # 티켓 데이터 조회 (기존 엔드포인트와 동일한 방식)
-            from core.platforms.freshdesk.fetcher import fetch_ticket_details
-            ticket_data = None
-            try:
-                # Freshdesk API를 통해 티켓 정보 조회
-                ticket_data = await fetch_ticket_details(int(ticket_id), domain=domain, api_key=api_key)
-            except Exception as e:
-                logger.warning(f"Freshdesk API 호출 실패: {e}")
-            
-            if not ticket_data:
-                # API 조회 실패 시 벡터 검색 폴백
-                try:
-                    ticket_data = vector_db.get_by_id(original_id_value=ticket_id, tenant_id=tenant_id, doc_type="ticket")
-                except Exception as e:
-                    logger.warning(f"벡터 DB 조회 실패: {e}")
-            
-            if not ticket_data:
-                yield f"data: {json.dumps({'type': 'error', 'message': '티켓을 찾을 수 없습니다'})}\n\n"
-                return
-            
-            # 메타데이터 추출 및 정규화 (기존 엔드포인트와 완전히 동일)
-            ticket_metadata = ticket_data.get("metadata", {}) if isinstance(ticket_data, dict) else ticket_data
-            
-            # 디버깅: 실제 데이터 구조 확인
-            logger.info(f"🔍 디버깅 - 티켓 데이터 구조: {list(ticket_data.keys()) if isinstance(ticket_data, dict) else 'Not a dict'}")
-            logger.info(f"🔍 디버깅 - 메타데이터 구조: {list(ticket_metadata.keys()) if isinstance(ticket_metadata, dict) else 'Not a dict'}")
-            
-            # description_text 필드 우선 사용
-            description_text = (
-                ticket_metadata.get("description_text") or 
-                ticket_data.get("description_text") or
-                ticket_metadata.get("description") or
-                ticket_data.get("description") or
-                "티켓 본문 정보 없음"
-            )
-            
-            # 티켓 정보 구성 (description_text 필드 우선 사용)
-            structured_ticket_data = {
-                "id": ticket_id,
-                "subject": ticket_metadata.get("subject", f"티켓 ID {ticket_id}"),
-                "description_text": description_text,
-                "conversations": ticket_data.get("conversations", []) if isinstance(ticket_data, dict) else [],
-                "tenant_id": tenant_id,
-                "platform": platform,
-                "metadata": ticket_metadata
-            }
-            
-            # 디버깅: 최종 구조화된 데이터 확인
-            logger.info(f"🔍 디버깅 - description_text: {description_text[:100]}..." if description_text else "None")  
-            logger.info(f"🔍 디버깅 - 구조화된 티켓 제목: {structured_ticket_data['subject']}")
-            logger.info(f"🔍 디버깅 - 구조화된 티켓 본문: {structured_ticket_data['description_text'][:100]}...")
-            
-            # 스트리밍 벡터 검색 실행
-            llm_manager = get_llm_manager()
-            adapter = InitHybridAdapter()
-            
-            async for chunk in adapter.execute_vector_init_streaming(
-                llm_manager=llm_manager,
-                ticket_data=structured_ticket_data,
-                tenant_id=tenant_id,
-                platform=platform,
-                include_summary=True,
-                include_similar_tickets=include_similar,
-                include_kb_docs=include_kb,
-                top_k_tickets=3,
-                top_k_kb=3,
-                retry_reason=retry_reason
-            ):
-                yield f"data: {json.dumps(chunk)}\n\n"
-            
-            # 완료 로깅
-            streaming_execution_time = time.time() - start_time
-            logger.info(f"하이브리드 스트리밍 초기화 완료 - ticket_id: {ticket_id}, 총 실행시간: {streaming_execution_time:.2f}초")
-                
-        except Exception as e:
-            logger.error(f"하이브리드 스트리밍 초기화 실패: {e}")
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
-    
-    return StreamingResponse(
-        generate_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Headers": "Cache-Control"
-        }
-    )

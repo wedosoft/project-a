@@ -21,6 +21,7 @@ from .scalable_key_manager import scalable_key_manager, APIKeyStrategy
 from core.metadata.normalizer import TenantMetadataNormalizer
 from .summarizer.prompt.loader import PromptLoader
 from .summarizer import generate_smart_summary
+from .batch_summarizer import BatchSummarizer
 
 logger = logging.getLogger(__name__)
 
@@ -327,7 +328,21 @@ class LLMManager:
         
         # 병렬 처리 활성화 확인
         enable_parallel = os.getenv("ENABLE_PARALLEL_PROCESSING", "true").lower() == "true"
+        enable_batch = os.getenv("ENABLE_BATCH_SUMMARIES", "true").lower() == "true"
         max_concurrent = int(os.getenv("MAX_CONCURRENT_SUMMARIES", "3"))
+        
+        # 배치 처리 우선 시도
+        if enable_batch and len(similar_tickets) >= 2:
+            logger.info(f"🚀 [배치 처리] 유사 티켓 {len(similar_tickets)}개 배치 요약 시작")
+            try:
+                batch_summarizer = BatchSummarizer(self.providers[0])  # 첫 번째 프로바이더 사용
+                return await batch_summarizer.generate_batch_summaries(
+                    similar_tickets, 
+                    ui_language,
+                    max_batch_size=5
+                )
+            except Exception as e:
+                logger.error(f"❌ [배치 처리] 실패, 병렬 처리로 폴백: {e}")
         
         if not enable_parallel or len(similar_tickets) <= 1:
             # 순차 처리 (기존 로직)

@@ -1,0 +1,50 @@
+{
+  "mcpServers": {
+    "filesystem-server": {
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-filesystem", "/Users/alan/GitHub/project-a"],
+      "env": {}
+    },
+    "git-server": {
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-git"],
+      "env": {}
+    },
+    "sqlite-server": {
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-sqlite"],
+      "env": {}
+    },
+    "postgres-server": {
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-postgres"],
+      "env": {
+        "DATABASE_URL": "${DATABASE_URL:-postgresql://localhost:5432/project_a}"
+      }
+    },
+    "brave-search": {
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-brave-search"],
+      "env": {
+        "BRAVE_API_KEY": "${BRAVE_API_KEY}"
+      }
+    },
+    "github-server": {
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      }
+    },
+    "puppeteer-server": {
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-puppeteer"],
+      "env": {}
+    },
+    "memory-server": {
+      "command": "npx",
+      "args": ["@modelcontextprotocol/server-memory"],
+      "env": {}
+    }
+  }
+}

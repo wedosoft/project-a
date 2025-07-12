@@ -113,3 +113,22 @@ https://developers.freshworks.com/docs/app-sdk/v3.0/common/advanced-interfaces/r
 - X-Platform: freshdesk
 - X-Domain: weodosft.freshdesk.com
 - 모든 엔드포인트의 엔드포인트 필수 헤더입니다. 인지하세요.
+
+## Multilingual System Guidelines
+
+### Multilingual Processing Principles
+- 기본적으로 우리 시스템은 다국어를 지향하고 있습니다. 템플릿이나 프롬프트에 한국어로만 강제하는 코드는 제거하세요.
+- 다음 다국어 처리 원칙을 유의하세요:
+  1. UI 언어 (Title Language):
+     - 요약 섹션의 타이틀 언어를 의미합니다.
+     - 본문 언어와는 완전히 별개입니다.
+     - 상담원 언어 파라미터로 결정 (ko이면 한국어 타이틀, 그 외 영어 타이틀)
+  2. 본문 요약 언어:
+     - 본문 언어를 자동 감지하여 해당 언어로 요약
+     - 현재 언어 결정 로직은 LLM에 의존
+  3. LLM 의존 판단 항목:
+     - 요약 본문의 언어 식별
+     - 유사 티켓 요약 시 관련 첨부파일 식별
+       * 원문 파일 3개 이하: 그대로 반환
+       * 3개 초과: LLM이 판단
+     - 다국어 및 복잡한 환경에서의 통합 판단 요청
