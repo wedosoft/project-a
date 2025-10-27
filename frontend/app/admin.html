@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Copilot Canvas - 데이터 관리 콘솔</title>
+    <!-- Modern Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap"
+        rel="stylesheet">
+    <!-- CSS 파일들 로드 -->
+    <link rel="stylesheet" href="styles/admin.css?v=202508222100">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- Scripts -->
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+    <!-- Freshdesk FDK -->
+    <script src="https://static.freshdev.io/fdk/2.0/assets/fresh_client.js"></script>
+    <!-- Backend Configuration -->
+    <script src="scripts/backend-config.js"></script>
+</head>
+
+<body>
+    <div class="main-container">
+        <!-- Unified Header with Status -->
+        <div class="unified-header">
+            <div class="header-left">
+                <h1>🎨 <span data-i18n="admin_title">데이터 관리</span> • <span class="header-domain">도메인: <span
+                            id="customerDomain">loading...</span></span></h1>
+            </div>
+            <div class="header-right">
+                <span class="status-dot status-success"></span>
+                <strong>시스템:</strong> <span id="systemStatus">점검중</span>
+                <span class="separator">•</span>
+                <i class="fas fa-database"></i>
+                <strong>벡터DB:</strong> 티켓 <span id="ticketCount">-</span>개 / 아티클 <span id="articleCount">-</span>개
+                <span class="separator">•</span>
+                <i class="fas fa-sync-alt"></i>
+                <strong>동기화:</strong> <span id="lastSyncTime">-</span>
+            </div>
+        </div>
+
+        <!-- Setup Guide (shown only for first-time users) -->
+        <div id="setupGuide" class="alert alert-info" style="display: none;">
+            <h5><i class="fas fa-info-circle"></i> <span data-i18n="admin_setup_guide_title">데이터 수집 가이드</span></h5>
+            <ol style="margin-bottom: 0;">
+                <li><strong>수집 대상 선택</strong> - <span data-i18n="admin_setup_step1">티켓과 지식베이스 중 수집할 데이터를 선택하세요</span>
+                </li>
+                <li><strong>수집 방식 선택</strong> - <span data-i18n="admin_setup_step2">처음 사용시에는 '전체 수집'을 선택하세요</span></li>
+                <li><strong>수집 시작</strong> - <span data-i18n="admin_setup_step3">재생 버튼을 클릭하여 데이터 수집을 시작하세요</span></li>
+            </ol>
+        </div>
+
+        <!-- Alert Container -->
+        <div id="alertContainer"></div>
+
+        <!-- Web Component Sections -->
+
+        <!-- 1. Data Collection Manager -->
+        <div class="component-section">
+            <h2 class="section-title">
+                <i class="fas fa-database"></i>
+                <span data-i18n="data_collection_title">데이터 수집 관리</span>
+            </h2>
+            <data-collection-manager></data-collection-manager>
+        </div>
+
+        <!-- 에이전트 관리 섹션은 비활성화됨 -->
+        <!-- <div class="component-section">
+            <h2 class="section-title">
+                <i class="fas fa-users"></i>
+                <span data-i18n="agent_management_title">에이전트 관리</span>
+            </h2>
+            <agent-manager></agent-manager>
+        </div> -->
+    </div>
+
+    <!-- I18n System -->
+    <script src="scripts/i18n-manager.js"></script>
+
+    <!-- Load Web Components -->
+    <script src="scripts/components/data-collection-manager.js"></script>
+    <!-- <script src="scripts/components/agent-manager.js"></script> -->
+
+    <!-- Load Main Admin Script -->
+    <script src="scripts/admin.js"></script>
+</body>
+
+</html>
