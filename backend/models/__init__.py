@@ -1,15 +1,63 @@
 """
-Data Models
+Pydantic models for AI Contact Center OS
 """
-from backend.models.ticket import TicketContext
-from backend.models.proposal import AIProposal, SimilarCase, KBProcedure
-from backend.models.feedback import ApprovalLog, ApprovalStatus
+
+from backend.models.schemas import (
+    # Enums
+    BlockType,
+    ApprovalStatus,
+    SourceType,
+    TicketStatus,
+    Priority,
+
+    # Database Models
+    IssueBlock,
+    IssueBlockCreate,
+    KBBlock,
+    KBBlockCreate,
+    ApprovalLog,
+    ApprovalLogCreate,
+
+    # API Models
+    TicketContext,
+    SearchResult,
+    ProposedAction,
+    FeedbackLog,
+    MetricsPayload,
+    ComplianceCheckResult,
+
+    # Utility Models
+    PaginationParams,
+    PaginatedResponse,
+    ErrorResponse,
+)
 
 __all__ = [
-    "TicketContext",
-    "AIProposal",
-    "SimilarCase",
-    "KBProcedure",
-    "ApprovalLog",
+    # Enums
+    "BlockType",
     "ApprovalStatus",
+    "SourceType",
+    "TicketStatus",
+    "Priority",
+
+    # Database Models
+    "IssueBlock",
+    "IssueBlockCreate",
+    "KBBlock",
+    "KBBlockCreate",
+    "ApprovalLog",
+    "ApprovalLogCreate",
+
+    # API Models
+    "TicketContext",
+    "SearchResult",
+    "ProposedAction",
+    "FeedbackLog",
+    "MetricsPayload",
+    "ComplianceCheckResult",
+
+    # Utility Models
+    "PaginationParams",
+    "PaginatedResponse",
+    "ErrorResponse",
 ]

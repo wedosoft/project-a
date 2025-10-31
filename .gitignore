@@ -80,8 +80,8 @@ backend/data/
 .claude/settings.local.json
 .mcp.json
 claude-flow.config.json
-.swarm/
-.hive-mind/
+#.swarm/
+#.hive-mind/
 .claude-flow/
 memory/
 coordination/
