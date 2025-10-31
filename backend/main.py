@@ -1,50 +1,40 @@
 """
-Project-A Spinoff: Vertex AI Migration
-FastAPI Backend - Main Application
+AI Contact Center OS - FastAPI Backend
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import os
-from dotenv import load_dotenv
+from backend.config import get_settings
+from backend.routes import tickets, assist, metrics
 
-# Load environment variables
-load_dotenv()
+settings = get_settings()
 
-# Create FastAPI app
 app = FastAPI(
-    title="Copilot Canvas - Vertex AI",
-    description="RAG-based Freshdesk AI Assistant using Google Vertex AI",
-    version="2.0.0"
+    title="AI Contact Center OS",
+    description="MVP Backend API with LangGraph orchestration",
+    version="1.0.0"
 )
 
-# CORS middleware
+# CORS 설정
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # TODO: Restrict in production
+    allow_origins=["*"],  # 프로덕션에서는 제한 필요
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# 라우터 등록
+app.include_router(tickets.router, prefix="/api/tickets", tags=["tickets"])
+app.include_router(assist.router, prefix="/api/assist", tags=["assist"])
+app.include_router(metrics.router, prefix="/api/metrics", tags=["metrics"])
 
 @app.get("/")
 async def root():
-    """Root endpoint"""
-    return {
-        "name": "Copilot Canvas - Vertex AI",
-        "version": "2.0.0",
-        "status": "running"
-    }
-
+    return {"message": "AI Contact Center OS API", "version": "1.0.0"}
 
 @app.get("/health")
-async def health_check():
-    """Health check endpoint"""
-    return {
-        "status": "healthy",
-        "service": "copilot-canvas-vertex",
-        "gcp_project": os.getenv("GOOGLE_CLOUD_PROJECT", "not-set")
-    }
+async def health():
+    return {"status": "healthy"}
 
 
 if __name__ == "__main__":

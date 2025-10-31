@@ -1,281 +1,434 @@
-# Project-A Spinoff: Vertex AI Migration
+# AI Contact Center OS – 다중 에이전트 아키텍처
 
-**상태**: Phase 1 진행 중 (80% 완료)
-**저장소**: https://github.com/wedosoft/project-a-spinoff
-**목적**: 레거시(15K줄) → Vertex AI 기반 단순 시스템(800줄)
-**마지막 업데이트**: 2025-10-27
+## 개요
 
-## 현황
-
-### ✅ 완료 (Phase 0)
-- ✅ Git 저장소 초기화
-- ✅ Backend 구조 생성 (routes/, services/, models/, utils/)
-- ✅ 기본 파일 (main.py, requirements.txt, .env.example)
-- ✅ Frontend 복사 (project-a에서)
-- ✅ GitHub 연동 완료
-
-### ✅ 완료 (Phase 1 - GCP 환경 셋업)
-- ✅ GCP 프로젝트 생성 (project-a-spinoff, #715996531149)
-- ✅ 빌링 연결 (01526A-E56CA7-1464C8)
-- ✅ 필수 API 활성화 (Vertex AI, Discovery Engine, Logging, Monitoring, Storage)
-- ✅ 서비스 계정 생성 및 키 발급
-  - 계정: `vertex-ai-service@project-a-spinoff.iam.gserviceaccount.com`
-  - 역할: Vertex AI User + Discovery Engine Admin
-  - 키 위치: `backend/service-account-key.json` (2.3K)
-- ✅ **과금 최적화 완료**
-  - project-a-spinoff: 불필요한 API 14개 제거 (BigQuery, Datastore 등)
-  - project-b-475522: 고비용 API 23개 제거 (Cloud Spanner 포함)
-  - 기타 11개 프로젝트: 100개 이상 고비용 API 정리
-  - **현재 과금: ₩0** (리소스 없음)
-
-### ⏳ 진행 중 (Phase 1 - 남은 작업)
-- ⏳ Vertex AI Datastore 생성 (asia-northeast3/서울)
-- ⏳ 샘플 데이터 업로드 (티켓 50개 + KB 50개)
-- ⏳ 검색 품질 테스트 (10개 쿼리)
-
-### 데이터
-- 티켓: 4,800개
-- KB 문서: 1,300개
-- 증분 수집: 2시간마다
-
-### 기술 스택 확정
-- Backend: FastAPI + Fly.io (nrt/나리타)
-- DB/Search: Vertex AI Search (asia-northeast3/서울)
-- LLM: Gemini API
-- Scheduler: Fly.io Machines API
-
-## 아키텍처
-
-```
-Freshdesk App (Frontend)
-       ↓
-Fly.io Backend (nrt/도쿄) 🇯🇵
-  - FastAPI
-  - Stateless (임시 처리만)
-  - 지연: ~30-50ms to 서울
-       ↓
-Vertex AI Search (asia-northeast3/서울) 🇰🇷
-  - 모든 데이터 영구 저장
-  - 자동 임베딩/파싱
-  - Gemini 통합
-       ↑
-Fly.io Scheduled (2시간마다)
-       ↑
-Freshdesk API
-```
-
-### 컴플라이언스
-- ✅ 데이터 영구 저장: 한국(서울)
-- ✅ 백엔드 일시 처리: 일본(도쿄)
-- ✅ 개인정보보호법 준수 (영구 저장소 기준)
-
-## 프로젝트 구조
-
-```
-project-a-spinoff/
-├── backend/           # 800줄 전체
-│   ├── main.py                  # 50줄
-│   ├── requirements.txt         # 7개 패키지
-│   ├── routes/
-│   │   ├── health.py           # 30줄
-│   │   ├── init.py             # 80줄 - 티켓 로드
-│   │   ├── query.py            # 150줄 - RAG 파이프라인
-│   │   └── sync.py             # 100줄 - 데이터 동기화
-│   ├── services/
-│   │   ├── freshdesk.py        # 150줄
-│   │   ├── vertex_search.py    # 100줄
-│   │   ├── gemini.py           # 80줄
-│   │   └── sync_service.py     # 150줄
-│   ├── models/schemas.py       # 100줄
-│   └── utils/tenant.py         # 40줄
-└── frontend/          # project-a 복사
-```
-
-## 실행 계획
-
-### Phase 1: GCP 환경 셋업 (1주) - 80% 완료 ✅
-- ✅ GCP 프로젝트 생성 (project-a-spinoff)
-- ✅ Vertex AI API 활성화
-- ✅ 서비스 계정 생성 및 권한 부여
-- ✅ 과금 최적화 (100개 이상 불필요한 API 제거)
-- ⏳ Datastore 생성 (asia-northeast3/서울) - **다음 단계**
-- ⏳ 샘플 데이터 100개 업로드
-- ⏳ 품질 검증 (10개 쿼리)
-
-### Phase 2: 백엔드 핵심 (1주)
-- services/vertex_search.py
-- services/gemini.py  
-- services/freshdesk.py
-- routes/query.py (RAG)
-- services/sync_service.py
-
-### Phase 3: 프론트엔드 연동 (3일)
-- backend-config.js URL 변경
-- 통합 테스트
-
-### Phase 4: Fly.io 배포 (2일)
-- fly.toml 작성 (nrt 리전)
-- Dockerfile
-- Secrets 설정
-- 배포
-
-### Phase 5: 스케줄링 (1일)
-- Fly.io Machines API 또는 외부 cron
-
-### Phase 6: 데이터 마이그레이션 (2일)
-- 전체 동기화 (4,800 티켓 + 1,300 KB)
-- 검증
-
-## 핵심 구현 사항
-
-### 1. 데이터 수집 (150줄)
-```python
-class FreshdeskSyncService:
-    def fetch_tickets(updated_since=None)
-    def fetch_ticket_conversations(ticket_id)
-    def fetch_kb_articles(updated_since=None)
-    def convert_to_vertex_document(data, doc_type)
-    def upload_to_vertex(documents)
-    def sync_all(incremental=False)
-```
-
-### 2. 증분 수집
-- Freshdesk API: `?updated_since=2025-01-27T10:00:00Z`
-- 마지막 동기화 시간: `backend/data/last_sync_tenant_1.json`
-- Cloud Scheduler: 2시간마다 자동 실행
-
-### 3. 첨부파일
-- Vertex AI 자동 파싱 (PDF, DOCX, TXT)
-- 별도 로직 불필요
-
-## 환경변수
-
-```bash
-# backend/.env (실제 설정 완료)
-GOOGLE_CLOUD_PROJECT=project-a-spinoff
-GOOGLE_APPLICATION_CREDENTIALS=./service-account-key.json
-VERTEX_AI_LOCATION=asia-northeast3  # 서울
-VERTEX_AI_DATASTORE_ID=tenant_1_freshdesk  # 생성 예정
-FRESHDESK_DOMAIN=your-domain  # 설정 필요
-FRESHDESK_API_KEY=your-api-key  # 설정 필요
-```
-
-## GCP 리소스 정보
-
-```bash
-# 프로젝트 정보
-프로젝트 ID: project-a-spinoff
-프로젝트 번호: 715996531149
-빌링 계정: 01526A-E56CA7-1464C8
-
-# 서비스 계정
-이메일: vertex-ai-service@project-a-spinoff.iam.gserviceaccount.com
-역할: roles/aiplatform.user, roles/discoveryengine.admin
-키 파일: backend/service-account-key.json (2.3K)
-
-# 활성화된 API (8개만)
-- aiplatform.googleapis.com
-- discoveryengine.googleapis.com
-- logging.googleapis.com
-- monitoring.googleapis.com
-- storage.googleapis.com (+ storage-api)
-- servicemanagement.googleapis.com
-- serviceusage.googleapis.com
-```
-
-## Fly.io 설정
-
-```toml
-# fly.toml
-app = "copilot-vertex"
-primary_region = "nrt"  # 나리타
-
-[http_service]
-  internal_port = 8080
-  force_https = true
-  auto_stop_machines = true
-  min_machines_running = 0
-
-[[vm]]
-  cpu_kind = "shared"
-  cpus = 1
-  memory_mb = 256
-```
-
-## 예상 비용
-
-```
-Fly.io (nrt):        $0-5/월
-Vertex AI (서울):    $70/월
-─────────────────────────────
-Total:               $70-75/월
-```
-
-## 참고 파일 (project-a)
-
-**Freshdesk API**:
-- `project-a/backend/core/platforms/freshdesk/fetcher.py`
-- `project-a/backend/core/platforms/freshdesk/adapter.py`
-
-**프롬프트**:
-- `project-a/backend/config/prompts/*.yaml`
-
-**프론트엔드**:
-- `project-a/frontend/app/scripts/app.js`
-- `project-a/frontend/app/config/backend-config.js`
+AI Contact Center OS는 LangGraph 기반 오케스트레이션과 역할 분리된 다중 에이전트 시스템을 통해 상담원 지원 업무를 자동화합니다. 각 에이전트는 특정 도메인에 특화되어 독립적으로 동작하며, LangGraph의 상태 기반 워크플로우를 통해 협력합니다.
 
 ---
 
-**마지막 업데이트**: 2025-10-27  
-**다음 단계**: Phase 1 - Vertex AI Datastore 생성 (서울)  
-**상태**: Phase 1 진행 중 (80% 완료) ⏳
+## Phase 1: MVP 핵심 에이전트 (4종)
 
-## 다음 작업자를 위한 인수인계
+### 1. Orchestrator Agent (오케스트레이터)
 
-### 🎯 즉시 진행 가능한 작업
+**역할**: 전체 워크플로우 제어 및 에이전트 간 조율
 
-**1. Vertex AI Datastore 생성**
-```bash
-# 프로젝트 확인
-gcloud config get-value project  # project-a-spinoff
+**책임**:
+- 티켓 유형 라우팅 (티켓 컨텍스트 / KB 검색 / 일반 대화)
+- 에이전트 실행 순서 및 병렬 처리 제어
+- 상태 관리 (LangGraph State)
+- 에러 핸들링 및 재시도 로직
+- 승인 루프 관리
 
-# Datastore 생성 (Google Cloud Console 또는 gcloud CLI)
-# 리전: asia-northeast3 (서울)
-# 이름: tenant_1_freshdesk
-# 타입: Search (Unstructured documents)
+**주요 노드**:
+- `context_router`: 입력 분류 및 라우팅
+- `workflow_coordinator`: 에이전트 실행 순서 결정
+- `error_handler`: 에러 복구 및 fallback
+
+**기술 스택**:
+- LangGraph (상태 기반 그래프 실행)
+- FastAPI (API 엔드포인트)
+- Pydantic (상태 스키마 정의)
+
+**입력/출력**:
+- 입력: Freshdesk 티켓 컨텍스트 (ID, 제목, 본문, 메타데이터)
+- 출력: 최종 제안 (응답 초안, 필드 업데이트, 유사사례, KB 절차)
+
+---
+
+### 2. Retriever Agent (검색 에이전트)
+
+**역할**: 유사사례 및 KB 검색 엔진
+
+**책임**:
+- 구조화 쿼리 생성 (product, component, error_code, 기간 등)
+- 하이브리드 검색 실행 (Dense + Sparse)
+- 메타 필터링 (tenant_id, product, version 등)
+- 재랭킹 (Cross-Encoder)
+- 시간 감쇠 및 부스팅 적용
+
+**주요 노드**:
+- `retrieve_cases`: 유사사례 Top-200 후보 생성 → Top-5 재랭킹
+- `retrieve_kb`: 관련 KB 절차 Top-20 → Top-2 재랭킹
+- `query_builder`: LLM 기반 구조화 쿼리 생성
+
+**기술 스택**:
+- Qdrant (벡터 데이터베이스, 멀티벡터 인덱싱)
+- OpenSearch / pg_trgm (BM25 Sparse 검색)
+- jina-reranker-v2-base (크로스인코더 재랭커)
+- bge-m3 / e5-mistral (임베딩 모델)
+
+**검색 파이프라인**:
+```
+입력 쿼리
+  ↓
+Query Builder (LLM) → 구조화 쿼리 (product/component/error_code/기간)
+  ↓
+Hybrid Search
+  ├─ Dense (Qdrant 멀티벡터) → Top-N
+  ├─ Sparse (BM25) → Top-N
+  └─ RRF (Reciprocal Rank Fusion) + time decay + error_code boosting
+  ↓
+Re-ranker (Cross-Encoder) → Top-200 → Top-20
+  ↓
+출력: 유사사례 Top-5 + KB 절차 Top-2
 ```
 
-**2. 환경 변수 설정**
-- `backend/.env` 파일에 Freshdesk 정보 입력 필요
-- `FRESHDESK_DOMAIN`과 `FRESHDESK_API_KEY` 설정
+**입력/출력**:
+- 입력: 구조화 쿼리 (티켓 메타데이터 + 본문)
+- 출력:
+  - `similar_cases`: Top-5 유사사례 (티켓 ID, 요약, 유사도 점수)
+  - `kb_procedures`: Top-2 KB 절차 (문서 ID, 단계, 주의사항)
 
-**3. 샘플 데이터 준비**
-- project-a에서 티켓 50개 추출
-- KB 문서 50개 추출
-- Datastore에 업로드
+---
 
-### ⚠️ 주의사항
+### 3. Resolution Agent (해결 에이전트)
 
-**과금 관련:**
-- 현재 과금: ₩0 (리소스 없음)
-- Datastore 생성 시 과금 시작 (예상: ₩4,000-40,000/월)
-- 고비용 API 모두 제거됨 (BigQuery, Cloud Spanner 등)
+**역할**: 솔루션 합성 및 응답 생성
 
-**인증 정보:**
-- 서비스 계정 키: `backend/service-account-key.json` (Git 제외됨)
-- 절대 커밋하지 말 것 (.gitignore에 포함됨)
+**책임**:
+- 유사사례 + KB 절차 결합 요약
+- 응답 초안 생성 (상담원 승인용)
+- 필드 업데이트 제안 (카테고리, 태그, 우선순위, 상태)
+- 근거 링크 첨부 (유사사례/KB 출처)
 
-**리전 정책:**
-- 데이터 저장소: 반드시 서울(asia-northeast3)
-- 백엔드: Fly.io nrt (도쿄) - 개인정보 일시 처리만
+**주요 노드**:
+- `propose_solution`: 유사사례와 KB를 결합한 응답 초안 생성
+- `propose_field_updates`: 티켓 필드 자동 업데이트 제안
+- `draft_response`: 상담원 승인용 최종 초안
 
-### 📚 참고 문서
+**기술 스택**:
+- LLM (GPT-4o-mini / Claude 3.5 / Gemini 1.5)
+- 프롬프트 템플릿 (Jinja2 / LangChain)
+- 출력 구조화 (Pydantic)
 
-**GCP 관련:**
-- [Vertex AI Search 문서](https://cloud.google.com/generative-ai-app-builder/docs/introduction)
-- [Discovery Engine API](https://cloud.google.com/discovery-engine/docs)
+**생성 프로세스**:
+```
+입력: 유사사례 Top-5 + KB 절차 Top-2 + 티켓 컨텍스트
+  ↓
+LLM Synthesis
+  ├─ 유사사례 패턴 분석
+  ├─ KB 절차 적용 가능성 검토
+  └─ 현재 티켓에 맞춤화
+  ↓
+출력:
+  ├─ 응답 초안 (고객에게 보낼 메시지)
+  ├─ 필드 업데이트 제안 (카테고리, 태그, 우선순위 등)
+  └─ 근거 (유사사례 링크 + KB 문서 링크)
+```
 
-**레거시 참조:**
-- project-a의 Freshdesk 연동 로직 참고
-- 벡터 저장 구조는 완전히 다름 (Qdrant → Vertex AI Search)
+**입력/출력**:
+- 입력:
+  - `similar_cases`: Retriever Agent 출력
+  - `kb_procedures`: Retriever Agent 출력
+  - `ticket_context`: 현재 티켓 정보
+- 출력:
+  - `draft_response`: 응답 초안
+  - `field_updates`: 필드 업데이트 제안 (JSON)
+  - `justification`: 근거 및 출처
 
+---
+
+### 4. Human Agent (승인 인터페이스)
+
+**역할**: 상담원 승인 루프 관리
+
+**책임**:
+- FDK 앱 UI 렌더링 (티켓 사이드바)
+- 상담원 피드백 수집 (승인 / 수정 / 거부)
+- Freshdesk API 연계 (필드 패치)
+- 승인 로그 저장 (피드백 루프)
+
+**주요 노드**:
+- `human_approve`: 승인/수정/거부 대기
+- `execute_changes`: Freshdesk API PATCH 실행
+- `log_feedback`: Supabase 로그 적재
+
+**FDK 앱 패널 구성**:
+```
+┌─────────────────────────────────────┐
+│ AI 요약 & 상태                      │
+│ - 요약: [1줄 요약]                  │
+│ - 감정: 😊 긍정 | 긴급도: 🔴 높음  │
+├─────────────────────────────────────┤
+│ 유사사례 Top-5                      │
+│ 1. [티켓#123] 근거 링크 + 요약     │
+│ 2. [티켓#456] ...                   │
+├─────────────────────────────────────┤
+│ KB 절차 (Top-2)                     │
+│ 1. [KB-001] 단계별 절차 + 주의점   │
+├─────────────────────────────────────┤
+│ AI 제안                             │
+│ - 응답 초안: [편집 가능 텍스트]    │
+│ - 필드 업데이트:                    │
+│   카테고리: [결제] → [기술지원]     │
+│   우선순위: [중간] → [높음]         │
+├─────────────────────────────────────┤
+│ 버튼                                │
+│ [승인 후 전송] [수정하기]          │
+│ [필드만 업데이트] [무시]           │
+└─────────────────────────────────────┘
+```
+
+**기술 스택**:
+- Freshdesk FDK (티켓 사이드바 iframe 앱)
+- Freshdesk API (티켓 필드 PATCH)
+- Supabase (승인 로그 저장)
+
+**승인 플로우**:
+```
+AI 제안 표시
+  ↓
+상담원 선택
+  ├─ [승인 후 전송] → Freshdesk API PATCH + 로그 저장
+  ├─ [수정하기] → 응답/필드 수정 → API PATCH + 로그
+  ├─ [필드만 업데이트] → 필드만 PATCH + 로그
+  └─ [무시] → 로그만 저장 (rejection 기록)
+  ↓
+피드백 루프 (학습 데이터로 활용)
+```
+
+**입력/출력**:
+- 입력:
+  - `draft_response`: Resolution Agent 출력
+  - `field_updates`: 필드 업데이트 제안
+- 출력:
+  - `approval_status`: approved / modified / rejected
+  - `final_response`: 최종 응답 (상담원 수정 반영)
+  - `final_field_updates`: 최종 필드 업데이트
+  - `feedback_log`: Supabase 로그
+
+---
+
+## Phase 2~3: 확장 에이전트
+
+### 5. Analyzer Agent (분석 에이전트)
+
+**역할**: 티켓 의도, 감정, 원인 분석
+
+**책임**:
+- 의도 분류 (문의 / 불만 / 요청 / 기술지원)
+- 감정 분석 (긍정 / 중립 / 부정 / 긴급)
+- 근본 원인 추론 (RCA: Root Cause Analysis)
+
+**기술 스택**:
+- LLM (분류·감정 분석)
+- 경량 분류 모델 (distilbert-base-uncased-finetuned-sst-2)
+
+---
+
+### 6. Compliance Agent (컴플라이언스 에이전트)
+
+**역할**: 개인정보 보호 및 정책 준수
+
+**책임**:
+- PII 탐지 및 마스킹 (이메일, 전화, 계좌, 주민번호 등)
+- DLP (Data Loss Prevention) 정책 검증
+- 규제 준수 검사 (GDPR, CCPA 등)
+
+**기술 스택**:
+- spaCy / Presidio (PII 탐지)
+- 정규 표현식 (한국형 PII: 주민번호, 계좌번호)
+
+---
+
+### 7. KB-Agent (지식베이스 에이전트)
+
+**역할**: 신규 KB 문서 제안
+
+**책임**:
+- 반복 패턴 탐지 (유사 티켓 클러스터링)
+- 신규 표준 절차 제안
+- KB 갭 분석 (커버리지가 낮은 영역 식별)
+
+**기술 스택**:
+- HDBSCAN (클러스터링)
+- LLM (KB 초안 생성)
+
+---
+
+### 8. Metrics Agent (지표 집계 에이전트)
+
+**역할**: KPI 추적 및 대시보드
+
+**책임**:
+- 검색 품질 지표 (Recall@10, nDCG@10)
+- 도입 효과 지표 (승인률, 응답시간, FTR)
+- 운영 지표 (에러율, 평균 지연, LLM 비용)
+
+**기술 스택**:
+- Supabase (로그 집계)
+- Grafana / Metabase (대시보드)
+
+---
+
+## 에이전트 간 상호작용 (LangGraph 워크플로우)
+
+### 전체 플로우 (MVP)
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                 Orchestrator Agent                      │
+│  (context_router, workflow_coordinator, error_handler)  │
+└────────────────────┬────────────────────────────────────┘
+                     ↓
+           ┌─────────┴─────────┐
+           ↓                   ↓
+   ┌──────────────┐    ┌──────────────┐
+   │  Retriever   │    │  Resolution  │
+   │    Agent     │    │    Agent     │
+   └──────┬───────┘    └──────┬───────┘
+          │                   │
+          └─────────┬─────────┘
+                    ↓
+            ┌──────────────┐
+            │    Human     │
+            │    Agent     │
+            └──────────────┘
+                    ↓
+          ┌──────────────────┐
+          │  Freshdesk API   │
+          │  (Field PATCH)   │
+          └──────────────────┘
+```
+
+### 상세 워크플로우
+
+```
+1. 티켓 입력
+   ↓
+2. Orchestrator: context_router
+   ├─ 티켓 컨텍스트? → Retriever Agent 호출
+   ├─ KB 검색? → Retriever Agent (KB 모드)
+   └─ 일반 대화? → Resolution Agent (직접)
+   ↓
+3. Retriever Agent (병렬 실행)
+   ├─ retrieve_cases → 유사사례 Top-5
+   └─ retrieve_kb → KB 절차 Top-2
+   ↓
+4. Resolution Agent
+   ├─ propose_solution → 응답 초안
+   └─ propose_field_updates → 필드 제안
+   ↓
+5. Human Agent
+   ├─ human_approve → 상담원 승인 대기
+   └─ execute_changes → Freshdesk API PATCH
+   ↓
+6. log_feedback → Supabase 로그 저장
+   ↓
+7. 완료
+```
+
+### Phase 2 확장 시
+
+```
+Analyzer Agent (의도/감정) → Orchestrator에 병렬 연결
+Compliance Agent (PII 마스킹) → Retriever/Resolution 전에 실행
+KB-Agent (신규 문서 제안) → 백그라운드 배치 작업
+Metrics Agent (지표 집계) → 별도 스케줄러로 실행
+```
+
+---
+
+## 구현 기술 스택 요약
+
+| 에이전트 | 주요 기술 | 모델/라이브러리 |
+|---------|----------|----------------|
+| Orchestrator | LangGraph, FastAPI | Pydantic |
+| Retriever | Qdrant, OpenSearch | bge-m3, jina-reranker-v2 |
+| Resolution | LLM API | GPT-4o-mini / Claude 3.5 |
+| Human | Freshdesk FDK, API | Supabase |
+| Analyzer | LLM, 분류 모델 | distilbert-sst-2 |
+| Compliance | spaCy, Presidio | 정규 표현식 |
+| KB-Agent | HDBSCAN, LLM | scikit-learn |
+| Metrics | Supabase, BI | Grafana |
+
+---
+
+## 배포 아키텍처
+
+### 컨테이너 구성
+
+```
+Docker Compose (개발)
+├─ fastapi-app (Orchestrator + Resolution + Human)
+├─ qdrant (벡터 DB)
+├─ opensearch (BM25)
+├─ postgres (Supabase 대체 가능)
+└─ redis (캐싱)
+
+Kubernetes (프로덕션)
+├─ Orchestrator Pod (FastAPI + LangGraph)
+├─ Retriever Pod (검색 엔진)
+├─ Resolution Pod (LLM API 호출)
+└─ Worker Pods (비동기 작업)
+```
+
+### 확장 전략
+
+- **수평 확장**: Retriever, Resolution Pod 복제
+- **캐싱**: Redis로 검색 결과 캐싱
+- **비동기**: Celery/RQ로 배치 작업
+- **멀티테넌시**: `tenant_id` 기반 RLS + 컬렉션 분리
+
+---
+
+## 모니터링 & 로깅
+
+### 필수 지표
+
+1. **검색 품질**: Recall@10, nDCG@10
+2. **도입 효과**: 승인률, 응답시간, FTR (First Time Resolution)
+3. **운영**: 에러율, 평균 지연, LLM 비용/건
+4. **상담원 피드백**: 수정률 (승인 대비)
+
+### 로깅 스키마
+
+```sql
+-- Supabase 로그 테이블
+create table approval_logs (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id text not null,
+  ticket_id text not null,
+  draft_response text,
+  final_response text,
+  field_updates jsonb,
+  approval_status text check (approval_status in ('approved','modified','rejected')),
+  agent_id text,
+  created_at timestamptz default now()
+);
+```
+
+---
+
+## 개발 로드맵 (8주)
+
+| 주차 | 에이전트 작업 | 결과물 |
+|-----|-------------|--------|
+| W1 | Orchestrator 스캐폴드 | LangGraph 기본 그래프 |
+| W2 | Retriever (인제스트) | Issue Block 저장 |
+| W3 | Retriever (검색) | Qdrant + BM25 |
+| W4 | Resolution | 합성 + 제안 |
+| W5 | Human | FDK 앱 + 승인 루프 |
+| W6 | Orchestrator (라우터) | 분기 로직 |
+| W7 | 성능 튜닝 | 재랭커 가중치 |
+| W8 | 파일럿 | 테넌트 1 적용 |
+
+---
+
+## 리스크 & 완화
+
+| 리스크 | 완화 방안 |
+|-------|----------|
+| LLM 비용/지연 | 배치 추출, 캐싱, 경량 모델 전환 (Phase 2) |
+| 데이터 품질 | 규칙+LLM 혼합 추출기, 하드네거티브 파인튜닝 |
+| 테넌트 격리 | RLS + 벡터 페이로드 필터 + 컬렉션 분리 |
+| 확장성 | 재랭킹 Top-K 조정, 비동기 워커, 캐시 |
+| FDK 제약 | API 기반 자동화 중심 (브라우저 전역 제어 배제) |
+
+---
+
+## 참고 문서
+
+- [README.md](../README.md): 전체 시스템 개요
+- [API 스펙](./API.md): REST API 계약 (예정)
+- [데이터 모델](./DATA_MODEL.md): 스키마 상세 (예정)
