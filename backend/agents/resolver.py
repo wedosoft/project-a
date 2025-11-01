@@ -102,11 +102,24 @@ CONFIDENCE: [0.0-1.0]
 
             confidence = max(0.0, min(1.0, confidence))
 
+            # Get ticket_id from ticket_context
+            ticket_id = state.get("ticket_context", {}).get("ticket_id", "unknown")
+
+            # Get search results for similar_cases and kb_procedures
+            search_results = state.get("search_results", {})
+            similar_cases = search_results.get("similar_cases", [])
+            kb_procedures = search_results.get("kb_procedures", [])
+
+            # Initialize proposed_action with all required fields
             if "proposed_action" not in state:
                 state["proposed_action"] = {}
 
+            state["proposed_action"]["ticket_id"] = ticket_id
             state["proposed_action"]["draft_response"] = draft
+            state["proposed_action"]["similar_cases"] = similar_cases
+            state["proposed_action"]["kb_procedures"] = kb_procedures
             state["proposed_action"]["confidence"] = confidence
+            state["proposed_action"]["justification"] = f"Generated based on {len(similar_cases)} similar cases and {len(kb_procedures)} KB articles with {confidence:.0%} confidence."
 
             logger.info(f"Solution generated with confidence: {confidence:.2f}")
             return state

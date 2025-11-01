@@ -16,6 +16,7 @@ from backend.services.freshdesk import FreshdeskClient
 from backend.services.llm_service import LLMService
 from backend.services.qdrant_service import QdrantService
 from backend.services.supabase_client import SupabaseService
+from backend.services.sparse_search import SparseSearchService
 from backend.utils.logger import get_logger
 from backend.config import get_settings
 
@@ -28,6 +29,7 @@ freshdesk = FreshdeskClient()
 llm = LLMService()
 qdrant = QdrantService()
 supabase = SupabaseService()
+sparse_search = SparseSearchService()
 
 # Collection names
 TICKETS_COLLECTION = "support_tickets"
@@ -107,6 +109,9 @@ async def sync_tickets_task(since: Optional[datetime], limit: int) -> SyncResult
 
                 logger.info(f"Fetched {len(tickets)} tickets (page {page})")
 
+                # Prepare batch for sparse indexing
+                sparse_documents = []
+
                 # Process each ticket
                 for ticket in tickets:
                     try:
@@ -154,6 +159,18 @@ async def sync_tickets_task(since: Optional[datetime], limit: int) -> SyncResult
                             payload=payload
                         )
 
+                        # Prepare document for sparse indexing
+                        sparse_documents.append({
+                            "id": ticket_id,
+                            "content": content,
+                            "metadata": {
+                                "subject": subject,
+                                "status": ticket.get("status"),
+                                "priority": ticket.get("priority"),
+                                "type": ticket.get("type")
+                            }
+                        })
+
                         # Log to Supabase
                         await supabase.client.table("sync_logs").insert({
                             "collection": TICKETS_COLLECTION,
@@ -168,6 +185,19 @@ async def sync_tickets_task(since: Optional[datetime], limit: int) -> SyncResult
                         error_msg = f"Failed to process ticket {ticket.get('id')}: {str(e)}"
                         logger.error(error_msg)
                         errors.append(error_msg)
+
+                # Index documents in Postgres for BM25 sparse search
+                if sparse_documents:
+                    try:
+                        indexed_count = await sparse_search.index_documents(
+                            collection_name=TICKETS_COLLECTION,
+                            documents=sparse_documents
+                        )
+                        logger.info(f"Indexed {indexed_count} tickets for BM25 search")
+                    except Exception as e:
+                        error_msg = f"Failed to index tickets for sparse search: {str(e)}"
+                        logger.warning(error_msg)
+                        # Don't add to errors as this is non-critical
 
                 total_fetched += len(tickets)
 
@@ -248,6 +278,9 @@ async def sync_kb_task(since: Optional[datetime], limit: int) -> SyncResult:
 
                 logger.info(f"Fetched {len(articles)} KB articles (page {page})")
 
+                # Prepare batch for sparse indexing
+                sparse_documents = []
+
                 # Process each article
                 for article in articles:
                     try:
@@ -294,6 +327,18 @@ async def sync_kb_task(since: Optional[datetime], limit: int) -> SyncResult:
                             payload=payload
                         )
 
+                        # Prepare document for sparse indexing
+                        sparse_documents.append({
+                            "id": article_id,
+                            "content": content,
+                            "metadata": {
+                                "title": title,
+                                "folder_id": article.get("folder_id"),
+                                "category_id": article.get("category_id"),
+                                "status": article.get("status")
+                            }
+                        })
+
                         # Log to Supabase
                         await supabase.client.table("sync_logs").insert({
                             "collection": KB_COLLECTION,
@@ -308,6 +353,19 @@ async def sync_kb_task(since: Optional[datetime], limit: int) -> SyncResult:
                         error_msg = f"Failed to process KB article {article.get('id')}: {str(e)}"
                         logger.error(error_msg)
                         errors.append(error_msg)
+
+                # Index documents in Postgres for BM25 sparse search
+                if sparse_documents:
+                    try:
+                        indexed_count = await sparse_search.index_documents(
+                            collection_name=KB_COLLECTION,
+                            documents=sparse_documents
+                        )
+                        logger.info(f"Indexed {indexed_count} KB articles for BM25 search")
+                    except Exception as e:
+                        error_msg = f"Failed to index KB articles for sparse search: {str(e)}"
+                        logger.warning(error_msg)
+                        # Don't add to errors as this is non-critical
 
                 total_fetched += len(articles)
 

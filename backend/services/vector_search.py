@@ -385,6 +385,48 @@ class VectorSearchService:
             logger.error(f"Failed to delete collection '{collection_name}': {e}")
             raise
 
+    async def search(
+        self,
+        collection_name: str,
+        query: str,
+        top_k: int = 10,
+        filters: Optional[Dict[str, Any]] = None,
+        vector_name: str = "content_vec"
+    ) -> List[Dict[str, Any]]:
+        """
+        Search with text query (generates embedding automatically)
+
+        This method is called by HybridSearchService.
+
+        Args:
+            collection_name: Name of the collection
+            query: Text query
+            top_k: Number of results
+            filters: Optional filters
+            vector_name: Vector field name (default: content_vec)
+
+        Returns:
+            List of search results
+        """
+        try:
+            # Generate embedding from text query
+            query_embedding = self.generate_embeddings([query])[0].tolist()
+
+            # Use existing search_similar method
+            results = self.search_similar(
+                collection_name=collection_name,
+                query_vector=query_embedding,
+                vector_name=vector_name,
+                top_k=top_k,
+                filters=filters
+            )
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Text search failed in '{collection_name}': {e}")
+            raise
+
     def get_collection_info(self, collection_name: str) -> Dict[str, Any]:
         """
         Get collection information

@@ -18,6 +18,7 @@ from datetime import datetime
 
 from backend.agents.orchestrator import compile_workflow
 from backend.services.freshdesk import FreshdeskClient
+from backend.services.supabase_client import SupabaseService
 from backend.models.schemas import (
     TicketContext,
     SearchResult,
@@ -331,8 +332,9 @@ async def approve_suggestion(ticket_id: str, approval: ApprovalRequest):
     )
 
     try:
-        # 1. Initialize Freshdesk client
+        # 1. Initialize Freshdesk client and Supabase service
         freshdesk_client = FreshdeskClient()
+        supabase_service = SupabaseService()
         updates_applied = []
 
         # 2. Handle approval status
@@ -363,6 +365,28 @@ async def approve_suggestion(ticket_id: str, approval: ApprovalRequest):
                     logger.info(
                         f"Updated {len(approval.final_field_updates)} fields for ticket {ticket_id}"
                     )
+
+                # Log approval to Supabase
+                try:
+                    # Get ticket data for tenant_id extraction
+                    ticket_data = await freshdesk_client.get_ticket(ticket_id)
+                    tenant_id = ticket_data.get("custom_fields", {}).get("cf_tenant_id", "default")
+
+                    await supabase_service.log_approval({
+                        "tenant_id": tenant_id,
+                        "ticket_id": ticket_id,
+                        "draft_response": None,  # Not available in approval request
+                        "final_response": approval.final_response,
+                        "field_updates": approval.final_field_updates,
+                        "approval_status": "approved",
+                        "agent_id": approval.agent_id or "unknown",
+                        "feedback_notes": None
+                    })
+                    updates_applied.append("Logged approval to Supabase")
+                    logger.info(f"Logged approval to Supabase for ticket {ticket_id}")
+                except Exception as e:
+                    # Don't fail the entire operation if Supabase logging fails
+                    logger.warning(f"Failed to log approval to Supabase for ticket {ticket_id}: {e}")
 
                 return ExecutionResult(
                     success=True,
@@ -410,10 +434,27 @@ async def approve_suggestion(ticket_id: str, approval: ApprovalRequest):
 
                 logger.info(f"Re-ran orchestrator for ticket {ticket_id} with modifications")
 
+                # Log modification to Supabase
+                try:
+                    tenant_id = ticket_data.get("custom_fields", {}).get("cf_tenant_id", "default")
+                    await supabase_service.log_approval({
+                        "tenant_id": tenant_id,
+                        "ticket_id": ticket_id,
+                        "draft_response": None,  # Original draft not available
+                        "final_response": approval.final_response,
+                        "field_updates": approval.final_field_updates,
+                        "approval_status": "modified",
+                        "agent_id": approval.agent_id or "unknown",
+                        "feedback_notes": f"Re-executed with modifications. New confidence: {modified_result.confidence:.2f}"
+                    })
+                    logger.info(f"Logged modification to Supabase for ticket {ticket_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to log modification to Supabase for ticket {ticket_id}: {e}")
+
                 return ExecutionResult(
                     success=True,
                     ticket_id=ticket_id,
-                    updates_applied=["Re-executed workflow with modifications"],
+                    updates_applied=["Re-executed workflow with modifications", "Logged to Supabase"],
                     message=f"Workflow re-executed with modifications. New confidence: {modified_result.confidence:.2f}"
                 )
 
@@ -444,6 +485,27 @@ async def approve_suggestion(ticket_id: str, approval: ApprovalRequest):
                 updates_applied.append("Added rejection note to ticket")
             except Exception as e:
                 logger.warning(f"Failed to add rejection note to ticket {ticket_id}: {e}")
+
+            # Log rejection to Supabase
+            try:
+                # Get ticket data for tenant_id extraction
+                ticket_data = await freshdesk_client.get_ticket(ticket_id)
+                tenant_id = ticket_data.get("custom_fields", {}).get("cf_tenant_id", "default")
+
+                await supabase_service.log_approval({
+                    "tenant_id": tenant_id,
+                    "ticket_id": ticket_id,
+                    "draft_response": None,  # Not available in approval request
+                    "final_response": None,  # Rejected, no final response
+                    "field_updates": None,
+                    "approval_status": "rejected",
+                    "agent_id": approval.agent_id or "unknown",
+                    "feedback_notes": approval.rejection_reason or "No reason provided"
+                })
+                updates_applied.append("Logged rejection to Supabase")
+                logger.info(f"Logged rejection to Supabase for ticket {ticket_id}")
+            except Exception as e:
+                logger.warning(f"Failed to log rejection to Supabase for ticket {ticket_id}: {e}")
 
             return ExecutionResult(
                 success=True,

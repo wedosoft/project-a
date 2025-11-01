@@ -46,7 +46,7 @@ async def retrieve_cases(state: AgentState) -> AgentState:
         search_service = HybridSearchService()
         results = await asyncio.wait_for(
             search_service.search(
-                collection_name="issue_cases",
+                collection_name="support_tickets",
                 query=query,
                 top_k=5,
                 use_reranking=True
@@ -86,7 +86,7 @@ async def retrieve_cases(state: AgentState) -> AgentState:
 
 async def retrieve_kb(state: AgentState) -> AgentState:
     """
-    Retrieve KB articles from kb_articles collection
+    Retrieve KB articles from kb_procedures collection
 
     Args:
         state: Current agent state with ticket context
@@ -95,7 +95,7 @@ async def retrieve_kb(state: AgentState) -> AgentState:
         Updated state with kb_procedures in search_results
     """
     try:
-        logger.info("Retrieving KB articles")
+        logger.info("Retrieving KB procedures")
 
         # Extract search query from ticket context
         ticket_context = state.get("ticket_context", {})
@@ -114,11 +114,11 @@ async def retrieve_kb(state: AgentState) -> AgentState:
             logger.warning("No search query available from ticket context")
             return state
 
-        # Search KB articles with timeout
+        # Search KB procedures with timeout
         search_service = HybridSearchService()
         results = await asyncio.wait_for(
             search_service.search(
-                collection_name="kb_articles",
+                collection_name="kb_procedures",
                 query=query,
                 top_k=5,
                 use_reranking=True
