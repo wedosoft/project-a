@@ -250,7 +250,7 @@ class TestExtractFromTicket:
             prompt = call_args["messages"][1]["content"]
 
             # Verify conversations were included
-            assert "Recent Conversations" in prompt
+            assert "모든 대화 내역" in prompt
             assert sample_ticket["conversations"][0]["body_text"] in prompt
 
     @pytest.mark.asyncio

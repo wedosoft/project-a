@@ -172,14 +172,15 @@ class TestGetTicket:
 
 
 class TestFetchConversations:
-    """Test conversation fetching"""
+    """Test conversation fetching with pagination"""
 
     @pytest.mark.asyncio
-    async def test_fetch_conversations(self, freshdesk_client):
-        """Test fetching conversations for a ticket"""
+    async def test_fetch_conversations_single_page(self, freshdesk_client):
+        """Test fetching conversations - single page"""
         with patch.object(
             freshdesk_client, "_make_request", new_callable=AsyncMock
         ) as mock_request:
+            # Return less than 30 conversations (single page)
             mock_request.return_value = [
                 {"id": 1, "body_text": "First message"},
                 {"id": 2, "body_text": "Second message"}
@@ -187,8 +188,41 @@ class TestFetchConversations:
 
             result = await freshdesk_client.fetch_ticket_conversations("123")
 
-            mock_request.assert_called_once_with("GET", "tickets/123/conversations")
+            # Should only call once
+            mock_request.assert_called_once()
             assert len(result) == 2
+
+    @pytest.mark.asyncio
+    async def test_fetch_conversations_multiple_pages(self, freshdesk_client):
+        """Test fetching conversations - multiple pages (pagination)"""
+        with patch.object(
+            freshdesk_client, "_make_request", new_callable=AsyncMock
+        ) as mock_request:
+            # Page 1: 30 conversations (full page)
+            # Page 2: 21 conversations (partial page)
+            mock_request.side_effect = [
+                [{"id": i, "body_text": f"Message {i}"} for i in range(1, 31)],  # 30 items
+                [{"id": i, "body_text": f"Message {i}"} for i in range(31, 52)]   # 21 items
+            ]
+
+            result = await freshdesk_client.fetch_ticket_conversations("123")
+
+            # Should call twice (2 pages)
+            assert mock_request.call_count == 2
+            assert len(result) == 51  # 30 + 21
+
+    @pytest.mark.asyncio
+    async def test_fetch_conversations_empty(self, freshdesk_client):
+        """Test fetching conversations - empty result"""
+        with patch.object(
+            freshdesk_client, "_make_request", new_callable=AsyncMock
+        ) as mock_request:
+            mock_request.return_value = []
+
+            result = await freshdesk_client.fetch_ticket_conversations("123")
+
+            mock_request.assert_called_once()
+            assert len(result) == 0
 
 
 class TestFetchKBArticles:

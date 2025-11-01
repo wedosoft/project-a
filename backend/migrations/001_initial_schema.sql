@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS kb_blocks (
     article_id TEXT,
     intent TEXT,
     step TEXT,
-    constraint_text TEXT,
+    constraint TEXT,
     example TEXT,
     meta JSONB,
     embedding_id TEXT UNIQUE,
@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS kb_blocks (
 COMMENT ON TABLE kb_blocks IS '표준 절차 및 정책 문서 블록';
 COMMENT ON COLUMN kb_blocks.intent IS '의도/목적 설명';
 COMMENT ON COLUMN kb_blocks.step IS '절차 단계';
-COMMENT ON COLUMN kb_blocks.constraint_text IS '제약사항 및 주의점';
+COMMENT ON COLUMN kb_blocks.constraint IS '제약사항 및 주의점';
 COMMENT ON COLUMN kb_blocks.example IS '예시';
 
 -- Approval Logs Table (승인 이력)
@@ -142,7 +142,7 @@ VALUES
 ON CONFLICT DO NOTHING;
 
 -- Sample kb_blocks
-INSERT INTO kb_blocks (tenant_id, article_id, intent, step, constraint_text, example, meta)
+INSERT INTO kb_blocks (tenant_id, article_id, intent, step, constraint, example, meta)
 VALUES
     ('demo-tenant', 'KB-AUTH-001', '로그인 문제 해결', '1. JWT 설정 확인\n2. 토큰 만료 시간 검증\n3. Refresh token 구현 확인', 'JWT 만료 시간은 최소 15분 이상', 'JWT_EXPIRATION=30m', '{"category": "authentication", "lang": "ko"}'),
     ('demo-tenant', 'KB-AUTH-002', '비밀번호 재설정', '1. 이메일 인증\n2. 임시 비밀번호 발급\n3. 강제 변경 유도', '비밀번호는 8자 이상, 특수문자 포함', 'Temp123!@#', '{"category": "authentication", "lang": "ko"}'),

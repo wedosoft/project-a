@@ -235,7 +235,7 @@ class KBBlock(BaseModel):
     article_id: Optional[str] = Field(None, max_length=255, description="KB article ID")
     intent: Optional[str] = Field(None, max_length=1024, description="Intent/purpose")
     step: Optional[str] = Field(None, max_length=2048, description="Procedure steps")
-    constraints: Optional[str] = Field(None, max_length=1024, description="Constraints and warnings")
+    constraint: Optional[str] = Field(None, max_length=1024, description="Constraints and warnings")
     example: Optional[str] = Field(None, max_length=1024, description="Example usage")
     meta: Optional[Dict[str, Any]] = Field(None, description="Additional metadata (JSONB)")
     embedding_id: Optional[str] = Field(None, max_length=255, description="Qdrant vector ID")
@@ -258,7 +258,7 @@ class KBBlockCreate(BaseModel):
     article_id: Optional[str] = Field(None, max_length=255)
     intent: Optional[str] = Field(None, max_length=1024)
     step: Optional[str] = Field(None, max_length=2048)
-    constraints: Optional[str] = Field(None, max_length=1024)
+    constraint: Optional[str] = Field(None, max_length=1024, alias="constraints")
     example: Optional[str] = Field(None, max_length=1024)
     meta: Optional[Dict[str, Any]] = None
 

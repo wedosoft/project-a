@@ -48,6 +48,16 @@ class Settings(BaseSettings):
         case_sensitive=False
     )
 
+    @property
+    def QDRANT_URL(self) -> str:
+        """Construct Qdrant URL from host and port"""
+        return f"http://{self.qdrant_host}:{self.qdrant_port}"
+
+    @property
+    def QDRANT_API_KEY(self) -> str:
+        """Qdrant API key"""
+        return self.qdrant_api_key
+
 
 @lru_cache()
 def get_settings() -> Settings:

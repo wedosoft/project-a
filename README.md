@@ -1,3 +1,72 @@
+# AI Contact Center OS – MVP
+
+## Quick Start
+
+### Prerequisites
+- Python 3.11+
+- Docker and Docker Compose
+- PostgreSQL (or Supabase account)
+- Qdrant (local or cloud)
+- Freshdesk account with API access
+
+### Environment Setup
+
+1. **Clone the repository**
+```bash
+git clone <repository-url>
+cd project-a-spinoff
+```
+
+2. **Set up environment variables**
+```bash
+cp .env.example .env
+```
+
+Edit `.env` with your credentials:
+- `OPENAI_API_KEY` - OpenAI API key for LLM extraction
+- `GOOGLE_API_KEY` - Google API key for Gemini (optional)
+- `QDRANT_URL` - Qdrant server URL (default: http://localhost:6333)
+- `SUPABASE_URL` - Supabase project URL
+- `SUPABASE_KEY` - Supabase anon/public key
+- `SUPABASE_SERVICE_ROLE_KEY` - Supabase service role key (for admin operations)
+- `SUPABASE_DB_*` - Direct database connection parameters
+- `FRESHDESK_DOMAIN` - Your Freshdesk domain (e.g., yourcompany.freshdesk.com)
+- `FRESHDESK_API_KEY` - Freshdesk API key
+
+3. **Create Python virtual environment**
+```bash
+cd backend
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+4. **Run database migrations**
+```bash
+# Using Supabase CLI or SQL editor, run:
+psql <your-connection-string> -f migrations/001_initial_schema.sql
+```
+
+5. **Start services**
+```bash
+# Start Qdrant (if running locally)
+docker run -p 6333:6333 qdrant/qdrant
+
+# Start FastAPI backend
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+6. **Verify installation**
+```bash
+# Run tests
+pytest tests/ -v
+
+# Check API health
+curl http://localhost:8000/health
+```
+
+---
+
 # AI Contact Center OS – MVP 개발 지침서 (Final v1.0)
 
 ## 0. 팩트체크 요약 (현실성·구현 가능성)
