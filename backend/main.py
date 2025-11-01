@@ -4,7 +4,7 @@ AI Contact Center OS - FastAPI Backend
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.config import get_settings
-from backend.routes import tickets, assist, metrics
+from backend.routes import tickets, assist, metrics, health, sync
 
 settings = get_settings()
 
@@ -27,14 +27,12 @@ app.add_middleware(
 app.include_router(tickets.router, prefix="/api/tickets", tags=["tickets"])
 app.include_router(assist.router, prefix="/api/assist", tags=["assist"])
 app.include_router(metrics.router, prefix="/api/metrics", tags=["metrics"])
+app.include_router(sync.router, prefix="/api/sync", tags=["sync"])
+app.include_router(health.router, prefix="/api", tags=["health"])
 
 @app.get("/")
 async def root():
     return {"message": "AI Contact Center OS API", "version": "1.0.0"}
-
-@app.get("/health")
-async def health():
-    return {"status": "healthy"}
 
 
 if __name__ == "__main__":
