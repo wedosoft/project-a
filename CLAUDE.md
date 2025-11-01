@@ -47,9 +47,9 @@
 
 ### 💾 Project Memory Management
 
-**CRITICAL: ALL project progress data MUST be saved to SQLite database**
+**CRITICAL: Use Core Memory MCP for ALL project progress tracking**
 
-**Database Location**: `.swarm/memory.db`
+**Memory System**: Core Memory MCP (NOT SQLite, NOT Claude Flow)
 
 **When to Save**:
 - After completing major tasks or milestones
@@ -58,34 +58,48 @@
 - When finishing coding sessions
 - Before context switches or breaks
 
-**How to Save**:
-```bash
-# Save project memory to SQLite database
-sqlite3 .swarm/memory.db "INSERT OR REPLACE INTO memory_entries (key, value, namespace, metadata, created_at, updated_at)
-VALUES
-('key-name', 'markdown content here...', 'namespace', '{\"type\":\"project-memory\"}', strftime('%s', 'now'), strftime('%s', 'now'))"
+**How to Save** (Core Memory MCP):
+```javascript
+// Get session ID first (if not available)
+mcp__core-memory__get_session_id({ new: true })
+
+// Save to Core Memory
+mcp__core-memory__memory_ingest({
+  message: "Detailed markdown content with context...",
+  sessionId: "session-uuid",
+  spaceIds: ["cmhetlxnf3g4zqj1vf764glel"]  // spinoff space ID
+})
 ```
 
-**Namespaces to Use**:
-- `mvp` - Overall project status
-- `mvp-phase1` - Phase 1 specific (database, models)
-- `mvp-phase2` - Phase 2 specific (AI workflows)
-- `mvp-phase3` - Phase 3 specific (approval loops)
-- `feature-[name]` - Feature-specific progress
-- `bugfix-[name]` - Bug fix progress
+**Memory Categories** (AI-optimized structure):
+1. **CODEBASE**: Repository structure, tech stack, file organization
+2. **MASTER_PLAN**: Project vision, architecture, development roadmap
+3. **COMPLETED**: Finished tasks with timestamps and deliverables
+4. **PENDING**: Current sprint tasks, priorities, blockers
+5. **ISSUES**: Critical bugs, design problems, technical debt
 
-**Retrieve Memory**:
-```bash
-# Query saved memories
-sqlite3 .swarm/memory.db "SELECT key, namespace, value FROM memory_entries WHERE namespace = 'mvp-phase1'"
+**How to Retrieve**:
+```javascript
+// Search memories
+mcp__core-memory__memory_search({
+  query: "spinoff codebase structure implementation status",
+  spaceIds: ["cmhetlxnf3g4zqj1vf764glel"]
+})
+
+// Get spinoff space details
+mcp__core-memory__memory_get_space({
+  spaceName: "spinoff"
+})
 ```
 
-**Example Keys**:
-- `database-schema` - Database design and structure
-- `pydantic-models` - Model implementations
-- `api-endpoints` - API implementation status
-- `test-results` - Test coverage and results
-- `project-status` - Overall project state
+**Space ID**: `cmhetlxnf3g4zqj1vf764glel` (spinoff project)
+
+**Memory Format Guidelines**:
+- Use structured markdown with clear headings
+- Separate facts from interpretations
+- Include timestamps for time-sensitive data
+- Use bullet points and tables for scanability
+- Tag with relevant keywords for search
 
 ## Project Overview
 

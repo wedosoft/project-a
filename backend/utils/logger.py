@@ -31,3 +31,16 @@ def setup_logger(name: str) -> logging.Logger:
     logger.addHandler(handler)
 
     return logger
+
+
+def get_logger(name: str) -> logging.Logger:
+    """
+    Get logger instance (alias for setup_logger)
+
+    Args:
+        name: Logger name (usually __name__)
+
+    Returns:
+        Configured logger instance
+    """
+    return setup_logger(name)

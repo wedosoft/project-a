@@ -4,6 +4,8 @@
 
 AI Contact Center OS는 LangGraph 기반 오케스트레이션과 역할 분리된 다중 에이전트 시스템을 통해 상담원 지원 업무를 자동화합니다. 각 에이전트는 특정 도메인에 특화되어 독립적으로 동작하며, LangGraph의 상태 기반 워크플로우를 통해 협력합니다.
 
+> **Core Memory Space ID (spinoff)**: `cmhetlxnf3g4zqj1vf764glel`
+
 ---
 
 ## Phase 1: MVP 핵심 에이전트 (4종)
@@ -427,8 +429,57 @@ create table approval_logs (
 
 ---
 
+---
+
+## 메모리 관리 프로토콜
+
+### Core Memory MCP 사용 가이드
+
+**중요**: 모든 프로젝트 진행상황은 Core Memory MCP의 spinoff 스페이스에 저장합니다.
+
+**메모리 저장 시점**:
+- 각 에이전트 구현 완료 시
+- 주요 마일스톤 달성 시
+- 아키텍처 변경 시
+- 이슈 발견 또는 해결 시
+- 작업 세션 종료 전
+
+**메모리 카테고리**:
+1. **CODEBASE**: 코드베이스 구조, 파일 조직, 기술 스택
+2. **MASTER_PLAN**: 프로젝트 비전, 8주 로드맵, 아키텍처
+3. **COMPLETED**: 완료된 작업 (에이전트 구현, 테스트 등)
+4. **PENDING**: 진행 중/예정 작업 (우선순위 포함)
+5. **ISSUES**: 버그, 설계 문제, 기술 부채
+
+**저장 방법**:
+```javascript
+// 세션 ID 획득
+mcp__core-memory__get_session_id({ new: true })
+
+// 메모리 저장
+mcp__core-memory__memory_ingest({
+  message: "구조화된 마크다운 콘텐츠...",
+  sessionId: "uuid",
+  spaceIds: ["cmhetlxnf3g4zqj1vf764glel"]  // spinoff space
+})
+```
+
+**조회 방법**:
+```javascript
+// 메모리 검색
+mcp__core-memory__memory_search({
+  query: "Retriever Agent implementation status",
+  spaceIds: ["cmhetlxnf3g4zqj1vf764glel"]
+})
+```
+
+**Space ID**: `cmhetlxnf3g4zqj1vf764glel`
+
+---
+
 ## 참고 문서
 
 - [README.md](../README.md): 전체 시스템 개요
+- [CLAUDE.md](../CLAUDE.md): 개발 환경 및 메모리 관리
 - [API 스펙](./API.md): REST API 계약 (예정)
 - [데이터 모델](./DATA_MODEL.md): 스키마 상세 (예정)

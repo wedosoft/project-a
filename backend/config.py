@@ -1,7 +1,7 @@
 """
 AI Contact Center OS - Configuration Management
 """
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 
 
@@ -15,6 +15,7 @@ class Settings(BaseSettings):
 
     # LLM
     openai_api_key: str = ""
+    google_api_key: str = ""
 
     # Qdrant
     qdrant_host: str = "localhost"
@@ -24,6 +25,16 @@ class Settings(BaseSettings):
     # Supabase
     supabase_url: str = ""
     supabase_key: str = ""
+    supabase_service_role_key: str = ""
+    supabase_db_password: str = ""
+    supabase_db_host: str = ""
+    supabase_db_port: int = 6543
+    supabase_db_name: str = "postgres"
+    supabase_db_user: str = ""
+
+    # Models
+    embedding_model: str = "BAAI/bge-m3"
+    reranker_model: str = "jinaai/jina-reranker-v2-base-multilingual"
 
     # Freshdesk
     freshdesk_domain: str = ""
@@ -32,9 +43,10 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = "INFO"
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        case_sensitive=False
+    )
 
 
 @lru_cache()
