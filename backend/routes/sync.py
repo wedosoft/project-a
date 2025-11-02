@@ -91,127 +91,119 @@ async def sync_tickets_task(since: Optional[datetime], limit: int) -> SyncResult
         )
 
         # Fetch tickets from Freshdesk
-        page = 1
-        total_fetched = 0
+        # Note: fetch_tickets handles pagination internally, we just set max_tickets
+        try:
+            tickets = await freshdesk.fetch_tickets(
+                updated_since=since,
+                per_page=30,  # per_page is used internally for pagination
+                max_tickets=limit  # total limit for all pages
+            )
 
-        while total_fetched < limit:
-            per_page = min(100, limit - total_fetched)
-
-            try:
-                tickets = await freshdesk.fetch_tickets(
-                    updated_since=since,
-                    per_page=per_page,
-                    page=page
+            if not tickets:
+                logger.info("No tickets found")
+                return SyncResult(
+                    success=True,
+                    items_synced=0,
+                    last_sync_time=last_sync,
+                    errors=[]
                 )
 
-                if not tickets:
-                    break
+            logger.info(f"Fetched {len(tickets)} tickets total")
 
-                logger.info(f"Fetched {len(tickets)} tickets (page {page})")
+            # Prepare batch for sparse indexing
+            sparse_documents = []
 
-                # Prepare batch for sparse indexing
-                sparse_documents = []
+            # Process each ticket
+            for ticket in tickets:
+                try:
+                    # Extract text content
+                    ticket_id = str(ticket.get("id"))
+                    subject = ticket.get("subject", "")
+                    description = ticket.get("description_text", "")
 
-                # Process each ticket
-                for ticket in tickets:
-                    try:
-                        # Extract text content
-                        ticket_id = str(ticket.get("id"))
-                        subject = ticket.get("subject", "")
-                        description = ticket.get("description_text", "")
+                    # Combine for embedding
+                    content = f"{subject}\n\n{description}".strip()
 
-                        # Combine for embedding
-                        content = f"{subject}\n\n{description}".strip()
+                    if not content:
+                        logger.warning(f"Empty content for ticket {ticket_id}, skipping")
+                        continue
 
-                        if not content:
-                            logger.warning(f"Empty content for ticket {ticket_id}, skipping")
-                            continue
+                    # Generate embeddings
+                    embedding = llm.generate_embedding(content)
 
-                        # Generate embeddings
-                        embedding = llm.generate_embedding(content)
+                    # Prepare vectors (use same embedding for all fields for now)
+                    vectors = {
+                        "symptom_vec": embedding,
+                        "cause_vec": embedding,
+                        "resolution_vec": embedding
+                    }
 
-                        # Prepare vectors (use same embedding for all fields for now)
-                        vectors = {
-                            "symptom_vec": embedding,
-                            "cause_vec": embedding,
-                            "resolution_vec": embedding
-                        }
+                    # Prepare payload
+                    payload = {
+                        "ticket_id": ticket_id,
+                        "subject": subject,
+                        "description": description,
+                        "content": content,
+                        "status": ticket.get("status"),
+                        "priority": ticket.get("priority"),
+                        "type": ticket.get("type"),
+                        "created_at": ticket.get("created_at"),
+                        "updated_at": ticket.get("updated_at"),
+                        "tags": ticket.get("tags", [])
+                    }
 
-                        # Prepare payload
-                        payload = {
-                            "ticket_id": ticket_id,
+                    # Store in Qdrant
+                    qdrant.store_vector(
+                        collection_name=TICKETS_COLLECTION,
+                        point_id=ticket_id,
+                        vectors=vectors,
+                        payload=payload
+                    )
+
+                    # Prepare document for sparse indexing
+                    sparse_documents.append({
+                        "id": ticket_id,
+                        "content": content,
+                        "metadata": {
                             "subject": subject,
-                            "description": description,
-                            "content": content,
                             "status": ticket.get("status"),
                             "priority": ticket.get("priority"),
-                            "type": ticket.get("type"),
-                            "created_at": ticket.get("created_at"),
-                            "updated_at": ticket.get("updated_at"),
-                            "tags": ticket.get("tags", [])
+                            "type": ticket.get("type")
                         }
+                    })
 
-                        # Store in Qdrant
-                        qdrant.store_vector(
-                            collection_name=TICKETS_COLLECTION,
-                            point_id=ticket_id,
-                            vectors=vectors,
-                            payload=payload
-                        )
+                    # Log to Supabase
+                    await supabase.client.table("sync_logs").insert({
+                        "collection": TICKETS_COLLECTION,
+                        "item_id": ticket_id,
+                        "synced_at": datetime.utcnow().isoformat(),
+                        "item_type": "ticket"
+                    }).execute()
 
-                        # Prepare document for sparse indexing
-                        sparse_documents.append({
-                            "id": ticket_id,
-                            "content": content,
-                            "metadata": {
-                                "subject": subject,
-                                "status": ticket.get("status"),
-                                "priority": ticket.get("priority"),
-                                "type": ticket.get("type")
-                            }
-                        })
+                    synced_count += 1
 
-                        # Log to Supabase
-                        await supabase.client.table("sync_logs").insert({
-                            "collection": TICKETS_COLLECTION,
-                            "item_id": ticket_id,
-                            "synced_at": datetime.utcnow().isoformat(),
-                            "item_type": "ticket"
-                        }).execute()
+                except Exception as e:
+                    error_msg = f"Failed to process ticket {ticket.get('id')}: {str(e)}"
+                    logger.error(error_msg)
+                    errors.append(error_msg)
 
-                        synced_count += 1
+            # Index documents in Postgres for BM25 sparse search
+            if sparse_documents:
+                try:
+                    indexed_count = await sparse_search.index_documents(
+                        collection_name=TICKETS_COLLECTION,
+                        documents=sparse_documents
+                    )
+                    logger.info(f"Indexed {indexed_count} tickets for BM25 search")
+                except Exception as e:
+                    error_msg = f"Failed to index tickets for sparse search: {str(e)}"
+                    logger.warning(error_msg)
+                    # Don't add to errors as this is non-critical
 
-                    except Exception as e:
-                        error_msg = f"Failed to process ticket {ticket.get('id')}: {str(e)}"
-                        logger.error(error_msg)
-                        errors.append(error_msg)
-
-                # Index documents in Postgres for BM25 sparse search
-                if sparse_documents:
-                    try:
-                        indexed_count = await sparse_search.index_documents(
-                            collection_name=TICKETS_COLLECTION,
-                            documents=sparse_documents
-                        )
-                        logger.info(f"Indexed {indexed_count} tickets for BM25 search")
-                    except Exception as e:
-                        error_msg = f"Failed to index tickets for sparse search: {str(e)}"
-                        logger.warning(error_msg)
-                        # Don't add to errors as this is non-critical
-
-                total_fetched += len(tickets)
-
-                # Check if we've reached the end
-                if len(tickets) < per_page:
-                    break
-
-                page += 1
-
-            except Exception as e:
-                error_msg = f"Failed to fetch tickets (page {page}): {str(e)}"
-                logger.error(error_msg)
-                errors.append(error_msg)
-                break
+        except Exception as e:
+            error_msg = f"Failed to fetch tickets: {str(e)}"
+            logger.error(error_msg)
+            errors.append(error_msg)
 
         logger.info(f"Ticket sync completed: {synced_count} tickets synced, {len(errors)} errors")
 
@@ -260,126 +252,118 @@ async def sync_kb_task(since: Optional[datetime], limit: int) -> SyncResult:
         )
 
         # Fetch KB articles from Freshdesk
-        page = 1
-        total_fetched = 0
+        # Note: fetch_kb_articles handles pagination internally, we just set max_articles
+        try:
+            articles = await freshdesk.fetch_kb_articles(
+                updated_since=since,
+                per_page=30,  # per_page is used internally for pagination
+                max_articles=limit  # total limit for all pages
+            )
 
-        while total_fetched < limit:
-            per_page = min(100, limit - total_fetched)
-
-            try:
-                articles = await freshdesk.fetch_kb_articles(
-                    updated_since=since,
-                    per_page=per_page,
-                    page=page
+            if not articles:
+                logger.info("No KB articles found")
+                return SyncResult(
+                    success=True,
+                    items_synced=0,
+                    last_sync_time=last_sync,
+                    errors=[]
                 )
 
-                if not articles:
-                    break
+            logger.info(f"Fetched {len(articles)} KB articles total")
 
-                logger.info(f"Fetched {len(articles)} KB articles (page {page})")
+            # Prepare batch for sparse indexing
+            sparse_documents = []
 
-                # Prepare batch for sparse indexing
-                sparse_documents = []
+            # Process each article
+            for article in articles:
+                try:
+                    # Extract text content
+                    article_id = str(article.get("id"))
+                    title = article.get("title", "")
+                    description = article.get("description_text", "")
 
-                # Process each article
-                for article in articles:
-                    try:
-                        # Extract text content
-                        article_id = str(article.get("id"))
-                        title = article.get("title", "")
-                        description = article.get("description_text", "")
+                    # Combine for embedding
+                    content = f"{title}\n\n{description}".strip()
 
-                        # Combine for embedding
-                        content = f"{title}\n\n{description}".strip()
+                    if not content:
+                        logger.warning(f"Empty content for KB article {article_id}, skipping")
+                        continue
 
-                        if not content:
-                            logger.warning(f"Empty content for KB article {article_id}, skipping")
-                            continue
+                    # Generate embeddings
+                    embedding = llm.generate_embedding(content)
 
-                        # Generate embeddings
-                        embedding = llm.generate_embedding(content)
+                    # Prepare vectors
+                    vectors = {
+                        "intent_vec": embedding,
+                        "procedure_vec": embedding
+                    }
 
-                        # Prepare vectors
-                        vectors = {
-                            "intent_vec": embedding,
-                            "procedure_vec": embedding
-                        }
+                    # Prepare payload
+                    payload = {
+                        "article_id": article_id,
+                        "title": title,
+                        "description": description,
+                        "content": content,
+                        "folder_id": article.get("folder_id"),
+                        "category_id": article.get("category_id"),
+                        "status": article.get("status"),
+                        "created_at": article.get("created_at"),
+                        "updated_at": article.get("updated_at"),
+                        "tags": article.get("tags", [])
+                    }
 
-                        # Prepare payload
-                        payload = {
-                            "article_id": article_id,
+                    # Store in Qdrant
+                    qdrant.store_vector(
+                        collection_name=KB_COLLECTION,
+                        point_id=article_id,
+                        vectors=vectors,
+                        payload=payload
+                    )
+
+                    # Prepare document for sparse indexing
+                    sparse_documents.append({
+                        "id": article_id,
+                        "content": content,
+                        "metadata": {
                             "title": title,
-                            "description": description,
-                            "content": content,
                             "folder_id": article.get("folder_id"),
                             "category_id": article.get("category_id"),
-                            "status": article.get("status"),
-                            "created_at": article.get("created_at"),
-                            "updated_at": article.get("updated_at"),
-                            "tags": article.get("tags", [])
+                            "status": article.get("status")
                         }
+                    })
 
-                        # Store in Qdrant
-                        qdrant.store_vector(
-                            collection_name=KB_COLLECTION,
-                            point_id=article_id,
-                            vectors=vectors,
-                            payload=payload
-                        )
+                    # Log to Supabase
+                    await supabase.client.table("sync_logs").insert({
+                        "collection": KB_COLLECTION,
+                        "item_id": article_id,
+                        "synced_at": datetime.utcnow().isoformat(),
+                        "item_type": "kb_article"
+                    }).execute()
 
-                        # Prepare document for sparse indexing
-                        sparse_documents.append({
-                            "id": article_id,
-                            "content": content,
-                            "metadata": {
-                                "title": title,
-                                "folder_id": article.get("folder_id"),
-                                "category_id": article.get("category_id"),
-                                "status": article.get("status")
-                            }
-                        })
+                    synced_count += 1
 
-                        # Log to Supabase
-                        await supabase.client.table("sync_logs").insert({
-                            "collection": KB_COLLECTION,
-                            "item_id": article_id,
-                            "synced_at": datetime.utcnow().isoformat(),
-                            "item_type": "kb_article"
-                        }).execute()
+                except Exception as e:
+                    error_msg = f"Failed to process KB article {article.get('id')}: {str(e)}"
+                    logger.error(error_msg)
+                    errors.append(error_msg)
 
-                        synced_count += 1
+            # Index documents in Postgres for BM25 sparse search
+            if sparse_documents:
+                try:
+                    indexed_count = await sparse_search.index_documents(
+                        collection_name=KB_COLLECTION,
+                        documents=sparse_documents
+                    )
+                    logger.info(f"Indexed {indexed_count} KB articles for BM25 search")
+                except Exception as e:
+                    error_msg = f"Failed to index KB articles for sparse search: {str(e)}"
+                    logger.warning(error_msg)
+                    # Don't add to errors as this is non-critical
 
-                    except Exception as e:
-                        error_msg = f"Failed to process KB article {article.get('id')}: {str(e)}"
-                        logger.error(error_msg)
-                        errors.append(error_msg)
-
-                # Index documents in Postgres for BM25 sparse search
-                if sparse_documents:
-                    try:
-                        indexed_count = await sparse_search.index_documents(
-                            collection_name=KB_COLLECTION,
-                            documents=sparse_documents
-                        )
-                        logger.info(f"Indexed {indexed_count} KB articles for BM25 search")
-                    except Exception as e:
-                        error_msg = f"Failed to index KB articles for sparse search: {str(e)}"
-                        logger.warning(error_msg)
-                        # Don't add to errors as this is non-critical
-
-                total_fetched += len(articles)
-
-                # Check if we've reached the end
-                if len(articles) < per_page:
-                    break
-
-                page += 1
-
-            except Exception as e:
-                error_msg = f"Failed to fetch KB articles (page {page}): {str(e)}"
-                logger.error(error_msg)
-                errors.append(error_msg)
-                break
+        except Exception as e:
+            error_msg = f"Failed to fetch KB articles: {str(e)}"
+            logger.error(error_msg)
+            errors.append(error_msg)
 
         logger.info(f"KB sync completed: {synced_count} articles synced, {len(errors)} errors")
 

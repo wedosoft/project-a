@@ -319,8 +319,8 @@ class DataSeeder:
 
         # Supabase 카운트
         try:
-            issue_count = await self.issue_repo.count(tenant_id="default")
-            kb_count = await self.kb_repo.count(tenant_id="default")
+            issue_count = await self.issue_repo.count_async(tenant_id="default")
+            kb_count = await self.kb_repo.count_async(tenant_id="default")
             print(f"✅ Supabase: Issue {issue_count}개, KB {kb_count}개")
         except Exception as e:
             print(f"❌ Supabase 검증 실패: {e}")

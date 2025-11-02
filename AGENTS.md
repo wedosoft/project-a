@@ -481,6 +481,94 @@ mcp__core-memory__memory_search({
 
 ---
 
+## 개발 환경 설정
+
+### 가상환경 및 환경변수
+
+**가상환경 위치**: 프로젝트 루트 (`/venv`)
+
+```bash
+# 가상환경 활성화
+source venv/bin/activate
+
+# 테스트 실행 (프로젝트 루트에서 실행)
+pytest backend/tests/test_e2e.py -v
+
+# 백엔드 디렉토리에서 실행 시 주의
+cd backend
+pytest tests/test_e2e.py -v  # ❌ .env를 찾지 못함
+
+# 올바른 실행 방법
+cd /Users/alan/GitHub/project-a-spinoff
+pytest backend/tests/test_e2e.py -v  # ✅ .env를 제대로 읽음
+```
+
+**환경변수 파일**: 프로젝트 루트 (`/.env`)
+
+**중요**: `backend/config.py`의 `env_file=".env"`는 상대 경로이므로, 테스트나 서버 실행 시 반드시 **프로젝트 루트 디렉토리에서 실행**해야 환경변수를 제대로 읽을 수 있습니다.
+
+**환경변수 구성**:
+```bash
+# FastAPI
+FASTAPI_ENV=development
+FASTAPI_HOST=0.0.0.0
+FASTAPI_PORT=8000
+
+# LLM
+OPENAI_API_KEY=sk-proj-...
+GOOGLE_API_KEY=AIzaSy...
+
+# Qdrant (Cloud)
+QDRANT_HOST=<your-qdrant-cluster>.aws.cloud.qdrant.io
+QDRANT_PORT=6333
+QDRANT_USE_HTTPS=true
+QDRANT_API_KEY=<your-qdrant-api-key>
+
+# Supabase
+SUPABASE_URL=https://<your-project>.supabase.co
+SUPABASE_KEY=<your-anon-key>
+SUPABASE_SERVICE_ROLE_KEY=<your-service-role-key>
+SUPABASE_DB_PASSWORD=<your-db-password>
+SUPABASE_DB_HOST=aws-1-ap-northeast-2.pooler.supabase.com
+SUPABASE_DB_PORT=6543
+SUPABASE_DB_NAME=postgres
+SUPABASE_DB_USER=postgres.<your-project>
+
+# Models
+EMBEDDING_MODEL=BAAI/bge-m3
+RERANKER_MODEL=jinaai/jina-reranker-v2-base-multilingual
+
+# Freshdesk
+FRESHDESK_DOMAIN=<your-domain>.freshdesk.com
+FRESHDESK_API_KEY=<your-freshdesk-api-key>
+
+# Authentication (선택사항)
+ALLOWED_API_KEYS=key1,key2,key3  # 쉼표로 구분된 API 키 목록
+
+# Logging
+LOG_LEVEL=INFO
+```
+
+### 디렉토리 구조 주의사항
+
+```
+project-a-spinoff/          # 프로젝트 루트
+├── venv/                   # ✅ 가상환경 (여기에 위치)
+├── .env                    # ✅ 환경변수 (여기에 위치)
+├── backend/
+│   ├── config.py           # env_file=".env" (상대 경로)
+│   ├── tests/
+│   │   └── test_e2e.py
+│   └── ...
+└── ...
+```
+
+**실행 경로별 동작**:
+- ✅ **프로젝트 루트에서 실행**: `pytest backend/tests/test_e2e.py` → `.env` 제대로 읽음
+- ❌ **backend에서 실행**: `pytest tests/test_e2e.py` → `backend/.env`를 찾으려고 시도 (파일 없음)
+
+---
+
 ## 참고 문서
 
 - [README.md](../README.md): 전체 시스템 개요

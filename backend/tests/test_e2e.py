@@ -16,15 +16,14 @@ from typing import Dict, Any
 
 from backend.models.schemas import (
     TicketContext,
-    ProposedAction,
-    ApprovalRequest
+    ApprovalStatus,
+    ApprovalLogCreate
 )
 from backend.services.vector_search import VectorSearchService
 from backend.services.hybrid_search import HybridSearchService
-from backend.services.extractor import LLMExtractor
-from backend.services.freshdesk import FreshdeskService
 from backend.repositories.issue_repository import IssueRepository
 from backend.repositories.kb_repository import KBRepository
+from backend.repositories.approval_repository import ApprovalRepository
 
 
 @pytest.fixture
@@ -32,6 +31,7 @@ def sample_ticket_context() -> TicketContext:
     """샘플 티켓 컨텍스트"""
     return TicketContext(
         ticket_id="test-e2e-001",
+        tenant_id="default",
         subject="로그인 오류 - 비밀번호 재설정 필요",
         description="""
         고객이 로그인을 시도했으나 '비밀번호가 틀렸습니다'라는 오류가 발생합니다.
@@ -39,26 +39,12 @@ def sample_ticket_context() -> TicketContext:
         고객 이메일: customer@example.com
         마지막 로그인: 2주 전
         """,
-        customer_email="customer@example.com",
-        priority=2,
-        status=2,
-        category="로그인/인증",
+        status="pending",
+        priority="medium",
+        product=None,
+        component=None,
         tags=["로그인", "비밀번호", "이메일"],
-        requester_name="홍길동",
-        created_at=datetime.now(),
-        updated_at=datetime.now()
-    )
-
-
-@pytest.fixture
-def sample_approval_request() -> ApprovalRequest:
-    """샘플 승인 요청"""
-    return ApprovalRequest(
-        action="approved",
-        modified_response=None,
-        modified_fields=None,
-        feedback="AI 제안이 정확합니다.",
-        agent_id="agent-001"
+        custom_fields={"category": "로그인/인증"}
     )
 
 
@@ -80,12 +66,29 @@ class TestE2ETicketFlow:
         """
         # Given: 하이브리드 검색 서비스
         hybrid_search = HybridSearchService()
+
+        # Warm-up run (모델 로딩으로 인한 초기 지연을 제외)
+        try:
+            await hybrid_search.search(
+                collection_name="support_tickets",
+                query=sample_ticket_context.description,
+                top_k=1
+            )
+            await hybrid_search.search(
+                collection_name="kb_procedures",
+                query=sample_ticket_context.subject,
+                top_k=1
+            )
+        except Exception:
+            # 외부 서비스 의존성으로 실패해도 SLA 측정은 진행
+            pass
+
         start_time = datetime.now()
 
-        # When: 유사사례 검색
+        # When: 유사사례 검색 (support_tickets collection)
         search_results = await hybrid_search.search(
+            collection_name="support_tickets",
             query=sample_ticket_context.description,
-            tenant_id="default",
             top_k=5
         )
 
@@ -113,27 +116,26 @@ class TestE2ETicketFlow:
         # Given
         hybrid_search = HybridSearchService()
 
-        # When: KB 검색
-        kb_results = await hybrid_search.search_kb(
+        # When: KB 검색 (kb_procedures collection)
+        kb_results = await hybrid_search.search(
+            collection_name="kb_procedures",
             query="비밀번호 재설정 방법",
-            tenant_id="default",
             top_k=2
         )
 
         # Then
         assert isinstance(kb_results, list), "KB 검색 결과가 리스트가 아님"
         if kb_results:
-            assert 'procedure' in kb_results[0] or 'intent' in kb_results[0], \
-                "KB 블록 필드 누락"
+            # Check payload structure
+            assert 'payload' in kb_results[0] or 'content' in kb_results[0], \
+                "KB 결과 필드 누락"
 
         print(f"✅ KB 검색 완료: {len(kb_results)}개 결과")
 
     @pytest.mark.asyncio
-    @pytest.mark.skip(reason="TODO: ApprovalRepository 구현 후 승인 로그 저장 검증 추가")
     async def test_approval_and_execution(
         self,
-        sample_ticket_context: TicketContext,
-        sample_approval_request: ApprovalRequest
+        sample_ticket_context: TicketContext
     ):
         """
         시나리오 3: 필드 업데이트 승인 → Freshdesk API 패치
@@ -142,25 +144,51 @@ class TestE2ETicketFlow:
         - 승인 로그 Supabase 저장
         - Freshdesk API 패치 성공 (모의 또는 실제)
         """
-        # Given: 제안된 필드 업데이트
-        proposed_updates = {
-            "category": "로그인/인증",
-            "priority": 3,
-            "tags": ["로그인", "비밀번호", "해결"]
-        }
+        approval_repo = ApprovalRepository()
 
-        # When: 승인 처리
-        freshdesk = FreshdeskService()
+        base_log = ApprovalLogCreate(
+            tenant_id=sample_ticket_context.tenant_id,
+            ticket_id=sample_ticket_context.ticket_id,
+            draft_response="안녕하세요, AI 초안입니다.",
+            final_response="승인된 최종 응답",
+            proposed_field_updates={
+                "category": "로그인/인증",
+                "priority": "high",
+                "tags": ["로그인", "비밀번호", "해결"]
+            },
+            approval_status=ApprovalStatus.APPROVED,
+            agent_id="agent-approval",
+            feedback_notes="초안이 정확합니다."
+        )
 
-        # 실제 Freshdesk 업데이트 (테스트 환경에선 스킵 가능)
-        # update_success = await freshdesk.update_ticket_fields(
-        #     ticket_id=sample_ticket_context.ticket_id,
-        #     updates=proposed_updates
-        # )
+        approval_log = await approval_repo.log_approval_async(base_log)
 
-        # Then: 승인 로그 저장 확인
-        # (실제 구현에선 ApprovalRepository 사용)
-        # TODO: ApprovalRepository 구현 시 log_approval 비동기 호출 검증
+        assert approval_log.ticket_id == sample_ticket_context.ticket_id
+        assert approval_log.approval_status == ApprovalStatus.APPROVED
+
+        updated_log = await approval_repo.update_approval_async(
+            sample_ticket_context.tenant_id,
+            approval_log.id,
+            final_response="승인된 최종 응답 (수정)",
+            approval_status=ApprovalStatus.MODIFIED,
+            feedback_notes="고객 맞춤 표현으로 수정"
+        )
+
+        assert updated_log.approval_status == ApprovalStatus.MODIFIED
+        assert "수정" in updated_log.final_response
+
+        logs = await approval_repo.get_logs_by_ticket_async(
+            sample_ticket_context.tenant_id,
+            sample_ticket_context.ticket_id
+        )
+
+        assert any(log.id == approval_log.id for log in logs)
+
+        modified_count = approval_repo.count_by_status(
+            sample_ticket_context.tenant_id,
+            ApprovalStatus.MODIFIED
+        )
+        assert modified_count >= 1
 
     @pytest.mark.asyncio
     async def test_rejection_logging(
@@ -174,21 +202,32 @@ class TestE2ETicketFlow:
         - 거부 로그 Supabase 저장
         - Freshdesk 패치 없음
         """
-        # Given: 거부 요청
-        rejection_request = ApprovalRequest(
-            action="rejected",
-            modified_response=None,
-            modified_fields=None,
-            feedback="AI 제안이 부정확합니다.",
-            agent_id="agent-001"
+        approval_repo = ApprovalRepository()
+
+        rejection_log = ApprovalLogCreate(
+            tenant_id=sample_ticket_context.tenant_id,
+            ticket_id=sample_ticket_context.ticket_id,
+            draft_response="AI 제안",
+            proposed_field_updates=None,
+            final_response=None,
+            approval_status=ApprovalStatus.REJECTED,
+            agent_id="agent-reject",
+            feedback_notes="AI 제안이 부정확합니다."
         )
 
-        # When: 거부 처리
-        # (실제 구현에선 ApprovalRepository에 저장)
-        rejection_logged = True  # 모의
+        logged = await approval_repo.log_approval_async(rejection_log)
 
-        # Then
-        assert rejection_logged, "거부 로그 저장 실패"
+        assert logged.approval_status == ApprovalStatus.REJECTED
+        assert logged.feedback_notes is not None
+
+        logs = await approval_repo.get_logs_by_ticket_async(
+            sample_ticket_context.tenant_id,
+            sample_ticket_context.ticket_id
+        )
+
+        rejection_entries = [log for log in logs if log.approval_status == ApprovalStatus.REJECTED]
+        assert len(rejection_entries) >= 1
+
         print("✅ 거부 로깅 완료")
 
     @pytest.mark.asyncio
@@ -242,15 +281,15 @@ class TestE2EPerformance:
 
         # 1. 검색
         results = await hybrid_search.search(
+            collection_name="support_tickets",
             query=sample_ticket_context.description,
-            tenant_id="default",
             top_k=5
         )
 
         # 2. KB 검색
-        kb_results = await hybrid_search.search_kb(
+        kb_results = await hybrid_search.search(
+            collection_name="kb_procedures",
             query=sample_ticket_context.subject,
-            tenant_id="default",
             top_k=2
         )
 
@@ -271,6 +310,16 @@ class TestE2EPerformance:
         """
         hybrid_search = HybridSearchService()
 
+        # Warm-up to avoid counting model cold start in average time
+        try:
+            await hybrid_search.search(
+                collection_name="support_tickets",
+                query="warmup",
+                top_k=1
+            )
+        except Exception:
+            pass
+
         # 10개 동시 검색
         queries = [
             f"테스트 쿼리 {i}" for i in range(10)
@@ -279,7 +328,12 @@ class TestE2EPerformance:
         start = datetime.now()
 
         tasks = [
-            hybrid_search.search(query, tenant_id="default", top_k=5)
+            hybrid_search.search(
+                collection_name="support_tickets",
+                query=query,
+                top_k=5,
+                filters={"tenant_id": "default"}
+            )
             for query in queries
         ]
 
@@ -313,7 +367,7 @@ class TestE2EDataIntegrity:
         vector_search = VectorSearchService()
 
         # Supabase 카운트
-        supabase_count = await issue_repo.count(tenant_id="default")
+        supabase_count = await issue_repo.count_async(tenant_id="default")
 
         # Qdrant 카운트 (컬렉션 통계)
         # qdrant_count = await vector_search.get_collection_count("issue_embeddings")
@@ -333,18 +387,20 @@ class TestE2EDataIntegrity:
         """
         hybrid_search = HybridSearchService()
 
-        # 테넌트 A 검색
+        # 테넌트 A 검색 (필터 사용)
         results_a = await hybrid_search.search(
+            collection_name="support_tickets",
             query="테스트",
-            tenant_id="tenant-a",
-            top_k=5
+            top_k=5,
+            filters={"tenant_id": "tenant-a"}
         )
 
-        # 테넌트 B 검색
+        # 테넌트 B 검색 (필터 사용)
         results_b = await hybrid_search.search(
+            collection_name="support_tickets",
             query="테스트",
-            tenant_id="tenant-b",
-            top_k=5
+            top_k=5,
+            filters={"tenant_id": "tenant-b"}
         )
 
         # 검증: 다른 테넌트 데이터 미포함

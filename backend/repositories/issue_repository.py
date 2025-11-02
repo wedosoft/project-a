@@ -8,6 +8,7 @@ Features:
 - Query filtering by product, component, block_type
 - Pagination support
 """
+import asyncio
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 from datetime import datetime
@@ -360,3 +361,20 @@ class IssueRepository:
         except Exception as e:
             logger.error(f"Failed to count issue blocks: {e}")
             raise
+
+    async def count_async(
+        self,
+        tenant_id: str,
+        product: Optional[str] = None,
+        component: Optional[str] = None,
+        block_type: Optional[BlockType] = None
+    ) -> int:
+        """Async wrapper for count() to avoid blocking the event loop."""
+
+        return await asyncio.to_thread(
+            self.count,
+            tenant_id,
+            product,
+            component,
+            block_type
+        )

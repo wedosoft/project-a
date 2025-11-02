@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     freshdesk_domain: str = ""
     freshdesk_api_key: str = ""
 
+    # Authentication
+    allowed_api_keys: str = ""  # Comma-separated API keys for authentication
+
     # Logging
     log_level: str = "INFO"
 

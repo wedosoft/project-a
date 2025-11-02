@@ -8,6 +8,7 @@ Features:
 - Query filtering by article_id
 - Pagination support
 """
+import asyncio
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 from datetime import datetime
@@ -364,3 +365,14 @@ class KBRepository:
         except Exception as e:
             logger.error(f"Failed to count KB blocks: {e}")
             raise
+
+    async def count_async(
+        self,
+        tenant_id: str
+    ) -> int:
+        """Async wrapper for count() to avoid blocking the event loop."""
+
+        return await asyncio.to_thread(
+            self.count,
+            tenant_id
+        )

@@ -51,8 +51,8 @@ async def test_fetch_tickets(freshdesk: FreshdeskClient, limit: int = 10) -> Lis
 
         tickets = await freshdesk.fetch_tickets(
             updated_since=since,
-            per_page=limit,
-            page=1
+            per_page=30,
+            max_tickets=limit
         )
 
         logger.info(f"✅ Successfully fetched {len(tickets)} tickets")
@@ -94,8 +94,8 @@ async def test_fetch_kb_articles(freshdesk: FreshdeskClient, limit: int = 10) ->
 
         articles = await freshdesk.fetch_kb_articles(
             updated_since=since,
-            per_page=limit,
-            page=1
+            per_page=30,
+            max_articles=limit
         )
 
         logger.info(f"✅ Successfully fetched {len(articles)} KB articles")

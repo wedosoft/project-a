@@ -9,7 +9,8 @@ Provides comprehensive Freshdesk API integration for:
 """
 import httpx
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timezone as dt_timezone
+from dateutil import parser as date_parser
 from backend.config import get_settings
 from backend.utils.logger import get_logger
 import asyncio
@@ -288,6 +289,43 @@ class FreshdeskClient:
 
                         if not articles:
                             break
+
+                        # Client-side filtering by updated_since if provided
+                        if updated_since:
+                            filtered_articles = []
+                            for article in articles:
+                                updated_at_str = article.get('updated_at')
+                                if updated_at_str:
+                                    try:
+                                        # Parse ISO format datetime
+                                        article_updated_at = date_parser.isoparse(updated_at_str)
+
+                                        # Make both timezone-aware for comparison
+                                        if article_updated_at.tzinfo is None:
+                                            article_updated_at = article_updated_at.replace(tzinfo=dt_timezone.utc)
+                                        if updated_since.tzinfo is None:
+                                            updated_since_aware = updated_since.replace(tzinfo=dt_timezone.utc)
+                                        else:
+                                            updated_since_aware = updated_since
+
+                                        # Only include articles updated after the threshold
+                                        if article_updated_at >= updated_since_aware:
+                                            filtered_articles.append(article)
+                                    except Exception as e:
+                                        logger.warning(f"Failed to parse updated_at for article {article.get('id')}: {e}")
+                                        # Include article if we can't parse date
+                                        filtered_articles.append(article)
+                                else:
+                                    # Include articles without updated_at
+                                    filtered_articles.append(article)
+
+                            articles = filtered_articles
+                            logger.info(f"Filtered to {len(articles)} articles after updated_since check")
+
+                        if not articles:
+                            # All articles filtered out, move to next page
+                            page += 1
+                            continue
 
                         all_articles.extend(articles)
                         logger.info(f"Fetched page {page} from folder {folder_id}: {len(articles)} articles (total: {len(all_articles)})")

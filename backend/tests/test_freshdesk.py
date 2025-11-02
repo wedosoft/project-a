@@ -115,12 +115,14 @@ class TestFetchTickets:
         with patch.object(
             freshdesk_client, "_make_request", new_callable=AsyncMock
         ) as mock_request:
+            # Return less than per_page to simulate last page
             mock_request.return_value = [{"id": 1}, {"id": 2}]
 
             result = await freshdesk_client.fetch_tickets()
 
+            # Should be called once with page 1
             mock_request.assert_called_once_with(
-                "GET", "tickets", params={"per_page": 30, "page": 1}
+                "GET", "tickets", params={"per_page": 30, "page": 1, "order_type": "desc", "order_by": "updated_at"}
             )
             assert len(result) == 2
 
@@ -141,17 +143,21 @@ class TestFetchTickets:
 
     @pytest.mark.asyncio
     async def test_fetch_tickets_pagination(self, freshdesk_client):
-        """Test ticket fetch with pagination"""
+        """Test ticket fetch with internal pagination"""
         with patch.object(
             freshdesk_client, "_make_request", new_callable=AsyncMock
         ) as mock_request:
-            mock_request.return_value = [{"id": 1}]
+            # Simulate multiple pages: first page full (30), second page partial (10)
+            mock_request.side_effect = [
+                [{"id": i} for i in range(1, 31)],  # Page 1: 30 tickets
+                [{"id": i} for i in range(31, 41)]  # Page 2: 10 tickets
+            ]
 
-            await freshdesk_client.fetch_tickets(per_page=50, page=2)
+            result = await freshdesk_client.fetch_tickets(per_page=30, max_tickets=50)
 
-            call_args = mock_request.call_args
-            assert call_args[1]["params"]["per_page"] == 50
-            assert call_args[1]["params"]["page"] == 2
+            # Should be called twice (2 pages)
+            assert mock_request.call_count == 2
+            assert len(result) == 40  # 30 + 10
 
 
 class TestGetTicket:
@@ -230,17 +236,29 @@ class TestFetchKBArticles:
 
     @pytest.mark.asyncio
     async def test_fetch_kb_articles(self, freshdesk_client):
-        """Test fetching KB articles"""
+        """Test fetching KB articles with category/folder hierarchy"""
         with patch.object(
-            freshdesk_client, "_make_request", new_callable=AsyncMock
-        ) as mock_request:
-            mock_request.return_value = [{"id": 1, "title": "Article 1"}]
+            freshdesk_client, "fetch_kb_categories", new_callable=AsyncMock
+        ) as mock_categories:
+            with patch.object(
+                freshdesk_client, "fetch_kb_folders", new_callable=AsyncMock
+            ) as mock_folders:
+                with patch.object(
+                    freshdesk_client, "_make_request", new_callable=AsyncMock
+                ) as mock_request:
+                    # Mock category and folder structure
+                    mock_categories.return_value = [{"id": 1, "name": "Category 1"}]
+                    mock_folders.return_value = [{"id": 10, "name": "Folder 1"}]
+                    # Return article from folder
+                    mock_request.return_value = [{"id": 100, "title": "Article 1"}]
 
-            result = await freshdesk_client.fetch_kb_articles()
+                    result = await freshdesk_client.fetch_kb_articles(max_articles=10)
 
-            call_args = mock_request.call_args
-            assert call_args[0] == ("GET", "solutions/articles")
-            assert len(result) == 1
+                    # Should fetch categories, folders, and articles
+                    mock_categories.assert_called_once()
+                    mock_folders.assert_called_once()
+                    assert len(result) == 1
+                    assert result[0]["id"] == 100
 
 
 class TestUpdateTicketFields:
