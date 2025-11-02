@@ -201,11 +201,11 @@ class VectorSearchService:
                 ]
                 query_filter = Filter(must=conditions)
 
-            # Search (use vector_name for multi-vector collections)
+            # Search (use tuple for named vector in multi-vector collections)
+            # In qdrant-client >= 1.8.0, use tuple (vector_name, vector) instead of using parameter
             results = self.client.search(
                 collection_name=collection_name,
-                query_vector=query_vector,
-                using=vector_name,
+                query_vector=(vector_name, query_vector),
                 query_filter=query_filter,
                 limit=top_k,
                 score_threshold=score_threshold,
