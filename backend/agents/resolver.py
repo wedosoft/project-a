@@ -5,8 +5,15 @@ Resolution Agent - AI-generated solution proposal
 import asyncio
 from backend.models.graph_state import AgentState
 from backend.config import get_settings
-import google.generativeai as genai
 from backend.utils.logger import get_logger
+
+try:
+    import google.generativeai as genai
+    GENAI_AVAILABLE = True
+except ImportError:
+    GENAI_AVAILABLE = False
+    logger = get_logger(__name__)
+    logger.warning("google-generativeai not available, some features will be disabled")
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -23,6 +30,11 @@ async def propose_solution(state: AgentState) -> AgentState:
         Updated state with proposed solution
     """
     logger.info("Starting solution proposal generation")
+
+    if not GENAI_AVAILABLE:
+        logger.warning("google-generativeai not available, skipping solution generation")
+        state["errors"] = state.get("errors", []) + ["google-generativeai not installed"]
+        return state
 
     try:
         async def _generate():
@@ -153,6 +165,11 @@ async def propose_field_updates(state: AgentState) -> AgentState:
         Updated state with proposed field updates
     """
     logger.info("Starting field updates proposal")
+
+    if not GENAI_AVAILABLE:
+        logger.warning("google-generativeai not available, skipping field updates proposal")
+        state["errors"] = state.get("errors", []) + ["google-generativeai not installed"]
+        return state
 
     try:
         async def _generate():
