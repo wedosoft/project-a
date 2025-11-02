@@ -5,6 +5,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.config import get_settings
 from backend.routes import tickets, assist, metrics, health, sync
+from backend.middleware.tenant_middleware import TenantMiddleware
+from backend.middleware.logging_middleware import LoggingMiddleware
 
 settings = get_settings()
 
@@ -14,7 +16,8 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS 설정
+# Middleware 순서 중요: 아래에서 위로 실행됨
+# 1. CORS (가장 먼저)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # 프로덕션에서는 제한 필요
@@ -22,6 +25,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 2. Logging (요청/응답 로깅)
+app.add_middleware(LoggingMiddleware)
+
+# 3. Tenant (테넌트 ID 추출 및 검증)
+app.add_middleware(TenantMiddleware)
 
 # 라우터 등록
 app.include_router(tickets.router, prefix="/api/tickets", tags=["tickets"])

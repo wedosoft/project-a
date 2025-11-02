@@ -49,7 +49,8 @@ class RerankerService:
         self.model = CrossEncoder(
             model_name,
             device=self.device,
-            max_length=512
+            max_length=512,
+            trust_remote_code=True  # Required for jinaai/jina-reranker models
         )
 
         logger.info("Reranker model loaded successfully")

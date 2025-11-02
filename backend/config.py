@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     qdrant_host: str = "localhost"
     qdrant_port: int = 6333
     qdrant_api_key: str = ""
+    qdrant_use_https: bool = False
 
     # Supabase
     supabase_url: str = ""
@@ -51,7 +52,8 @@ class Settings(BaseSettings):
     @property
     def QDRANT_URL(self) -> str:
         """Construct Qdrant URL from host and port"""
-        return f"http://{self.qdrant_host}:{self.qdrant_port}"
+        protocol = "https" if self.qdrant_use_https else "http"
+        return f"{protocol}://{self.qdrant_host}:{self.qdrant_port}"
 
     @property
     def QDRANT_API_KEY(self) -> str:

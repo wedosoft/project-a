@@ -87,29 +87,56 @@ class FreshdeskClient:
         self,
         updated_since: Optional[datetime] = None,
         per_page: int = 30,
-        page: int = 1
+        max_tickets: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """
-        Fetch tickets with optional filtering
+        Fetch tickets with optional filtering and pagination
 
         Args:
             updated_since: Filter tickets updated after this datetime
             per_page: Number of tickets per page (max 100)
-            page: Page number
+            max_tickets: Maximum number of tickets to fetch (None = all pages)
 
         Returns:
             List of ticket dictionaries
         """
-        params = {
-            "per_page": min(per_page, 100),
-            "page": page
-        }
+        all_tickets = []
+        page = 1
+        per_page = min(per_page, 100)
 
-        if updated_since:
-            params["updated_since"] = updated_since.isoformat()
+        while True:
+            params = {
+                "per_page": per_page,
+                "page": page,
+                "order_type": "desc",
+                "order_by": "updated_at"
+            }
 
-        logger.info(f"Fetching tickets (page={page}, per_page={per_page})")
-        return await self._make_request("GET", "tickets", params=params)
+            if updated_since:
+                params["updated_since"] = updated_since.isoformat()
+
+            logger.info(f"Fetching tickets (page={page}, per_page={per_page})")
+            tickets = await self._make_request("GET", "tickets", params=params)
+
+            if not tickets:
+                break
+
+            all_tickets.extend(tickets)
+            logger.info(f"Fetched page {page}: {len(tickets)} tickets (total: {len(all_tickets)})")
+
+            # Stop if we've reached max_tickets
+            if max_tickets and len(all_tickets) >= max_tickets:
+                all_tickets = all_tickets[:max_tickets]
+                break
+
+            # Stop if last page (less than per_page means last page)
+            if len(tickets) < per_page:
+                break
+
+            page += 1
+
+        logger.info(f"Successfully fetched total {len(all_tickets)} tickets")
+        return all_tickets
 
     async def get_ticket(self, ticket_id: str) -> Dict[str, Any]:
         """
@@ -163,37 +190,126 @@ class FreshdeskClient:
         logger.info(f"Fetched total {len(all_conversations)} conversations for ticket {ticket_id}")
         return all_conversations
 
+    async def fetch_kb_categories(self) -> List[Dict[str, Any]]:
+        """
+        Fetch all KB categories
+
+        Returns:
+            List of category dictionaries with category IDs and metadata
+        """
+        logger.info("Fetching KB categories")
+        categories = await self._make_request("GET", "solutions/categories")
+        logger.info(f"Found {len(categories)} KB categories")
+        return categories
+
+    async def fetch_kb_folders(self, category_id: str) -> List[Dict[str, Any]]:
+        """
+        Fetch all folders in a KB category
+
+        Args:
+            category_id: Category ID
+
+        Returns:
+            List of folder dictionaries with folder IDs and metadata
+        """
+        logger.info(f"Fetching folders for category {category_id}")
+        folders = await self._make_request("GET", f"solutions/categories/{category_id}/folders")
+        logger.info(f"Found {len(folders)} folders in category {category_id}")
+        return folders
+
     async def fetch_kb_articles(
         self,
         updated_since: Optional[datetime] = None,
         per_page: int = 30,
-        page: int = 1
+        max_articles: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """
-        Fetch KB articles with optional filtering
+        Fetch KB articles from all categories/folders with pagination
+
+        Freshdesk KB hierarchy: Categories → Folders → Articles
 
         Args:
             updated_since: Filter articles updated after this datetime
             per_page: Number of articles per page (max 100)
-            page: Page number
+            max_articles: Maximum total number of articles to fetch
 
         Returns:
             List of KB article dictionaries
         """
-        params = {
-            "per_page": min(per_page, 100),
-            "page": page
-        }
+        all_articles = []
+        per_page = min(per_page, 100)
 
-        if updated_since:
-            params["updated_since"] = updated_since.isoformat()
+        # Step 1: Fetch all categories
+        try:
+            categories = await self.fetch_kb_categories()
+        except Exception as e:
+            logger.error(f"Failed to fetch KB categories: {e}")
+            return []
 
-        logger.info(f"Fetching KB articles (page={page}, per_page={per_page})")
-        return await self._make_request(
-            "GET",
-            "solutions/articles",
-            params=params
-        )
+        # Step 2: Iterate through categories and their folders
+        for category in categories:
+            category_id = category.get('id')
+            if not category_id:
+                continue
+
+            logger.info(f"Processing category {category_id} ({category.get('name', 'Unknown')})")
+
+            # Step 3: Fetch folders in this category
+            try:
+                folders = await self.fetch_kb_folders(str(category_id))
+            except Exception as e:
+                logger.warning(f"Failed to fetch folders for category {category_id}: {e}")
+                continue
+
+            # Step 4: Iterate through folders and fetch articles with pagination
+            for folder in folders:
+                folder_id = folder.get('id')
+                if not folder_id:
+                    continue
+
+                logger.info(f"Fetching articles from folder {folder_id} ({folder.get('name', 'Unknown')})")
+                page = 1
+
+                while True:
+                    params = {
+                        "per_page": per_page,
+                        "page": page
+                    }
+
+                    # Note: KB articles endpoint does not support updated_since parameter
+                    # We fetch all articles and filter client-side if needed
+
+                    try:
+                        articles = await self._make_request(
+                            "GET",
+                            f"solutions/folders/{folder_id}/articles",
+                            params=params
+                        )
+
+                        if not articles:
+                            break
+
+                        all_articles.extend(articles)
+                        logger.info(f"Fetched page {page} from folder {folder_id}: {len(articles)} articles (total: {len(all_articles)})")
+
+                        # Stop if we've reached max_articles
+                        if max_articles and len(all_articles) >= max_articles:
+                            all_articles = all_articles[:max_articles]
+                            logger.info(f"Reached max_articles limit: {max_articles}")
+                            return all_articles
+
+                        # Stop if last page (less than per_page means last page)
+                        if len(articles) < per_page:
+                            break
+
+                        page += 1
+
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch articles from folder {folder_id}: {e}")
+                        break
+
+        logger.info(f"Successfully fetched total {len(all_articles)} articles from all categories/folders")
+        return all_articles
 
     async def update_ticket_fields(
         self,
