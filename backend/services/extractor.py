@@ -16,7 +16,12 @@ from enum import Enum
 import json
 import asyncio
 from openai import AsyncOpenAI
-import google.generativeai as genai
+
+try:
+    import google.generativeai as genai
+    GENAI_AVAILABLE = True
+except ImportError:
+    GENAI_AVAILABLE = False
 
 from backend.config import get_settings
 from backend.utils.logger import get_logger
@@ -24,6 +29,9 @@ from backend.models.schemas import IssueBlock, BlockType
 
 settings = get_settings()
 logger = get_logger(__name__)
+
+if not GENAI_AVAILABLE:
+    logger.warning("google-generativeai not available, Gemini provider will not work")
 
 
 class LLMProvider(str, Enum):
@@ -54,6 +62,11 @@ class IssueBlockExtractor:
             self.model = "gpt-4o-mini"
         # Initialize Gemini
         elif provider == LLMProvider.GEMINI:
+            if not GENAI_AVAILABLE:
+                raise ImportError(
+                    "google-generativeai is not installed. "
+                    "Install it with: pip install google-generativeai"
+                )
             genai.configure(api_key=settings.google_api_key)
             self.gemini_model = genai.GenerativeModel("gemini-2.0-flash-exp")
             self.model = "gemini-2.0-flash-exp"

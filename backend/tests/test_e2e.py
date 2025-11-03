@@ -7,6 +7,9 @@ E2E (End-to-End) 통합 테스트
 3. 필드 업데이트 승인 → Freshdesk API 패치
 4. 승인 거부 → 로그 저장
 5. 에러 핸들링 (외부 서비스 연결 실패)
+
+Note: 이 테스트는 외부 서비스(Qdrant, PostgreSQL, Supabase)가 필요합니다.
+서비스가 없으면 자동으로 skip됩니다.
 """
 
 import pytest
@@ -24,6 +27,14 @@ from backend.services.hybrid_search import HybridSearchService
 from backend.repositories.issue_repository import IssueRepository
 from backend.repositories.kb_repository import KBRepository
 from backend.repositories.approval_repository import ApprovalRepository
+
+# Import skip markers from conftest
+from backend.tests.conftest import (
+    requires_qdrant,
+    requires_postgres,
+    requires_supabase,
+    requires_external_services
+)
 
 
 @pytest.fixture
@@ -52,6 +63,7 @@ class TestE2ETicketFlow:
     """티켓 처리 E2E 테스트"""
 
     @pytest.mark.asyncio
+    @requires_external_services
     async def test_full_ticket_pipeline(
         self,
         sample_ticket_context: TicketContext
@@ -60,9 +72,11 @@ class TestE2ETicketFlow:
         시나리오 1: 티켓 입력 → 유사사례 검색 → 제안 생성
 
         검증:
-        - 응답 시간 < 5초
+        - 응답 시간 < 5초 (외부 서비스 가용 시)
         - 검색 결과 Top-5 반환
         - AI 제안 포함 (응답 초안, 필드 업데이트)
+        
+        Note: Qdrant, PostgreSQL, Supabase가 필요합니다.
         """
         # Given: 하이브리드 검색 서비스
         hybrid_search = HybridSearchService()
@@ -102,6 +116,7 @@ class TestE2ETicketFlow:
         print(f"✅ 검색 완료: {len(search_results)}개 결과, {elapsed:.2f}초")
 
     @pytest.mark.asyncio
+    @requires_external_services
     async def test_kb_search_flow(
         self,
         sample_ticket_context: TicketContext
@@ -112,6 +127,8 @@ class TestE2ETicketFlow:
         검증:
         - KB 검색 결과 반환
         - 절차(procedure) 포함
+        
+        Note: Qdrant, PostgreSQL이 필요합니다.
         """
         # Given
         hybrid_search = HybridSearchService()
@@ -133,6 +150,7 @@ class TestE2ETicketFlow:
         print(f"✅ KB 검색 완료: {len(kb_results)}개 결과")
 
     @pytest.mark.asyncio
+    @requires_supabase
     async def test_approval_and_execution(
         self,
         sample_ticket_context: TicketContext
@@ -143,6 +161,8 @@ class TestE2ETicketFlow:
         검증:
         - 승인 로그 Supabase 저장
         - Freshdesk API 패치 성공 (모의 또는 실제)
+        
+        Note: Supabase가 필요합니다.
         """
         approval_repo = ApprovalRepository()
 
@@ -191,6 +211,7 @@ class TestE2ETicketFlow:
         assert modified_count >= 1
 
     @pytest.mark.asyncio
+    @requires_supabase
     async def test_rejection_logging(
         self,
         sample_ticket_context: TicketContext
@@ -201,6 +222,8 @@ class TestE2ETicketFlow:
         검증:
         - 거부 로그 Supabase 저장
         - Freshdesk 패치 없음
+        
+        Note: Supabase가 필요합니다.
         """
         approval_repo = ApprovalRepository()
 
@@ -241,6 +264,8 @@ class TestE2ETicketFlow:
         검증:
         - 적절한 에러 메시지 반환
         - 서비스 중단 없이 fallback 또는 에러 응답
+        
+        Note: 이 테스트는 외부 서비스 없이도 실행 가능합니다.
         """
         # Given: 잘못된 Qdrant 설정
         # (테스트 환경에선 실제로 끊을 필요 없음, 예외 발생 시뮬레이션)
@@ -267,12 +292,16 @@ class TestE2EPerformance:
     """성능 E2E 테스트"""
 
     @pytest.mark.asyncio
+    @requires_external_services
     async def test_response_time_sla(
         self,
         sample_ticket_context: TicketContext
     ):
         """
         SLA 검증: 전체 파이프라인 응답 시간 < 5초
+        
+        Note: 이 테스트는 Qdrant, PostgreSQL, Supabase가 모두 필요하며,
+        네트워크 지연 및 서비스 성능에 따라 결과가 달라질 수 있습니다.
         """
         start = datetime.now()
 
@@ -300,6 +329,7 @@ class TestE2EPerformance:
         print(f"✅ SLA 통과: {elapsed:.2f}초")
 
     @pytest.mark.asyncio
+    @requires_external_services
     async def test_concurrent_requests(self):
         """
         동시 요청 처리 테스트 (10개 동시 검색)
@@ -307,6 +337,8 @@ class TestE2EPerformance:
         검증:
         - 모든 요청 성공
         - 평균 응답 시간 < 5초
+        
+        Note: Qdrant, PostgreSQL이 필요합니다.
         """
         hybrid_search = HybridSearchService()
 
@@ -355,6 +387,7 @@ class TestE2EDataIntegrity:
     """데이터 무결성 E2E 테스트"""
 
     @pytest.mark.asyncio
+    @requires_external_services
     async def test_supabase_qdrant_consistency(self):
         """
         Supabase와 Qdrant 데이터 일관성 검증
@@ -362,6 +395,8 @@ class TestE2EDataIntegrity:
         검증:
         - Supabase에 저장된 레코드 수 == Qdrant 벡터 수
         - 동일 ticket_id 존재
+        
+        Note: Qdrant, Supabase가 필요합니다.
         """
         issue_repo = IssueRepository()
         vector_search = VectorSearchService()
@@ -377,6 +412,7 @@ class TestE2EDataIntegrity:
         # assert supabase_count == qdrant_count, "데이터 불일치"
 
     @pytest.mark.asyncio
+    @requires_external_services
     async def test_tenant_isolation(self):
         """
         멀티테넌시 격리 검증
@@ -384,6 +420,8 @@ class TestE2EDataIntegrity:
         검증:
         - tenant_id별 데이터 격리
         - 다른 테넌트 데이터 접근 불가
+        
+        Note: Qdrant, PostgreSQL이 필요합니다.
         """
         hybrid_search = HybridSearchService()
 
