@@ -14,6 +14,7 @@ from sentence_transformers import SentenceTransformer
 import numpy as np
 from backend.utils.logger import get_logger
 from backend.config import get_settings
+from backend.services.embedding_cache import get_embedding_model
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -29,7 +30,7 @@ class VectorSearchService:
         embedding_model: str = "BAAI/bge-m3"
     ):
         """
-        Initialize Qdrant client and embedding model
+        Initialize Qdrant client and embedding model (cached singleton)
 
         Args:
             qdrant_url: Qdrant server URL (default from env)
@@ -45,9 +46,8 @@ class VectorSearchService:
             api_key=self.qdrant_api_key
         )
 
-        # Initialize embedding model
-        logger.info(f"Loading embedding model: {embedding_model}")
-        self.embedding_model = SentenceTransformer(embedding_model)
+        # Use cached embedding model (singleton) - only loads once!
+        self.embedding_model = get_embedding_model(embedding_model)
         self.embedding_dim = self.embedding_model.get_sentence_embedding_dimension()
         logger.info(f"Embedding dimension: {self.embedding_dim}")
 
