@@ -7,16 +7,15 @@ from backend.models.graph_state import AgentState
 from backend.config import get_settings
 from backend.utils.logger import get_logger
 
+logger = get_logger(__name__)
+settings = get_settings()
+
 try:
     import google.generativeai as genai
     GENAI_AVAILABLE = True
 except ImportError:
     GENAI_AVAILABLE = False
-    logger = get_logger(__name__)
     logger.warning("google-generativeai not available, some features will be disabled")
-
-logger = get_logger(__name__)
-settings = get_settings()
 
 
 async def propose_solution(state: AgentState) -> AgentState:
