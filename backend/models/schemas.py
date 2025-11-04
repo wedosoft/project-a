@@ -361,7 +361,7 @@ class TicketContext(BaseModel):
         description="Tenant ID"
     )
     subject: str = Field(..., min_length=1, max_length=512, description="Ticket subject")
-    description: str = Field(..., min_length=1, max_length=8192, description="Ticket description")
+    description: str = Field(..., min_length=1, description="Ticket description with conversations")
     status: TicketStatus = Field(..., description="Ticket status (enum validated)")
     priority: Priority = Field(..., description="Ticket priority (enum validated)")
     product: Optional[str] = Field(None, max_length=255, description="Product name")

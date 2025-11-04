@@ -38,7 +38,7 @@ async def propose_solution(state: AgentState) -> AgentState:
     try:
         async def _generate():
             genai.configure(api_key=settings.google_api_key)
-            model = genai.GenerativeModel("gemini-1.5-pro")
+            model = genai.GenerativeModel("models/gemini-2.5-flash")
 
             ticket_ctx = state.get("ticket_context", {})
             search_res = state.get("search_results", {})
@@ -87,14 +87,39 @@ SOLUTION:
 CONFIDENCE: [0.0-1.0]
 """
 
+            # Configure safety settings to be more permissive for business content
+            safety_settings = {
+                genai.types.HarmCategory.HARM_CATEGORY_HATE_SPEECH: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                genai.types.HarmCategory.HARM_CATEGORY_HARASSMENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                genai.types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                genai.types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+            }
+
             response = await asyncio.to_thread(
                 model.generate_content,
                 prompt,
                 generation_config=genai.GenerationConfig(
                     temperature=0.7,
-                    max_output_tokens=1024,
-                )
+                    max_output_tokens=2048,  # Increased from 1024 to allow longer responses
+                ),
+                safety_settings=safety_settings
             )
+
+            # Check if response was blocked
+            if not response.candidates or not response.candidates[0].content.parts:
+                candidate = response.candidates[0] if response.candidates else None
+                finish_reason = candidate.finish_reason if candidate else 'unknown'
+
+                # Log detailed safety ratings
+                if candidate and hasattr(candidate, 'safety_ratings'):
+                    logger.error(f"Response blocked - Finish reason: {finish_reason}")
+                    logger.error(f"Safety ratings: {candidate.safety_ratings}")
+                else:
+                    logger.error(f"Response blocked - Finish reason: {finish_reason}")
+
+                error_msg = f"Response blocked. Finish reason: {finish_reason}"
+                state["errors"] = state.get("errors", []) + [error_msg]
+                return state
 
             result_text = response.text.strip()
 
@@ -173,7 +198,7 @@ async def propose_field_updates(state: AgentState) -> AgentState:
     try:
         async def _generate():
             genai.configure(api_key=settings.google_api_key)
-            model = genai.GenerativeModel("gemini-1.5-pro")
+            model = genai.GenerativeModel("models/gemini-2.5-flash")
 
             ticket_ctx = state.get("ticket_context", {})
             proposed = state.get("proposed_action", {})
@@ -181,11 +206,14 @@ async def propose_field_updates(state: AgentState) -> AgentState:
             draft_response = proposed.get("draft_response", "")
             confidence = proposed.get("confidence", 0.5)
 
+            # Use only subject and summary for field updates (not full description to avoid token limits)
+            description_summary = ticket_ctx.get('description', '')[:500] + "..." if len(ticket_ctx.get('description', '')) > 500 else ticket_ctx.get('description', 'N/A')
+
             prompt = f"""You are a ticket management AI. Analyze this ticket and propose field updates.
 
 Ticket Details:
 - Subject: {ticket_ctx.get('subject', 'N/A')}
-- Description: {ticket_ctx.get('description', 'N/A')}
+- Description Summary: {description_summary}
 - Current Priority: {ticket_ctx.get('priority', 'N/A')}
 - Current Status: {ticket_ctx.get('status', 'N/A')}
 
@@ -208,14 +236,39 @@ TAGS: [tag1, tag2, tag3]
 JUSTIFICATION: [Brief explanation of the updates]
 """
 
+            # Configure safety settings
+            safety_settings = {
+                genai.types.HarmCategory.HARM_CATEGORY_HATE_SPEECH: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                genai.types.HarmCategory.HARM_CATEGORY_HARASSMENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                genai.types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+                genai.types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: genai.types.HarmBlockThreshold.BLOCK_NONE,
+            }
+
             response = await asyncio.to_thread(
                 model.generate_content,
                 prompt,
                 generation_config=genai.GenerationConfig(
                     temperature=0.3,
-                    max_output_tokens=512,
-                )
+                    max_output_tokens=1024,  # Increased from 512 to allow longer field update justifications
+                ),
+                safety_settings=safety_settings
             )
+
+            # Check if response was blocked
+            if not response.candidates or not response.candidates[0].content.parts:
+                candidate = response.candidates[0] if response.candidates else None
+                finish_reason = candidate.finish_reason if candidate else 'unknown'
+
+                # Log detailed safety ratings
+                if candidate and hasattr(candidate, 'safety_ratings'):
+                    logger.error(f"Response blocked - Finish reason: {finish_reason}")
+                    logger.error(f"Safety ratings: {candidate.safety_ratings}")
+                else:
+                    logger.error(f"Response blocked - Finish reason: {finish_reason}")
+
+                error_msg = f"Response blocked. Finish reason: {finish_reason}"
+                state["errors"] = state.get("errors", []) + [error_msg]
+                return state
 
             result_text = response.text.strip()
 
