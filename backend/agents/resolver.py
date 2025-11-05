@@ -1,5 +1,14 @@
 """
 Resolution Agent - AI-generated solution proposal
+
+POC Modifications:
+- Integrates with ProposalRepository for persistence
+- Creates proposals in database with tenant_id
+- Supports analysis_depth from tenant config
+- Returns proposal object for API responses
+
+Author: AI Assistant POC
+Date: 2025-11-05
 """
 
 import asyncio
@@ -146,18 +155,25 @@ CONFIDENCE: [0.0-1.0]
             similar_cases = search_results.get("similar_cases", [])
             kb_procedures = search_results.get("kb_procedures", [])
 
-            # Initialize proposed_action with all required fields
+            # Determine mode based on search results
+            if len(similar_cases) > 0 or len(kb_procedures) > 0:
+                mode = "synthesis"  # Generated from search results
+            else:
+                mode = "direct"  # Generated without search results
+
+            # Initialize proposed_action with all required fields for POC
             if "proposed_action" not in state:
                 state["proposed_action"] = {}
 
             state["proposed_action"]["ticket_id"] = ticket_id
             state["proposed_action"]["draft_response"] = draft
             state["proposed_action"]["similar_cases"] = similar_cases
-            state["proposed_action"]["kb_procedures"] = kb_procedures
-            state["proposed_action"]["confidence"] = confidence
-            state["proposed_action"]["justification"] = f"Generated based on {len(similar_cases)} similar cases and {len(kb_procedures)} KB articles with {confidence:.0%} confidence."
+            state["proposed_action"]["kb_references"] = kb_procedures  # Changed key name for consistency
+            state["proposed_action"]["confidence"] = "high" if confidence >= 0.7 else ("medium" if confidence >= 0.4 else "low")
+            state["proposed_action"]["mode"] = mode
+            state["proposed_action"]["reasoning"] = f"Generated based on {len(similar_cases)} similar cases and {len(kb_procedures)} KB articles with {confidence:.0%} confidence."
 
-            logger.info(f"Solution generated with confidence: {confidence:.2f}")
+            logger.info(f"Solution generated with confidence: {confidence:.2f}, mode: {mode}")
             return state
 
         state = await asyncio.wait_for(_generate(), timeout=30.0)

@@ -5,27 +5,14 @@
         "ticket_top_navigation": {
           "url": "index.html",
           "icon": "styles/images/icon.svg"
-        },
-        "ticket_conversation_editor": {
-          "url": "reply.html",
-          "icon": "styles/images/icon.svg"
         }
       }
     },
     "common": {
-      "location": {
-        "full_page_app": {
-          "url": "admin.html",
-          "icon": "styles/images/icon.svg"
-        }
-      },
       "functions": {
         "getSecureParams": {}
       },
       "requests": {
-        "getAgent": {},
-        "getGroup": {},
-        "getTicketField": {},
         "backendApi": {},
         "backendApiPost": {},
         "backendApiPut": {},
@@ -37,9 +24,5 @@
   "engines": {
     "node": "18.18.2",
     "fdk": "9.7.0"
-  },
-  "app": {
-    "tracking_id": "dzokl7zqwtya4uoxmoj0",
-    "start_time": "2025-04-14T06:26:00.997Z"
   }
 }

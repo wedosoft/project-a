@@ -19,6 +19,7 @@ import time
 
 from backend.repositories.tenant_repository import TenantRepository
 from backend.repositories.proposal_repository import ProposalRepository
+from backend.services.orchestrator import OrchestratorService
 from backend.utils.pii_masker import mask_pii_in_dict
 from backend.utils.token_counter import get_token_counter
 from backend.utils.chunking import TicketChunker
@@ -27,9 +28,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/assist", tags=["assist"])
 
-# Initialize repositories
+# Initialize services and repositories
 tenant_repo = TenantRepository()
 proposal_repo = ProposalRepository()
+orchestrator = OrchestratorService()
 
 
 # Request/Response Models
@@ -160,11 +162,15 @@ async def analyze_ticket(
         }
 
         if request.stream_progress:
-            # Return SSE stream
+            # Return SSE stream with orchestrator
+            events = await orchestrator.process_ticket(
+                ticket_context=ticket_data,
+                tenant_id=tenant_id,
+                platform=platform,
+                stream_events=True
+            )
             return StreamingResponse(
-                sse_generator(
-                    _analyze_with_streaming(ticket_data, config)
-                ),
+                sse_generator(events),
                 media_type="text/event-stream",
                 headers={
                     "Cache-Control": "no-cache",
@@ -172,9 +178,14 @@ async def analyze_ticket(
                 }
             )
         else:
-            # Return single JSON response
-            proposal = await _analyze_ticket(ticket_data, config)
-            return {"proposal": proposal.dict()}
+            # Return single JSON response with orchestrator
+            result = await orchestrator.process_ticket(
+                ticket_context=ticket_data,
+                tenant_id=tenant_id,
+                platform=platform,
+                stream_events=False
+            )
+            return {"proposal": result}
 
     except Exception as e:
         logger.error(f"Analysis error: {e}")
@@ -184,108 +195,8 @@ async def analyze_ticket(
         )
 
 
-async def _analyze_with_streaming(
-    ticket_data: Dict[str, Any],
-    config
-) -> AsyncGenerator[Dict[str, Any], None]:
-    """
-    Analyze ticket with streaming progress events.
-
-    Args:
-        ticket_data: Ticket information
-        config: Tenant configuration
-
-    Yields:
-        Progress events
-    """
-    start_time = time.time()
-
-    try:
-        # Step 1: Router decision
-        yield {
-            "type": "router_decision",
-            "decision": "retrieve_cases" if config.embedding_enabled else "propose_solution_direct",
-            "reasoning": "Embedding mode enabled" if config.embedding_enabled else "Embedding mode disabled",
-            "embedding_mode": config.embedding_enabled
-        }
-
-        await asyncio.sleep(0.5)  # Simulate processing
-
-        # Step 2: Retrieval (if enabled)
-        if config.embedding_enabled:
-            yield {"type": "retriever_start", "mode": "embedding"}
-            await asyncio.sleep(1)
-
-            # Simulate search (would call actual retriever)
-            # For POC, return empty results
-            yield {
-                "type": "retriever_results",
-                "results": {
-                    "similar_cases": [],
-                    "kb_articles": []
-                },
-                "result_count": 0
-            }
-
-        # Step 3: Resolution
-        yield {"type": "resolution_start"}
-        await asyncio.sleep(1)
-
-        # Generate proposal
-        proposal = await _analyze_ticket(ticket_data, config)
-
-        # Final event
-        analysis_time = int((time.time() - start_time) * 1000)
-        yield {
-            "type": "resolution_complete",
-            "proposal": proposal.dict(),
-            "analysis_time_ms": analysis_time
-        }
-
-    except Exception as e:
-        logger.error(f"Streaming analysis error: {e}")
-        yield {
-            "type": "error",
-            "message": str(e),
-            "recoverable": False
-        }
-
-
-async def _analyze_ticket(ticket_data: Dict[str, Any], config):
-    """
-    Core analysis logic (direct mode for POC).
-
-    Args:
-        ticket_data: Ticket information
-        config: Tenant configuration
-
-    Returns:
-        Created Proposal object
-    """
-    # Check token count and chunk if needed
-    chunker = TicketChunker(max_tokens=config.llm_max_tokens)
-    chunked = chunker.chunk_ticket(ticket_data)
-
-    # TODO: Call LLM service for analysis
-    # For POC, create mock proposal
-    draft_response = f"Thank you for contacting us. Based on the issue description, please try the following steps:\n\n1. Clear browser cache and cookies\n2. Use incognito mode\n3. Try different browser\n\nIf issue persists, please contact support."
-
-    # Create proposal
-    proposal_data = {
-        "tenant_id": config.tenant_id,
-        "ticket_id": ticket_data["id"],
-        "draft_response": draft_response,
-        "field_updates": {"status": "pending", "priority": "high"},
-        "confidence": "medium",
-        "mode": "direct",
-        "reasoning": "Generated using direct analysis mode (no search results)",
-        "similar_cases": [],
-        "kb_references": [],
-        "token_count": chunked["metadata"]["token_count"]
-    }
-
-    proposal = await proposal_repo.create(proposal_data)
-    return proposal
+# Note: _analyze_with_streaming and _analyze_ticket are now handled by orchestrator
+# These functions are removed as orchestrator.process_ticket() handles both streaming and direct modes
 
 
 @router.post("/approve")

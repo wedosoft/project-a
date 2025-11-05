@@ -1,0 +1,252 @@
+/* === 콘텐츠 카드 스타일 === */
+
+.content-card {
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    overflow: hidden;
+    transition: all 0.2s ease;
+}
+
+.content-card:hover {
+    border-color: #3284D6;
+    box-shadow: 0 0 0 1px #3284D6;
+}
+
+.card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid #f3f4f6;
+}
+
+.card-id {
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+    font-size: 13px;
+    color: #9ca3af;
+    font-weight: 400;
+}
+
+.similarity-score {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 12px;
+    border-radius: 16px;
+    color: white;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.score-high {
+    background: #f97316;
+}
+
+.score-medium {
+    background: #fbbf24;
+}
+
+.score-low {
+    background: #a3a3a3;
+}
+
+.card-body {
+    padding: 12px 16px;
+}
+
+.card-title {
+    font-weight: 600;
+    color: #1f2937;
+    margin-bottom: 8px;
+    line-height: 1.4;
+    font-size: 14px;
+}
+
+.card-excerpt {
+    color: #6b7280;
+    font-size: 13px;
+    line-height: 1.4;
+    margin-bottom: 12px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.card-date {
+    font-size: 12px;
+    color: #9ca3af;
+    margin: 0 0 8px 0;
+}
+
+/* 이 스타일은 아래쪽 통합 스타일로 대체됨 */
+
+.meta-left {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.status-indicator {
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 500;
+}
+
+.status-resolved {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.status-progress {
+    background: #dbeafe;
+    color: #1e40af;
+}
+
+.status-pending {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.card-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.card-btn {
+    flex: 1;
+    padding: 10px 16px;
+    border: 1px solid rgba(59, 130, 246, 0.2);
+    background: rgba(147, 197, 253, 0.08);
+    border-radius: 10px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    color: #1e40af;
+    font-weight: 500;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+
+.card-btn.primary {
+    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 50%, #1d4ed8 100%);
+    color: white;
+    border-color: rgba(59, 130, 246, 0.3);
+}
+
+.card-btn:hover {
+    background: rgba(147, 197, 253, 0.2);
+    border-color: rgba(59, 130, 246, 0.4);
+    color: #1d4ed8;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
+}
+
+.card-btn.primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4), 0 4px 12px rgba(37, 99, 235, 0.3);
+}
+
+/* 감정 배지 스타일 */
+.emotion-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.emotion-positive {
+    background: #e6f4ea;
+    color: #137333;
+}
+
+.emotion-negative {
+    background: #fce8e6;
+    color: #c5221f;
+}
+
+.emotion-neutral {
+    background: #f1f3f4;
+    color: #5f6368;
+}
+
+/* === 카드 메타정보 스타일 (통합) === */
+.card-meta {
+    display: flex !important;
+    flex-direction: row !important;
+    gap: 8px !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    font-size: 13px;
+    color: #6b7280;
+    margin-top: 8px;
+    margin-bottom: 0 !important;
+    flex-wrap: nowrap !important;
+}
+
+/* 혹시 남아있는 meta-info-compact 무력화 */
+.meta-info-compact {
+    display: flex !important;
+    flex-direction: row !important;
+    gap: 8px !important;
+    align-items: center !important;
+    width: 100% !important;
+}
+
+.meta-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.meta-item:hover {
+    background: #f3f4f6;
+    border-color: #d1d5db;
+}
+
+.meta-date {
+    color: #4b5563;
+}
+
+.meta-views {
+    color: #1f2937;
+}
+
+.meta-thumbs-up {
+    color: #059669;
+}
+
+.meta-thumbs-down {
+    color: #dc2626;
+}
+
+/* 반응형 처리 */
+@media (max-width: 480px) {
+    .card-meta {
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+    
+    .meta-item {
+        font-size: 11px;
+        padding: 3px 6px;
+    }
+}

@@ -1,12 +1,21 @@
 """
 LangGraph Retriever Agent
 Retrieves similar cases and KB articles using hybrid search
+
+POC Modifications:
+- Integrates with tenant_configs for embedding control
+- Uses Supabase issue_blocks and kb_blocks tables
+- Supports tenant isolation via RLS
+
+Author: AI Assistant POC
+Date: 2025-11-05
 """
 
 import asyncio
-from typing import Dict, Any
+from typing import Dict, Any, List
 from backend.models.graph_state import AgentState
 from backend.services.hybrid_search import HybridSearchService
+from backend.repositories.tenant_repository import TenantRepository
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -14,16 +23,33 @@ logger = get_logger(__name__)
 
 async def retrieve_cases(state: AgentState) -> AgentState:
     """
-    Retrieve similar cases from issue_cases collection
+    Retrieve similar cases from issue_blocks table (POC).
+
+    POC Changes:
+    - Uses issue_blocks table instead of Qdrant collection
+    - Checks tenant config for embedding_enabled
+    - Returns empty if embedding disabled
 
     Args:
-        state: Current agent state with ticket context
+        state: Current agent state with ticket context and tenant_config
 
     Returns:
         Updated state with similar_cases in search_results
     """
     try:
         logger.info("Retrieving similar cases")
+
+        # Check if embedding is enabled
+        tenant_config = state.get("tenant_config")
+        if not tenant_config or not tenant_config.get("embedding_enabled"):
+            logger.info("Embedding disabled for tenant, skipping case retrieval")
+            if "search_results" not in state:
+                state["search_results"] = {
+                    "similar_cases": [],
+                    "kb_procedures": [],
+                    "total_results": 0
+                }
+            return state
 
         # Extract search query from ticket context
         ticket_context = state.get("ticket_context", {})
@@ -43,10 +69,11 @@ async def retrieve_cases(state: AgentState) -> AgentState:
             return state
 
         # Search similar cases with timeout
+        # POC: Using HybridSearchService which should be configured to use issue_blocks
         search_service = HybridSearchService()
         results = await asyncio.wait_for(
             search_service.search(
-                collection_name="support_tickets",
+                collection_name="issue_blocks",  # Changed to issue_blocks table
                 query=query,
                 top_k=5,
                 use_reranking=True
@@ -86,16 +113,33 @@ async def retrieve_cases(state: AgentState) -> AgentState:
 
 async def retrieve_kb(state: AgentState) -> AgentState:
     """
-    Retrieve KB articles from kb_procedures collection
+    Retrieve KB articles from kb_blocks table (POC).
+
+    POC Changes:
+    - Uses kb_blocks table instead of Qdrant collection
+    - Checks tenant config for embedding_enabled
+    - Returns empty if embedding disabled
 
     Args:
-        state: Current agent state with ticket context
+        state: Current agent state with ticket context and tenant_config
 
     Returns:
         Updated state with kb_procedures in search_results
     """
     try:
         logger.info("Retrieving KB procedures")
+
+        # Check if embedding is enabled
+        tenant_config = state.get("tenant_config")
+        if not tenant_config or not tenant_config.get("embedding_enabled"):
+            logger.info("Embedding disabled for tenant, skipping KB retrieval")
+            if "search_results" not in state:
+                state["search_results"] = {
+                    "similar_cases": [],
+                    "kb_procedures": [],
+                    "total_results": 0
+                }
+            return state
 
         # Extract search query from ticket context
         ticket_context = state.get("ticket_context", {})
@@ -115,10 +159,11 @@ async def retrieve_kb(state: AgentState) -> AgentState:
             return state
 
         # Search KB procedures with timeout
+        # POC: Using HybridSearchService which should be configured to use kb_blocks
         search_service = HybridSearchService()
         results = await asyncio.wait_for(
             search_service.search(
-                collection_name="kb_procedures",
+                collection_name="kb_blocks",  # Changed to kb_blocks table
                 query=query,
                 top_k=5,
                 use_reranking=True
