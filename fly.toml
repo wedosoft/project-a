@@ -32,7 +32,7 @@ primary_region = "nrt"  # Tokyo region for Korea proximity
     path = "/health"
 
 [[vm]]
-  memory = "256mb"  # Minimum memory for development
+  memory = "1024mb"  # Minimum memory for development
   cpu_kind = "shared"
   cpus = 1
 
