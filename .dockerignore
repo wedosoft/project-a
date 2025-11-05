@@ -1,0 +1,103 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Documentation
+*.md
+docs/
+README*
+CHANGELOG*
+LICENSE*
+CONTRIBUTING*
+
+# Testing
+tests/
+test/
+*.test.js
+*.spec.js
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+.circleci/
+
+# Docker
+docker-compose*.yml
+Dockerfile*
+!Dockerfile
+.dockerignore
+
+# Frontend (not needed in backend container)
+frontend/
+frontend-*/
+
+# Claude skills
+.claude/
+
+# Copilot
+.copilot/
+
+# Logs
+*.log
+logs/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Fly.io
+fly.toml
+
+# Scripts (deploy separately if needed)
+scripts/
+*.sh
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# FDK
+.fdk/
+.meta.json
+app.info
