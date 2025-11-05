@@ -39,7 +39,7 @@
     "schema": {
       "method": "GET",
       "protocol": "https",
-      "host": "ssl.wedosoft.net",
+      "host": "ameer-timberless-paragogically.ngrok-free.dev",
       "path": "/<%= context.path %>",
       "headers": {
         "Content-Type": "application/json",
@@ -55,7 +55,7 @@
     "schema": {
       "method": "POST",
       "protocol": "https",
-      "host": "ssl.wedosoft.net",
+      "host": "ameer-timberless-paragogically.ngrok-free.dev",
       "path": "/<%= context.path %>",
       "headers": {
         "Content-Type": "application/json",
@@ -71,7 +71,7 @@
     "schema": {
       "method": "PUT",
       "protocol": "https",
-      "host": "ssl.wedosoft.net",
+      "host": "ameer-timberless-paragogically.ngrok-free.dev",
       "path": "/<%= context.path %>",
       "headers": {
         "Content-Type": "application/json",
@@ -87,7 +87,7 @@
     "schema": {
       "method": "DELETE",
       "protocol": "https",
-      "host": "ssl.wedosoft.net",
+      "host": "ameer-timberless-paragogically.ngrok-free.dev",
       "path": "/<%= context.path %>",
       "headers": {
         "Content-Type": "application/json",

@@ -27,13 +27,13 @@
     // 환경별 백엔드 호스트 설정
     const BACKEND_HOSTS = {
         // 프로덕션 환경
-        production: 'ssl.wedosoft.net',
+        production: 'ameer-timberless-paragogically.ngrok-free.dev',
 
         // 개발 환경 (필요시 localhost 사용)
-        development: 'ssl.wedosoft.net',
+        development: 'ameer-timberless-paragogically.ngrok-free.dev',
 
         // 테스트 환경
-        test: 'ssl.wedosoft.net'
+        test: 'ameer-timberless-paragogically.ngrok-free.dev'
     };
 
     // 현재 환경 감지
