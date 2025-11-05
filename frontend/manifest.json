@@ -13,16 +13,15 @@
         "getSecureParams": {}
       },
       "requests": {
+        "getTicketWithConversations": {},
         "backendApi": {},
-        "backendApiPost": {},
-        "backendApiPut": {},
-        "backendApiDelete": {}
+        "backendApiPost": {}
       }
     }
   },
   "platform-version": "3.0",
   "engines": {
     "node": "18.18.2",
-    "fdk": "9.7.0"
+    "fdk": "9.7.1"
   }
 }

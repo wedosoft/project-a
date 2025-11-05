@@ -58,27 +58,47 @@ document.onreadystatechange = function () {
   if (document.readyState === "complete") {
     if (typeof app !== 'undefined') {
       app.initialized().then(async function (_client) {
-        client = _client;
-        const context = await client.instance.context();
-        isModalView = context.location !== 'ticket_top_navigation';
+        var client = _client;
 
-        // 메인 페이지: 버튼 클릭시 모달 열기
-        if (!isModalView) {
-          client.events.on("app.activated", async () => {
-            await client.interface.trigger("showModal", {
-              title: "🎨 Copilot Canvas",
-              template: "index.html",
-              noBackdrop: true
-            });
+        // top bar navigation 버튼 클릭 시 모달 열기
+        client.events.on("app.activated", async () => {
+          await client.interface.trigger("showModal", {
+            title: "🎨 Copilot Canvas",
+            template: "modal.html",
+            noBackdrop: true
           });
-          return;
+        });
+
+        // Load ticket data
+        async function loadTicketData() {
+          try {
+            // Get basic ticket info from FDK
+            const data = await client.data.get('ticket');
+            const ticketId = data.ticket.id;
+
+            // Get full ticket with conversations from Freshdesk API
+            const response = await client.request.invoke('getTicketWithConversations', {
+              context: {
+                ticketId: ticketId
+              }
+            });
+
+            if (response.status === 200) {
+              ticketData = JSON.parse(response.response);
+              console.log('Ticket data loaded with conversations:', ticketData);
+              console.log('Conversations:', ticketData.conversations);
+            } else {
+              throw new Error(`Failed to load ticket: ${response.status}`);
+            }
+          } catch (error) {
+            console.error('Failed to load ticket data:', error);
+            showError('티켓 데이터를 불러올 수 없습니다.');
+          }
         }
 
-        // 모달 뷰: 비즈니스 로직 실행
-        cacheElements();
-        setupEventListeners();
-        await loadTicketData();
-        setTimeout(() => analyzeTicket(), 500);
+        // Call loadTicketData function
+        loadTicketData();
+
       }).catch(function(error) {
         console.error("Error during app initialization", error);
       });
@@ -151,28 +171,23 @@ async function loadTicketData() {
     // Get basic ticket info from FDK
     const data = await client.data.get('ticket');
     const ticketId = data.ticket.id;
-    console.log('📋 Ticket ID:', ticketId);
 
     // Get full ticket with conversations from Freshdesk API
-    console.log('🔄 Calling getTicketWithConversations...');
-    const response = await client.request.invokeTemplate('getTicketWithConversations', {
+    const response = await client.request.invoke('getTicketWithConversations', {
       context: {
         ticketId: ticketId
       }
     });
 
-    console.log('📥 Response status:', response.status);
-    console.log('📥 Response:', response);
-
     if (response.status === 200) {
       ticketData = JSON.parse(response.response);
-      console.log('✅ Ticket data loaded with conversations:', ticketData);
-      console.log('💬 Conversations count:', ticketData.conversations?.length || 0);
+      console.log('Ticket data loaded with conversations:', ticketData);
+      console.log('Conversations:', ticketData.conversations);
     } else {
       throw new Error(`Failed to load ticket: ${response.status}`);
     }
   } catch (error) {
-    console.error('❌ Failed to load ticket data:', error);
+    console.error('Failed to load ticket data:', error);
     showError('티켓 데이터를 불러올 수 없습니다.');
   }
 }
@@ -208,7 +223,7 @@ async function analyzeTicket() {
 async function startSSEStreaming(ticket) {
   try {
     // Use backendApiPost with streaming
-    const response = await client.request.invokeTemplate('backendApiPost', {
+    const response = await client.request.invoke('backendApiPost', {
       context: {
         path: 'api/v1/assist/analyze'
       },
@@ -278,7 +293,7 @@ async function analyzeTicketDirect() {
   try {
     updateProgress(1, '직접 분석 모드로 전환...');
 
-    const response = await client.request.invokeTemplate('backendApiPost', {
+    const response = await client.request.invoke('backendApiPost', {
       context: {
         path: 'api/v1/assist/analyze'
       },
@@ -401,7 +416,7 @@ function updateProgress(step, message, completed = false) {
  */
 async function loadProposalDetails(proposalId) {
   try {
-    const response = await client.request.invokeTemplate('backendApi', {
+    const response = await client.request.invoke('backendApi', {
       context: {
         path: `api/v1/proposals/${proposalId}`
       }
@@ -553,7 +568,7 @@ async function approveProposal() {
     elements.approveBtn.disabled = true;
     elements.approveBtn.textContent = '승인 중...';
 
-    const response = await client.request.invokeTemplate('backendApiPost', {
+    const response = await client.request.invoke('backendApiPost', {
       context: {
         path: 'api/v1/assist/approve'
       },
@@ -634,7 +649,7 @@ async function rejectProposal() {
   try {
     elements.rejectBtn.disabled = true;
 
-    await client.request.invokeTemplate('backendApiPost', {
+    await client.request.invoke('backendApiPost', {
       context: {
         path: 'api/v1/assist/reject'
       },
@@ -701,7 +716,7 @@ async function sendRefinementRequest() {
     elements.sendChatBtn.disabled = true;
     elements.sendChatBtn.textContent = '처리 중...';
 
-    const response = await client.request.invokeTemplate('backendApiPost', {
+    const response = await client.request.invoke('backendApiPost', {
       context: {
         path: 'api/v1/assist/refine'
       },

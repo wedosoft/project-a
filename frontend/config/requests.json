@@ -1,17 +1,13 @@
 {
-  "backendApi": {
+  "getTicketWithConversations": {
     "schema": {
       "method": "GET",
       "protocol": "https",
-      "host": "ameer-timberless-paragogically.ngrok-free.dev",
-      "path": "/<%= context.path %>",
+      "host": "<%= iparam.freshdesk_domain %>",
+      "path": "/api/v2/tickets/<%= context.ticketId %>?include=conversations",
       "headers": {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "X-Domain": "<%= iparam.freshdesk_domain %>",
-        "X-API-Key": "<%= iparam.freshdesk_api_key %>",
-        "X-Tenant-ID": "<%= iparam.freshdesk_domain.split('.')[0] %>",
-        "X-Platform": "freshdesk"
+        "Authorization": "Basic <%= encode(iparam.freshdesk_api_key + ':X') %>",
+        "Content-Type": "application/json"
       }
     }
   },
@@ -23,7 +19,6 @@
       "path": "/<%= context.path %>",
       "headers": {
         "Content-Type": "application/json",
-        "Accept": "application/json",
         "X-Domain": "<%= iparam.freshdesk_domain %>",
         "X-API-Key": "<%= iparam.freshdesk_api_key %>",
         "X-Tenant-ID": "<%= iparam.freshdesk_domain.split('.')[0] %>",
@@ -31,31 +26,14 @@
       }
     }
   },
-  "backendApiPut": {
+  "backendApi": {
     "schema": {
-      "method": "PUT",
+      "method": "GET",
       "protocol": "https",
       "host": "ameer-timberless-paragogically.ngrok-free.dev",
       "path": "/<%= context.path %>",
       "headers": {
         "Content-Type": "application/json",
-        "Accept": "application/json",
-        "X-Domain": "<%= iparam.freshdesk_domain %>",
-        "X-API-Key": "<%= iparam.freshdesk_api_key %>",
-        "X-Tenant-ID": "<%= iparam.freshdesk_domain.split('.')[0] %>",
-        "X-Platform": "freshdesk"
-      }
-    }
-  },
-  "backendApiDelete": {
-    "schema": {
-      "method": "DELETE",
-      "protocol": "https",
-      "host": "ameer-timberless-paragogically.ngrok-free.dev",
-      "path": "/<%= context.path %>",
-      "headers": {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
         "X-Domain": "<%= iparam.freshdesk_domain %>",
         "X-API-Key": "<%= iparam.freshdesk_api_key %>",
         "X-Tenant-ID": "<%= iparam.freshdesk_domain.split('.')[0] %>",
