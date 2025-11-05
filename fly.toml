@@ -53,3 +53,4 @@ primary_region = "nrt"  # Tokyo region for Korea proximity
     type = "connections"
     hard_limit = 25
     soft_limit = 20
+
