@@ -32,7 +32,7 @@ primary_region = "nrt"  # Tokyo region for Korea proximity
     path = "/health"
 
 [[vm]]
-  memory = "1024mb"  # Minimum memory for development
+  memory = "1gb"  # Increased for embedding models (BGE-M3 needs ~800MB)
   cpu_kind = "shared"
   cpus = 1
 
