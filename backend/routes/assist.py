@@ -1,531 +1,458 @@
 """
-AI Assist API routes
+AI Assistant API Routes
 
-Provides AI-powered ticket assistance endpoints:
-- POST /api/assist/{ticket_id}/suggest - Generate AI suggestions
-- POST /api/assist/{ticket_id}/approve - Process agent approval/rejection
+Handles ticket analysis, proposal approval, and refinement with
+Server-Sent Events (SSE) streaming for real-time progress updates.
 
-Integrates with:
-- LangGraph Orchestrator for workflow execution
-- FreshdeskClient for ticket updates
-- AgentDB for context retrieval
+Author: AI Assistant POC
+Date: 2025-11-05
 """
-from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, Field, ConfigDict
-from typing import Dict, Any, List, Optional
+
+from fastapi import APIRouter, HTTPException, Header, status, Request
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from typing import Optional, Dict, Any, AsyncGenerator
+import asyncio
+import json
+import logging
 import time
-from datetime import datetime
 
-from backend.agents.orchestrator import compile_workflow
-from backend.services.freshdesk import FreshdeskClient
-from backend.services.supabase_client import SupabaseService
-from backend.models.schemas import (
-    TicketContext,
-    SearchResult,
-    ProposedAction,
-    ApprovalStatus,
-    SourceType,
-)
-from backend.models.graph_state import create_initial_state, typed_dict_to_pydantic
-from backend.utils.logger import get_logger
+from backend.repositories.tenant_repository import TenantRepository
+from backend.repositories.proposal_repository import ProposalRepository
+from backend.utils.pii_masker import mask_pii_in_dict
+from backend.utils.token_counter import get_token_counter
+from backend.utils.chunking import TicketChunker
 
-router = APIRouter()
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/v1/assist", tags=["assist"])
+
+# Initialize repositories
+tenant_repo = TenantRepository()
+proposal_repo = ProposalRepository()
 
 
-# ============================================================================
 # Request/Response Models
-# ============================================================================
 
-class AssistRequest(BaseModel):
+class AnalyzeRequest(BaseModel):
+    """Request model for ticket analysis."""
+    ticket_id: str
+    stream_progress: bool = True
+
+
+class ApproveRequest(BaseModel):
+    """Request model for proposal approval."""
+    ticket_id: str
+    proposal_id: str
+    action: str  # approve | reject
+    final_response: Optional[str] = None
+    rejection_reason: Optional[str] = None
+    agent_email: Optional[str] = None
+
+
+class RefineRequest(BaseModel):
+    """Request model for proposal refinement."""
+    ticket_id: str
+    proposal_id: str
+    refinement_request: str
+    agent_email: Optional[str] = None
+
+
+# SSE Streaming Helper
+
+async def sse_generator(
+    events: AsyncGenerator[Dict[str, Any], None]
+) -> AsyncGenerator[str, None]:
     """
-    AI assist request model
-
-    Contains full ticket context for AI processing.
-    """
-    model_config = ConfigDict(from_attributes=True)
-
-    ticket_id: str = Field(..., description="Freshdesk ticket ID")
-    ticket_content: str = Field(..., min_length=1, description="Ticket description/body")
-    ticket_meta: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Ticket metadata (subject, status, priority, etc.)"
-    )
-
-
-class SimilarCase(BaseModel):
-    """Similar case model for response"""
-    model_config = ConfigDict(from_attributes=True)
-
-    ticket_id: str = Field(..., description="Ticket ID")
-    summary: str = Field(..., description="Case summary")
-    similarity_score: float = Field(..., ge=0.0, le=1.0, description="Similarity score")
-
-
-class KBProcedure(BaseModel):
-    """KB procedure model for response"""
-    model_config = ConfigDict(from_attributes=True)
-
-    doc_id: str = Field(..., description="Document ID")
-    title: str = Field(..., description="Procedure title")
-    steps: List[str] = Field(..., description="Procedure steps")
-
-
-class AssistResponse(BaseModel):
-    """
-    AI assist response model
-
-    Contains AI-generated suggestions for agent review.
-    """
-    model_config = ConfigDict(from_attributes=True)
-
-    draft_response: str = Field(..., description="AI-generated draft response")
-    field_updates: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Suggested ticket field updates"
-    )
-    similar_cases: List[SimilarCase] = Field(
-        default_factory=list,
-        description="Similar cases found"
-    )
-    kb_procedures: List[KBProcedure] = Field(
-        default_factory=list,
-        description="Relevant KB procedures"
-    )
-    justification: str = Field(..., description="Justification for suggestions")
-    confidence: float = Field(..., ge=0.0, le=1.0, description="Overall confidence score")
-
-
-class ApprovalRequest(BaseModel):
-    """
-    Agent approval request model
-
-    Contains agent's decision and modifications.
-    """
-    model_config = ConfigDict(from_attributes=True)
-
-    status: ApprovalStatus = Field(..., description="Approval status (approved/modified/rejected)")
-    final_response: Optional[str] = Field(None, description="Final approved/modified response")
-    final_field_updates: Optional[Dict[str, Any]] = Field(
-        None,
-        description="Final field updates after modification"
-    )
-    rejection_reason: Optional[str] = Field(None, description="Reason for rejection")
-    agent_id: Optional[str] = Field(None, description="Agent who made the decision")
-
-
-class ExecutionResult(BaseModel):
-    """
-    Execution result model
-
-    Contains result of approval execution.
-    """
-    model_config = ConfigDict(from_attributes=True)
-
-    success: bool = Field(..., description="Whether execution succeeded")
-    ticket_id: str = Field(..., description="Ticket ID")
-    updates_applied: List[str] = Field(
-        default_factory=list,
-        description="List of updates successfully applied"
-    )
-    message: str = Field(..., description="Result message")
-    error: Optional[str] = Field(None, description="Error message if failed")
-
-
-# ============================================================================
-# Helper Functions
-# ============================================================================
-
-def convert_search_result_to_similar_case(result: SearchResult) -> SimilarCase:
-    """Convert SearchResult to SimilarCase"""
-    return SimilarCase(
-        ticket_id=result.ticket_id or result.id.hex[:8],
-        summary=result.excerpt or result.content[:100],
-        similarity_score=result.score
-    )
-
-
-def convert_search_result_to_kb_procedure(result: SearchResult) -> KBProcedure:
-    """Convert SearchResult to KBProcedure"""
-    # Parse steps from content (assuming newline-separated steps)
-    steps = [
-        step.strip()
-        for step in result.content.split('\n')
-        if step.strip()
-    ]
-
-    return KBProcedure(
-        doc_id=result.article_id or result.id.hex[:8],
-        title=result.excerpt or "Procedure",
-        steps=steps[:5]  # Limit to 5 steps for response
-    )
-
-
-# ============================================================================
-# API Endpoints
-# ============================================================================
-
-@router.post("/{ticket_id}/suggest", response_model=AssistResponse)
-async def suggest_solution(ticket_id: str, request: AssistRequest):
-    """
-    Generate AI-powered solution suggestions
-
-    Workflow:
-    1. Create TicketContext from request
-    2. Initialize AgentState with ticket context
-    3. Execute LangGraph Orchestrator workflow
-    4. Extract and return ProposedAction as AssistResponse
+    Convert event stream to SSE format.
 
     Args:
-        ticket_id: Freshdesk ticket ID (path parameter)
-        request: AssistRequest with ticket content and metadata
+        events: Async generator of event dictionaries
+
+    Yields:
+        SSE-formatted strings
+
+    Format:
+        data: {"type": "event_name", "data": {...}}\\n\\n
+    """
+    last_heartbeat = time.time()
+
+    try:
+        async for event in events:
+            # Mask PII in event data
+            masked_event = mask_pii_in_dict(event)
+
+            # Send event
+            yield f"data: {json.dumps(masked_event)}\n\n"
+
+            # Send heartbeat if >30s since last event
+            if time.time() - last_heartbeat > 30:
+                heartbeat = {"type": "heartbeat", "timestamp": time.time()}
+                yield f"data: {json.dumps(heartbeat)}\n\n"
+                last_heartbeat = time.time()
+
+    except Exception as e:
+        logger.error(f"SSE streaming error: {e}")
+        error_event = {
+            "type": "error",
+            "message": str(e),
+            "recoverable": False
+        }
+        yield f"data: {json.dumps(error_event)}\n\n"
+
+
+# Routes
+
+@router.post("/analyze")
+async def analyze_ticket(
+    request: AnalyzeRequest,
+    tenant_id: str = Header(..., alias="X-Tenant-ID"),
+    platform: str = Header(..., alias="X-Platform")
+):
+    """
+    Analyze ticket and generate AI proposal with optional streaming.
+
+    Args:
+        request: Analysis request with ticket_id
+        tenant_id: Tenant identifier from header
+        platform: Platform name from header
 
     Returns:
-        AssistResponse with AI suggestions
+        StreamingResponse with SSE events or JSON response
 
-    Raises:
-        HTTPException 422: Invalid request data
-        HTTPException 500: Orchestrator execution error
-        HTTPException 504: Workflow timeout
+    Events:
+        - router_decision: Embedding mode decision
+        - retriever_start: Search initiated
+        - retriever_results: Search results found
+        - retriever_fallback: Search failed, using direct analysis
+        - resolution_start: Proposal generation started
+        - resolution_complete: Proposal ready
+        - heartbeat: Keep-alive ping (every 30s)
+        - error: Error occurred
+
+    Example:
+        >>> # Client-side JavaScript
+        >>> const eventSource = new EventSource('/api/v1/assist/analyze');
+        >>> eventSource.onmessage = (event) => {
+        ...     const data = JSON.parse(event.data);
+        ...     console.log(data.type, data);
+        ... };
+    """
+    try:
+        # Set tenant context for RLS
+        await tenant_repo.set_tenant_context(tenant_id)
+        await proposal_repo.set_tenant_context(tenant_id)
+
+        # Get tenant config
+        config = await tenant_repo.get_config(tenant_id, platform)
+
+        # TODO: Fetch ticket data from Freshdesk
+        # For POC, mock ticket data
+        ticket_data = {
+            "id": request.ticket_id,
+            "subject": "Cannot login to dashboard",
+            "description": "User unable to access dashboard after password reset",
+            "conversations": [
+                {"body": "I tried resetting password but still can't login", "user_id": 1},
+                {"body": "Have you cleared browser cache?", "user_id": 2},
+                {"body": "Yes, still not working", "user_id": 1}
+            ]
+        }
+
+        if request.stream_progress:
+            # Return SSE stream
+            return StreamingResponse(
+                sse_generator(
+                    _analyze_with_streaming(ticket_data, config)
+                ),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "X-Accel-Buffering": "no"  # Disable nginx buffering
+                }
+            )
+        else:
+            # Return single JSON response
+            proposal = await _analyze_ticket(ticket_data, config)
+            return {"proposal": proposal.dict()}
+
+    except Exception as e:
+        logger.error(f"Analysis error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Analysis failed: {str(e)}"
+        )
+
+
+async def _analyze_with_streaming(
+    ticket_data: Dict[str, Any],
+    config
+) -> AsyncGenerator[Dict[str, Any], None]:
+    """
+    Analyze ticket with streaming progress events.
+
+    Args:
+        ticket_data: Ticket information
+        config: Tenant configuration
+
+    Yields:
+        Progress events
     """
     start_time = time.time()
-    logger.info(f"Received assist request for ticket {ticket_id}")
 
     try:
-        # 1. Validate ticket_id matches request
-        if ticket_id != request.ticket_id:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Ticket ID mismatch: path={ticket_id}, body={request.ticket_id}"
-            )
+        # Step 1: Router decision
+        yield {
+            "type": "router_decision",
+            "decision": "retrieve_cases" if config.embedding_enabled else "propose_solution_direct",
+            "reasoning": "Embedding mode enabled" if config.embedding_enabled else "Embedding mode disabled",
+            "embedding_mode": config.embedding_enabled
+        }
 
-        # 2. Create TicketContext from request
-        try:
-            ticket_context = TicketContext(
-                ticket_id=request.ticket_id,
-                tenant_id=request.ticket_meta.get("tenant_id", "default"),
-                subject=request.ticket_meta.get("subject", "No subject"),
-                description=request.ticket_content,
-                status=request.ticket_meta.get("status", "open"),
-                priority=request.ticket_meta.get("priority", "medium"),
-                product=request.ticket_meta.get("product"),
-                component=request.ticket_meta.get("component"),
-                tags=request.ticket_meta.get("tags", []),
-                custom_fields=request.ticket_meta.get("custom_fields"),
-            )
-        except Exception as e:
-            logger.error(f"Failed to create TicketContext: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Invalid ticket metadata: {str(e)}"
-            )
+        await asyncio.sleep(0.5)  # Simulate processing
 
-        # 3. Initialize AgentState
-        initial_state = create_initial_state(ticket_context)
-        logger.debug(f"Created initial state for ticket {ticket_id}")
+        # Step 2: Retrieval (if enabled)
+        if config.embedding_enabled:
+            yield {"type": "retriever_start", "mode": "embedding"}
+            await asyncio.sleep(1)
 
-        # 4. Compile and execute workflow
-        try:
-            logger.info(f"Compiling LangGraph workflow for ticket {ticket_id}")
-            workflow = compile_workflow()
+            # Simulate search (would call actual retriever)
+            # For POC, return empty results
+            yield {
+                "type": "retriever_results",
+                "results": {
+                    "similar_cases": [],
+                    "kb_articles": []
+                },
+                "result_count": 0
+            }
 
-            logger.info(f"Executing workflow for ticket {ticket_id}")
-            result_state = await workflow.ainvoke(initial_state)
+        # Step 3: Resolution
+        yield {"type": "resolution_start"}
+        await asyncio.sleep(1)
 
-            execution_time = time.time() - start_time
-            logger.info(f"Workflow completed for ticket {ticket_id} in {execution_time:.2f}s")
+        # Generate proposal
+        proposal = await _analyze_ticket(ticket_data, config)
 
-        except TimeoutError:
-            logger.error(f"Workflow timeout for ticket {ticket_id}")
-            raise HTTPException(
-                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-                detail="Workflow execution timed out. Please try again."
-            )
-        except Exception as e:
-            logger.error(f"Workflow execution error for ticket {ticket_id}: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Workflow execution failed: {str(e)}"
-            )
+        # Final event
+        analysis_time = int((time.time() - start_time) * 1000)
+        yield {
+            "type": "resolution_complete",
+            "proposal": proposal.dict(),
+            "analysis_time_ms": analysis_time
+        }
 
-        # 5. Extract ProposedAction from result state
-        proposed_action_data = result_state.get("proposed_action")
-        if not proposed_action_data:
-            logger.error(f"No proposed action in workflow result for ticket {ticket_id}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Workflow did not produce a proposed action"
-            )
-
-        # 6. Convert to Pydantic model for validation
-        try:
-            pydantic_state = typed_dict_to_pydantic(result_state)
-            proposed_action = pydantic_state.proposed_action
-        except Exception as e:
-            logger.error(f"Failed to convert workflow result to Pydantic: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to process workflow result: {str(e)}"
-            )
-
-        # 7. Convert to AssistResponse
-        similar_cases = [
-            convert_search_result_to_similar_case(case)
-            for case in proposed_action.similar_cases
-        ]
-
-        kb_procedures = [
-            convert_search_result_to_kb_procedure(kb)
-            for kb in proposed_action.kb_procedures
-        ]
-
-        response = AssistResponse(
-            draft_response=proposed_action.draft_response,
-            field_updates=proposed_action.proposed_field_updates,
-            similar_cases=similar_cases,
-            kb_procedures=kb_procedures,
-            justification=proposed_action.justification,
-            confidence=proposed_action.confidence
-        )
-
-        logger.info(
-            f"Successfully generated suggestions for ticket {ticket_id} "
-            f"(confidence={proposed_action.confidence:.2f})"
-        )
-        return response
-
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Unexpected error in suggest_solution for ticket {ticket_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal server error: {str(e)}"
-        )
+        logger.error(f"Streaming analysis error: {e}")
+        yield {
+            "type": "error",
+            "message": str(e),
+            "recoverable": False
+        }
 
 
-@router.post("/{ticket_id}/approve", response_model=ExecutionResult)
-async def approve_suggestion(ticket_id: str, approval: ApprovalRequest):
+async def _analyze_ticket(ticket_data: Dict[str, Any], config):
     """
-    Process agent approval and execute Freshdesk updates
-
-    Workflow:
-    1. Validate approval request
-    2. If approved: Apply updates to Freshdesk ticket
-    3. If modified: Re-run orchestrator with modifications
-    4. If rejected: Log rejection reason
-    5. Return execution result
+    Core analysis logic (direct mode for POC).
 
     Args:
-        ticket_id: Freshdesk ticket ID (path parameter)
-        approval: ApprovalRequest with agent's decision
+        ticket_data: Ticket information
+        config: Tenant configuration
 
     Returns:
-        ExecutionResult with success status and details
-
-    Raises:
-        HTTPException 422: Invalid approval data
-        HTTPException 500: Freshdesk update error
+        Created Proposal object
     """
-    logger.info(
-        f"Received approval request for ticket {ticket_id}: status={approval.status.value}"
-    )
+    # Check token count and chunk if needed
+    chunker = TicketChunker(max_tokens=config.llm_max_tokens)
+    chunked = chunker.chunk_ticket(ticket_data)
 
+    # TODO: Call LLM service for analysis
+    # For POC, create mock proposal
+    draft_response = f"Thank you for contacting us. Based on the issue description, please try the following steps:\n\n1. Clear browser cache and cookies\n2. Use incognito mode\n3. Try different browser\n\nIf issue persists, please contact support."
+
+    # Create proposal
+    proposal_data = {
+        "tenant_id": config.tenant_id,
+        "ticket_id": ticket_data["id"],
+        "draft_response": draft_response,
+        "field_updates": {"status": "pending", "priority": "high"},
+        "confidence": "medium",
+        "mode": "direct",
+        "reasoning": "Generated using direct analysis mode (no search results)",
+        "similar_cases": [],
+        "kb_references": [],
+        "token_count": chunked["metadata"]["token_count"]
+    }
+
+    proposal = await proposal_repo.create(proposal_data)
+    return proposal
+
+
+@router.post("/approve")
+async def approve_proposal(
+    request: ApproveRequest,
+    tenant_id: str = Header(..., alias="X-Tenant-ID")
+):
+    """
+    Approve or reject a proposal.
+
+    Args:
+        request: Approval request
+        tenant_id: Tenant identifier
+
+    Returns:
+        Updated proposal with field updates for FDK insertion
+
+    Example:
+        >>> POST /api/v1/assist/approve
+        >>> {
+        ...     "ticket_id": "TKT-123",
+        ...     "proposal_id": "prop-uuid",
+        ...     "action": "approve",
+        ...     "agent_email": "agent@example.com"
+        ... }
+    """
     try:
-        # 1. Initialize Freshdesk client and Supabase service
-        freshdesk_client = FreshdeskClient()
-        supabase_service = SupabaseService()
-        updates_applied = []
+        await proposal_repo.set_tenant_context(tenant_id)
 
-        # 2. Handle approval status
-        if approval.status == ApprovalStatus.APPROVED:
-            # Apply approved suggestions to Freshdesk
-            logger.info(f"Applying approved suggestions to ticket {ticket_id}")
+        # Get proposal
+        proposal = await proposal_repo.get_by_id(request.proposal_id)
+        if not proposal:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Proposal {request.proposal_id} not found"
+            )
 
-            try:
-                # Post approved response as reply
-                if approval.final_response:
-                    await freshdesk_client.post_reply(
-                        ticket_id=ticket_id,
-                        body=approval.final_response,
-                        private=False  # Public reply to customer
-                    )
-                    updates_applied.append("Posted reply to customer")
-                    logger.info(f"Posted reply to ticket {ticket_id}")
+        # Update status
+        if request.action == "approve":
+            await proposal_repo.update_status(
+                request.proposal_id,
+                "approved",
+                approved_by=request.agent_email
+            )
 
-                # Apply field updates
-                if approval.final_field_updates:
-                    await freshdesk_client.update_ticket_fields(
-                        ticket_id=ticket_id,
-                        updates=approval.final_field_updates
-                    )
-                    updates_applied.append(
-                        f"Updated fields: {', '.join(approval.final_field_updates.keys())}"
-                    )
-                    logger.info(
-                        f"Updated {len(approval.final_field_updates)} fields for ticket {ticket_id}"
-                    )
+            # Log approval
+            await proposal_repo.log_approval_action(
+                request.proposal_id,
+                "approve",
+                agent_email=request.agent_email
+            )
 
-                # Log approval to Supabase
-                try:
-                    # Get ticket data for tenant_id extraction
-                    ticket_data = await freshdesk_client.get_ticket(ticket_id)
-                    tenant_id = ticket_data.get("custom_fields", {}).get("cf_tenant_id", "default")
+            # TODO: Update Freshdesk ticket with field_updates
+            # For POC, return field_updates for FDK to apply
 
-                    await supabase_service.log_approval({
-                        "tenant_id": tenant_id,
-                        "ticket_id": ticket_id,
-                        "draft_response": None,  # Not available in approval request
-                        "final_response": approval.final_response,
-                        "field_updates": approval.final_field_updates,
-                        "approval_status": "approved",
-                        "agent_id": approval.agent_id or "unknown",
-                        "feedback_notes": None
-                    })
-                    updates_applied.append("Logged approval to Supabase")
-                    logger.info(f"Logged approval to Supabase for ticket {ticket_id}")
-                except Exception as e:
-                    # Don't fail the entire operation if Supabase logging fails
-                    logger.warning(f"Failed to log approval to Supabase for ticket {ticket_id}: {e}")
+            return {
+                "status": "approved",
+                "field_updates": proposal.field_updates,
+                "final_response": request.final_response or proposal.draft_response
+            }
 
-                return ExecutionResult(
-                    success=True,
-                    ticket_id=ticket_id,
-                    updates_applied=updates_applied,
-                    message=f"Successfully applied approved suggestions to ticket {ticket_id}"
-                )
+        elif request.action == "reject":
+            await proposal_repo.update_status(
+                request.proposal_id,
+                "rejected",
+                rejection_reason=request.rejection_reason
+            )
 
-            except Exception as e:
-                logger.error(f"Failed to apply updates to ticket {ticket_id}: {e}")
-                return ExecutionResult(
-                    success=False,
-                    ticket_id=ticket_id,
-                    updates_applied=updates_applied,
-                    message="Partial update failure",
-                    error=str(e)
-                )
-
-        elif approval.status == ApprovalStatus.MODIFIED:
-            # Re-run orchestrator with modifications
-            logger.info(f"Re-running orchestrator with modifications for ticket {ticket_id}")
-
-            try:
-                # Get original ticket data
-                ticket_data = await freshdesk_client.get_ticket(ticket_id)
-
-                # Create modified AssistRequest
-                modified_request = AssistRequest(
-                    ticket_id=ticket_id,
-                    ticket_content=approval.final_response or ticket_data.get("description", ""),
-                    ticket_meta={
-                        "tenant_id": ticket_data.get("custom_fields", {}).get("cf_tenant_id", "default"),
-                        "subject": ticket_data.get("subject", ""),
-                        "status": ticket_data.get("status", "open"),
-                        "priority": ticket_data.get("priority", "medium"),
-                        "product": ticket_data.get("product", ""),
-                        "component": ticket_data.get("custom_fields", {}).get("cf_component"),
-                        "tags": ticket_data.get("tags", []),
-                        "custom_fields": approval.final_field_updates or {},
-                    }
-                )
-
-                # Re-run suggestion workflow
-                modified_result = await suggest_solution(ticket_id, modified_request)
-
-                logger.info(f"Re-ran orchestrator for ticket {ticket_id} with modifications")
-
-                # Log modification to Supabase
-                try:
-                    tenant_id = ticket_data.get("custom_fields", {}).get("cf_tenant_id", "default")
-                    await supabase_service.log_approval({
-                        "tenant_id": tenant_id,
-                        "ticket_id": ticket_id,
-                        "draft_response": None,  # Original draft not available
-                        "final_response": approval.final_response,
-                        "field_updates": approval.final_field_updates,
-                        "approval_status": "modified",
-                        "agent_id": approval.agent_id or "unknown",
-                        "feedback_notes": f"Re-executed with modifications. New confidence: {modified_result.confidence:.2f}"
-                    })
-                    logger.info(f"Logged modification to Supabase for ticket {ticket_id}")
-                except Exception as e:
-                    logger.warning(f"Failed to log modification to Supabase for ticket {ticket_id}: {e}")
-
-                return ExecutionResult(
-                    success=True,
-                    ticket_id=ticket_id,
-                    updates_applied=["Re-executed workflow with modifications", "Logged to Supabase"],
-                    message=f"Workflow re-executed with modifications. New confidence: {modified_result.confidence:.2f}"
-                )
-
-            except Exception as e:
-                logger.error(f"Failed to re-run orchestrator for ticket {ticket_id}: {e}")
-                return ExecutionResult(
-                    success=False,
-                    ticket_id=ticket_id,
-                    updates_applied=[],
-                    message="Failed to re-execute workflow",
-                    error=str(e)
-                )
-
-        elif approval.status == ApprovalStatus.REJECTED:
             # Log rejection
-            logger.info(
-                f"Suggestion rejected for ticket {ticket_id}: {approval.rejection_reason}"
+            await proposal_repo.log_approval_action(
+                request.proposal_id,
+                "reject",
+                agent_email=request.agent_email,
+                feedback=request.rejection_reason
             )
 
-            # Add internal note about rejection
-            try:
-                await freshdesk_client.add_note(
-                    ticket_id=ticket_id,
-                    note_body=f"AI suggestion rejected by {approval.agent_id or 'agent'}. "
-                              f"Reason: {approval.rejection_reason or 'No reason provided'}",
-                    private=True
-                )
-                updates_applied.append("Added rejection note to ticket")
-            except Exception as e:
-                logger.warning(f"Failed to add rejection note to ticket {ticket_id}: {e}")
-
-            # Log rejection to Supabase
-            try:
-                # Get ticket data for tenant_id extraction
-                ticket_data = await freshdesk_client.get_ticket(ticket_id)
-                tenant_id = ticket_data.get("custom_fields", {}).get("cf_tenant_id", "default")
-
-                await supabase_service.log_approval({
-                    "tenant_id": tenant_id,
-                    "ticket_id": ticket_id,
-                    "draft_response": None,  # Not available in approval request
-                    "final_response": None,  # Rejected, no final response
-                    "field_updates": None,
-                    "approval_status": "rejected",
-                    "agent_id": approval.agent_id or "unknown",
-                    "feedback_notes": approval.rejection_reason or "No reason provided"
-                })
-                updates_applied.append("Logged rejection to Supabase")
-                logger.info(f"Logged rejection to Supabase for ticket {ticket_id}")
-            except Exception as e:
-                logger.warning(f"Failed to log rejection to Supabase for ticket {ticket_id}: {e}")
-
-            return ExecutionResult(
-                success=True,
-                ticket_id=ticket_id,
-                updates_applied=updates_applied,
-                message=f"Suggestion rejected: {approval.rejection_reason or 'No reason provided'}"
-            )
+            return {
+                "status": "rejected",
+                "reason": request.rejection_reason
+            }
 
         else:
-            logger.error(f"Unknown approval status: {approval.status}")
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Invalid approval status: {approval.status}"
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid action: {request.action}"
             )
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Unexpected error in approve_suggestion for ticket {ticket_id}: {e}")
+        logger.error(f"Approval error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Internal server error: {str(e)}"
+            detail=str(e)
+        )
+
+
+@router.post("/refine")
+async def refine_proposal(
+    request: RefineRequest,
+    tenant_id: str = Header(..., alias="X-Tenant-ID")
+):
+    """
+    Refine a proposal based on agent feedback.
+
+    Args:
+        request: Refinement request
+        tenant_id: Tenant identifier
+
+    Returns:
+        New proposal version with refined response
+
+    Example:
+        >>> POST /api/v1/assist/refine
+        >>> {
+        ...     "ticket_id": "TKT-123",
+        ...     "proposal_id": "prop-uuid",
+        ...     "refinement_request": "Make response more empathetic"
+        ... }
+    """
+    try:
+        await proposal_repo.set_tenant_context(tenant_id)
+
+        # Get original proposal
+        original = await proposal_repo.get_by_id(request.proposal_id)
+        if not original:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Proposal {request.proposal_id} not found"
+            )
+
+        # TODO: Call LLM for refinement
+        # For POC, append refinement note
+        refined_response = f"{original.draft_response}\n\n[Refined based on feedback: {request.refinement_request}]"
+
+        # Create new version
+        refined_data = {
+            "draft_response": refined_response,
+            "field_updates": original.field_updates,
+            "confidence": original.confidence,
+            "mode": original.mode,
+            "reasoning": f"Refined from version {original.proposal_version}: {request.refinement_request}"
+        }
+
+        new_proposal = await proposal_repo.create_version(
+            request.proposal_id,
+            refined_data
+        )
+
+        # Log refinement action
+        await proposal_repo.log_approval_action(
+            request.proposal_id,
+            "refine",
+            agent_email=request.agent_email,
+            feedback=request.refinement_request
+        )
+
+        return {
+            "proposal": new_proposal.dict(),
+            "version": new_proposal.proposal_version
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Refinement error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
         )

@@ -2,8 +2,8 @@
 Health check endpoints with comprehensive dependency monitoring
 
 Provides two endpoints:
-- GET /api/health - Basic health check
-- GET /api/health/dependencies - Detailed dependency status check
+- GET /api/v1/health - Basic health check
+- GET /api/v1/health/dependencies - Detailed dependency status check
 """
 import time
 from datetime import datetime
@@ -22,7 +22,7 @@ from backend.utils.logger import get_logger
 settings = get_settings()
 logger = get_logger(__name__)
 
-router = APIRouter()
+router = APIRouter(prefix="/api/v1/health", tags=["health"])
 
 # Application start time for uptime calculation
 APP_START_TIME = time.time()
@@ -404,7 +404,7 @@ def determine_overall_status(dependencies: Dict[str, DependencyStatus]) -> str:
 # ============================================================================
 
 @router.get(
-    "/health",
+    "/",
     response_model=HealthResponse,
     status_code=status.HTTP_200_OK,
     summary="Basic health check",
@@ -431,7 +431,7 @@ async def basic_health_check() -> HealthResponse:
 
 
 @router.get(
-    "/health/dependencies",
+    "/dependencies",
     response_model=DependencyHealth,
     status_code=status.HTTP_200_OK,
     summary="Dependency health check",

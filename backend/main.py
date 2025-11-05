@@ -32,12 +32,16 @@ app.add_middleware(LoggingMiddleware)
 # 3. Tenant (테넌트 ID 추출 및 검증)
 app.add_middleware(TenantMiddleware)
 
-# 라우터 등록
-app.include_router(tickets.router, prefix="/api/tickets", tags=["tickets"])
-app.include_router(assist.router, prefix="/api/assist", tags=["assist"])
-app.include_router(metrics.router, prefix="/api/metrics", tags=["metrics"])
-app.include_router(sync.router, prefix="/api/sync", tags=["sync"])
-app.include_router(health.router, prefix="/api", tags=["health"])
+# 라우터 등록 (prefix는 각 라우터 파일에서 정의됨)
+app.include_router(tickets.router)
+app.include_router(assist.router)
+app.include_router(metrics.router)
+app.include_router(sync.router)
+app.include_router(health.router)
+
+# Admin API 라우터 추가
+from backend.routes import admin
+app.include_router(admin.router)
 
 @app.get("/")
 async def root():

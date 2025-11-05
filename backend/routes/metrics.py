@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Dict, Any
 
-router = APIRouter()
+router = APIRouter(prefix="/api/v1/metrics", tags=["metrics"])
 
 
 class MetricsResponse(BaseModel):

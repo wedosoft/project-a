@@ -20,7 +20,7 @@ from backend.services.sparse_search import SparseSearchService
 from backend.utils.logger import get_logger
 from backend.config import get_settings
 
-router = APIRouter()
+router = APIRouter(prefix="/api/v1/sync", tags=["sync"])
 logger = get_logger(__name__)
 settings = get_settings()
 

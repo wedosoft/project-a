@@ -12,19 +12,36 @@
 
 ---
 
+## 📋 핵심 구성 요약
+
+### **1. 테넌트 식별 체계** 
+- `tenant_id` + `platform` 조합으로 고유 식별
+- 예: `demo-tenant` + `freshdesk`
+
+### **2. 임베딩 모드 분기**
+- `embedding_enabled=true`: 검색 기반 (Retriever → 유사사례 참조)
+- `embedding_enabled=false`: 직접 분석 (LLM만 사용)
+
+### **3. 스트리밍 이벤트 타입**
+- `router_decision`: 라우팅 판단 (임베딩 여부 확인)
+- `retriever_start`, `retriever_results`: 검색 단계
+- `resolution_start`, `resolution_complete`: 솔루션 생성
+- `error`: 오류
+
+---
+
 ## 테넌트 식별 체계
 
 ### **고유 키 조합**
 ```
-tenant_key = {tenant_id} + {platform} + {domain}
+tenant_key = {tenant_id} + {platform}
 ```
 
 **예시**:
 ```json
 {
   "tenant_id": "customer-abc",
-  "platform": "freshdesk",
-  "domain": "customer-abc.freshdesk.com"
+  "platform": "freshdesk"
 }
 ```
 
@@ -35,12 +52,11 @@ CREATE TABLE tenant_configs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id TEXT NOT NULL,
     platform TEXT NOT NULL,  -- freshdesk, zendesk, intercom
-    domain TEXT NOT NULL,
     embedding_enabled BOOLEAN DEFAULT true,
     analysis_depth TEXT DEFAULT 'full',
     llm_max_tokens INTEGER DEFAULT 1500,
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(tenant_id, platform, domain)
+    UNIQUE(tenant_id, platform)
 );
 ```
 
@@ -250,8 +266,7 @@ CREATE TABLE tenant_configs (
             // 테넌트 정보 구성
             const tenantInfo = {
                 tenant_id: getTenantId(),
-                platform: 'freshdesk',
-                domain: getDomain()
+                platform: 'freshdesk'
             };
 
             // 백엔드 API 호출 (스트리밍)
@@ -260,8 +275,7 @@ CREATE TABLE tenant_configs (
                 headers: {
                     'Content-Type': 'application/json',
                     'X-Tenant-ID': tenantInfo.tenant_id,
-                    'X-Platform': tenantInfo.platform,
-                    'X-Domain': tenantInfo.domain
+                    'X-Platform': tenantInfo.platform
                 },
                 body: JSON.stringify({
                     ticket_id: ticketData.id,
@@ -662,13 +676,6 @@ CREATE TABLE tenant_configs (
     }
 
     /**
-     * Helper: 도메인 추출
-     */
-    function getDomain() {
-        return window.location.hostname;
-    }
-
-    /**
      * Helper: 백엔드 URL 생성
      */
     function getBackendUrl(path) {
@@ -721,8 +728,7 @@ class AnalyzeRequest(BaseModel):
 async def analyze_ticket(
     request: AnalyzeRequest,
     tenant_id: str = Header(..., alias="X-Tenant-ID"),
-    platform: str = Header(..., alias="X-Platform"),
-    domain: str = Header(..., alias="X-Domain")
+    platform: str = Header(..., alias="X-Platform")
 ):
     """
     티켓 분석 시작 (스트리밍 응답)
@@ -739,8 +745,7 @@ async def analyze_ticket(
         # 1. 테넌트 설정 조회
         tenant_config = await tenant_repo.get_config(
             tenant_id=tenant_id,
-            platform=platform,
-            domain=domain
+            platform=platform
         )
         
         if not tenant_config:
@@ -769,7 +774,6 @@ async def analyze_ticket(
                     "metadata": {
                         "tenant_id": tenant_id,
                         "platform": platform,
-                        "domain": domain,
                         "max_tokens": tenant_config.llm_max_tokens,
                         "analysis_depth": tenant_config.analysis_depth
                     }
@@ -981,7 +985,6 @@ class TenantConfig:
     def __init__(self, data: dict):
         self.tenant_id = data['tenant_id']
         self.platform = data['platform']
-        self.domain = data['domain']
         self.embedding_enabled = data.get('embedding_enabled', True)
         self.analysis_depth = data.get('analysis_depth', 'full')
         self.llm_max_tokens = data.get('llm_max_tokens', 1500)
@@ -1000,8 +1003,7 @@ class TenantRepository:
     async def get_config(
         self,
         tenant_id: str,
-        platform: str,
-        domain: str
+        platform: str
     ) -> Optional[TenantConfig]:
         """
         테넌트 설정 조회
@@ -1011,8 +1013,6 @@ class TenantRepository:
                 "tenant_id", tenant_id
             ).eq(
                 "platform", platform
-            ).eq(
-                "domain", domain
             ).execute()
             
             if response.data:
@@ -1023,7 +1023,6 @@ class TenantRepository:
             return TenantConfig({
                 "tenant_id": tenant_id,
                 "platform": platform,
-                "domain": domain,
                 "embedding_enabled": True,
                 "analysis_depth": "full",
                 "llm_max_tokens": 1500
@@ -1044,13 +1043,12 @@ CREATE TABLE IF NOT EXISTS tenant_configs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id TEXT NOT NULL,
     platform TEXT NOT NULL,  -- freshdesk, zendesk, intercom
-    domain TEXT NOT NULL,    -- customer.freshdesk.com
     embedding_enabled BOOLEAN DEFAULT true,
     analysis_depth TEXT DEFAULT 'full',  -- full | summary | minimal
     llm_max_tokens INTEGER DEFAULT 1500,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(tenant_id, platform, domain)
+    UNIQUE(tenant_id, platform)
 );
 
 COMMENT ON TABLE tenant_configs IS '테넌트별 AI 어시스턴트 설정';
@@ -1059,13 +1057,13 @@ COMMENT ON COLUMN tenant_configs.analysis_depth IS '분석 깊이 (full=전체, 
 
 -- 인덱스
 CREATE INDEX idx_tenant_configs_lookup 
-ON tenant_configs(tenant_id, platform, domain);
+ON tenant_configs(tenant_id, platform);
 
 -- 샘플 데이터
-INSERT INTO tenant_configs (tenant_id, platform, domain, embedding_enabled)
+INSERT INTO tenant_configs (tenant_id, platform, embedding_enabled)
 VALUES 
-    ('demo-tenant', 'freshdesk', 'demo-tenant.freshdesk.com', true),
-    ('privacy-tenant', 'freshdesk', 'privacy-tenant.freshdesk.com', false)
+    ('demo-tenant', 'freshdesk', true),
+    ('privacy-tenant', 'freshdesk', false)
 ON CONFLICT DO NOTHING;
 ```
 
@@ -1134,8 +1132,8 @@ async def propose_solution_direct(state: AgentState) -> AgentState:
 
 ```bash
 # 1. 테넌트 설정
-INSERT INTO tenant_configs (tenant_id, platform, domain, embedding_enabled)
-VALUES ('test-customer', 'freshdesk', 'test-customer.freshdesk.com', true);
+INSERT INTO tenant_configs (tenant_id, platform, embedding_enabled)
+VALUES ('test-customer', 'freshdesk', true);
 
 # 2. 티켓 생성 (Freshdesk)
 # 3. FDK 앱에서 "티켓 분석 시작" 클릭
@@ -1150,8 +1148,8 @@ VALUES ('test-customer', 'freshdesk', 'test-customer.freshdesk.com', true);
 
 ```bash
 # 1. 테넌트 설정
-INSERT INTO tenant_configs (tenant_id, platform, domain, embedding_enabled)
-VALUES ('privacy-customer', 'freshdesk', 'privacy-customer.freshdesk.com', false);
+INSERT INTO tenant_configs (tenant_id, platform, embedding_enabled)
+VALUES ('privacy-customer', 'freshdesk', false);
 
 # 2. 티켓 생성
 # 3. "티켓 분석 시작" 클릭

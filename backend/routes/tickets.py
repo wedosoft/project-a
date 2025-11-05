@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Dict, Any, List
 
-router = APIRouter()
+router = APIRouter(prefix="/api/v1/tickets", tags=["tickets"])
 
 
 class TicketResponse(BaseModel):
