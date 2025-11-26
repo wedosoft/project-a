@@ -19,10 +19,10 @@
       "path": "/<%= context.path %>",
       "headers": {
         "Content-Type": "application/json",
-        "X-Domain": "<%= iparam.freshdesk_domain %>",
-        "X-API-Key": "<%= iparam.freshdesk_api_key %>",
-        "X-Tenant-ID": "<%= iparam.freshdesk_domain.split('.')[0] %>",
-        "X-Platform": "freshdesk"
+        "ngrok-skip-browser-warning": "true",
+        "X-Freshdesk-Domain": "<%= iparam.freshdesk_domain %>",
+        "X-Freshdesk-API-Key": "<%= iparam.freshdesk_api_key %>",
+        "X-Tenant-ID": "<%= iparam.freshdesk_domain.split('.')[0] %>"
       }
     }
   },
@@ -34,10 +34,10 @@
       "path": "/<%= context.path %>",
       "headers": {
         "Content-Type": "application/json",
-        "X-Domain": "<%= iparam.freshdesk_domain %>",
-        "X-API-Key": "<%= iparam.freshdesk_api_key %>",
-        "X-Tenant-ID": "<%= iparam.freshdesk_domain.split('.')[0] %>",
-        "X-Platform": "freshdesk"
+        "ngrok-skip-browser-warning": "true",
+        "X-Freshdesk-Domain": "<%= iparam.freshdesk_domain %>",
+        "X-Freshdesk-API-Key": "<%= iparam.freshdesk_api_key %>",
+        "X-Tenant-ID": "<%= iparam.freshdesk_domain.split('.')[0] %>"
       }
     }
   }

@@ -3,134 +3,162 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AI Assistant</title>
-  <link rel="stylesheet" href="styles/main.css">
+  <title>AI Copilot</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            'app-bg': '#f8fafc',
+            'app-card': '#ffffff',
+            'app-border': '#e2e8f0',
+            'app-text': '#1e293b',
+            'app-muted': '#64748b',
+            'app-primary': '#2563eb',
+            'app-primary-hover': '#1d4ed8',
+            'app-success': '#10b981',
+            'app-danger': '#ef4444',
+          }
+        }
+      }
+    }
+  </script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+    .chat-container { height: calc(100vh - 180px); }
+    .typing-indicator span {
+      animation: blink 1.4s infinite both;
+    }
+    .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+    .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes blink {
+      0%, 60%, 100% { opacity: 0.3; }
+      30% { opacity: 1; }
+    }
+    .source-chip:hover { transform: translateY(-1px); }
+    .message-enter { animation: messageSlide 0.3s ease-out; }
+    @keyframes messageSlide {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
 </head>
-<body>
-  <!-- 메인 컨테이너 -->
-  <div class="container">
-
-      <!-- 헤더 -->
-      <div class="header">
-        <h2>🤖 AI Assistant</h2>
-        <p class="subtitle">실시간 티켓 분석 및 응답 제안</p>
+<body class="bg-app-bg text-app-text">
+  
+  <div class="flex flex-col h-screen max-w-4xl mx-auto">
+    
+    <!-- 헤더 -->
+    <header class="bg-app-card border-b border-app-border px-4 py-3 flex items-center justify-between sticky top-0 z-10">
+      <div>
+        <p class="text-xs font-semibold text-app-primary uppercase tracking-wide">AI Copilot</p>
+        <h1 class="text-lg font-bold text-app-text" id="headerTitle">티켓 분석 중...</h1>
       </div>
-
-      <!-- 진행 상태 -->
-      <div class="progress-section" id="progressSection">
-        <div class="progress-header">
-          <div class="spinner"></div>
-          <span id="progressText">분석 중...</span>
-        </div>
-        <div class="progress-details">
-          <div class="progress-step" id="step1">
-            <span class="step-icon">⏳</span>
-            <span>라우팅 결정</span>
-          </div>
-          <div class="progress-step" id="step2">
-            <span class="step-icon">⏳</span>
-            <span>유사 사례 검색</span>
-          </div>
-          <div class="progress-step" id="step3">
-            <span class="step-icon">⏳</span>
-            <span>AI 솔루션 생성</span>
-          </div>
-        </div>
+      <div class="flex items-center gap-2">
+        <span id="statusBadge" class="px-2 py-1 text-xs font-medium rounded-full bg-yellow-100 text-yellow-700">
+          준비 중
+        </span>
+        <button id="newChatBtn" class="p-2 rounded-lg hover:bg-app-border transition-colors" title="새 대화">
+          <svg class="w-5 h-5 text-app-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+          </svg>
+        </button>
       </div>
+    </header>
 
-      <!-- AI 제안 -->
-      <div class="proposal-section hidden" id="proposalSection">
-
-        <!-- 제안 헤더 -->
-        <div class="proposal-header">
-          <div class="proposal-meta">
-            <span class="confidence-badge" id="confidenceBadge">중간 신뢰도</span>
-            <span class="mode-badge" id="modeBadge">직접 분석</span>
-          </div>
-          <div class="analysis-time" id="analysisTime">분석 시간: 0초</div>
-        </div>
-
-        <!-- 제안 내용 -->
-        <div class="proposal-content">
-          <h3>📝 AI 응답 제안</h3>
-          <div class="proposal-response" id="proposalResponse">
-            <!-- 여기에 AI 제안 내용이 표시됩니다 -->
-          </div>
-        </div>
-
-        <!-- 필드 업데이트 제안 -->
-        <div class="field-updates" id="fieldUpdates">
-          <h4>🏷️ 필드 업데이트 제안</h4>
-          <div class="field-list" id="fieldList">
-            <!-- 여기에 필드 업데이트 내용이 표시됩니다 -->
-          </div>
-        </div>
-
-        <!-- 참조 정보 -->
-        <div class="references" id="references">
-          <details>
-            <summary>📚 참조 정보 (<span id="refCount">0</span>개)</summary>
-            <div class="reference-list" id="referenceList">
-              <!-- 여기에 유사 사례 및 KB 참조가 표시됩니다 -->
-            </div>
-          </details>
-        </div>
-
-        <!-- 액션 버튼 -->
-        <div class="action-buttons">
-          <button class="btn btn-success" id="approveBtn">
-            <span class="btn-icon">✅</span>
-            <span>승인 및 적용</span>
-          </button>
-          <button class="btn btn-secondary" id="refineBtn">
-            <span class="btn-icon">💬</span>
-            <span>수정 요청</span>
-          </button>
-          <button class="btn btn-danger" id="rejectBtn">
-            <span class="btn-icon">❌</span>
-            <span>거부</span>
-          </button>
-        </div>
-      </div>
-
-      <!-- 채팅 인터페이스 (수정 요청) -->
-      <div class="chat-section hidden" id="chatSection">
-        <div class="chat-header">
-          <h3>💬 수정 요청</h3>
-          <button class="btn-close" id="closeChatBtn">×</button>
-        </div>
-
-        <div class="chat-messages" id="chatMessages">
-          <div class="chat-message assistant">
-            <div class="message-content">
-              어떻게 수정해드릴까요? 구체적으로 말씀해주시면 AI가 다시 생성합니다.
-            </div>
-          </div>
-        </div>
-
-        <div class="chat-input-container">
-          <textarea
-            class="chat-input"
-            id="chatInput"
-            placeholder="예: 더 공손한 톤으로 바꿔주세요"
-            rows="3"
-          ></textarea>
-          <button class="btn btn-primary" id="sendChatBtn">
-            <span>전송</span>
-          </button>
-        </div>
-      </div>
-
-      <!-- 결과 메시지 -->
-      <div class="result-section hidden" id="resultSection">
-        <div class="result-message" id="resultMessage"></div>
-      </div>
-
-    <!-- 에러 메시지 -->
-    <div class="error-section hidden" id="errorSection">
-      <div class="error-message" id="errorMessage"></div>
+    <!-- 검색 대상 선택 -->
+    <div class="bg-app-card border-b border-app-border px-4 py-3" id="sourceSelector">
+      <!-- JavaScript에서 동적으로 렌더링 -->
+      <p class="text-xs font-medium text-app-muted">검색 소스를 불러오는 중...</p>
     </div>
 
+    <!-- 필터 표시 (응답 후 표시) -->
+    <div class="bg-gray-50 border-b border-app-border px-4 py-2 hidden" id="filterDisplay">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-medium text-gray-500">적용된 필터:</span>
+          <div class="flex flex-wrap gap-1" id="filterChips">
+            <!-- 필터 칩들 -->
+          </div>
+        </div>
+        <span id="filterConfidence" class="text-xs text-gray-500"></span>
+      </div>
+    </div>
+
+    <!-- 채팅 영역 -->
+    <div class="flex-1 overflow-y-auto chat-container" id="chatContainer">
+      <div class="p-4 space-y-4" id="chatMessages">
+        
+        <!-- 웰컴 메시지 -->
+        <div class="flex justify-start message-enter" id="welcomeMessage">
+          <div class="max-w-[85%] bg-app-card border border-app-border rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
+            <p class="text-sm text-app-text">안녕하세요! 티켓 분석 및 검색을 도와드리겠습니다.</p>
+            <p class="text-sm text-app-text mt-2">아래 예시 질문을 클릭하거나, 직접 질문을 입력해주세요.</p>
+            
+            <!-- 예시 질문 -->
+            <div class="mt-4 flex flex-wrap gap-2" id="exampleQuestions">
+              <button class="example-btn px-3 py-1.5 text-xs font-medium bg-app-bg border border-app-border rounded-full hover:border-app-primary hover:text-app-primary transition-colors">
+                이 티켓을 분석해줘
+              </button>
+              <button class="example-btn px-3 py-1.5 text-xs font-medium bg-app-bg border border-app-border rounded-full hover:border-app-primary hover:text-app-primary transition-colors">
+                유사한 티켓을 찾아줘
+              </button>
+              <button class="example-btn px-3 py-1.5 text-xs font-medium bg-app-bg border border-app-border rounded-full hover:border-app-primary hover:text-app-primary transition-colors">
+                응답 초안을 작성해줘
+              </button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- 입력 영역 -->
+    <div class="bg-app-card border-t border-app-border p-4 sticky bottom-0">
+      <form id="chatForm" class="flex items-end gap-3">
+        <div class="flex-1 relative">
+          <textarea 
+            id="chatInput"
+            rows="1"
+            placeholder="메시지를 입력하세요..."
+            class="w-full px-4 py-3 pr-12 text-sm bg-app-bg border border-app-border rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-app-primary focus:border-transparent transition-all"
+            style="max-height: 120px;"
+          ></textarea>
+        </div>
+        <button 
+          type="submit" 
+          id="sendBtn"
+          class="p-3 bg-app-primary hover:bg-app-primary-hover text-white rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+          </svg>
+        </button>
+      </form>
+      <p class="text-xs text-app-muted mt-2 text-center" id="statusText">
+        티켓 정보를 불러오는 중...
+      </p>
+    </div>
+
+  </div>
+
+  <!-- 참조 문서 모달 -->
+  <div id="sourceModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 hidden">
+    <div class="bg-app-card rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden mx-4">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-app-border">
+        <h3 class="font-semibold text-app-text" id="modalTitle">참조 문서</h3>
+        <button id="closeModalBtn" class="p-1 hover:bg-app-border rounded-lg transition-colors">
+          <svg class="w-5 h-5 text-app-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div class="p-4 overflow-y-auto max-h-[60vh]">
+        <div id="modalContent" class="text-sm text-app-text whitespace-pre-wrap"></div>
+      </div>
+    </div>
   </div>
 
   <!-- FDK Client 스크립트 -->
