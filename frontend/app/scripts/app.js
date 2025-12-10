@@ -826,25 +826,60 @@ async function handleAnalyzeTicket() {
   const loadingId = addLoadingMessage("티켓을 분석하고 있습니다...");
   
   try {
-    // Call backend analysis API
-    // Fix: Ensure ticket_id is a string to avoid 422 validation error
-    // Fix: Correct API path (removed /v1)
-    const response = await apiCall('POST', 'api/assist/analyze', {
+    // Call backend analysis API with async_mode: true to avoid timeout
+    const initialResponse = await apiCall('POST', 'api/assist/analyze', {
       ticket_id: String(ticketData.id),
       subject: ticketData.subject,
       description: ticketData.description_text,
-      stream_progress: false
+      ticket_fields: ticketFields,
+      stream_progress: false,
+      async_mode: true
     });
     
-    console.log('Analyze response:', response); // Debug logging
+    console.log('Initial Async Response:', initialResponse);
+
+    if (!initialResponse || !initialResponse.proposal || !initialResponse.proposal.id) {
+        throw new Error("분석 요청 실패: Proposal ID가 없습니다.");
+    }
+
+    const proposalId = initialResponse.proposal.id;
+    
+    // Poll for completion
+    let attempts = 0;
+    const maxAttempts = 60; // 2 minutes (2s interval)
+    let finalProposal = null;
+
+    while (attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s
+        attempts++;
+        
+        try {
+            const statusResponse = await apiCall('GET', `api/assist/status/${proposalId}`);
+            console.log(`Polling attempt ${attempts}:`, statusResponse);
+            
+            if (statusResponse && statusResponse.status !== 'processing') {
+                if (statusResponse.status === 'error') {
+                    throw new Error(statusResponse.rejectionReason || "분석 중 오류 발생");
+                }
+                finalProposal = statusResponse;
+                break;
+            }
+        } catch (e) {
+            console.warn("Polling error (ignoring):", e);
+        }
+    }
+
+    if (!finalProposal) {
+        throw new Error("분석 시간이 초과되었습니다.");
+    }
 
     removeMessage(loadingId);
     
-    if (response && response.proposal) {
+    if (finalProposal) {
       // 1. Show Analysis Summary
-      const summary = response.proposal.summary;
-      const intent = response.proposal.intent;
-      const sentiment = response.proposal.sentiment;
+      const summary = finalProposal.summary;
+      const intent = finalProposal.intent;
+      const sentiment = finalProposal.sentiment;
       
       let analysisHtml = `**[티켓 분석 결과]**\n\n`;
       if (summary) analysisHtml += `**요약:** ${summary}\n`;
@@ -854,8 +889,12 @@ async function handleAnalyzeTicket() {
       addMessage('assistant', analysisHtml);
 
       // 2. Render Editable Field Suggestions
-      renderFieldSuggestions(response.proposal);
+      renderFieldSuggestions(finalProposal);
       
+      // 3. Render Draft Response (if available)
+      if (finalProposal.draftResponse) {
+          addMessage('assistant', `**[제안된 답변]**\n\n${finalProposal.draftResponse}`);
+      }
     } else {
       addErrorMessage("분석 결과를 받을 수 없습니다.");
     }
@@ -873,6 +912,12 @@ function renderFieldSuggestions(proposal) {
   // Fix: Backend returns 'field_updates', not 'proposed_field_updates'
   const updates = proposal.field_updates || proposal.fieldUpdates || proposal.proposed_field_updates || proposal.proposedFieldUpdates || {};
   const reasons = proposal.field_reasons || {};
+
+  // Map proposals for quick lookup
+  const fieldProposals = proposal.field_proposals || [];
+  const proposalMap = {};
+  fieldProposals.forEach(p => { proposalMap[p.field_name] = p; });
+  const renderedFields = new Set();
 
   const messageId = 'msg-' + Date.now();
   const messageDiv = document.createElement('div');
@@ -919,33 +964,242 @@ function renderFieldSuggestions(proposal) {
     </tr>
   `;
 
-  // --- Hierarchy Logic ---
-  // Find the root field (Category)
-  let rootField = null;
-  if (ticketFields) {
-    const activeFields = ticketFields.filter(f => !f.archived);
-    // Try to find a field with nested choices (depth > 1)
-    // Note: Freshdesk API might return choices as Object for nested fields
-    rootField = activeFields.find(f => {
-       if (!f.choices) return false;
-       // Check if choices is object with keys (nested) or array with sub-choices
-       if (Array.isArray(f.choices)) {
-          return f.choices.some(c => c.choices && c.choices.length > 0);
-       } else if (typeof f.choices === 'object') {
-          // If object, it's likely nested
-          return Object.keys(f.choices).length > 0;
-       }
-       return false;
-    });
-    
-    if (!rootField) {
-      rootField = activeFields.find(f => f.name === 'category' || f.label === 'Category');
+  // --- Dynamic Field Rendering ---
+  // Use field_proposals from backend if available, otherwise fallback to legacy logic
+  if (fieldProposals.length > 0) {
+    // Special handling: nested field (Category/Sub/Item) should map 1:1 per level
+    const nestedRoot = ticketFields ? ticketFields.find(f => f.type === 'nested_field') : null;
+    if (nestedRoot && nestedRoot.choices && nestedRoot.nested_ticket_fields) {
+      const nestedFields = nestedRoot.nested_ticket_fields;
+      const level2Name = nestedFields.find(n => n.level === 2)?.name || nestedFields[0]?.name;
+      const level3Name = nestedFields.find(n => n.level === 3)?.name || nestedFields[1]?.name;
+      const hasNestedProposal = [nestedRoot.name, level2Name, level3Name].some(n => proposalMap[n]);
+
+      if (hasNestedProposal) {
+        const choices = normalizeChoices(nestedRoot.choices);
+        window[`choices-${messageId}-${nestedRoot.name}`] = choices;
+
+        const proposedLeaf = proposalMap[level3Name]?.proposed_value || proposalMap[level2Name]?.proposed_value || proposalMap[nestedRoot.name]?.proposed_value || '';
+        const path = findPathToValue(choices, proposedLeaf) || [];
+        const val1 = path[0] || proposalMap[nestedRoot.name]?.proposed_value || '';
+        const val2 = path[1] || proposalMap[level2Name]?.proposed_value || '';
+        const val3 = path[2] || proposalMap[level3Name]?.proposed_value || '';
+
+        // Level 1 options
+        let opts1 = '<option value="">선택하세요</option>';
+        choices.forEach(c => opts1 += `<option value="${c.value}" ${c.value === val1 ? 'selected' : ''}>${c.value}</option>`);
+
+        // Level 2 options
+        let opts2 = '<option value="">선택하세요</option>';
+        const subChoices = val1 ? choices.find(c => c.value === val1)?.choices : [];
+        if (subChoices) subChoices.forEach(c => opts2 += `<option value="${c.value}" ${c.value === val2 ? 'selected' : ''}>${c.value}</option>`);
+
+        // Level 3 options
+        let opts3 = '<option value="">선택하세요</option>';
+        const itemChoices = val2 ? subChoices?.find(c => c.value === val2)?.choices : [];
+        if (itemChoices) itemChoices.forEach(c => opts3 += `<option value="${c.value}" ${c.value === val3 ? 'selected' : ''}>${c.value}</option>`);
+
+        const currentVal1 = ticketData[nestedRoot.name] !== undefined ? ticketData[nestedRoot.name] : ticketData.custom_fields?.[nestedRoot.name];
+        const currentVal2 = level2Name ? (ticketData[level2Name] !== undefined ? ticketData[level2Name] : ticketData.custom_fields?.[level2Name]) : undefined;
+        const currentVal3 = level3Name ? (ticketData[level3Name] !== undefined ? ticketData[level3Name] : ticketData.custom_fields?.[level3Name]) : undefined;
+
+        html += renderRow(nestedRoot.label || 'Category', currentVal1, `
+          <select id="input-${nestedRoot.name}-${messageId}-1" data-field-name="${nestedRoot.name}" data-level="1" onchange="updateDependentFields('${messageId}', '${nestedRoot.name}', 1)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1">
+            ${opts1}
+          </select>
+        `, proposalMap[nestedRoot.name]?.reason);
+
+        if (level2Name) {
+          html += renderRow('Sub Category', currentVal2, `
+            <select id="input-${nestedRoot.name}-${messageId}-2" data-field-name="${level2Name}" data-level="2" onchange="updateDependentFields('${messageId}', '${nestedRoot.name}', 2)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1" ${!val1 ? 'disabled' : ''}>
+              ${opts2}
+            </select>
+          `, proposalMap[level2Name]?.reason);
+        }
+
+        if (level3Name) {
+          html += renderRow('Item', currentVal3, `
+            <select id="input-${nestedRoot.name}-${messageId}-3" data-field-name="${level3Name}" data-level="3" onchange="updateParentFields('${messageId}', '${nestedRoot.name}', 3)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1" ${!val2 ? 'disabled' : ''}>
+              ${opts3}
+            </select>
+          `, proposalMap[level3Name]?.reason);
+        }
+
+        renderedFields.add(nestedRoot.name);
+        if (level2Name) renderedFields.add(level2Name);
+        if (level3Name) renderedFields.add(level3Name);
+      }
     }
+
+    // Render remaining proposals (excluding system fields)
+    fieldProposals.forEach(prop => {
+      if (renderedFields.has(prop.field_name)) return;
+      if (['status', 'group', 'group_id'].includes(prop.field_name)) return;
+
+      const fieldName = prop.field_name;
+      const fieldLabel = prop.field_label;
+      const proposedValue = prop.proposed_value;
+      const reason = prop.reason;
+      renderedFields.add(fieldName);
+      
+      // Find field definition to get choices
+      const fieldDef = ticketFields ? ticketFields.find(f => f.name === fieldName) : null;
+      let inputHtml = '';
+
+      // Helper to check for nested choices
+      const isNested = (choices) => {
+          if (!choices || !Array.isArray(choices)) return false;
+          return choices.some(c => c.choices && c.choices.length > 0);
+      };
+
+      if (fieldDef && (fieldDef.type === 'custom_dropdown' || fieldDef.type === 'default_status' || fieldDef.type === 'default_priority' || fieldDef.choices)) {
+         const choices = normalizeChoices(fieldDef.choices);
+         
+         if (isNested(choices)) {
+             // --- Nested Field Rendering (3 Levels) ---
+             window[`choices-${messageId}-${fieldName}`] = choices; // Store for handlers
+
+             const path = findPathToValue(choices, proposedValue) || [];
+             const val1 = path[0] || '';
+             const val2 = path[1] || '';
+             const val3 = path[2] || '';
+
+             let opts1 = '<option value="">선택하세요</option>';
+             choices.forEach(c => opts1 += `<option value="${c.value}" ${c.value === val1 ? 'selected' : ''}>${c.value}</option>`);
+             
+             let opts2 = '<option value="">선택하세요</option>';
+             const subChoices = val1 ? choices.find(c => c.value === val1)?.choices : [];
+             if(subChoices) subChoices.forEach(c => opts2 += `<option value="${c.value}" ${c.value === val2 ? 'selected' : ''}>${c.value}</option>`);
+
+             let opts3 = '<option value="">선택하세요</option>';
+             const itemChoices = val2 ? subChoices?.find(c => c.value === val2)?.choices : [];
+             if(itemChoices) itemChoices.forEach(c => opts3 += `<option value="${c.value}" ${c.value === val3 ? 'selected' : ''}>${c.value}</option>`);
+
+             inputHtml = `
+                <div class="flex flex-col gap-2">
+                    <select id="input-${fieldName}-${messageId}-1" data-field-name="${fieldName}" data-level="1" onchange="updateDependentFields('${messageId}', '${fieldName}', 1)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1">${opts1}</select>
+                    <select id="input-${fieldName}-${messageId}-2" data-field-name="${fieldName}" data-level="2" onchange="updateDependentFields('${messageId}', '${fieldName}', 2)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1" ${!val1 ? 'disabled' : ''}>${opts2}</select>
+                    <select id="input-${fieldName}-${messageId}-3" data-field-name="${fieldName}" data-level="3" onchange="updateParentFields('${messageId}', '${fieldName}', 3)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1" ${!val2 ? 'disabled' : ''}>${opts3}</select>
+                </div>
+             `;
+         } else {
+             // --- Flat Dropdown Rendering ---
+             let optionsHtml = '<option value="">선택하세요</option>';
+             
+             // Flatten choices for simple dropdown
+             const flatOptions = [];
+             function collectOptions(list) {
+                list.forEach(c => {
+                   flatOptions.push(c.value);
+                   if (c.choices) collectOptions(c.choices);
+                });
+             }
+             collectOptions(choices);
+             
+             flatOptions.forEach(val => {
+                optionsHtml += `<option value="${val}" ${val === proposedValue ? 'selected' : ''}>${val}</option>`;
+             });
+
+             inputHtml = `
+                <select id="input-${fieldName}-${messageId}" data-field-name="${fieldName}" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1">
+                  ${optionsHtml}
+                </select>
+             `;
+         }
+      } else {
+         // Render Text Input
+         inputHtml = `
+            <input type="text" id="input-${fieldName}-${messageId}" data-field-name="${fieldName}" value="${proposedValue || ''}" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1">
+         `;
+      }
+
+      let currentVal = ticketData[fieldName];
+      if (currentVal === undefined && ticketData.custom_fields) {
+         currentVal = ticketData.custom_fields[fieldName];
+      }
+
+      html += renderRow(fieldLabel, currentVal, inputHtml, reason);
+    });
+
+  } else {
+    // --- Legacy Hierarchy Logic (Fallback) ---
+    // Find the root field (Category)
+    let rootField = null;
+    if (ticketFields) {
+      const activeFields = ticketFields.filter(f => !f.archived);
+      // Try to find a field with nested choices (depth > 1)
+      rootField = activeFields.find(f => {
+         if (!f.choices) return false;
+         if (Array.isArray(f.choices)) {
+            return f.choices.some(c => c.choices && c.choices.length > 0);
+         } else if (typeof f.choices === 'object') {
+            return Object.keys(f.choices).length > 0;
+         }
+         return false;
+      });
+    }
+
+    const rawRootChoices = rootField ? rootField.choices : [];
+    const rootFieldName = rootField ? rootField.name : '';
+    const rootChoices = normalizeChoices(rawRootChoices);
+    
+    // Store normalized choices for helpers (New Scheme)
+    window[`choices-${messageId}-${rootFieldName}`] = rootChoices;
+    
+    // Initial Values (Legacy)
+    const categoryValue = updates.category || '';
+    const subCategoryValue = updates.sub_category || '';
+    const itemCategoryValue = updates.item_category || '';
+
+    // Category Input (Level 1)
+    let categoryOptionsHtml = '<option value="">선택하세요</option>';
+    rootChoices.forEach(c => {
+      categoryOptionsHtml += `<option value="${c.value}" ${c.value === categoryValue ? 'selected' : ''}>${c.value}</option>`;
+    });
+    const categoryInput = `
+      <select id="input-${rootFieldName}-${messageId}-1" data-field-name="${rootFieldName}" data-level="1" onchange="updateDependentFields('${messageId}', '${rootFieldName}', 1)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1">
+        ${categoryOptionsHtml}
+      </select>
+    `;
+    html += renderRow('카테고리 (1단계)', ticketData.category || '-', categoryInput, reasons.category);
+
+    // Sub Category Input (Level 2)
+    const selectedCatObj = rootChoices.find(c => c.value === categoryValue);
+    const subChoices = selectedCatObj ? selectedCatObj.choices : [];
+    
+    let subCategoryOptionsHtml = '<option value="">선택하세요</option>';
+    if (subChoices) {
+      subChoices.forEach(c => {
+        subCategoryOptionsHtml += `<option value="${c.value}" ${c.value === subCategoryValue ? 'selected' : ''}>${c.value}</option>`;
+      });
+    }
+    const subCategoryInput = `
+      <select id="input-${rootFieldName}-${messageId}-2" data-field-name="${rootFieldName}" data-level="2" onchange="updateDependentFields('${messageId}', '${rootFieldName}', 2)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1" ${!categoryValue ? 'disabled' : ''}>
+        ${subCategoryOptionsHtml}
+      </select>
+    `;
+    html += renderRow('하위 카테고리 (2단계)', ticketData.sub_category || '-', subCategoryInput);
+
+    // Item Category Input (Level 3)
+    const selectedSubObj = subChoices ? subChoices.find(c => c.value === subCategoryValue) : null;
+    const itemChoices = selectedSubObj ? selectedSubObj.choices : [];
+    
+    let itemOptionsHtml = '<option value="">선택하세요</option>';
+    if (itemChoices) {
+        itemChoices.forEach(c => {
+           itemOptionsHtml += `<option value="${c.value}" ${c.value === itemCategoryValue ? 'selected' : ''}>${c.value}</option>`;
+        });
+    }
+
+    const itemCategoryInput = `
+      <select id="input-${rootFieldName}-${messageId}-3" data-field-name="${rootFieldName}" data-level="3" onchange="updateParentFields('${messageId}', '${rootFieldName}', 3)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1" ${(!categoryValue && rootChoices.length === 0) ? 'disabled' : ''}>
+        ${itemOptionsHtml}
+      </select>
+    `;
+    html += renderRow('아이템 (3단계)', ticketData.item_category || '-', itemCategoryInput);
   }
 
-  const rawRootChoices = rootField ? rootField.choices : [];
-  
-  // Helper to normalize choices to Array structure: [{ value: '...', choices: [...] }]
+  // Helper to normalize choices (Hoisted or defined outside if needed, but here for scope)
   function normalizeChoices(choices) {
     if (!choices) return [];
     if (Array.isArray(choices)) {
@@ -961,93 +1215,6 @@ function renderFieldSuggestions(proposal) {
     }
     return [];
   }
-
-  const rootChoices = normalizeChoices(rawRootChoices);
-  
-  // Flatten choices for reverse lookup
-  const flatChoices = {};
-  function flatten(choices, path) {
-    choices.forEach(c => {
-      const currentPath = [...path, c.value];
-      flatChoices[c.value] = currentPath;
-      if (c.choices && c.choices.length > 0) flatten(c.choices, currentPath);
-    });
-  }
-  flatten(rootChoices, []);
-  
-  // Store normalized choices for helpers
-  window[`choices-${messageId}`] = rootChoices;
-  window[`flatChoices-${messageId}`] = flatChoices;
-
-  // Initial Values
-  const categoryValue = updates.category || '';
-  const subCategoryValue = updates.sub_category || '';
-  const itemCategoryValue = updates.item_category || '';
-
-  // Category Input
-  let categoryOptionsHtml = '<option value="">선택하세요</option>';
-  rootChoices.forEach(c => {
-    categoryOptionsHtml += `<option value="${c.value}" ${c.value === categoryValue ? 'selected' : ''}>${c.value}</option>`;
-  });
-  const categoryInput = `
-    <select id="input-category-${messageId}" onchange="updateDependentFields('${messageId}', 'category')" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1">
-      ${categoryOptionsHtml}
-    </select>
-  `;
-  html += renderRow('카테고리', ticketData.category || '-', categoryInput, reasons.category);
-
-  // Sub Category Input
-  const selectedCatObj = rootChoices.find(c => c.value === categoryValue);
-  const subChoices = selectedCatObj ? selectedCatObj.choices : [];
-  
-  let subCategoryOptionsHtml = '<option value="">선택하세요</option>';
-  if (subChoices) {
-    subChoices.forEach(c => {
-      subCategoryOptionsHtml += `<option value="${c.value}" ${c.value === subCategoryValue ? 'selected' : ''}>${c.value}</option>`;
-    });
-  }
-  const subCategoryInput = `
-    <select id="input-sub-category-${messageId}" onchange="updateDependentFields('${messageId}', 'sub_category')" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1" ${!categoryValue ? 'disabled' : ''}>
-      ${subCategoryOptionsHtml}
-    </select>
-  `;
-  html += renderRow('하위 카테고리', ticketData.sub_category || '-', subCategoryInput);
-
-  // Item Category Input (Reverse Lookup Enabled)
-  const selectedSubObj = subChoices ? subChoices.find(c => c.value === subCategoryValue) : null;
-  const itemChoices = selectedSubObj ? selectedSubObj.choices : [];
-  
-  let itemOptionsHtml = '<option value="">선택하세요</option>';
-  
-  // If no category selected, show ALL items (flattened) to enable reverse lookup
-  if (!categoryValue) {
-     const allItems = [];
-     function collectLeaves(choices) {
-        choices.forEach(c => {
-           if (!c.choices || c.choices.length === 0) allItems.push(c.value);
-           else collectLeaves(c.choices);
-        });
-     }
-     collectLeaves(rootChoices);
-     const uniqueItems = [...new Set(allItems)];
-     // Limit to 200 items to prevent performance issues if list is huge
-     uniqueItems.sort().slice(0, 200).forEach(val => {
-        itemOptionsHtml += `<option value="${val}">${val}</option>`;
-     });
-  } else {
-     if (itemChoices) {
-        itemChoices.forEach(c => {
-           itemOptionsHtml += `<option value="${c.value}" ${c.value === itemCategoryValue ? 'selected' : ''}>${c.value}</option>`;
-        });
-     }
-  }
-
-  const itemCategoryInput = `
-    <select id="input-item-category-${messageId}" onchange="updateParentFields('${messageId}')" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1" ${(!categoryValue && rootChoices.length === 0) ? 'disabled' : ''}>
-      ${itemOptionsHtml}
-    </select>
-  `;
-  html += renderRow('아이템', ticketData.item_category || '-', itemCategoryInput);
   
   html += `
           </tbody>
@@ -1169,45 +1336,194 @@ window.updateParentFields = function(messageId) {
   }
 };
 
+// =============================================================================
+// Field Update Helpers (Nested Fields)
+// =============================================================================
+
+function findPathToValue(choices, targetValue) {
+    for (const c of choices) {
+        if (c.value === targetValue) return [c.value];
+        if (c.choices && c.choices.length > 0) {
+            const path = findPathToValue(c.choices, targetValue);
+            if (path) return [c.value, ...path];
+        }
+    }
+    return null;
+}
+
+window.updateDependentFields = function(messageId, fieldName, level) {
+    const choices = window[`choices-${messageId}-${fieldName}`];
+    const el1 = document.getElementById(`input-${fieldName}-${messageId}-1`);
+    const el2 = document.getElementById(`input-${fieldName}-${messageId}-2`);
+    const el3 = document.getElementById(`input-${fieldName}-${messageId}-3`);
+    
+    const val1 = el1 ? el1.value : '';
+    
+    if (level === 1) {
+        // Update Level 2
+        let opts2 = '<option value="">선택하세요</option>';
+        const subChoices = val1 ? choices.find(c => c.value === val1)?.choices : [];
+        if (subChoices) {
+            subChoices.forEach(c => opts2 += `<option value="${c.value}">${c.value}</option>`);
+            if (el2) {
+                el2.innerHTML = opts2;
+                el2.disabled = false;
+                el2.value = ''; // Reset value
+            }
+        } else {
+            if (el2) {
+                el2.innerHTML = '<option value="">선택하세요</option>';
+                el2.disabled = true;
+                el2.value = '';
+            }
+        }
+        
+        // Reset Level 3
+        if (el3) {
+            el3.innerHTML = '<option value="">선택하세요</option>';
+            el3.disabled = true;
+            el3.value = '';
+        }
+    } else if (level === 2) {
+        // Update Level 3
+        const val2 = el2 ? el2.value : '';
+        let opts3 = '<option value="">선택하세요</option>';
+        const subChoices = val1 ? choices.find(c => c.value === val1)?.choices : [];
+        const itemChoices = val2 ? subChoices?.find(c => c.value === val2)?.choices : [];
+        
+        if (itemChoices) {
+            itemChoices.forEach(c => opts3 += `<option value="${c.value}">${c.value}</option>`);
+            if (el3) {
+                el3.innerHTML = opts3;
+                el3.disabled = false;
+                el3.value = '';
+            }
+        } else {
+            if (el3) {
+                el3.innerHTML = '<option value="">선택하세요</option>';
+                el3.disabled = true;
+                el3.value = '';
+            }
+        }
+    }
+};
+
+window.updateParentFields = function(messageId, fieldName, level) {
+    // Reverse lookup: When Level 3 is selected, set Level 1 and 2
+    if (level !== 3) return;
+
+    const choices = window[`choices-${messageId}-${fieldName}`];
+    const el3 = document.getElementById(`input-${fieldName}-${messageId}-3`);
+    const val3 = el3 ? el3.value : '';
+    
+    if (!val3) return;
+
+    // Find path to this value
+    // Note: This assumes leaf values are unique enough or we take the first match
+    const path = findPathToValue(choices, val3);
+    
+    if (path && path.length === 3) {
+        const val1 = path[0];
+        const val2 = path[1];
+        
+        const el1 = document.getElementById(`input-${fieldName}-${messageId}-1`);
+        const el2 = document.getElementById(`input-${fieldName}-${messageId}-2`);
+        
+        if (el1 && el1.value !== val1) {
+            el1.value = val1;
+            // Trigger update for Level 2 options
+            window.updateDependentFields(messageId, fieldName, 1);
+        }
+        
+        if (el2) {
+            // Ensure Level 2 options are populated (should be done by updateDependentFields above)
+            // But we need to set the value
+            el2.value = val2;
+            // Trigger update for Level 3 options
+            window.updateDependentFields(messageId, fieldName, 2);
+        }
+        
+        // Finally set Level 3 value again because updateDependentFields(2) might have reset it
+        if (el3) el3.value = val3;
+    }
+};
+
 async function applyEditableFieldUpdates(messageId) {
   if (!client || !ticketData) return;
   
   try {
-    const category = document.getElementById(`input-category-${messageId}`).value;
-    const subCategory = document.getElementById(`input-sub-category-${messageId}`).value;
-    const itemCategory = document.getElementById(`input-item-category-${messageId}`).value;
+    const messageDiv = document.getElementById(messageId);
+    if (!messageDiv) throw new Error("메시지 요소를 찾을 수 없습니다.");
 
-    // Build update payload
+    const inputs = messageDiv.querySelectorAll('[data-field-name]');
+    if (inputs.length === 0) {
+        throw new Error("업데이트할 필드를 찾을 수 없습니다.");
+    }
+
     const updateBody = {};
-    
     const customFields = {};
+    // Standard fields in Freshdesk that are at the root level
+    const standardFields = ['status', 'priority', 'type', 'group_id', 'responder_id', 'description', 'subject', 'source', 'tags']; 
 
-    // Helper to find field name by label
-    const findFieldName = (labels) => {
-      if (!ticketFields) return null;
-      const field = ticketFields.find(f => labels.includes(f.label));
-      return field ? field.name : null;
-    };
+    // Group inputs by field name to handle nested fields (multiple selects for one field)
+    const fieldGroups = {};
+    inputs.forEach(input => {
+        const fieldName = input.dataset.fieldName;
+        if (!fieldGroups[fieldName]) {
+            fieldGroups[fieldName] = [];
+        }
+        fieldGroups[fieldName].push(input);
+    });
 
-    // Try to find field names for Category, Sub Category, Item
-    // Adjust these labels based on your actual Freshdesk configuration
-    const categoryFieldName = findFieldName(['Category', '카테고리', '대분류']) || 'category';
-    const subCategoryFieldName = findFieldName(['Sub Category', '하위 카테고리', '중분류']) || 'sub_category';
-    const itemCategoryFieldName = findFieldName(['Item Category', 'Item', '아이템', '소분류']) || 'item_category';
+    for (const [fieldName, groupInputs] of Object.entries(fieldGroups)) {
+        let valueToUpdate = null;
 
-    console.log('Mapped Field Names:', { categoryFieldName, subCategoryFieldName, itemCategoryFieldName });
+        if (groupInputs.length > 1) {
+            // Handle Nested Fields (Legacy Hierarchy or new multi-level)
+            // Assuming order is Category -> Sub -> Item based on DOM order
+            // We want the last non-empty value (lowest level selected)
+            for (let i = groupInputs.length - 1; i >= 0; i--) {
+                if (groupInputs[i].value) {
+                    valueToUpdate = groupInputs[i].value;
+                    break;
+                }
+            }
+        } else {
+            // Single input
+            valueToUpdate = groupInputs[0].value;
+        }
 
-    if (category) customFields[categoryFieldName] = category;
-    if (subCategory) customFields[subCategoryFieldName] = subCategory;
-    if (itemCategory) customFields[itemCategoryFieldName] = itemCategory;
-    
+        // Skip if value is empty (unless we want to clear, but usually we update with values)
+        if (valueToUpdate === '' || valueToUpdate === null || valueToUpdate === undefined) continue;
+
+        // Determine if standard or custom field
+        if (standardFields.includes(fieldName)) {
+            // Special handling for integers
+            if (['priority', 'status', 'group_id', 'responder_id', 'source'].includes(fieldName)) {
+                updateBody[fieldName] = parseInt(valueToUpdate, 10);
+            } else {
+                updateBody[fieldName] = valueToUpdate;
+            }
+        } else {
+            customFields[fieldName] = valueToUpdate;
+        }
+    }
+
     if (Object.keys(customFields).length > 0) {
       updateBody.custom_fields = customFields;
     }
 
     console.log('Updating ticket with:', updateBody);
 
-    // Use Data API (updateTicket) instead of Interface API
+    if (Object.keys(updateBody).length === 0) {
+       client.interface.trigger("showNotify", {
+        type: "warning",
+        message: "변경할 필드 값이 선택되지 않았습니다."
+      });
+      return;
+    }
+
+    // Use Data API (updateTicket)
     const response = await client.request.invokeTemplate("updateTicket", {
       context: {
         ticketId: ticketData.id
@@ -1220,9 +1536,6 @@ async function applyEditableFieldUpdates(messageId) {
         type: "success",
         message: "티켓이 성공적으로 업데이트되었습니다."
       });
-      
-      // Optional: Refresh the ticket page to show changes
-      // client.interface.trigger("refresh"); // This might reload the whole page including the app
     } else {
       throw new Error(`API Error: ${response.status} ${response.response}`);
     }
