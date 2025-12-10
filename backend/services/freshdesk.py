@@ -349,6 +349,16 @@ class FreshdeskClient:
         logger.info(f"Successfully fetched total {len(all_articles)} articles from all categories/folders")
         return all_articles
 
+    async def get_ticket_fields(self) -> List[Dict[str, Any]]:
+        """
+        Fetch all ticket fields
+
+        Returns:
+            List of ticket field dictionaries
+        """
+        logger.info("Fetching ticket fields")
+        return await self._make_request("GET", "ticket_fields")
+
     async def update_ticket_fields(
         self,
         ticket_id: str,

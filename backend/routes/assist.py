@@ -26,7 +26,7 @@ from backend.utils.chunking import TicketChunker
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/v1/assist", tags=["assist"])
+router = APIRouter(prefix="/api/assist", tags=["assist"])
 
 # Initialize services and repositories
 tenant_repo = TenantRepository()
@@ -39,6 +39,8 @@ orchestrator = OrchestratorService()
 class AnalyzeRequest(BaseModel):
     """Request model for ticket analysis."""
     ticket_id: str
+    subject: Optional[str] = None
+    description: Optional[str] = None
     stream_progress: bool = True
 
 
@@ -148,18 +150,26 @@ async def analyze_ticket(
         # Get tenant config
         config = await tenant_repo.get_config(tenant_id, platform)
 
-        # TODO: Fetch ticket data from Freshdesk
-        # For POC, mock ticket data
-        ticket_data = {
-            "id": request.ticket_id,
-            "subject": "Cannot login to dashboard",
-            "description": "User unable to access dashboard after password reset",
-            "conversations": [
-                {"body": "I tried resetting password but still can't login", "user_id": 1},
-                {"body": "Have you cleared browser cache?", "user_id": 2},
-                {"body": "Yes, still not working", "user_id": 1}
-            ]
-        }
+        # Use provided ticket data if available, otherwise fallback to mock
+        if request.subject and request.description:
+            ticket_data = {
+                "id": request.ticket_id,
+                "subject": request.subject,
+                "description": request.description,
+                "conversations": [] # Conversations not passed from frontend yet
+            }
+        else:
+            # For POC, mock ticket data if not provided
+            ticket_data = {
+                "id": request.ticket_id,
+                "subject": "Cannot login to dashboard",
+                "description": "User unable to access dashboard after password reset",
+                "conversations": [
+                    {"body": "I tried resetting password but still can't login", "user_id": 1},
+                    {"body": "Have you cleared browser cache?", "user_id": 2},
+                    {"body": "Yes, still not working", "user_id": 1}
+                ]
+            }
 
         if request.stream_progress:
             # Return SSE stream with orchestrator

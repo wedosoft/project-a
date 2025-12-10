@@ -15,6 +15,7 @@ import asyncio
 from backend.models.graph_state import AgentState
 from backend.config import get_settings
 from backend.utils.logger import get_logger
+from backend.services.freshdesk import FreshdeskClient
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -65,7 +66,7 @@ async def propose_solution(state: AgentState) -> AgentState:
                 for i, kb in enumerate(kb_procedures[:3])
             ])
 
-            prompt = f"""You are a customer support AI assistant. Generate a professional solution for this ticket.
+            prompt = f"""You are a customer support AI assistant. Analyze this ticket to understand the customer's intent and summarize the issue.
 
 Ticket Details:
 - Subject: {ticket_ctx.get('subject', 'N/A')}
@@ -78,21 +79,17 @@ Similar Cases:
 Knowledge Base Procedures:
 {kb_text or 'No KB articles found'}
 
-Generate a clear, actionable solution that:
-1. Addresses the customer's issue directly
-2. Uses information from similar cases and KB articles when relevant
-3. Provides step-by-step instructions if applicable
-4. Maintains a professional and empathetic tone
+Perform the following analysis:
+1. Summarize the ticket content concisely (1-2 sentences).
+2. Identify the customer's intent (e.g., Inquiry, Complaint, Technical Issue, Feature Request).
+3. Determine the sentiment (Positive, Neutral, Negative, Urgent).
 
-Also provide a confidence score (0.0-1.0) based on:
-- Availability of similar cases
-- Clarity of the issue
-- KB article relevance
+Also provide a confidence score (0.0-1.0) for your analysis.
 
 Response format:
-SOLUTION:
-[Your solution text here]
-
+SUMMARY: [Your summary here]
+INTENT: [Identified intent]
+SENTIMENT: [Identified sentiment]
 CONFIDENCE: [0.0-1.0]
 """
 
@@ -108,8 +105,8 @@ CONFIDENCE: [0.0-1.0]
                 model.generate_content,
                 prompt,
                 generation_config=genai.GenerationConfig(
-                    temperature=0.7,
-                    max_output_tokens=2048,  # Increased from 1024 to allow longer responses
+                    temperature=0.3, # Lower temperature for analysis
+                    max_output_tokens=1024,
                 ),
                 safety_settings=safety_settings
             )
@@ -133,17 +130,23 @@ CONFIDENCE: [0.0-1.0]
             result_text = response.text.strip()
 
             confidence = 0.5
-            draft = result_text
+            summary = ""
+            intent = ""
+            sentiment = ""
 
-            if "CONFIDENCE:" in result_text:
-                parts = result_text.split("CONFIDENCE:")
-                draft = parts[0].replace("SOLUTION:", "").strip()
-                try:
-                    confidence = float(parts[1].strip())
-                except:
-                    confidence = 0.5
-            else:
-                draft = result_text.replace("SOLUTION:", "").strip()
+            for line in result_text.split("\n"):
+                line = line.strip()
+                if line.startswith("SUMMARY:"):
+                    summary = line.split(":", 1)[1].strip()
+                elif line.startswith("INTENT:"):
+                    intent = line.split(":", 1)[1].strip()
+                elif line.startswith("SENTIMENT:"):
+                    sentiment = line.split(":", 1)[1].strip()
+                elif line.startswith("CONFIDENCE:"):
+                    try:
+                        confidence = float(line.split(":", 1)[1].strip())
+                    except:
+                        confidence = 0.5
 
             confidence = max(0.0, min(1.0, confidence))
 
@@ -166,14 +169,19 @@ CONFIDENCE: [0.0-1.0]
                 state["proposed_action"] = {}
 
             state["proposed_action"]["ticket_id"] = ticket_id
-            state["proposed_action"]["draft_response"] = draft
+            # Store analysis results instead of draft response
+            state["proposed_action"]["draft_response"] = "" # Clear draft response as it's not generated yet
+            state["proposed_action"]["summary"] = summary
+            state["proposed_action"]["intent"] = intent
+            state["proposed_action"]["sentiment"] = sentiment
+            
             state["proposed_action"]["similar_cases"] = similar_cases
             state["proposed_action"]["kb_references"] = kb_procedures  # Changed key name for consistency
             state["proposed_action"]["confidence"] = "high" if confidence >= 0.7 else ("medium" if confidence >= 0.4 else "low")
             state["proposed_action"]["mode"] = mode
-            state["proposed_action"]["reasoning"] = f"Generated based on {len(similar_cases)} similar cases and {len(kb_procedures)} KB articles with {confidence:.0%} confidence."
+            state["proposed_action"]["reasoning"] = f"Analyzed ticket with intent '{intent}' and sentiment '{sentiment}'. Confidence: {confidence:.0%}"
 
-            logger.info(f"Solution generated with confidence: {confidence:.2f}, mode: {mode}")
+            logger.info(f"Analysis complete: {intent}, {sentiment}, confidence: {confidence:.2f}")
             return state
 
         state = await asyncio.wait_for(_generate(), timeout=30.0)
@@ -192,6 +200,55 @@ CONFIDENCE: [0.0-1.0]
             state["errors"] = []
         state["errors"].append(f"Solution generation error: {str(e)}")
         return state
+
+
+def _build_hierarchy_context(fields: list) -> str:
+    """
+    Build a string representation of ticket field hierarchies from Freshdesk API response.
+    Focuses on MANDATORY DROPDOWN fields (required_for_agents=True and type=custom_dropdown/nested_field).
+    """
+    context = []
+    
+    for field in fields:
+        # Skip archived fields
+        if field.get('archived'):
+            continue
+            
+        # Filter: Include all dropdown types (removed strict required_for_agents check to ensure suggestions appear)
+        field_type = field.get('type', '')
+        is_dropdown = field_type in ['custom_dropdown', 'nested_field', 'default_dropdown']
+        
+        if is_dropdown and field.get('choices'):
+            label = field.get('label', 'Unknown Field')
+            name = field.get('name', 'unknown_name')
+            
+            context.append(f"Field: {label} (ID: {name})")
+            
+            def process_choices(choices, level=1):
+                lines = []
+                for i, choice in enumerate(choices):
+                    if i > 50: # Safety limit
+                        lines.append(f"{'  ' * level}- ... (more options)")
+                        break
+                        
+                    val = choice.get('value', '')
+                    sub_choices = choice.get('choices', [])
+                    
+                    prefix = "  " * level + "- "
+                    if sub_choices:
+                        lines.append(f"{prefix}{val}")
+                        lines.extend(process_choices(sub_choices, level + 1))
+                    else:
+                        lines.append(f"{prefix}{val}")
+                return lines
+
+            context.extend(process_choices(field['choices']))
+            context.append("") # Empty line between fields
+
+    if not context:
+        return "No mandatory dropdown fields found."
+        
+    return "AVAILABLE MANDATORY FIELD OPTIONS:\n" + "\n".join(context)
 
 
 async def propose_field_updates(state: AgentState) -> AgentState:
@@ -219,37 +276,57 @@ async def propose_field_updates(state: AgentState) -> AgentState:
             ticket_ctx = state.get("ticket_context", {})
             proposed = state.get("proposed_action", {})
 
-            draft_response = proposed.get("draft_response", "")
+            # Use summary and intent instead of draft_response
+            summary = proposed.get("summary", "")
+            intent = proposed.get("intent", "")
             confidence = proposed.get("confidence", 0.5)
 
             # Use only subject and summary for field updates (not full description to avoid token limits)
             description_summary = ticket_ctx.get('description', '')[:500] + "..." if len(ticket_ctx.get('description', '')) > 500 else ticket_ctx.get('description', 'N/A')
+
+            # Fetch dynamic ticket fields
+            freshdesk = FreshdeskClient()
+            try:
+                ticket_fields = await freshdesk.get_ticket_fields()
+                hierarchy_str = _build_hierarchy_context(ticket_fields)
+            except Exception as e:
+                logger.error(f"Failed to fetch ticket fields: {e}")
+                hierarchy_str = "Could not fetch dynamic hierarchy. Please propose based on standard fields."
 
             prompt = f"""You are a ticket management AI. Analyze this ticket and propose field updates.
 
 Ticket Details:
 - Subject: {ticket_ctx.get('subject', 'N/A')}
 - Description Summary: {description_summary}
-- Current Priority: {ticket_ctx.get('priority', 'N/A')}
-- Current Status: {ticket_ctx.get('status', 'N/A')}
 
-Proposed Solution:
-{draft_response[:300]}
+Analysis:
+- Summary: {summary}
+- Intent: {intent}
 
 Solution Confidence: {confidence:.2f}
 
-Based on the ticket analysis, propose appropriate field updates:
-- Priority: [low/medium/high/urgent]
-- Status: [open/pending/resolved/closed]
+Based on the ticket analysis, propose appropriate field updates for MANDATORY DROPDOWN FIELDS.
+
+IMPORTANT RULES:
+1. **Scope**: Only propose updates for the mandatory dropdown fields listed below. Do NOT propose changes to Priority, Status, Group, or Agent.
+2. **Tags**: You MAY propose relevant tags to help classify the ticket.
+3. **Hierarchy**: If a field has a hierarchy (e.g. Category -> Sub Category), ensure your proposal forms a valid chain.
+
+VALID CHOICES:
+
+{hierarchy_str}
+
+Fields to propose:
 - Tags: [comma-separated relevant tags]
+- [Any Mandatory Field Name from above]: [Valid Value]
 
 Also provide a brief justification for each update.
 
 Response format:
-PRIORITY: [value]
-STATUS: [value]
 TAGS: [tag1, tag2, tag3]
-JUSTIFICATION: [Brief explanation of the updates]
+[FIELD_NAME]: [value]
+REASON_[FIELD_NAME]: [Reason]
+JUSTIFICATION: [Overall summary of changes]
 """
 
             # Configure safety settings
@@ -265,7 +342,7 @@ JUSTIFICATION: [Brief explanation of the updates]
                 prompt,
                 generation_config=genai.GenerationConfig(
                     temperature=0.3,
-                    max_output_tokens=1024,  # Increased from 512 to allow longer field update justifications
+                    max_output_tokens=1024,
                 ),
                 safety_settings=safety_settings
             )
@@ -290,17 +367,51 @@ JUSTIFICATION: [Brief explanation of the updates]
 
             updates = {}
             justification = ""
+            reasons = {}
+
+            # Mapping constants
+            PRIORITY_MAP = {
+                "low": 1,
+                "medium": 2,
+                "high": 3,
+                "urgent": 4
+            }
+
+            STATUS_MAP = {
+                "open": 2,
+                "pending": 3,
+                "resolved": 4,
+                "closed": 5
+            }
 
             for line in result_text.split("\n"):
                 line = line.strip()
-                if line.startswith("PRIORITY:"):
-                    updates["priority"] = line.split(":", 1)[1].strip().lower()
-                elif line.startswith("STATUS:"):
-                    updates["status"] = line.split(":", 1)[1].strip().lower()
-                elif line.startswith("TAGS:"):
+                upper_line = line.upper()
+                
+                if upper_line.startswith("PRIORITY:"):
+                    p_str = line.split(":", 1)[1].strip().lower()
+                    updates["priority"] = PRIORITY_MAP.get(p_str, 2)  # Default to Medium
+                    updates["priority_label"] = p_str.capitalize()
+                elif upper_line.startswith("REASON_PRIORITY:"):
+                    reasons["priority"] = line.split(":", 1)[1].strip()
+                elif upper_line.startswith("STATUS:"):
+                    s_str = line.split(":", 1)[1].strip().lower()
+                    updates["status"] = STATUS_MAP.get(s_str, 2)  # Default to Open
+                    updates["status_label"] = s_str.capitalize()
+                elif upper_line.startswith("REASON_STATUS:"):
+                    reasons["status"] = line.split(":", 1)[1].strip()
+                elif upper_line.startswith("TAGS:"):
                     tags_str = line.split(":", 1)[1].strip()
                     updates["tags"] = [t.strip() for t in tags_str.split(",") if t.strip()]
-                elif line.startswith("JUSTIFICATION:"):
+                elif upper_line.startswith("CATEGORY:"):
+                    updates["category"] = line.split(":", 1)[1].strip()
+                elif upper_line.startswith("SUB_CATEGORY:") or upper_line.startswith("SUB CATEGORY:"):
+                    updates["sub_category"] = line.split(":", 1)[1].strip()
+                elif upper_line.startswith("ITEM_CATEGORY:") or upper_line.startswith("ITEM CATEGORY:"):
+                    updates["item_category"] = line.split(":", 1)[1].strip()
+                elif upper_line.startswith("REASON_CATEGORY:"):
+                    reasons["category"] = line.split(":", 1)[1].strip()
+                elif upper_line.startswith("JUSTIFICATION:"):
                     justification = line.split(":", 1)[1].strip()
 
             if "proposed_action" not in state:
@@ -308,6 +419,7 @@ JUSTIFICATION: [Brief explanation of the updates]
 
             state["proposed_action"]["proposed_field_updates"] = updates
             state["proposed_action"]["justification"] = justification
+            state["proposed_action"]["field_reasons"] = reasons
 
             logger.info(f"Field updates proposed: {updates}")
             return state

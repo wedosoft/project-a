@@ -246,12 +246,16 @@ class OrchestratorService:
         ticket_context = state.get("ticket_context", {})
 
         # Build proposal data
+        reasoning = proposed_action.get("reasoning", "")
+        justification = proposed_action.get("justification", "")
+        combined_reasoning = f"{reasoning}\n\n[Field Updates]: {justification}".strip() if justification else reasoning
+
         proposal_data = {
             "tenant_id": tenant_id,
             "ticket_id": str(proposed_action.get("ticket_id", ticket_context.get("id", "unknown"))),
             "draft_response": proposed_action.get("draft_response", ""),
             "field_updates": proposed_action.get("proposed_field_updates", {}),
-            "reasoning": proposed_action.get("reasoning", ""),
+            "reasoning": combined_reasoning,
             "confidence": proposed_action.get("confidence", "medium"),
             "mode": proposed_action.get("mode", "direct"),
             "similar_cases": proposed_action.get("similar_cases", []),

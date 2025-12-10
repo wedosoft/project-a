@@ -12,6 +12,7 @@
 
 let client = null;
 let ticketData = null;
+let ticketFields = null; // Global ticket fields definition
 let sessionId = null;
 let chatHistory = [];
 let isLoading = false;
@@ -62,6 +63,7 @@ document.onreadystatechange = function() {
         cacheElements();
         setupEventListeners();
         await loadTicketData();
+        await loadTicketFields(); // Load ticket fields for dropdowns
         await loadStatus();
         await createSession();
         updateStatus('ready', '준비 완료');
@@ -85,6 +87,7 @@ function cacheElements() {
   elements.chatInput = document.getElementById('chatInput');
   elements.sendBtn = document.getElementById('sendBtn');
   elements.newChatBtn = document.getElementById('newChatBtn');
+  elements.analyzeBtn = document.getElementById('analyzeBtn');
   elements.sourceModal = document.getElementById('sourceModal');
   elements.modalTitle = document.getElementById('modalTitle');
   elements.modalContent = document.getElementById('modalContent');
@@ -105,6 +108,7 @@ function setupEventListeners() {
     }
   });
   elements.newChatBtn.addEventListener('click', handleNewChat);
+  elements.analyzeBtn.addEventListener('click', handleAnalyzeTicket);
   elements.closeModalBtn.addEventListener('click', closeModal);
   elements.sourceModal.addEventListener('click', (e) => {
     if (e.target === elements.sourceModal) closeModal();
@@ -136,24 +140,45 @@ async function apiCall(method, path, body = null) {
     options.body = JSON.stringify(body);
   }
   
-  try {
-    const response = await client.request.invokeTemplate(templateName, options);
-    console.log(`API ${method} ${path}:`, response.status);
-    
-    if (response.status >= 200 && response.status < 300) {
-      // 응답이 JSON인지 확인
-      const responseText = response.response;
-      if (responseText && responseText.trim().startsWith('{')) {
-        return JSON.parse(responseText);
-      } else {
-        console.error('응답이 JSON이 아님:', responseText?.substring(0, 100));
-        throw new Error('서버 응답이 올바르지 않습니다.');
+  const MAX_RETRIES = 3;
+  
+  for (let i = 0; i < MAX_RETRIES; i++) {
+    try {
+      const response = await client.request.invokeTemplate(templateName, options);
+      console.log(`API ${method} ${path} (Attempt ${i + 1}):`, response.status);
+      
+      if (response.status >= 200 && response.status < 300) {
+        // 응답이 JSON인지 확인
+        const responseText = response.response;
+        if (responseText && responseText.trim().startsWith('{')) {
+          return JSON.parse(responseText);
+        } else {
+          console.error('응답이 JSON이 아님:', responseText?.substring(0, 100));
+          throw new Error('서버 응답이 올바르지 않습니다.');
+        }
       }
+      
+      // 502, 503, 504 에러인 경우 재시도
+      if ([502, 503, 504].includes(response.status)) {
+        if (i < MAX_RETRIES - 1) {
+          console.warn(`서버 오류(${response.status}), ${i + 1}초 후 재시도합니다... (${i + 1}/${MAX_RETRIES})`);
+          await new Promise(resolve => setTimeout(resolve, (i + 1) * 1000));
+          continue;
+        }
+      }
+      
+      throw new Error(`API 오류: ${response.status}`);
+    } catch (error) {
+      // 마지막 시도라면 에러 던지기
+      if (i === MAX_RETRIES - 1) {
+        console.error(`API 호출 최종 실패 (${method} ${path}):`, error);
+        throw error;
+      }
+      
+      // 에러 로그 출력 후 재시도
+      console.warn(`API 호출 중 예외 발생, 재시도합니다... (${i + 1}/${MAX_RETRIES})`, error);
+      await new Promise(resolve => setTimeout(resolve, (i + 1) * 1000));
     }
-    throw new Error(`API 오류: ${response.status}`);
-  } catch (error) {
-    console.error(`API 호출 실패 (${method} ${path}):`, error);
-    throw error;
   }
 }
 
@@ -222,6 +247,21 @@ async function loadTicketData() {
 
   elements.headerTitle.textContent = `티켓 #${ticketId}`;
   console.log('티켓 로드 완료:', ticketData);
+}
+
+async function loadTicketFields() {
+  try {
+    const response = await client.request.invokeTemplate("getTicketFields", {});
+    
+    if (response.status === 200) {
+      ticketFields = JSON.parse(response.response);
+      console.log('Ticket Fields Loaded:', ticketFields);
+    } else {
+      console.error('Failed to load ticket fields:', response);
+    }
+  } catch (error) {
+    console.error('Error loading ticket fields:', error);
+  }
 }
 
 async function fetchAllConversations(ticketId) {
@@ -629,7 +669,7 @@ function addErrorMessage(errorText) {
   return messageId;
 }
 
-function addLoadingMessage() {
+function addLoadingMessage(text = '검색 중...') {
   const messageId = 'loading-' + Date.now();
   const messageDiv = document.createElement('div');
   messageDiv.id = messageId;
@@ -643,7 +683,7 @@ function addLoadingMessage() {
           <span class="w-2 h-2 bg-gray-300 rounded-full animate-bounce" style="animation-delay: 150ms"></span>
           <span class="w-2 h-2 bg-gray-300 rounded-full animate-bounce" style="animation-delay: 300ms"></span>
         </div>
-        <span class="text-sm text-gray-400">검색 중...</span>
+        <span class="text-sm text-gray-400">${escapeHtml(text)}</span>
       </div>
     </div>
   `;
@@ -774,3 +814,427 @@ function closeModal() {
     elements.sourceModal.classList.add('hidden');
   }
 }
+
+// =============================================================================
+// Ticket Analysis Functions
+// =============================================================================
+
+async function handleAnalyzeTicket() {
+  if (isLoading || !ticketData) return;
+  
+  setLoading(true);
+  const loadingId = addLoadingMessage("티켓을 분석하고 있습니다...");
+  
+  try {
+    // Call backend analysis API
+    // Fix: Ensure ticket_id is a string to avoid 422 validation error
+    // Fix: Correct API path (removed /v1)
+    const response = await apiCall('POST', 'api/assist/analyze', {
+      ticket_id: String(ticketData.id),
+      subject: ticketData.subject,
+      description: ticketData.description_text,
+      stream_progress: false
+    });
+    
+    console.log('Analyze response:', response); // Debug logging
+
+    removeMessage(loadingId);
+    
+    if (response && response.proposal) {
+      // 1. Show Analysis Summary
+      const summary = response.proposal.summary;
+      const intent = response.proposal.intent;
+      const sentiment = response.proposal.sentiment;
+      
+      let analysisHtml = `**[티켓 분석 결과]**\n\n`;
+      if (summary) analysisHtml += `**요약:** ${summary}\n`;
+      if (intent) analysisHtml += `**의도:** ${intent}\n`;
+      if (sentiment) analysisHtml += `**감정:** ${sentiment}\n`;
+      
+      addMessage('assistant', analysisHtml);
+
+      // 2. Render Editable Field Suggestions
+      renderFieldSuggestions(response.proposal);
+      
+    } else {
+      addErrorMessage("분석 결과를 받을 수 없습니다.");
+    }
+    
+  } catch (error) {
+    console.error('티켓 분석 실패:', error);
+    removeMessage(loadingId);
+    addErrorMessage(`분석 오류: ${error.message}`);
+  } finally {
+    setLoading(false);
+  }
+}
+
+function renderFieldSuggestions(proposal) {
+  // Fix: Backend returns 'field_updates', not 'proposed_field_updates'
+  const updates = proposal.field_updates || proposal.fieldUpdates || proposal.proposed_field_updates || proposal.proposedFieldUpdates || {};
+  const reasons = proposal.field_reasons || {};
+
+  const messageId = 'msg-' + Date.now();
+  const messageDiv = document.createElement('div');
+  messageDiv.className = 'flex justify-start message-enter';
+  messageDiv.id = messageId;
+  
+  let html = `
+    <div class="max-w-[95%] bg-white border border-gray-200 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-sm font-bold text-gray-800 flex items-center gap-2">
+          <svg class="w-4 h-4 text-app-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+          </svg>
+          필드 업데이트 제안
+        </h3>
+        <span class="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium">AI 분석</span>
+      </div>
+      
+      <div class="mb-4 overflow-x-auto">
+        <table class="w-full text-sm text-left">
+          <thead class="text-xs text-gray-500 bg-gray-50 uppercase">
+            <tr>
+              <th class="px-2 py-2 w-20">필드</th>
+              <th class="px-2 py-2 w-24">현재 값</th>
+              <th class="px-2 py-2">제안 값 (수정 가능)</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+  `;
+  
+  const renderRow = (label, currentVal, inputHtml, reason) => `
+    <tr>
+      <td class="px-2 py-2 font-medium text-gray-600">
+        ${label}
+        ${reason ? `<div class="group relative inline-block ml-1">
+          <svg class="w-3 h-3 text-gray-400 cursor-help" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+          <div class="invisible group-hover:visible absolute z-10 w-48 p-2 mt-1 text-xs text-white bg-gray-800 rounded shadow-lg -left-2">
+            ${escapeHtml(reason)}
+          </div>
+        </div>` : ''}
+      </td>
+      <td class="px-2 py-2 text-gray-400 text-xs">${currentVal || '-'}</td>
+      <td class="px-2 py-2">${inputHtml}</td>
+    </tr>
+  `;
+
+  // --- Hierarchy Logic ---
+  // Find the root field (Category)
+  let rootField = null;
+  if (ticketFields) {
+    const activeFields = ticketFields.filter(f => !f.archived);
+    // Try to find a field with nested choices (depth > 1)
+    // Note: Freshdesk API might return choices as Object for nested fields
+    rootField = activeFields.find(f => {
+       if (!f.choices) return false;
+       // Check if choices is object with keys (nested) or array with sub-choices
+       if (Array.isArray(f.choices)) {
+          return f.choices.some(c => c.choices && c.choices.length > 0);
+       } else if (typeof f.choices === 'object') {
+          // If object, it's likely nested
+          return Object.keys(f.choices).length > 0;
+       }
+       return false;
+    });
+    
+    if (!rootField) {
+      rootField = activeFields.find(f => f.name === 'category' || f.label === 'Category');
+    }
+  }
+
+  const rawRootChoices = rootField ? rootField.choices : [];
+  
+  // Helper to normalize choices to Array structure: [{ value: '...', choices: [...] }]
+  function normalizeChoices(choices) {
+    if (!choices) return [];
+    if (Array.isArray(choices)) {
+      if (choices.length > 0 && typeof choices[0] === 'string') {
+         return choices.map(c => ({ value: c, choices: [] }));
+      }
+      return choices.map(c => ({ value: c.value, choices: normalizeChoices(c.choices) }));
+    } else if (typeof choices === 'object') {
+      return Object.keys(choices).map(key => ({
+        value: key,
+        choices: normalizeChoices(choices[key])
+      }));
+    }
+    return [];
+  }
+
+  const rootChoices = normalizeChoices(rawRootChoices);
+  
+  // Flatten choices for reverse lookup
+  const flatChoices = {};
+  function flatten(choices, path) {
+    choices.forEach(c => {
+      const currentPath = [...path, c.value];
+      flatChoices[c.value] = currentPath;
+      if (c.choices && c.choices.length > 0) flatten(c.choices, currentPath);
+    });
+  }
+  flatten(rootChoices, []);
+  
+  // Store normalized choices for helpers
+  window[`choices-${messageId}`] = rootChoices;
+  window[`flatChoices-${messageId}`] = flatChoices;
+
+  // Initial Values
+  const categoryValue = updates.category || '';
+  const subCategoryValue = updates.sub_category || '';
+  const itemCategoryValue = updates.item_category || '';
+
+  // Category Input
+  let categoryOptionsHtml = '<option value="">선택하세요</option>';
+  rootChoices.forEach(c => {
+    categoryOptionsHtml += `<option value="${c.value}" ${c.value === categoryValue ? 'selected' : ''}>${c.value}</option>`;
+  });
+  const categoryInput = `
+    <select id="input-category-${messageId}" onchange="updateDependentFields('${messageId}', 'category')" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1">
+      ${categoryOptionsHtml}
+    </select>
+  `;
+  html += renderRow('카테고리', ticketData.category || '-', categoryInput, reasons.category);
+
+  // Sub Category Input
+  const selectedCatObj = rootChoices.find(c => c.value === categoryValue);
+  const subChoices = selectedCatObj ? selectedCatObj.choices : [];
+  
+  let subCategoryOptionsHtml = '<option value="">선택하세요</option>';
+  if (subChoices) {
+    subChoices.forEach(c => {
+      subCategoryOptionsHtml += `<option value="${c.value}" ${c.value === subCategoryValue ? 'selected' : ''}>${c.value}</option>`;
+    });
+  }
+  const subCategoryInput = `
+    <select id="input-sub-category-${messageId}" onchange="updateDependentFields('${messageId}', 'sub_category')" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1" ${!categoryValue ? 'disabled' : ''}>
+      ${subCategoryOptionsHtml}
+    </select>
+  `;
+  html += renderRow('하위 카테고리', ticketData.sub_category || '-', subCategoryInput);
+
+  // Item Category Input (Reverse Lookup Enabled)
+  const selectedSubObj = subChoices ? subChoices.find(c => c.value === subCategoryValue) : null;
+  const itemChoices = selectedSubObj ? selectedSubObj.choices : [];
+  
+  let itemOptionsHtml = '<option value="">선택하세요</option>';
+  
+  // If no category selected, show ALL items (flattened) to enable reverse lookup
+  if (!categoryValue) {
+     const allItems = [];
+     function collectLeaves(choices) {
+        choices.forEach(c => {
+           if (!c.choices || c.choices.length === 0) allItems.push(c.value);
+           else collectLeaves(c.choices);
+        });
+     }
+     collectLeaves(rootChoices);
+     const uniqueItems = [...new Set(allItems)];
+     // Limit to 200 items to prevent performance issues if list is huge
+     uniqueItems.sort().slice(0, 200).forEach(val => {
+        itemOptionsHtml += `<option value="${val}">${val}</option>`;
+     });
+  } else {
+     if (itemChoices) {
+        itemChoices.forEach(c => {
+           itemOptionsHtml += `<option value="${c.value}" ${c.value === itemCategoryValue ? 'selected' : ''}>${c.value}</option>`;
+        });
+     }
+  }
+
+  const itemCategoryInput = `
+    <select id="input-item-category-${messageId}" onchange="updateParentFields('${messageId}')" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1" ${(!categoryValue && rootChoices.length === 0) ? 'disabled' : ''}>
+      ${itemOptionsHtml}
+    </select>
+  `;
+  html += renderRow('아이템', ticketData.item_category || '-', itemCategoryInput);
+  
+  html += `
+          </tbody>
+        </table>
+      </div>
+  `;
+
+  // Justification
+  const justification = proposal.justification || proposal.reasoning;
+  if (justification) {
+    html += `
+      <div class="mb-3 px-2 py-2 bg-gray-50 rounded border border-gray-100">
+        <p class="text-xs text-gray-600"><span class="font-semibold">AI 근거:</span> ${justification}</p>
+      </div>
+    `;
+  }
+  
+  html += `
+      <button onclick="applyEditableFieldUpdates('${messageId}')" class="w-full py-2 bg-app-primary hover:bg-app-primary-hover text-white text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+        </svg>
+        변경 사항 적용하기
+      </button>
+    </div>
+  `;
+  
+  messageDiv.innerHTML = html;
+  elements.chatMessages.appendChild(messageDiv);
+  scrollToBottom();
+}
+
+// Update dependent fields (Top-Down)
+window.updateDependentFields = function(messageId, level) {
+  const categorySelect = document.getElementById(`input-category-${messageId}`);
+  const subCategorySelect = document.getElementById(`input-sub-category-${messageId}`);
+  const itemCategorySelect = document.getElementById(`input-item-category-${messageId}`);
+  
+  const choices = window[`choices-${messageId}`];
+  if (!choices) return;
+
+  const selectedCategory = categorySelect.value;
+  
+  if (level === 'category') {
+    // Reset Sub & Item
+    subCategorySelect.innerHTML = '<option value="">선택하세요</option>';
+    itemCategorySelect.innerHTML = '<option value="">선택하세요</option>';
+    subCategorySelect.disabled = true;
+    itemCategorySelect.disabled = true;
+    
+    if (selectedCategory) {
+      const catObj = choices.find(c => c.value === selectedCategory);
+      if (catObj && catObj.choices && catObj.choices.length > 0) {
+        subCategorySelect.disabled = false;
+        catObj.choices.forEach(c => {
+          const option = document.createElement('option');
+          option.value = c.value;
+          option.textContent = c.value;
+          subCategorySelect.appendChild(option);
+        });
+      }
+    }
+  } else if (level === 'sub_category') {
+    // Reset Item
+    itemCategorySelect.innerHTML = '<option value="">선택하세요</option>';
+    itemCategorySelect.disabled = true;
+    
+    const selectedSub = subCategorySelect.value;
+    if (selectedCategory && selectedSub) {
+      const catObj = choices.find(c => c.value === selectedCategory);
+      const subObj = catObj ? catObj.choices.find(c => c.value === selectedSub) : null;
+      
+      if (subObj && subObj.choices && subObj.choices.length > 0) {
+        itemCategorySelect.disabled = false;
+        subObj.choices.forEach(c => {
+          const option = document.createElement('option');
+          option.value = c.value;
+          option.textContent = c.value;
+          itemCategorySelect.appendChild(option);
+        });
+      }
+    }
+  }
+};
+
+// Update parent fields (Bottom-Up / Reverse Hierarchy)
+window.updateParentFields = function(messageId) {
+  const itemSelect = document.getElementById(`input-item-category-${messageId}`);
+  const selectedItem = itemSelect.value;
+  
+  if (!selectedItem) return;
+  
+  const flatChoices = window[`flatChoices-${messageId}`];
+  const path = flatChoices ? flatChoices[selectedItem] : null;
+  
+  if (path && path.length >= 2) {
+     // path is [Category, SubCategory, Item]
+     const categorySelect = document.getElementById(`input-category-${messageId}`);
+     const subCategorySelect = document.getElementById(`input-sub-category-${messageId}`);
+     
+     // 1. Set Category
+     if (categorySelect.value !== path[0]) {
+        categorySelect.value = path[0];
+        // Trigger Top-Down update to populate SubCategory options
+        window.updateDependentFields(messageId, 'category');
+     }
+     
+     // 2. Set Sub Category
+     if (path.length > 2) {
+        if (subCategorySelect.value !== path[1]) {
+           subCategorySelect.value = path[1];
+           // Trigger Top-Down update to populate Item options
+           window.updateDependentFields(messageId, 'sub_category');
+        }
+     }
+     
+     // 3. Ensure Item is still selected
+     itemSelect.value = selectedItem;
+  }
+};
+
+async function applyEditableFieldUpdates(messageId) {
+  if (!client || !ticketData) return;
+  
+  try {
+    const category = document.getElementById(`input-category-${messageId}`).value;
+    const subCategory = document.getElementById(`input-sub-category-${messageId}`).value;
+    const itemCategory = document.getElementById(`input-item-category-${messageId}`).value;
+
+    // Build update payload
+    const updateBody = {};
+    
+    const customFields = {};
+
+    // Helper to find field name by label
+    const findFieldName = (labels) => {
+      if (!ticketFields) return null;
+      const field = ticketFields.find(f => labels.includes(f.label));
+      return field ? field.name : null;
+    };
+
+    // Try to find field names for Category, Sub Category, Item
+    // Adjust these labels based on your actual Freshdesk configuration
+    const categoryFieldName = findFieldName(['Category', '카테고리', '대분류']) || 'category';
+    const subCategoryFieldName = findFieldName(['Sub Category', '하위 카테고리', '중분류']) || 'sub_category';
+    const itemCategoryFieldName = findFieldName(['Item Category', 'Item', '아이템', '소분류']) || 'item_category';
+
+    console.log('Mapped Field Names:', { categoryFieldName, subCategoryFieldName, itemCategoryFieldName });
+
+    if (category) customFields[categoryFieldName] = category;
+    if (subCategory) customFields[subCategoryFieldName] = subCategory;
+    if (itemCategory) customFields[itemCategoryFieldName] = itemCategory;
+    
+    if (Object.keys(customFields).length > 0) {
+      updateBody.custom_fields = customFields;
+    }
+
+    console.log('Updating ticket with:', updateBody);
+
+    // Use Data API (updateTicket) instead of Interface API
+    const response = await client.request.invokeTemplate("updateTicket", {
+      context: {
+        ticketId: ticketData.id
+      },
+      body: JSON.stringify(updateBody)
+    });
+
+    if (response.status === 200) {
+      client.interface.trigger("showNotify", {
+        type: "success",
+        message: "티켓이 성공적으로 업데이트되었습니다."
+      });
+      
+      // Optional: Refresh the ticket page to show changes
+      // client.interface.trigger("refresh"); // This might reload the whole page including the app
+    } else {
+      throw new Error(`API Error: ${response.status} ${response.response}`);
+    }
+    
+  } catch (error) {
+    console.error("필드 업데이트 실패:", error);
+    client.interface.trigger("showNotify", {
+      type: "danger",
+      message: "필드 업데이트 중 오류가 발생했습니다: " + error.message
+    });
+  }
+}
+
+// Expose applyEditableFieldUpdates to global scope for onclick handler
+window.applyEditableFieldUpdates = applyEditableFieldUpdates;
