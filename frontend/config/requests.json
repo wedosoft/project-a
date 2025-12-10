@@ -11,6 +11,18 @@
       }
     }
   },
+  "getTicketConversations": {
+    "schema": {
+      "method": "GET",
+      "protocol": "https",
+      "host": "<%= iparam.freshdesk_domain %>",
+      "path": "/api/v2/tickets/<%= context.ticketId %>/conversations?page=<%= context.page %>&per_page=30",
+      "headers": {
+        "Authorization": "Basic <%= encode(iparam.freshdesk_api_key + ':X') %>",
+        "Content-Type": "application/json"
+      }
+    }
+  },
   "backendApiPost": {
     "schema": {
       "method": "POST",

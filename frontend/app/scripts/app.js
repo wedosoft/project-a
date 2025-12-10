@@ -182,8 +182,8 @@ async function loadStatus() {
   // 소스 라벨 매핑
   sourceLabels = {
     tickets: '🎫 티켓',
-    articles: '📄 KB 문서',
-    common: '📦 공통 문서'
+    articles: '📄 헬프센터',
+    common: '📦 제품 매뉴얼'
   };
   
   renderSourceSelector();
@@ -206,8 +206,86 @@ async function loadTicketData() {
   }
   
   ticketData = JSON.parse(response.response);
+  
+  // 대화 내역 페이지네이션 처리 (30개 이상일 경우)
+  try {
+    const allConversations = await fetchAllConversations(ticketId);
+    // 기존 conversations(첫 페이지)보다 많이 가져왔다면 교체
+    if (allConversations.length > (ticketData.conversations?.length || 0)) {
+      ticketData.conversations = allConversations;
+      console.log(`전체 대화 내역 로드 완료: ${allConversations.length}개`);
+    }
+  } catch (error) {
+    console.error('대화 내역 추가 로드 실패:', error);
+    // 실패해도 기본 로드된 데이터(첫 페이지)는 유지
+  }
+
   elements.headerTitle.textContent = `티켓 #${ticketId}`;
   console.log('티켓 로드 완료:', ticketData);
+}
+
+async function fetchAllConversations(ticketId) {
+  let conversations = [];
+  let page = 1;
+  let hasMore = true;
+  const PER_PAGE = 30;
+
+  while (hasMore) {
+    try {
+      console.log(`Fetching conversations page ${page}...`);
+      const response = await client.request.invokeTemplate('getTicketConversations', {
+        context: { 
+          ticketId: String(ticketId), 
+          page: String(page) 
+        }
+      });
+
+      if (response.status !== 200) {
+        console.warn(`대화 페이지 ${page} 로드 실패: ${response.status}`, response);
+        // 404나 400이면 더 이상 없는 것으로 간주하고 중단
+        if (response.status === 404 || response.status === 400) {
+            hasMore = false;
+        }
+        break;
+      }
+
+      const data = JSON.parse(response.response);
+      if (Array.isArray(data) && data.length > 0) {
+        console.log(`Page ${page} loaded: ${data.length} conversations`);
+        conversations = conversations.concat(data);
+        
+        if (data.length < PER_PAGE) {
+          hasMore = false;
+        } else {
+          page++;
+        }
+      } else {
+        hasMore = false;
+      }
+      
+      // 안전장치: 최대 20페이지 (600개)
+      if (page > 20) hasMore = false;
+      
+    } catch (e) {
+      console.error(`대화 페이지 ${page} 처리 중 오류:`, e);
+      try {
+        // 에러 객체 상세 출력
+        const errorDetails = {};
+        Object.getOwnPropertyNames(e).forEach(key => {
+            errorDetails[key] = e[key];
+        });
+        console.error('Error details:', JSON.stringify(errorDetails, null, 2));
+      } catch (jsonError) {
+        console.error('Error stringify failed', jsonError);
+      }
+      break;
+    }
+  }
+  
+  // 날짜순 정렬 (오래된 순) - 맥락 파악을 위해 시간순 정렬 필수
+  conversations.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  
+  return conversations;
 }
 
 // =============================================================================
@@ -217,45 +295,59 @@ async function loadTicketData() {
 function renderSourceSelector() {
   if (!elements.sourceSelector) return;
   
-  // 선택된 소스가 없으면 첫 번째 소스 선택
+  // 선택된 소스가 없으면 첫 번째 소스 선택 (기본값)
   if (!selectedSources.length && availableSources.length) {
     selectedSources = [availableSources[0]];
   }
   
-  const selectedSource = selectedSources[0] || '';
-  
   elements.sourceSelector.innerHTML = `
     <div class="flex items-center justify-between mb-2">
-      <span class="text-xs font-medium text-gray-600">검색 소스</span>
+      <span class="text-xs font-medium text-gray-600">검색 범위 (다중 선택 가능)</span>
     </div>
     <div class="flex flex-wrap gap-2" id="sourceButtons">
       ${availableSources.map(source => {
-        const isSelected = source === selectedSource;
+        const isSelected = selectedSources.includes(source);
         const label = sourceLabels[source] || source;
         return `
-          <label class="cursor-pointer">
-            <input type="radio" name="searchSource" value="${source}" ${isSelected ? 'checked' : ''} class="sr-only">
-            <span class="source-btn px-3 py-1.5 text-xs rounded-full border transition-all inline-block ${
+          <label class="cursor-pointer select-none">
+            <input type="checkbox" name="searchSource" value="${source}" ${isSelected ? 'checked' : ''} class="sr-only">
+            <span class="source-btn px-3 py-1.5 text-xs rounded-full border transition-all inline-flex items-center gap-1 ${
               isSelected 
-                ? 'bg-blue-500 text-white border-blue-500' 
-                : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'
-            }">${label}</span>
+                ? 'bg-blue-500 text-white border-blue-500 shadow-sm' 
+                : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400 hover:bg-gray-50'
+            }">
+              ${isSelected ? '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>' : ''}
+              ${label}
+            </span>
           </label>
         `;
       }).join('')}
     </div>
   `;
   
-  // 라디오 버튼 이벤트 연결
-  document.querySelectorAll('input[name="searchSource"]').forEach(radio => {
-    radio.addEventListener('change', (e) => {
-      selectSource(e.target.value);
+  // 체크박스 이벤트 연결
+  document.querySelectorAll('input[name="searchSource"]').forEach(checkbox => {
+    checkbox.addEventListener('change', (e) => {
+      toggleSource(e.target.value);
     });
   });
 }
 
-function selectSource(source) {
-  selectedSources = [source];
+function toggleSource(source) {
+  const index = selectedSources.indexOf(source);
+  if (index === -1) {
+    selectedSources.push(source);
+  } else {
+    // 최소 1개는 선택되어야 함
+    if (selectedSources.length > 1) {
+      selectedSources.splice(index, 1);
+    } else {
+      // 마지막 하나는 해제 불가 (알림 또는 무시)
+      // UI 재렌더링으로 체크박스 상태 복구
+      renderSourceSelector();
+      return;
+    }
+  }
   renderSourceSelector();
 }
 
@@ -271,8 +363,13 @@ async function handleSubmit(e) {
 
   // 사용자 메시지 추가
   addMessage('user', message);
-  elements.chatInput.value = '';
-  handleInputChange();
+  
+  // 한글 입력 시 마지막 글자 중복 문제 해결 (IME Composition)
+  // 이벤트 루프가 끝난 후 입력창을 비워야 브라우저의 IME 확정 동작과 충돌하지 않음
+  setTimeout(() => {
+    elements.chatInput.value = '';
+    handleInputChange();
+  }, 0);
 
   // 로딩 표시
   setLoading(true);
@@ -307,8 +404,47 @@ async function sendChat(message) {
   if (selectedSources.length > 0) {
     payload.sources = selectedSources;
   }
+
+  // 티켓 컨텍스트 추가
+  if (ticketData) {
+    // 페이로드 크기 최적화를 위해 필수 데이터만 추출
+    const minimalTicket = minimizeTicketData(ticketData);
+    payload.context = {
+      ticket: minimalTicket
+    };
+    const convCount = minimalTicket.conversations ? minimalTicket.conversations.length : 0;
+    console.log(`Sending chat with ticket context: ID=${minimalTicket.id}, Conversations=${convCount}`);
+  }
   
   return await apiCall('POST', 'api/chat', payload);
+}
+
+function minimizeTicketData(original) {
+  if (!original) return null;
+  
+  // 필수 필드만 추출
+  const minimal = {
+    id: original.id,
+    subject: original.subject,
+    description_text: original.description_text,
+    status: original.status,
+    priority: original.priority,
+    created_at: original.created_at,
+    updated_at: original.updated_at
+  };
+  
+  // 대화 내역 최소화 (HTML 태그 제거 등은 백엔드에서 처리하더라도, 불필요한 메타데이터는 여기서 제거)
+  if (original.conversations && Array.isArray(original.conversations)) {
+    minimal.conversations = original.conversations.map(c => ({
+      body_text: c.body_text,
+      incoming: c.incoming,
+      private: c.private,
+      created_at: c.created_at,
+      user_id: c.user_id
+    }));
+  }
+  
+  return minimal;
 }
 
 function handleInputChange() {
@@ -570,23 +706,71 @@ function scrollToBottom() {
 }
 
 // =============================================================================
-// Modal - FDK showModal (기존 방식)
+// Modal - Custom Implementation (FDK showModal 대체)
 // =============================================================================
 
-async function openModal(title, content, uri) {
+function openModal(title, content, uri) {
   console.log('openModal 호출:', { title, content, uri });
-  try {
-    await client.interface.trigger("showModal", {
-      title: title || "참조 문서",
-      template: "index.html",
-      noBackdrop: true
-    });
-    console.log('모달 열기 성공');
-  } catch (error) {
-    console.error('모달 열기 실패:', error);
+  
+  if (!elements.sourceModal || !elements.modalTitle || !elements.modalContent) {
+    console.error('모달 엘리먼트를 찾을 수 없습니다.');
+    return;
   }
+
+  // 1. URL Fix (localhost -> wedosoft.net)
+  let fixedUri = uri;
+  if (fixedUri) {
+    fixedUri = fixedUri.replace('http://localhost:10001', 'https://wedosoft.net');
+    fixedUri = fixedUri.replace('localhost:10001', 'wedosoft.net');
+  }
+
+  // 2. Header (Title + Button side-by-side)
+  const titleText = title || "참조 문서";
+  
+  // 제목과 버튼을 헤더에 함께 배치
+  let headerHtml = `<span class="truncate" title="${escapeAttr(titleText)}">${escapeHtml(titleText)}</span>`;
+  
+  if (fixedUri) {
+    headerHtml += `
+      <a href="${escapeAttr(fixedUri)}" target="_blank" rel="noopener noreferrer" 
+         class="flex-shrink-0 ml-2 px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 text-xs rounded flex items-center gap-1 transition-colors"
+         title="새 탭에서 원문 보기">
+        <span>원본 보기</span>
+        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+        </svg>
+      </a>
+    `;
+  }
+  
+  // 헤더 스타일 조정 (Flex)
+  elements.modalTitle.className = "font-semibold text-app-text flex items-center min-w-0 flex-1 mr-4";
+  elements.modalTitle.innerHTML = headerHtml;
+  
+  // 3. Body Content (Compact)
+  let html = '';
+  
+  // 구분선 및 라벨 (여백 최소화)
+  html += `
+    <div class="flex items-center mb-1">
+      <span class="text-xs text-gray-400">참조 내용 (발췌)</span>
+      <div class="flex-grow ml-2 border-t border-gray-100"></div>
+    </div>
+  `;
+  
+  // 본문 내용
+  html += `
+    <div class="bg-gray-50 p-3 rounded-lg border border-gray-200 text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">${formatMessage(content || "내용이 없습니다.")}</div>
+  `;
+  
+  elements.modalContent.innerHTML = html;
+  
+  // 모달 표시
+  elements.sourceModal.classList.remove('hidden');
 }
 
 function closeModal() {
-  // FDK에서 자동 처리
+  if (elements.sourceModal) {
+    elements.sourceModal.classList.add('hidden');
+  }
 }
