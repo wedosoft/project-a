@@ -1073,15 +1073,33 @@ function renderFieldSuggestions(proposal) {
              const subChoices = val1 ? choices.find(c => c.value === val1)?.choices : [];
              if(subChoices) subChoices.forEach(c => opts2 += `<option value="${c.value}" ${c.value === val2 ? 'selected' : ''}>${c.value}</option>`);
 
-             let opts3 = '<option value="">선택하세요</option>';
-             const itemChoices = val2 ? subChoices?.find(c => c.value === val2)?.choices : [];
-             if(itemChoices) itemChoices.forEach(c => opts3 += `<option value="${c.value}" ${c.value === val3 ? 'selected' : ''}>${c.value}</option>`);
+             // Helper to collect all leaf nodes (Recursive)
+             function getAllLeafNodes(choices) {
+                 let leaves = [];
+                 function traverse(list) {
+                     list.forEach(c => {
+                         if (!c.choices || c.choices.length === 0) {
+                             leaves.push(c.value);
+                         } else {
+                             traverse(c.choices);
+                         }
+                     });
+                 }
+                 traverse(choices);
+                 return [...new Set(leaves)].sort();
+             }
+
+             const allLeafNodes = getAllLeafNodes(choices);
+             let opts3 = '<option value="">선택하세요 (전체 목록)</option>';
+             allLeafNodes.forEach(val => {
+                 opts3 += `<option value="${val}" ${val === val3 ? 'selected' : ''}>${val}</option>`;
+             });
 
              inputHtml = `
                 <div class="flex flex-col gap-2">
                     <select id="input-${fieldName}-${messageId}-1" data-field-name="${fieldName}" data-level="1" onchange="updateDependentFields('${messageId}', '${fieldName}', 1)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1">${opts1}</select>
                     <select id="input-${fieldName}-${messageId}-2" data-field-name="${fieldName}" data-level="2" onchange="updateDependentFields('${messageId}', '${fieldName}', 2)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1" ${!val1 ? 'disabled' : ''}>${opts2}</select>
-                    <select id="input-${fieldName}-${messageId}-3" data-field-name="${fieldName}" data-level="3" onchange="updateParentFields('${messageId}', '${fieldName}', 3)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1" ${!val2 ? 'disabled' : ''}>${opts3}</select>
+                    <select id="input-${fieldName}-${messageId}-3" data-field-name="${fieldName}" data-level="3" onchange="updateParentFields('${messageId}', '${fieldName}', 3)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1">${opts3}</select>
                 </div>
              `;
          } else {
@@ -1187,15 +1205,30 @@ function renderFieldSuggestions(proposal) {
     const selectedSubObj = subChoices ? subChoices.find(c => c.value === subCategoryValue) : null;
     const itemChoices = selectedSubObj ? selectedSubObj.choices : [];
     
-    let itemOptionsHtml = '<option value="">선택하세요</option>';
-    if (itemChoices) {
-        itemChoices.forEach(c => {
-           itemOptionsHtml += `<option value="${c.value}" ${c.value === itemCategoryValue ? 'selected' : ''}>${c.value}</option>`;
-        });
+    // Helper to collect all leaf nodes (Recursive)
+    function getAllLeafNodes(choices) {
+        let leaves = [];
+        function traverse(list) {
+            list.forEach(c => {
+                if (!c.choices || c.choices.length === 0) {
+                    leaves.push(c.value);
+                } else {
+                    traverse(c.choices);
+                }
+            });
+        }
+        traverse(choices);
+        return [...new Set(leaves)].sort();
     }
 
+    const allLeafNodes = getAllLeafNodes(rootChoices);
+    let itemOptionsHtml = '<option value="">선택하세요 (전체 목록)</option>';
+    allLeafNodes.forEach(val => {
+        itemOptionsHtml += `<option value="${val}" ${val === itemCategoryValue ? 'selected' : ''}>${val}</option>`;
+    });
+
     const itemCategoryInput = `
-      <select id="input-${rootFieldName}-${messageId}-3" data-field-name="${rootFieldName}" data-level="3" onchange="updateParentFields('${messageId}', '${rootFieldName}', 3)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1" ${(!categoryValue && rootChoices.length === 0) ? 'disabled' : ''}>
+      <select id="input-${rootFieldName}-${messageId}-3" data-field-name="${rootFieldName}" data-level="3" onchange="updateParentFields('${messageId}', '${rootFieldName}', 3)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1">
         ${itemOptionsHtml}
       </select>
     `;
@@ -1304,32 +1337,16 @@ window.updateDependentFields = function(messageId, fieldName, level) {
             }
         }
         
-        // Reset Level 3
+        // Reset Level 3 Value ONLY (Keep options intact)
         if (el3) {
-            el3.innerHTML = '<option value="">선택하세요</option>';
-            el3.disabled = true;
             el3.value = '';
+            // Do NOT disable or clear options for Level 3 as per requirement
         }
     } else if (level === 2) {
-        // Update Level 3
-        const val2 = el2 ? el2.value : '';
-        let opts3 = '<option value="">선택하세요</option>';
-        const subChoices = val1 ? choices.find(c => c.value === val1)?.choices : [];
-        const itemChoices = val2 ? subChoices?.find(c => c.value === val2)?.choices : [];
-        
-        if (itemChoices) {
-            itemChoices.forEach(c => opts3 += `<option value="${c.value}">${c.value}</option>`);
-            if (el3) {
-                el3.innerHTML = opts3;
-                el3.disabled = false;
-                el3.value = '';
-            }
-        } else {
-            if (el3) {
-                el3.innerHTML = '<option value="">선택하세요</option>';
-                el3.disabled = true;
-                el3.value = '';
-            }
+        // Update Level 3 Value ONLY
+        if (el3) {
+            el3.value = '';
+            // Do NOT filter options based on Level 2. Keep all options available.
         }
     }
 };
