@@ -17,12 +17,6 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     gemini_api_key: str = ""
 
-    # Qdrant
-    qdrant_host: str = "localhost"
-    qdrant_port: int = 6333
-    qdrant_api_key: str = ""
-    qdrant_use_https: bool = False
-
     # Supabase
     supabase_url: str = ""
     supabase_key: str = ""
@@ -51,17 +45,6 @@ class Settings(BaseSettings):
         env_file=".env",
         case_sensitive=False
     )
-
-    @property
-    def QDRANT_URL(self) -> str:
-        """Construct Qdrant URL from host and port"""
-        protocol = "https" if self.qdrant_use_https else "http"
-        return f"{protocol}://{self.qdrant_host}:{self.qdrant_port}"
-
-    @property
-    def QDRANT_API_KEY(self) -> str:
-        """Qdrant API key"""
-        return self.qdrant_api_key
 
 
 @lru_cache()

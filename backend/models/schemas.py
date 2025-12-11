@@ -80,7 +80,7 @@ class IssueBlock(BaseModel):
         error_code: Error code if applicable (optional)
         content: Extracted core content (length varies by block_type)
         meta: Additional metadata as JSON (language, tags, etc.)
-        embedding_id: Reference to Qdrant vector ID (optional)
+        embedding_id: Legacy embedding vector ID (optional)
         created_at: Creation timestamp
     """
     model_config = ConfigDict(from_attributes=True)
@@ -100,7 +100,7 @@ class IssueBlock(BaseModel):
     error_code: Optional[str] = Field(None, max_length=255, description="Error code")
     content: str = Field(..., min_length=1, max_length=2048, description="Extracted content")
     meta: Optional[Dict[str, Any]] = Field(None, description="Additional metadata (JSONB)")
-    embedding_id: Optional[str] = Field(None, max_length=255, description="Qdrant vector ID")
+    embedding_id: Optional[str] = Field(None, max_length=255, description="Legacy embedding vector ID")
     created_at: datetime = Field(default_factory=datetime.utcnow, description="Creation timestamp")
 
     @field_validator('content')
@@ -219,7 +219,7 @@ class KBBlock(BaseModel):
         constraints: Constraints and warnings (renamed from constraint_text)
         example: Example usage (optional)
         meta: Additional metadata as JSON
-        embedding_id: Reference to Qdrant vector ID (optional)
+        embedding_id: Legacy embedding vector ID (optional)
         created_at: Creation timestamp
     """
     model_config = ConfigDict(from_attributes=True)
@@ -238,7 +238,7 @@ class KBBlock(BaseModel):
     constraint: Optional[str] = Field(None, max_length=1024, description="Constraints and warnings")
     example: Optional[str] = Field(None, max_length=1024, description="Example usage")
     meta: Optional[Dict[str, Any]] = Field(None, description="Additional metadata (JSONB)")
-    embedding_id: Optional[str] = Field(None, max_length=255, description="Qdrant vector ID")
+    embedding_id: Optional[str] = Field(None, max_length=255, description="Legacy embedding vector ID")
     created_at: datetime = Field(default_factory=datetime.utcnow, description="Creation timestamp")
 
     @field_validator('meta')

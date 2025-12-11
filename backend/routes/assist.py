@@ -10,7 +10,7 @@ Date: 2025-11-05
 
 from fastapi import APIRouter, HTTPException, Header, status, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, AsyncGenerator
 import asyncio
 import json
@@ -42,6 +42,13 @@ class AnalyzeRequest(BaseModel):
     subject: Optional[str] = None
     description: Optional[str] = None
     stream_progress: bool = True
+    async_mode: bool = False
+
+
+class AnalyzeResponse(BaseModel):
+    """Response when async_mode is enabled"""
+    proposal: Dict[str, Any]
+    status_url: str
 
 
 class ApproveRequest(BaseModel):
@@ -60,6 +67,26 @@ class RefineRequest(BaseModel):
     proposal_id: str
     refinement_request: str
     agent_email: Optional[str] = None
+
+
+class ProposalStatusResponse(BaseModel):
+    """Response schema for proposal status polling."""
+    id: str
+    status: str
+    tenant_id: str
+    ticket_id: str
+    proposal_version: int
+    draft_response: Optional[str] = None
+    field_updates: Dict[str, Any] = Field(default_factory=dict)
+    field_reasons: Optional[Dict[str, Any]] = None
+    summary: Optional[str] = None
+    intent: Optional[str] = None
+    sentiment: Optional[str] = None
+    confidence: Optional[str] = None
+    mode: Optional[str] = None
+    similar_cases: Optional[Any] = None
+    kb_references: Optional[Any] = None
+    analysis_time_ms: Optional[int] = None
 
 
 # SSE Streaming Helper
@@ -107,6 +134,7 @@ async def sse_generator(
 
 # Routes
 
+# Analyze endpoints
 @router.post("/analyze")
 async def analyze_ticket(
     request: AnalyzeRequest,
@@ -171,6 +199,26 @@ async def analyze_ticket(
                 ]
             }
 
+        if request.async_mode and request.stream_progress:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="async_mode is only supported with stream_progress=False"
+            )
+
+        if request.async_mode:
+            result = await orchestrator.process_ticket(
+                ticket_context=ticket_data,
+                tenant_id=tenant_id,
+                platform=platform,
+                stream_events=False
+            )
+
+            proposal_id = result.get("id")
+            return AnalyzeResponse(
+                proposal=result,
+                status_url=f"/api/assist/status/{proposal_id}"
+            )
+
         if request.stream_progress:
             # Return SSE stream with orchestrator
             events = await orchestrator.process_ticket(
@@ -209,6 +257,7 @@ async def analyze_ticket(
 # These functions are removed as orchestrator.process_ticket() handles both streaming and direct modes
 
 
+# Approval endpoints
 @router.post("/approve")
 async def approve_proposal(
     request: ApproveRequest,
@@ -304,6 +353,7 @@ async def approve_proposal(
         )
 
 
+# Refinement endpoints
 @router.post("/refine")
 async def refine_proposal(
     request: RefineRequest,
@@ -377,3 +427,21 @@ async def refine_proposal(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
+class ProposalStatusResponse(BaseModel):
+    """Response schema for proposal status polling."""
+    id: str
+    status: str
+    tenant_id: str
+    ticket_id: str
+    proposal_version: int
+    draft_response: Optional[str] = None
+    field_updates: Dict[str, Any]
+    field_reasons: Optional[Dict[str, Any]] = None
+    summary: Optional[str] = None
+    intent: Optional[str] = None
+    sentiment: Optional[str] = None
+    confidence: Optional[str] = None
+    mode: Optional[str] = None
+    similar_cases: Optional[Any] = None
+    kb_references: Optional[Any] = None
+    analysis_time_ms: Optional[int] = None

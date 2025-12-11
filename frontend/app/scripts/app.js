@@ -978,6 +978,7 @@ function renderFieldSuggestions(proposal) {
       if (hasNestedProposal) {
         const choices = normalizeChoices(nestedRoot.choices);
         window[`choices-${messageId}-${nestedRoot.name}`] = choices;
+        window[`pathMap-${messageId}-${nestedRoot.name}`] = buildValuePathMap(choices);
 
         const proposedLeaf = proposalMap[level3Name]?.proposed_value || proposalMap[level2Name]?.proposed_value || proposalMap[nestedRoot.name]?.proposed_value || '';
         const path = findPathToValue(choices, proposedLeaf) || [];
@@ -1053,11 +1054,12 @@ function renderFieldSuggestions(proposal) {
       };
 
       if (fieldDef && (fieldDef.type === 'custom_dropdown' || fieldDef.type === 'default_status' || fieldDef.type === 'default_priority' || fieldDef.choices)) {
-         const choices = normalizeChoices(fieldDef.choices);
-         
-         if (isNested(choices)) {
-             // --- Nested Field Rendering (3 Levels) ---
-             window[`choices-${messageId}-${fieldName}`] = choices; // Store for handlers
+             const choices = normalizeChoices(fieldDef.choices);
+             
+             if (isNested(choices)) {
+                 // --- Nested Field Rendering (3 Levels) ---
+                 window[`choices-${messageId}-${fieldName}`] = choices; // Store for handlers
+                 window[`pathMap-${messageId}-${fieldName}`] = buildValuePathMap(choices);
 
              const path = findPathToValue(choices, proposedValue) || [];
              const val1 = path[0] || '';
@@ -1145,6 +1147,7 @@ function renderFieldSuggestions(proposal) {
     
     // Store normalized choices for helpers (New Scheme)
     window[`choices-${messageId}-${rootFieldName}`] = rootChoices;
+    window[`pathMap-${messageId}-${rootFieldName}`] = buildValuePathMap(rootChoices);
     
     // Initial Values (Legacy)
     const categoryValue = updates.category || '';
@@ -1247,95 +1250,6 @@ function renderFieldSuggestions(proposal) {
   scrollToBottom();
 }
 
-// Update dependent fields (Top-Down)
-window.updateDependentFields = function(messageId, level) {
-  const categorySelect = document.getElementById(`input-category-${messageId}`);
-  const subCategorySelect = document.getElementById(`input-sub-category-${messageId}`);
-  const itemCategorySelect = document.getElementById(`input-item-category-${messageId}`);
-  
-  const choices = window[`choices-${messageId}`];
-  if (!choices) return;
-
-  const selectedCategory = categorySelect.value;
-  
-  if (level === 'category') {
-    // Reset Sub & Item
-    subCategorySelect.innerHTML = '<option value="">선택하세요</option>';
-    itemCategorySelect.innerHTML = '<option value="">선택하세요</option>';
-    subCategorySelect.disabled = true;
-    itemCategorySelect.disabled = true;
-    
-    if (selectedCategory) {
-      const catObj = choices.find(c => c.value === selectedCategory);
-      if (catObj && catObj.choices && catObj.choices.length > 0) {
-        subCategorySelect.disabled = false;
-        catObj.choices.forEach(c => {
-          const option = document.createElement('option');
-          option.value = c.value;
-          option.textContent = c.value;
-          subCategorySelect.appendChild(option);
-        });
-      }
-    }
-  } else if (level === 'sub_category') {
-    // Reset Item
-    itemCategorySelect.innerHTML = '<option value="">선택하세요</option>';
-    itemCategorySelect.disabled = true;
-    
-    const selectedSub = subCategorySelect.value;
-    if (selectedCategory && selectedSub) {
-      const catObj = choices.find(c => c.value === selectedCategory);
-      const subObj = catObj ? catObj.choices.find(c => c.value === selectedSub) : null;
-      
-      if (subObj && subObj.choices && subObj.choices.length > 0) {
-        itemCategorySelect.disabled = false;
-        subObj.choices.forEach(c => {
-          const option = document.createElement('option');
-          option.value = c.value;
-          option.textContent = c.value;
-          itemCategorySelect.appendChild(option);
-        });
-      }
-    }
-  }
-};
-
-// Update parent fields (Bottom-Up / Reverse Hierarchy)
-window.updateParentFields = function(messageId) {
-  const itemSelect = document.getElementById(`input-item-category-${messageId}`);
-  const selectedItem = itemSelect.value;
-  
-  if (!selectedItem) return;
-  
-  const flatChoices = window[`flatChoices-${messageId}`];
-  const path = flatChoices ? flatChoices[selectedItem] : null;
-  
-  if (path && path.length >= 2) {
-     // path is [Category, SubCategory, Item]
-     const categorySelect = document.getElementById(`input-category-${messageId}`);
-     const subCategorySelect = document.getElementById(`input-sub-category-${messageId}`);
-     
-     // 1. Set Category
-     if (categorySelect.value !== path[0]) {
-        categorySelect.value = path[0];
-        // Trigger Top-Down update to populate SubCategory options
-        window.updateDependentFields(messageId, 'category');
-     }
-     
-     // 2. Set Sub Category
-     if (path.length > 2) {
-        if (subCategorySelect.value !== path[1]) {
-           subCategorySelect.value = path[1];
-           // Trigger Top-Down update to populate Item options
-           window.updateDependentFields(messageId, 'sub_category');
-        }
-     }
-     
-     // 3. Ensure Item is still selected
-     itemSelect.value = selectedItem;
-  }
-};
-
 // =============================================================================
 // Field Update Helpers (Nested Fields)
 // =============================================================================
@@ -1349,6 +1263,18 @@ function findPathToValue(choices, targetValue) {
         }
     }
     return null;
+}
+
+function buildValuePathMap(choices, path = [], map = {}) {
+    if (!Array.isArray(choices)) return map;
+    choices.forEach(choice => {
+        const currentPath = [...path, choice.value];
+        map[choice.value] = currentPath;
+        if (choice.choices && choice.choices.length > 0) {
+            buildValuePathMap(choice.choices, currentPath, map);
+        }
+    });
+    return map;
 }
 
 window.updateDependentFields = function(messageId, fieldName, level) {
@@ -1413,18 +1339,19 @@ window.updateParentFields = function(messageId, fieldName, level) {
     if (level !== 3) return;
 
     const choices = window[`choices-${messageId}-${fieldName}`];
+    const pathMap = window[`pathMap-${messageId}-${fieldName}`];
     const el3 = document.getElementById(`input-${fieldName}-${messageId}-3`);
     const val3 = el3 ? el3.value : '';
     
     if (!val3) return;
 
-    // Find path to this value
-    // Note: This assumes leaf values are unique enough or we take the first match
-    const path = findPathToValue(choices, val3);
+    let path = pathMap ? pathMap[val3] : null;
+    if (!path && choices) {
+        path = findPathToValue(choices, val3);
+    }
     
-    if (path && path.length === 3) {
-        const val1 = path[0];
-        const val2 = path[1];
+    if (path && path.length >= 3) {
+        const [val1, val2] = path;
         
         const el1 = document.getElementById(`input-${fieldName}-${messageId}-1`);
         const el2 = document.getElementById(`input-${fieldName}-${messageId}-2`);
@@ -1436,8 +1363,6 @@ window.updateParentFields = function(messageId, fieldName, level) {
         }
         
         if (el2) {
-            // Ensure Level 2 options are populated (should be done by updateDependentFields above)
-            // But we need to set the value
             el2.value = val2;
             // Trigger update for Level 3 options
             window.updateDependentFields(messageId, fieldName, 2);

@@ -8,9 +8,6 @@ import os
 def pytest_configure(config):
     """Register custom markers"""
     config.addinivalue_line(
-        "markers", "requires_qdrant: mark test as requiring Qdrant service"
-    )
-    config.addinivalue_line(
         "markers", "requires_postgres: mark test as requiring PostgreSQL service"
     )
     config.addinivalue_line(
@@ -19,15 +16,6 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "requires_external_services: mark test as requiring all external services"
     )
-
-
-# Simple availability checks based on environment variables
-def is_qdrant_configured() -> bool:
-    """Check if Qdrant is configured"""
-    from backend.config import get_settings
-    settings = get_settings()
-    # If host is localhost and we're not in a Docker env, likely not available
-    return settings.qdrant_host != "localhost" or os.getenv("QDRANT_AVAILABLE") == "true"
 
 
 def is_postgres_configured() -> bool:
@@ -54,12 +42,6 @@ def is_supabase_configured() -> bool:
     return has_url and has_key
 
 
-# Skip markers using environment-based checks
-requires_qdrant = pytest.mark.skipif(
-    not is_qdrant_configured(),
-    reason="Qdrant service not configured (set QDRANT_HOST or QDRANT_AVAILABLE=true)"
-)
-
 requires_postgres = pytest.mark.skipif(
     not is_postgres_configured(),
     reason="PostgreSQL service not configured (set SUPABASE_DB_HOST and SUPABASE_DB_PASSWORD)"
@@ -70,11 +52,6 @@ requires_supabase = pytest.mark.skipif(
     reason="Supabase service not configured (set SUPABASE_URL and SUPABASE_KEY)"
 )
 
-requires_external_services = pytest.mark.skipif(
-    not all([is_qdrant_configured(), is_postgres_configured(), is_supabase_configured()]),
-    reason="External services not configured"
-)
-
 
 @pytest.fixture(scope="session")
 def event_loop():
@@ -83,4 +60,3 @@ def event_loop():
     loop = asyncio.get_event_loop_policy().new_event_loop()
     yield loop
     loop.close()
-

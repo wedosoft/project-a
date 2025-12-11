@@ -4,7 +4,7 @@ AI Contact Center OS - FastAPI Backend
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.config import get_settings
-from backend.routes import tickets, assist, metrics, health, sync
+from backend.routes import tickets, assist, metrics, health
 from backend.middleware.tenant_middleware import TenantMiddleware
 from backend.middleware.logging_middleware import LoggingMiddleware
 
@@ -36,7 +36,6 @@ app.add_middleware(TenantMiddleware)
 app.include_router(tickets.router)
 app.include_router(assist.router)
 app.include_router(metrics.router)
-app.include_router(sync.router)
 app.include_router(health.router)
 
 # Admin API 라우터 추가

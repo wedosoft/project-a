@@ -73,7 +73,7 @@ class TestDependencyHealthCheck:
         data = response.json()
 
         dependencies = data["dependencies"]
-        expected_services = ["qdrant", "supabase", "google_api", "openai_api", "freshdesk_api"]
+        expected_services = ["supabase", "google_api", "openai_api", "freshdesk_api"]
 
         for service in expected_services:
             assert service in dependencies

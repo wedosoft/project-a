@@ -29,7 +29,7 @@ COMMENT ON TABLE issue_blocks IS '티켓에서 추출한 증상/원인/해결책
 COMMENT ON COLUMN issue_blocks.block_type IS 'symptom(증상), cause(원인), resolution(해결책)';
 COMMENT ON COLUMN issue_blocks.content IS '추출된 핵심 문장/요약 (최대 512~1024자)';
 COMMENT ON COLUMN issue_blocks.meta IS '추가 메타데이터 (언어, 태그 등)';
-COMMENT ON COLUMN issue_blocks.embedding_id IS 'Qdrant 벡터 ID 참조';
+COMMENT ON COLUMN issue_blocks.embedding_id IS 'Legacy 벡터 ID 참조';
 
 -- KB Blocks Table (정책/절차 = 규범)
 -- 표준 절차, 정책, 제약사항 저장

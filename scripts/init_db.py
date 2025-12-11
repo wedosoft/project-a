@@ -44,18 +44,5 @@ async def init_supabase_schema():
     """)
 
 
-async def init_qdrant_collections():
-    """
-    Initialize Qdrant collections for vector search
-
-    Collections:
-    - similar_cases (ticket embeddings)
-    - kb_procedures (KB embeddings)
-    """
-    # TODO: Qdrant client setup
-    print("⚠️  Qdrant initialization pending")
-
-
 if __name__ == "__main__":
     asyncio.run(init_supabase_schema())
-    asyncio.run(init_qdrant_collections())

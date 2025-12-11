@@ -10,8 +10,6 @@ from datetime import datetime
 from typing import Dict, Optional
 from fastapi import APIRouter, status
 from pydantic import BaseModel, Field
-from qdrant_client import QdrantClient
-from qdrant_client.http.exceptions import UnexpectedResponse
 from supabase import create_client
 import httpx
 import asyncio
@@ -63,50 +61,6 @@ class DependencyHealth(BaseModel):
 # ============================================================================
 # Dependency Check Functions
 # ============================================================================
-
-async def check_qdrant() -> DependencyStatus:
-    """
-    Check Qdrant vector database connectivity
-
-    Returns:
-        DependencyStatus with health information
-    """
-    try:
-        start = time.time()
-
-        # Create sync client for health check
-        client = QdrantClient(
-            url=settings.QDRANT_URL,
-            api_key=settings.QDRANT_API_KEY if settings.QDRANT_API_KEY else None,
-            timeout=5.0
-        )
-
-        # Try to list collections
-        await asyncio.to_thread(client.get_collections)
-
-        latency = (time.time() - start) * 1000
-
-        return DependencyStatus(
-            name="qdrant",
-            status="healthy",
-            latency_ms=round(latency, 2)
-        )
-
-    except UnexpectedResponse as e:
-        logger.error(f"Qdrant health check failed: {e}")
-        return DependencyStatus(
-            name="qdrant",
-            status="unhealthy",
-            error_message=f"Qdrant API error: {str(e)}"
-        )
-    except Exception as e:
-        logger.error(f"Qdrant health check failed: {e}")
-        return DependencyStatus(
-            name="qdrant",
-            status="unhealthy",
-            error_message=str(e)
-        )
-
 
 async def check_supabase() -> DependencyStatus:
     """
@@ -334,7 +288,6 @@ async def check_all_dependencies() -> Dict[str, DependencyStatus]:
     """
     # Run all checks in parallel
     results = await asyncio.gather(
-        check_qdrant(),
         check_supabase(),
         check_google_api(),
         check_openai_api(),
@@ -344,7 +297,7 @@ async def check_all_dependencies() -> Dict[str, DependencyStatus]:
 
     # Map results to dependency names
     dependencies = {}
-    dep_names = ["qdrant", "supabase", "google_api", "openai_api", "freshdesk_api"]
+    dep_names = ["supabase", "google_api", "openai_api", "freshdesk_api"]
 
     for name, result in zip(dep_names, results):
         if isinstance(result, Exception):
@@ -365,7 +318,7 @@ def determine_overall_status(dependencies: Dict[str, DependencyStatus]) -> str:
     """
     Determine overall system status based on dependency health
 
-    Critical services: Qdrant, Supabase
+    Critical services: Supabase
     Non-critical services: Google API, OpenAI API, Freshdesk API
 
     Rules:
@@ -379,7 +332,7 @@ def determine_overall_status(dependencies: Dict[str, DependencyStatus]) -> str:
     Returns:
         Overall status string
     """
-    critical_services = ["qdrant", "supabase"]
+    critical_services = ["supabase"]
 
     # Check critical services
     for service in critical_services:
@@ -442,7 +395,6 @@ async def dependency_health_check() -> DependencyHealth:
     Comprehensive dependency health check endpoint
 
     Checks:
-    - Qdrant vector database
     - Supabase database
     - Google Gemini API
     - OpenAI API

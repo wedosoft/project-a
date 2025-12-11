@@ -14,7 +14,6 @@ Date: 2025-11-05
 import asyncio
 from typing import Dict, Any, List
 from backend.models.graph_state import AgentState
-from backend.services.hybrid_search import HybridSearchService
 from backend.repositories.tenant_repository import TenantRepository
 from backend.utils.logger import get_logger
 
@@ -26,7 +25,7 @@ async def retrieve_cases(state: AgentState) -> AgentState:
     Retrieve similar cases from issue_blocks table (POC).
 
     POC Changes:
-    - Uses issue_blocks table instead of Qdrant collection
+    - Uses issue_blocks table (legacy vector store removed)
     - Checks tenant config for embedding_enabled
     - Returns empty if embedding disabled
 
@@ -68,18 +67,9 @@ async def retrieve_cases(state: AgentState) -> AgentState:
             logger.warning("No search query available from ticket context")
             return state
 
-        # Search similar cases with timeout
-        # POC: Using HybridSearchService which should be configured to use issue_blocks
-        search_service = HybridSearchService()
-        results = await asyncio.wait_for(
-            search_service.search(
-                collection_name="issue_blocks",  # Changed to issue_blocks table
-                query=query,
-                top_k=5,
-                use_reranking=True
-            ),
-            timeout=30.0
-        )
+        # Gemini RAG store 외 스토리지 제거로 인해 검색은 비활성화
+        logger.info("레거시 벡터 검색이 제거되어 유사사례 검색을 건너뜁니다.")
+        results: List[Dict[str, Any]] = []
 
         # Update state
         if "search_results" not in state:
@@ -116,7 +106,7 @@ async def retrieve_kb(state: AgentState) -> AgentState:
     Retrieve KB articles from kb_blocks table (POC).
 
     POC Changes:
-    - Uses kb_blocks table instead of Qdrant collection
+    - Uses kb_blocks table (legacy vector store removed)
     - Checks tenant config for embedding_enabled
     - Returns empty if embedding disabled
 
@@ -158,18 +148,9 @@ async def retrieve_kb(state: AgentState) -> AgentState:
             logger.warning("No search query available from ticket context")
             return state
 
-        # Search KB procedures with timeout
-        # POC: Using HybridSearchService which should be configured to use kb_blocks
-        search_service = HybridSearchService()
-        results = await asyncio.wait_for(
-            search_service.search(
-                collection_name="kb_blocks",  # Changed to kb_blocks table
-                query=query,
-                top_k=5,
-                use_reranking=True
-            ),
-            timeout=30.0
-        )
+        # Gemini RAG store 외 스토리지 제거로 인해 KB 검색은 비활성화
+        logger.info("레거시 벡터 검색이 제거되어 KB 검색을 건너뜁니다.")
+        results: List[Dict[str, Any]] = []
 
         # Update state
         if "search_results" not in state:

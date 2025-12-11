@@ -28,6 +28,10 @@ class Proposal(BaseModel):
     # Proposal content
     draft_response: str
     field_updates: Optional[Dict[str, Any]] = None
+    field_reasons: Optional[Dict[str, Any]] = None
+    summary: Optional[str] = None
+    intent: Optional[str] = None
+    sentiment: Optional[str] = None
     reasoning: Optional[str] = None
     confidence: Optional[str] = None  # high | medium | low
     mode: Optional[str] = None  # synthesis | direct | fallback

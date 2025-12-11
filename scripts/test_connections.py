@@ -28,7 +28,6 @@ print("=" * 60)
 # Test Results
 results = {
     "supabase": {"status": "❌", "message": ""},
-    "qdrant": {"status": "❌", "message": ""},
     "freshdesk": {"status": "❌", "message": ""},
     "openai": {"status": "❌", "message": ""},
     "gemini": {"status": "❌", "message": ""},
@@ -66,39 +65,8 @@ except Exception as e:
     results["supabase"]["message"] = f"Error: {str(e)[:100]}"
 
 
-# 2. Qdrant 테스트
-print("\n2️⃣  Testing Qdrant Connection...")
-try:
-    from qdrant_client import QdrantClient
-
-    qdrant_host = os.getenv("QDRANT_HOST")
-    qdrant_api_key = os.getenv("QDRANT_API_KEY")
-
-    if not qdrant_host or not qdrant_api_key:
-        raise ValueError("QDRANT_HOST or QDRANT_API_KEY not found in .env")
-
-    # URL에서 프로토콜 제거 (https://)
-    qdrant_url = qdrant_host.replace("https://", "").replace("http://", "")
-    qdrant_url = qdrant_url.split(":")[0]  # 포트 제거
-
-    client = QdrantClient(
-        url=f"https://{qdrant_url}",
-        api_key=qdrant_api_key,
-        timeout=10
-    )
-
-    # 컬렉션 목록 조회
-    collections = client.get_collections()
-    results["qdrant"]["status"] = "✅"
-    results["qdrant"]["message"] = f"Connected. Collections: {len(collections.collections)}"
-
-except Exception as e:
-    results["qdrant"]["status"] = "❌"
-    results["qdrant"]["message"] = f"Error: {str(e)[:100]}"
-
-
-# 3. Freshdesk API 테스트
-print("\n3️⃣  Testing Freshdesk API...")
+# 2. Freshdesk API 테스트
+print("\n2️⃣  Testing Freshdesk API...")
 try:
     import requests
 
@@ -131,8 +99,8 @@ except Exception as e:
     results["freshdesk"]["message"] = f"Error: {str(e)[:100]}"
 
 
-# 4. OpenAI API 테스트
-print("\n4️⃣  Testing OpenAI API...")
+# 3. OpenAI API 테스트
+print("\n3️⃣  Testing OpenAI API...")
 try:
     from openai import OpenAI
 
@@ -158,8 +126,8 @@ except Exception as e:
     results["openai"]["message"] = f"Error: {str(e)[:100]}"
 
 
-# 5. Google Gemini API 테스트
-print("\n5️⃣  Testing Google Gemini API...")
+# 4. Google Gemini API 테스트
+print("\n4️⃣  Testing Google Gemini API...")
 try:
     import google.generativeai as genai
 
