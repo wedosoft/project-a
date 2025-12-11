@@ -1073,22 +1073,6 @@ function renderFieldSuggestions(proposal) {
              const subChoices = val1 ? choices.find(c => c.value === val1)?.choices : [];
              if(subChoices) subChoices.forEach(c => opts2 += `<option value="${c.value}" ${c.value === val2 ? 'selected' : ''}>${c.value}</option>`);
 
-             // Helper to collect all leaf nodes (Recursive)
-             function getAllLeafNodes(choices) {
-                 let leaves = [];
-                 function traverse(list) {
-                     list.forEach(c => {
-                         if (!c.choices || c.choices.length === 0) {
-                             leaves.push(c.value);
-                         } else {
-                             traverse(c.choices);
-                         }
-                     });
-                 }
-                 traverse(choices);
-                 return [...new Set(leaves)].sort();
-             }
-
              const allLeafNodes = getAllLeafNodes(choices);
              let opts3 = '<option value="">선택하세요 (전체 목록)</option>';
              allLeafNodes.forEach(val => {
@@ -1205,22 +1189,6 @@ function renderFieldSuggestions(proposal) {
     const selectedSubObj = subChoices ? subChoices.find(c => c.value === subCategoryValue) : null;
     const itemChoices = selectedSubObj ? selectedSubObj.choices : [];
     
-    // Helper to collect all leaf nodes (Recursive)
-    function getAllLeafNodes(choices) {
-        let leaves = [];
-        function traverse(list) {
-            list.forEach(c => {
-                if (!c.choices || c.choices.length === 0) {
-                    leaves.push(c.value);
-                } else {
-                    traverse(c.choices);
-                }
-            });
-        }
-        traverse(choices);
-        return [...new Set(leaves)].sort();
-    }
-
     const allLeafNodes = getAllLeafNodes(rootChoices);
     let itemOptionsHtml = '<option value="">선택하세요 (전체 목록)</option>';
     allLeafNodes.forEach(val => {
@@ -1296,6 +1264,21 @@ function findPathToValue(choices, targetValue) {
         }
     }
     return null;
+}
+
+function getAllLeafNodes(choices) {
+    let leaves = [];
+    function traverse(list) {
+        list.forEach(c => {
+            if (!c.choices || c.choices.length === 0) {
+                leaves.push(c.value);
+            } else {
+                traverse(c.choices);
+            }
+        });
+    }
+    traverse(choices);
+    return [...new Set(leaves)].sort();
 }
 
 function buildValuePathMap(choices, path = [], map = {}) {

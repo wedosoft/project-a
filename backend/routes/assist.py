@@ -446,7 +446,7 @@ async def get_proposal_status(
         Proposal status and data
         
     Example:
-        >>> GET /api/v1/assist/status/prop-uuid
+        >>> GET /api/assist/status/prop-uuid
     """
     try:
         await proposal_repo.set_tenant_context(tenant_id)
