@@ -427,6 +427,69 @@ async def refine_proposal(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
+
+
+# Status endpoint
+@router.get("/status/{proposal_id}")
+async def get_proposal_status(
+    proposal_id: str,
+    tenant_id: str = Header(..., alias="X-Tenant-ID")
+):
+    """
+    Get the status of a proposal by its ID.
+    
+    Args:
+        proposal_id: Proposal identifier
+        tenant_id: Tenant identifier
+        
+    Returns:
+        Proposal status and data
+        
+    Example:
+        >>> GET /api/v1/assist/status/prop-uuid
+    """
+    try:
+        await proposal_repo.set_tenant_context(tenant_id)
+        
+        # Get proposal
+        proposal = await proposal_repo.get_by_id(proposal_id)
+        if not proposal:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Proposal {proposal_id} not found"
+            )
+        
+        # Return proposal data
+        return {
+            "id": proposal.id,
+            "status": proposal.status,
+            "tenant_id": proposal.tenant_id,
+            "ticket_id": proposal.ticket_id,
+            "proposal_version": proposal.proposal_version,
+            "draft_response": proposal.draft_response,
+            "field_updates": proposal.field_updates or {},
+            "field_reasons": proposal.field_reasons,
+            "summary": proposal.summary,
+            "intent": proposal.intent,
+            "sentiment": proposal.sentiment,
+            "confidence": proposal.confidence,
+            "mode": proposal.mode,
+            "similar_cases": proposal.similar_cases,
+            "kb_references": proposal.kb_references,
+            "analysis_time_ms": proposal.analysis_time_ms,
+            "field_proposals": proposal.field_proposals
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Status retrieval error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
 class ProposalStatusResponse(BaseModel):
     """Response schema for proposal status polling."""
     id: str

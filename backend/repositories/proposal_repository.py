@@ -29,6 +29,7 @@ class Proposal(BaseModel):
     draft_response: str
     field_updates: Optional[Dict[str, Any]] = None
     field_reasons: Optional[Dict[str, Any]] = None
+    field_proposals: Optional[List[Dict[str, Any]]] = None
     summary: Optional[str] = None
     intent: Optional[str] = None
     sentiment: Optional[str] = None
