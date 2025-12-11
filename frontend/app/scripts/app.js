@@ -1368,38 +1368,35 @@ window.updateParentFields = function(messageId, fieldName, level) {
     }
     
     if (path && path.length >= 3) {
-        const [val1, val2] = path;
+        const [val1, val2, val3Final] = path;
         
         const el1 = document.getElementById(`input-${fieldName}-${messageId}-1`);
         const el2 = document.getElementById(`input-${fieldName}-${messageId}-2`);
         
-        // Update Level 1
-        if (el1) {
-            // If value mismatch OR Level 2 not ready, trigger update
-            const needUpdate = el1.value !== val1 || (el2 && (el2.disabled || el2.options.length <= 1));
-            
-            if (needUpdate) {
-                el1.value = val1;
-                // Trigger update for Level 2 options
-                window.updateDependentFields(messageId, fieldName, 1);
+        // Step 1: Set Level 1 value
+        if (el1 && el1.value !== val1) {
+            el1.value = val1;
+        }
+        
+        // Step 2: Update Level 2 options based on Level 1
+        if (el2 && val1) {
+            let opts2 = '<option value="">선택하세요</option>';
+            const subChoices = choices.find(c => c.value === val1)?.choices;
+            if (subChoices) {
+                subChoices.forEach(c => opts2 += `<option value="${c.value}">${c.value}</option>`);
+                el2.innerHTML = opts2;
+                el2.disabled = false;
             }
         }
         
-        // Update Level 2
-        if (el2) {
-            // If value mismatch OR Level 3 not ready, trigger update
-            const needUpdate = el2.value !== val2 || (el3 && (el3.disabled || el3.options.length <= 1));
-            
-            if (needUpdate) {
-                el2.value = val2;
-                // Trigger update for Level 3 options
-                window.updateDependentFields(messageId, fieldName, 2);
-            }
+        // Step 3: Set Level 2 value
+        if (el2 && el2.value !== val2) {
+            el2.value = val2;
         }
         
-        // Finally set Level 3 value again because updateDependentFields(2) might have reset it
-        if (el3 && el3.value !== val3) {
-            el3.value = val3;
+        // Step 4: Ensure Level 3 value is restored (in case it was reset)
+        if (el3 && el3.value !== val3Final) {
+            el3.value = val3Final;
         }
     }
 };
