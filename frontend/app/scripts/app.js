@@ -1186,9 +1186,6 @@ function renderFieldSuggestions(proposal) {
     html += renderRow('하위 카테고리 (2단계)', ticketData.sub_category || '-', subCategoryInput);
 
     // Item Category Input (Level 3)
-    const selectedSubObj = subChoices ? subChoices.find(c => c.value === subCategoryValue) : null;
-    const itemChoices = selectedSubObj ? selectedSubObj.choices : [];
-    
     const allLeafNodes = getAllLeafNodes(rootChoices);
     let itemOptionsHtml = '<option value="">선택하세요 (전체 목록)</option>';
     allLeafNodes.forEach(val => {
