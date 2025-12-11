@@ -846,11 +846,11 @@ async function handleAnalyzeTicket() {
     
     // Poll for completion
     let attempts = 0;
-    const maxAttempts = 60; // 2 minutes (2s interval)
+    const maxAttempts = 60; // 3 minutes (3s interval)
     let finalProposal = null;
 
     while (attempts < maxAttempts) {
-        await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s
+        await new Promise(resolve => setTimeout(resolve, 3000)); // Wait 3s
         attempts++;
         
         try {
@@ -1356,20 +1356,34 @@ window.updateParentFields = function(messageId, fieldName, level) {
         const el1 = document.getElementById(`input-${fieldName}-${messageId}-1`);
         const el2 = document.getElementById(`input-${fieldName}-${messageId}-2`);
         
-        if (el1 && el1.value !== val1) {
-            el1.value = val1;
-            // Trigger update for Level 2 options
-            window.updateDependentFields(messageId, fieldName, 1);
+        // Update Level 1
+        if (el1) {
+            // If value mismatch OR Level 2 not ready, trigger update
+            const needUpdate = el1.value !== val1 || (el2 && (el2.disabled || el2.options.length <= 1));
+            
+            if (needUpdate) {
+                el1.value = val1;
+                // Trigger update for Level 2 options
+                window.updateDependentFields(messageId, fieldName, 1);
+            }
         }
         
+        // Update Level 2
         if (el2) {
-            el2.value = val2;
-            // Trigger update for Level 3 options
-            window.updateDependentFields(messageId, fieldName, 2);
+            // If value mismatch OR Level 3 not ready, trigger update
+            const needUpdate = el2.value !== val2 || (el3 && (el3.disabled || el3.options.length <= 1));
+            
+            if (needUpdate) {
+                el2.value = val2;
+                // Trigger update for Level 3 options
+                window.updateDependentFields(messageId, fieldName, 2);
+            }
         }
         
         // Finally set Level 3 value again because updateDependentFields(2) might have reset it
-        if (el3) el3.value = val3;
+        if (el3 && el3.value !== val3) {
+            el3.value = val3;
+        }
     }
 };
 
