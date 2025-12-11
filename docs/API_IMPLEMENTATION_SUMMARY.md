@@ -194,7 +194,7 @@ app.include_router(health.router, prefix="/api", tags=["health"])
    ```env
    FRESHDESK_DOMAIN=your-domain.freshdesk.com
    FRESHDESK_API_KEY=your_freshdesk_key
-   GOOGLE_API_KEY=your_google_api_key
+   GEMINI_API_KEY=your_google_api_key
    OPENAI_API_KEY=your_openai_key
    QDRANT_URL=http://localhost:6333
    SUPABASE_URL=https://your-project.supabase.co

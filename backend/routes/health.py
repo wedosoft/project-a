@@ -164,7 +164,7 @@ async def check_google_api() -> DependencyStatus:
         DependencyStatus with health information
     """
     try:
-        if not settings.google_api_key:
+        if not settings.gemini_api_key:
             return DependencyStatus(
                 name="google_api",
                 status="degraded",
@@ -177,7 +177,7 @@ async def check_google_api() -> DependencyStatus:
         async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.get(
                 "https://generativelanguage.googleapis.com/v1/models",
-                params={"key": settings.google_api_key}
+                params={"key": settings.gemini_api_key}
             )
             response.raise_for_status()
 

@@ -223,7 +223,7 @@ await proposal_repo.set_tenant_context(tenant_id)
 ### Environment Variables
 ```bash
 # Gemini API (for resolver)
-GOOGLE_API_KEY=your_api_key
+GEMINI_API_KEY=your_api_key
 
 # Supabase
 SUPABASE_URL=https://your-project.supabase.co
@@ -329,7 +329,7 @@ Embedding Enabled:
 
 **Issue**: Gemini API errors
 - **Cause**: Invalid API key or rate limits
-- **Fix**: Check GOOGLE_API_KEY, implement retry logic
+- **Fix**: Check GEMINI_API_KEY, implement retry logic
 
 **Issue**: Proposal not saved
 - **Cause**: RLS tenant context not set

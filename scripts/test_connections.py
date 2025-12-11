@@ -163,12 +163,12 @@ print("\n5️⃣  Testing Google Gemini API...")
 try:
     import google.generativeai as genai
 
-    google_api_key = os.getenv("GOOGLE_API_KEY")
+    gemini_api_key = os.getenv("GEMINI_API_KEY")
 
-    if not google_api_key:
-        raise ValueError("GOOGLE_API_KEY not found in .env")
+    if not gemini_api_key:
+        raise ValueError("GEMINI_API_KEY not found in .env")
 
-    genai.configure(api_key=google_api_key)
+    genai.configure(api_key=gemini_api_key)
     model = genai.GenerativeModel("gemini-2.0-flash-exp")
 
     # 간단한 generation 테스트

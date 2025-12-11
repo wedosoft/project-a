@@ -24,7 +24,7 @@ cp .env.example .env
 
 Edit `.env` with your credentials:
 - `OPENAI_API_KEY` - OpenAI API key for LLM extraction
-- `GOOGLE_API_KEY` - Google API key for Gemini (optional)
+- `GEMINI_API_KEY` - Google API key for Gemini (optional)
 - `QDRANT_URL` - Qdrant server URL (default: http://localhost:6333)
 - `SUPABASE_URL` - Supabase project URL
 - `SUPABASE_KEY` - Supabase anon/public key

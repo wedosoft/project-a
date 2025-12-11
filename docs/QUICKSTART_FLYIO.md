@@ -38,7 +38,7 @@ flyctl secrets deploy
 
 # 또는 수동 설정
 flyctl secrets set OPENAI_API_KEY="your-key"
-flyctl secrets set GOOGLE_API_KEY="your-key"
+flyctl secrets set GEMINI_API_KEY="your-key"
 # ... (나머지 secrets)
 ```
 

@@ -15,7 +15,7 @@ class Settings(BaseSettings):
 
     # LLM
     openai_api_key: str = ""
-    google_api_key: str = ""
+    gemini_api_key: str = ""
 
     # Qdrant
     qdrant_host: str = "localhost"

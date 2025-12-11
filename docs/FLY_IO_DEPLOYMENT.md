@@ -19,7 +19,7 @@ Fly.io Secrets를 사용하여 환경 변수를 안전하게 설정합니다.
 ```bash
 # LLM API Keys
 flyctl secrets set OPENAI_API_KEY="your-openai-key"
-flyctl secrets set GOOGLE_API_KEY="your-google-key"
+flyctl secrets set GEMINI_API_KEY="your-google-key"
 
 # Qdrant
 flyctl secrets set QDRANT_HOST="your-qdrant-host"

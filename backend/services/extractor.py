@@ -67,7 +67,7 @@ class IssueBlockExtractor:
                     "google-generativeai is not installed. "
                     "Install it with: pip install google-generativeai"
                 )
-            genai.configure(api_key=settings.google_api_key)
+            genai.configure(api_key=settings.gemini_api_key)
             self.gemini_model = genai.GenerativeModel("gemini-2.0-flash-exp")
             self.model = "gemini-2.0-flash-exp"
 
