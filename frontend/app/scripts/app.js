@@ -846,7 +846,8 @@ async function handleAnalyzeTicket() {
     
     // Poll for completion
     let attempts = 0;
-    const maxAttempts = 60; // 3 minutes (3s interval)
+    const maxAttempts = 30; // 90초 한도로 단축
+    let consecutivePollErrors = 0;
     let finalProposal = null;
 
     while (attempts < maxAttempts) {
@@ -856,6 +857,7 @@ async function handleAnalyzeTicket() {
         try {
             const statusResponse = await apiCall('GET', `api/assist/status/${proposalId}`);
             console.log(`Polling attempt ${attempts}:`, statusResponse);
+            consecutivePollErrors = 0;
             
             if (statusResponse && statusResponse.status !== 'processing') {
                 if (statusResponse.status === 'error') {
@@ -865,7 +867,11 @@ async function handleAnalyzeTicket() {
                 break;
             }
         } catch (e) {
-            console.warn("Polling error (ignoring):", e);
+            consecutivePollErrors += 1;
+            console.warn(`Polling error (${consecutivePollErrors}회 연속):`, e);
+            if (consecutivePollErrors >= 3) {
+                throw new Error(`상태 조회가 반복 실패했습니다: ${e.message || e}`);
+            }
         }
     }
 
@@ -979,12 +985,15 @@ function renderFieldSuggestions(proposal) {
         const choices = normalizeChoices(nestedRoot.choices);
         window[`choices-${messageId}-${nestedRoot.name}`] = choices;
         window[`pathMap-${messageId}-${nestedRoot.name}`] = buildValuePathMap(choices);
+        window[`leafOptions-${messageId}-${nestedRoot.name}`] = flattenLeafOptions(choices);
 
         const proposedLeaf = proposalMap[level3Name]?.proposed_value || proposalMap[level2Name]?.proposed_value || proposalMap[nestedRoot.name]?.proposed_value || '';
         const path = findPathToValue(choices, proposedLeaf) || [];
         const val1 = path[0] || proposalMap[nestedRoot.name]?.proposed_value || '';
         const val2 = path[1] || proposalMap[level2Name]?.proposed_value || '';
         const val3 = path[2] || proposalMap[level3Name]?.proposed_value || '';
+        const searchInputId = `leafsearch-${nestedRoot.name}-${messageId}`;
+        const datalistId = `leaflist-${nestedRoot.name}-${messageId}`;
 
         // Level 1 options
         let opts1 = '<option value="">선택하세요</option>';
@@ -1023,7 +1032,14 @@ function renderFieldSuggestions(proposal) {
             <select id="input-${nestedRoot.name}-${messageId}-3" data-field-name="${level3Name}" data-level="3" onchange="updateParentFields('${messageId}', '${nestedRoot.name}', 3)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1" ${!val2 ? 'disabled' : ''}>
               ${opts3}
             </select>
-          `, proposalMap[level3Name]?.reason);
+            <div class="mt-2 flex gap-2 items-center">
+              <input id="${searchInputId}" list="${datalistId}" placeholder="3단계 빠른 검색" class="flex-1 text-sm border border-gray-300 rounded-md px-2 py-1 focus:border-blue-500 focus:ring-blue-500" oninput="handleLeafSearchApply('${messageId}', '${nestedRoot.name}', '${searchInputId}')">
+              <button type="button" class="px-3 py-1 text-xs rounded-md border border-gray-300 hover:border-blue-500" onclick="handleLeafSearchApply('${messageId}', '${nestedRoot.name}', '${searchInputId}')">적용</button>
+            </div>
+            <datalist id="${datalistId}">
+              ${window[`leafOptions-${messageId}-${nestedRoot.name}`].slice(0, 2000).map(opt => `<option value="${opt.value}" label="${opt.label}"></option>`).join('')}
+            </datalist>
+            `, proposalMap[level3Name]?.reason);
         }
 
         renderedFields.add(nestedRoot.name);
@@ -1060,6 +1076,9 @@ function renderFieldSuggestions(proposal) {
                  // --- Nested Field Rendering (3 Levels) ---
                  window[`choices-${messageId}-${fieldName}`] = choices; // Store for handlers
                  window[`pathMap-${messageId}-${fieldName}`] = buildValuePathMap(choices);
+                 window[`leafOptions-${messageId}-${fieldName}`] = flattenLeafOptions(choices);
+                 const searchInputId = `leafsearch-${fieldName}-${messageId}`;
+                 const datalistId = `leaflist-${fieldName}-${messageId}`;
 
              const path = findPathToValue(choices, proposedValue) || [];
              const val1 = path[0] || '';
@@ -1082,6 +1101,13 @@ function renderFieldSuggestions(proposal) {
                     <select id="input-${fieldName}-${messageId}-1" data-field-name="${fieldName}" data-level="1" onchange="updateDependentFields('${messageId}', '${fieldName}', 1)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1">${opts1}</select>
                     <select id="input-${fieldName}-${messageId}-2" data-field-name="${fieldName}" data-level="2" onchange="updateDependentFields('${messageId}', '${fieldName}', 2)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1" ${!val1 ? 'disabled' : ''}>${opts2}</select>
                     <select id="input-${fieldName}-${messageId}-3" data-field-name="${fieldName}" data-level="3" onchange="updateParentFields('${messageId}', '${fieldName}', 3)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1" ${!val2 ? 'disabled' : ''}>${opts3}</select>
+                    <div class="flex gap-2 items-center">
+                      <input id="${searchInputId}" list="${datalistId}" placeholder="3단계 빠른 검색" class="flex-1 text-sm border border-gray-300 rounded-md px-2 py-1 focus:border-blue-500 focus:ring-blue-500" oninput="handleLeafSearchApply('${messageId}', '${fieldName}', '${searchInputId}')">
+                      <button type="button" class="px-3 py-1 text-xs rounded-md border border-gray-300 hover:border-blue-500" onclick="handleLeafSearchApply('${messageId}', '${fieldName}', '${searchInputId}')">적용</button>
+                    </div>
+                    <datalist id="${datalistId}">
+                      ${window[`leafOptions-${messageId}-${fieldName}`].slice(0, 2000).map(opt => `<option value="${opt.value}" label="${opt.label}"></option>`).join('')}
+                    </datalist>
                 </div>
              `;
          } else {
@@ -1277,6 +1303,35 @@ function buildValuePathMap(choices, path = [], map = {}) {
     return map;
 }
 
+function flattenLeafOptions(choices, path = [], acc = []) {
+    if (!Array.isArray(choices)) return acc;
+    choices.forEach(choice => {
+        const currentPath = [...path, choice.value];
+        if (choice.choices && choice.choices.length > 0) {
+            flattenLeafOptions(choice.choices, currentPath, acc);
+        } else {
+            acc.push({
+                value: choice.value,
+                label: currentPath.join(" / ")
+            });
+        }
+    });
+    return acc;
+}
+
+function findLeafByInput(leaves, input) {
+    if (!input) return null;
+    const key = input.trim().toLowerCase();
+    // 1) exact match by value
+    let found = leaves.find(l => String(l.value).toLowerCase() === key);
+    if (found) return found;
+    // 2) exact match by label
+    found = leaves.find(l => l.label.toLowerCase() === key);
+    if (found) return found;
+    // 3) prefix/substring match
+    return leaves.find(l => l.label.toLowerCase().includes(key));
+}
+
 window.updateDependentFields = function(messageId, fieldName, level) {
     const choices = window[`choices-${messageId}-${fieldName}`];
     const el1 = document.getElementById(`input-${fieldName}-${messageId}-1`);
@@ -1384,6 +1439,30 @@ window.updateParentFields = function(messageId, fieldName, level) {
         if (el3 && el3.value !== val3) {
             el3.value = val3;
         }
+    }
+};
+
+window.handleLeafSearchApply = function(messageId, fieldName, inputId) {
+    const choices = window[`choices-${messageId}-${fieldName}`];
+    const elInput = document.getElementById(inputId);
+    if (!choices || !elInput) return;
+
+    const leaves = window[`leafOptions-${messageId}-${fieldName}`] || flattenLeafOptions(choices);
+    window[`leafOptions-${messageId}-${fieldName}`] = leaves;
+
+    const userInput = elInput.value;
+    const match = findLeafByInput(leaves, userInput);
+    if (!match) {
+        elInput.classList.add("ring-2", "ring-red-400");
+        setTimeout(() => elInput.classList.remove("ring-2", "ring-red-400"), 800);
+        return;
+    }
+
+    const el3 = document.getElementById(`input-${fieldName}-${messageId}-3`);
+    if (el3) {
+        el3.value = match.value;
+        window.updateParentFields(messageId, fieldName, 3);
+        elInput.classList.remove("ring-2", "ring-red-400");
     }
 };
 
