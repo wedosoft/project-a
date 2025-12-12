@@ -16,21 +16,23 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Middleware 순서 중요: 아래에서 위로 실행됨
-# 1. CORS (가장 먼저)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # 프로덕션에서는 제한 필요
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Middleware 순서 중요: 나중에 추가된 미들웨어가 요청을 먼저 처리함 (Outside-In)
+
+# 3. Tenant (테넌트 ID 추출 및 검증) - 가장 안쪽 (라우터 직전)
+app.add_middleware(TenantMiddleware)
 
 # 2. Logging (요청/응답 로깅)
 app.add_middleware(LoggingMiddleware)
 
-# 3. Tenant (테넌트 ID 추출 및 검증)
-app.add_middleware(TenantMiddleware)
+# 1. CORS (가장 먼저 요청을 받아야 함) - 가장 바깥쪽
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # Allow all origins
+    allow_origin_regex=".*", # Allow all origins regex (for credentials)
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # 라우터 등록 (prefix는 각 라우터 파일에서 정의됨)
 app.include_router(tickets.router)

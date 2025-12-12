@@ -253,6 +253,20 @@ async def analyze_ticket(
         )
 
 
+@router.post("/analyze/stream")
+async def analyze_ticket_stream(
+    request: AnalyzeRequest,
+    tenant_id: str = Header(..., alias="X-Tenant-ID"),
+    platform: str = Header(..., alias="X-Platform")
+):
+    """
+    Dedicated endpoint for SSE streaming analysis.
+    Forces stream_progress=True.
+    """
+    request.stream_progress = True
+    return await analyze_ticket(request, tenant_id, platform)
+
+
 # Note: _analyze_with_streaming and _analyze_ticket are now handled by orchestrator
 # These functions are removed as orchestrator.process_ticket() handles both streaming and direct modes
 

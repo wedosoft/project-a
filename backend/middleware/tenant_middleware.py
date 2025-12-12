@@ -26,9 +26,17 @@ class TenantMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next: Callable):
         """Process request and extract tenant_id"""
+        
+        # Debug logging
+        # logger.debug(f"TenantMiddleware dispatch: {request.method} {request.url.path}")
+
+        # Skip tenant validation for OPTIONS requests (CORS preflight)
+        if request.method == "OPTIONS":
+            # logger.debug("Skipping tenant validation for OPTIONS")
+            return await call_next(request)
 
         # Skip tenant validation for health/docs endpoints
-        if request.url.path in ["/api/health", "/api/health/dependencies", "/docs", "/openapi.json", "/redoc"]:
+        if request.url.path.startswith("/api/health") or request.url.path in ["/docs", "/openapi.json", "/redoc"]:
             return await call_next(request)
 
         tenant_id = None

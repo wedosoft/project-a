@@ -167,62 +167,103 @@ class OrchestratorService:
                 "errors": []
             }
 
-            # Event 1: Router decision
+            # Event 1: Started
             yield {
-                "type": "router_decision",
-                "decision": "retrieve_cases" if config.embedding_enabled else "propose_solution_direct",
-                "reasoning": "Embedding mode enabled" if config.embedding_enabled else "Embedding mode disabled",
-                "embedding_enabled": config.embedding_enabled,
-                "analysis_depth": config.analysis_depth
+                "type": "started",
+                "data": {
+                    "proposalId": "pending",
+                    "message": "분석을 시작합니다..."
+                }
             }
 
-            # Step 1: Retrieval (if enabled)
             if config.embedding_enabled:
-                # Event 2: Retriever start
-                yield {"type": "retriever_start", "mode": "embedding"}
+                # Event 2: Searching
+                yield {
+                    "type": "searching",
+                    "data": {
+                        "message": "유사 사례와 KB를 검색하고 있습니다..."
+                    }
+                }
 
                 # Execute retrieval
                 state = await retrieve_cases(state)
                 state = await retrieve_kb(state)
 
-                # Event 3: Retriever results
+                # Event 3: Search Result
                 search_results = state.get("search_results", {})
                 yield {
-                    "type": "retriever_results",
-                    "similar_cases_count": len(search_results.get("similar_cases", [])),
-                    "kb_articles_count": len(search_results.get("kb_procedures", [])),
-                    "total_results": search_results.get("total_results", 0)
+                    "type": "search_result",
+                    "data": {
+                        "similar_cases": search_results.get("similar_cases", []),
+                        "kb_procedures": search_results.get("kb_procedures", [])
+                    }
                 }
 
-            # Step 2: Resolution
-            # Event 4: Resolution start
-            yield {"type": "resolution_start"}
+            # Event 4: Analyzing
+            yield {
+                "type": "analyzing",
+                "data": {
+                    "message": "검색 결과를 분석하고 있습니다..."
+                }
+            }
 
             # Generate solution
             state = await propose_solution(state)
-
+            
             # Generate field updates
             state = await propose_field_updates(state)
 
-            # Step 3: Save to database
+            # Event 5: Field Proposal
+            proposed_action = state.get("proposed_action", {})
+            field_updates = proposed_action.get("proposed_field_updates", {})
+            field_reasons = proposed_action.get("field_reasons", {})
+            
+            for field, value in field_updates.items():
+                yield {
+                    "type": "field_proposal",
+                    "data": {
+                        "fieldName": field,
+                        "fieldLabel": field, 
+                        "proposedValue": value,
+                        "reason": field_reasons.get(field, "")
+                    }
+                }
+
+            # Event 6: Synthesizing
+            yield {
+                "type": "synthesizing",
+                "data": {
+                    "message": "최종 응답을 생성하고 있습니다..."
+                }
+            }
+
+            # Event 7: Draft Response
+            yield {
+                "type": "draft_response",
+                "data": {
+                    "text": proposed_action.get("draft_response", "")
+                }
+            }
+
+            # Save proposal
             analysis_time_ms = int((time.time() - start_time) * 1000)
             proposal = await self._save_proposal(state, tenant_id, analysis_time_ms)
 
-            # Event 5: Resolution complete
+            # Event 8: Complete
             yield {
-                "type": "resolution_complete",
-                "proposal_id": proposal.id,
-                "confidence": proposal.confidence,
-                "mode": proposal.mode,
-                "analysis_time_ms": analysis_time_ms
+                "type": "complete",
+                "data": {
+                    "proposalId": proposal.id
+                }
             }
 
         except Exception as e:
             logger.error(f"Streaming error: {e}")
             yield {
                 "type": "error",
-                "message": str(e),
-                "recoverable": False
+                "data": {
+                    "message": str(e)
+                }
             }
 
     async def _save_proposal(
