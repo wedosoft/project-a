@@ -1140,15 +1140,29 @@ async function loadTicketData() {
 async function loadTicketFields() {
   const { client } = state;
   try {
+    // 1) Prefer backend-cached schema (Supabase) to avoid hitting Freshdesk every modal open
+    try {
+      const cached = await apiCall('GET', 'api/assist/ticket-fields');
+      const fields = Array.isArray(cached) ? cached : (cached?.ticket_fields || []);
+      if (Array.isArray(fields) && fields.length > 0) {
+        setTicketFields(fields);
+        console.log('Ticket Fields Loaded (backend cache):', fields.length);
+        return;
+      }
+    } catch (e) {
+      console.warn('Backend ticket-fields fetch failed, falling back to Freshdesk:', e);
+    }
+
+    // 2) Fallback: Freshdesk API via FDK request template
     const response = await client.request.invokeTemplate("getTicketFields", {});
-    
     if (response.status === 200) {
       const fields = JSON.parse(response.response);
       setTicketFields(fields);
-      console.log('Ticket Fields Loaded:', fields);
-    } else {
-      console.error('Failed to load ticket fields:', response);
+      console.log('Ticket Fields Loaded (freshdesk fallback):', fields.length);
+      return;
     }
+
+    console.error('Failed to load ticket fields:', response);
   } catch (error) {
     console.error('Error loading ticket fields:', error);
   }

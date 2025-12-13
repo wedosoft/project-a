@@ -21,6 +21,23 @@ const STANDARD_FIELDS = [
 
 const NUMERIC_FIELDS = ['priority', 'status', 'group_id', 'responder_id', 'source'];
 
+// Fields we don't want to propose/update in this task (focus on nested field correctness)
+const EXCLUDED_PROPOSAL_FIELDS = new Set([
+  // exclude fields that are either not stable across tenants or not in scope
+  'status', 'product', 'source', 'group', 'agent', 'group_id', 'responder_id'
+]);
+const EXCLUDED_UPDATE_FIELDS = new Set([
+  'status', 'product', 'source', 'group', 'agent', 'group_id', 'responder_id'
+]);
+
+// Only keep these flat (non-nested) fields in UI for now
+const ALLOWED_FLAT_FIELDS = new Set(['ticket_type', 'priority']);
+
+// Some Freshdesk Ticket Fields API names differ from Ticket Update payload keys
+const FIELD_NAME_ALIASES = {
+  ticket_type: 'type'
+};
+
 // =============================================================================
 // [2] STATE MANAGEMENT
 // =============================================================================
@@ -68,6 +85,68 @@ function showNotify(type, message) {
   } else {
     console.log(`[${type}] ${message}`);
   }
+}
+
+function coerceNumericChoiceValue(rawValue, choices) {
+  // If already numeric-ish
+  const asNum = parseInt(String(rawValue), 10);
+  if (Number.isFinite(asNum)) return asNum;
+
+  if (!choices || !Array.isArray(choices)) return null;
+
+  const needle = String(rawValue).trim().toLowerCase();
+  const match = choices.find(c => {
+    if (typeof c === 'object' && c) {
+      const label = (c.label ?? c.value ?? c.name ?? '').toString().trim().toLowerCase();
+      const value = (c.value ?? c.id ?? '').toString().trim().toLowerCase();
+      return label === needle || value === needle;
+    }
+    return String(c).trim().toLowerCase() === needle;
+  });
+
+  if (!match) return null;
+
+  if (typeof match === 'object' && match) {
+    const cand = match.id ?? match.value;
+    const n = parseInt(String(cand), 10);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  const n = parseInt(String(match), 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizeChoiceOptions(choices) {
+  // Convert various Freshdesk choices shapes into [{ value, label }]
+  // - Array: ['A', 'B'] or [{label, value}]
+  // - Object map:
+  //   - { Low: 1 }  => label=Low, value=1
+  //   - { '2': ['Open', 'desc'] } => label=Open, value=2
+  if (!choices) return [];
+
+  if (Array.isArray(choices)) {
+    return choices.map(c => {
+      if (typeof c === 'object' && c) {
+        const label = c.label ?? c.value ?? c.name ?? '';
+        const value = c.value ?? c.id ?? c.name ?? label;
+        return { value: String(value), label: String(label) };
+      }
+      return { value: String(c), label: String(c) };
+    });
+  }
+
+  if (typeof choices === 'object') {
+    return Object.entries(choices).map(([k, v]) => {
+      if (Array.isArray(v)) {
+        // status-like: { '2': ['Open', '...'] }
+        return { value: String(k), label: String(v[0] ?? k) };
+      }
+      // priority/group-like: { 'High': 3 } or { 'Sales': 123 }
+      return { value: String(v), label: String(k) };
+    });
+  }
+
+  return [];
 }
 
 // =============================================================================
@@ -199,21 +278,31 @@ const NestedFieldManager = {
     const { choices } = cache;
     const el2 = document.getElementById(`input-${fieldName}-${messageId}-2`);
     const el3 = document.getElementById(`input-${fieldName}-${messageId}-3`);
+    const btn3 = document.getElementById(`btn-${fieldName}-${messageId}-3`);
 
     // Update Level 2 options
-    const level2Choices = this.getChoicesForLevel(choices, 2, [val1]);
+    const level2Choices = val1 ? this.getChoicesForLevel(choices, 2, [val1]) : [];
+    const hasLevel2 = level2Choices && level2Choices.length > 0;
     if (el2) {
       el2.innerHTML = this.buildSelectOptions(level2Choices);
-      el2.disabled = !val1;
+      el2.disabled = !val1 || !hasLevel2;
       el2.value = '';
     }
 
-    // Reset Level 3
+    // Reset / disable Level 3 input when Level 2 is not available
     if (el3) {
-      el3.innerHTML = '<option value="">선택하세요</option>';
-      el3.disabled = true;
+      el3.disabled = !hasLevel2;
       el3.value = '';
     }
+
+    // "목록" 버튼은 L3 사용 가능 여부에 맞춰 비활성화/활성화해야 함
+    if (btn3) {
+      btn3.disabled = true;
+    }
+
+    // Also hide dropdown list if present
+    const dropdown = document.getElementById(`dropdown-${fieldName}-${messageId}-3`);
+    if (dropdown) dropdown.classList.add('hidden');
   },
 
   /**
@@ -225,14 +314,23 @@ const NestedFieldManager = {
 
     const { choices } = cache;
     const el3 = document.getElementById(`input-${fieldName}-${messageId}-3`);
+    const btn3 = document.getElementById(`btn-${fieldName}-${messageId}-3`);
 
-    // Update Level 3 options
-    const level3Choices = this.getChoicesForLevel(choices, 3, [val1, val2]);
+    // If this branch ends at Level 2, disable Level 3.
+    const level3Choices = val2 ? this.getChoicesForLevel(choices, 3, [val1, val2]) : [];
+    const hasLevel3 = level3Choices && level3Choices.length > 0;
+
     if (el3) {
-      el3.innerHTML = this.buildSelectOptions(level3Choices);
-      el3.disabled = !val2;
+      el3.disabled = !val2 || !hasLevel3;
       el3.value = '';
     }
+
+    if (btn3) {
+      btn3.disabled = !val2 || !hasLevel3;
+    }
+
+    const dropdown = document.getElementById(`dropdown-${fieldName}-${messageId}-3`);
+    if (dropdown) dropdown.classList.add('hidden');
   },
 
   /**
@@ -246,37 +344,87 @@ const NestedFieldManager = {
     const { choices, pathMap } = cache;
     const path = pathMap[val3];
 
-    if (!path || path.length < 3) {
-      console.warn('Path not found for value:', val3);
+    // Only sync when user selected an exact leaf value.
+    // For partial typing, do nothing silently.
+    if (!path || path.length < 1) {
       return;
     }
 
-    const [targetVal1, targetVal2, targetVal3] = path;
+    const targetVal1 = path[0] || '';
+    const targetVal2 = path[1] || '';
+    const targetVal3 = path[2] || '';
 
     const el1 = document.getElementById(`input-${fieldName}-${messageId}-1`);
     const el2 = document.getElementById(`input-${fieldName}-${messageId}-2`);
     const el3 = document.getElementById(`input-${fieldName}-${messageId}-3`);
+    const btn3 = document.getElementById(`btn-${fieldName}-${messageId}-3`);
 
-    // Step 1: Set Level 1 and regenerate Level 2 options
-    if (el1) {
-      el1.value = targetVal1;
+    // Always set Level 1
+    if (el1) el1.value = targetVal1;
 
-      // Regenerate Level 2 options
-      const level2Choices = this.getChoicesForLevel(choices, 2, [targetVal1]);
-      if (el2) {
-        el2.innerHTML = this.buildSelectOptions(level2Choices);
-        el2.disabled = false;
-        el2.value = targetVal2;
-
-        // Regenerate Level 3 options
-        const level3Choices = this.getChoicesForLevel(choices, 3, [targetVal1, targetVal2]);
-        if (el3) {
-          el3.innerHTML = this.buildSelectOptions(level3Choices);
-          el3.disabled = false;
-          el3.value = targetVal3;
-        }
-      }
+    // Rebuild Level 2 options
+    const level2Choices = targetVal1 ? this.getChoicesForLevel(choices, 2, [targetVal1]) : [];
+    const hasLevel2 = level2Choices && level2Choices.length > 0;
+    if (el2) {
+      el2.innerHTML = this.buildSelectOptions(level2Choices);
+      el2.disabled = !hasLevel2;
+      el2.value = targetVal2 || '';
     }
+
+    // Handle branch depths:
+    // - leaf at level1: disable level2 + level3
+    // - leaf at level2: disable level3
+    // - leaf at level3: enable level3
+    const level3Choices = (targetVal1 && targetVal2)
+      ? this.getChoicesForLevel(choices, 3, [targetVal1, targetVal2])
+      : [];
+    const hasLevel3 = level3Choices && level3Choices.length > 0;
+
+    if (el3) {
+      // Level3 input is only meaningful when there are level3 choices.
+      el3.disabled = !hasLevel3;
+      // Keep the typed value so user sees what they chose.
+      // If the path is only 1 or 2 deep, val3 will be empty.
+      el3.value = val3;
+    }
+
+    if (btn3) {
+      btn3.disabled = !hasLevel3;
+    }
+
+    // If the selected leaf ends at level1 or level2, clear deeper fields explicitly.
+    if (path.length === 1) {
+      if (el2) el2.value = '';
+      if (el3) el3.value = val3; // leaf label is shown in level3 box
+    }
+    if (path.length === 2) {
+      if (el3) el3.value = val3;
+    }
+
+    // Hide dropdown list if present
+    const dropdown = document.getElementById(`dropdown-${fieldName}-${messageId}-3`);
+    if (dropdown) dropdown.classList.add('hidden');
+  },
+
+  onLevel3Input(messageId, fieldName, value) {
+    // Only sync when an exact option is selected/typed.
+    const cache = this.getCache(messageId, fieldName);
+    if (!cache) return;
+    if (cache.pathMap?.[value]) {
+      this.syncFromLevel3(messageId, fieldName, value);
+    }
+  },
+
+  toggleLevel3Dropdown(messageId, fieldName) {
+    const dropdown = document.getElementById(`dropdown-${fieldName}-${messageId}-3`);
+    if (!dropdown) return;
+    dropdown.classList.toggle('hidden');
+  },
+
+  applyLevel3FromDropdown(messageId, fieldName, value) {
+    const input = document.getElementById(`input-${fieldName}-${messageId}-3`);
+    if (input) input.value = value;
+    this.syncFromLevel3(messageId, fieldName, value);
   },
 
   /**
@@ -300,8 +448,9 @@ const NestedFieldManager = {
     const { nestedFields } = cache;
     const values = {};
 
+    // IDs are rooted by the nested root fieldName (not each nested field name)
     for (const nf of nestedFields) {
-      const el = document.getElementById(`input-${nf.name}-${messageId}-${nf.level}`);
+      const el = document.getElementById(`input-${fieldName}-${messageId}-${nf.level}`);
       if (el && el.value) {
         values[nf.name] = el.value;
       }
@@ -331,8 +480,7 @@ const NestedFieldManager = {
     const level2Choices = val1 ? this.getChoicesForLevel(normalized, 2, [val1]) : [];
     const level3Choices = val2 ? this.getChoicesForLevel(normalized, 3, [val1, val2]) : [];
 
-    const searchInputId = `search-${fieldName}-${messageId}`;
-    const datalistId = `datalist-${fieldName}-${messageId}`;
+    const datalistId = `datalist-${fieldName}-${messageId}-level3`;
 
     return `
       <div class="nested-field-container space-y-2">
@@ -340,7 +488,7 @@ const NestedFieldManager = {
         <div>
           <label class="text-xs text-gray-500">${escapeHtml(level1Field?.label || 'Level 1')}</label>
           <select
-            id="input-${level1Field?.name || fieldName}-${messageId}-1"
+            id="input-${fieldName}-${messageId}-1"
             data-field-name="${escapeHtml(level1Field?.name || fieldName)}"
             data-level="1"
             onchange="NestedFieldManager.syncFromLevel1('${messageId}', '${fieldName}', this.value)"
@@ -354,11 +502,11 @@ const NestedFieldManager = {
         <div>
           <label class="text-xs text-gray-500">${escapeHtml(level2Field?.label || 'Level 2')}</label>
           <select
-            id="input-${level2Field?.name || fieldName}-${messageId}-2"
+            id="input-${fieldName}-${messageId}-2"
             data-field-name="${escapeHtml(level2Field?.name || fieldName)}"
             data-level="2"
             onchange="NestedFieldManager.syncFromLevel2('${messageId}', '${fieldName}',
-              document.getElementById('input-${level1Field?.name || fieldName}-${messageId}-1').value, this.value)"
+              document.getElementById('input-${fieldName}-${messageId}-1').value, this.value)"
             class="w-full px-2 py-1 text-sm border rounded"
             ${!val1 ? 'disabled' : ''}
           >
@@ -369,77 +517,56 @@ const NestedFieldManager = {
         <!-- Level 3 -->
         <div>
           <label class="text-xs text-gray-500">${escapeHtml(level3Field?.label || 'Level 3')}</label>
-          <select
-            id="input-${level3Field?.name || fieldName}-${messageId}-3"
-            data-field-name="${escapeHtml(level3Field?.name || fieldName)}"
-            data-level="3"
-            onchange="NestedFieldManager.syncFromLevel3('${messageId}', '${fieldName}', this.value)"
-            class="w-full px-2 py-1 text-sm border rounded"
-            ${!val2 ? 'disabled' : ''}
-          >
-            ${this.buildSelectOptions(level3Choices)}
-          </select>
-        </div>
-
-        <!-- Quick Search -->
-        <div class="flex gap-2 mt-2">
-          <input
-            type="text"
-            id="${searchInputId}"
-            list="${datalistId}"
-            placeholder="3단계 빠른 검색..."
-            class="flex-1 px-2 py-1 text-sm border rounded"
-          />
-          <button
-            type="button"
-            onclick="handleLeafSearch('${messageId}', '${fieldName}', '${searchInputId}')"
-            class="px-3 py-1 text-sm bg-blue-500 text-white rounded hover:bg-blue-600"
-          >적용</button>
+          <!--
+            Make Level 3 searchable via datalist on the field itself (no extra search + apply UI).
+            On selection, immediately sync Level 1/2.
+          -->
+          <div class="flex gap-2">
+            <input
+              id="input-${fieldName}-${messageId}-3"
+              data-field-name="${escapeHtml(level3Field?.name || fieldName)}"
+              data-level="3"
+              list="${datalistId}"
+              value="${escapeHtml(val3)}"
+              placeholder="키워드로 검색/선택"
+              oninput="NestedFieldManager.onLevel3Input('${messageId}', '${fieldName}', this.value)"
+              onchange="NestedFieldManager.onLevel3Input('${messageId}', '${fieldName}', this.value)"
+              class="flex-1 px-2 py-1 text-sm border rounded"
+              ${!val2 ? 'disabled' : ''}
+            />
+            <button
+              type="button"
+              id="btn-${fieldName}-${messageId}-3"
+              onclick="NestedFieldManager.toggleLevel3Dropdown('${messageId}', '${fieldName}')"
+              class="px-3 py-1 text-sm bg-gray-200 rounded hover:bg-gray-300"
+              ${(!val2 || !level3Choices || level3Choices.length === 0) ? 'disabled' : ''}
+            >목록</button>
+          </div>
           <datalist id="${datalistId}">
-            ${leafOptions.slice(0, 500).map(opt =>
+            ${(leafOptions || []).slice(0, 2000).map(opt =>
               `<option value="${escapeHtml(opt.value)}" label="${escapeHtml(opt.label)}"></option>`
             ).join('')}
           </datalist>
+
+          <select
+            id="dropdown-${fieldName}-${messageId}-3"
+            class="mt-2 w-full px-2 py-1 text-sm border rounded hidden"
+            size="8"
+            onchange="NestedFieldManager.applyLevel3FromDropdown('${messageId}', '${fieldName}', this.value)"
+          >
+            <option value="">전체 목록에서 선택</option>
+            ${(leafOptions || []).slice(0, 2000).map(opt =>
+              `<option value="${escapeHtml(opt.value)}">${escapeHtml(opt.label)}</option>`
+            ).join('')}
+          </select>
         </div>
       </div>
     `;
   }
 };
 
-// Global reference for onclick handlers
+// Global reference for inline handlers
 window.NestedFieldManager = NestedFieldManager;
-
-/**
- * Handle leaf search apply button
- */
-function handleLeafSearch(messageId, fieldName, inputId) {
-  const cache = NestedFieldManager.getCache(messageId, fieldName);
-  if (!cache) return;
-
-  const input = document.getElementById(inputId);
-  if (!input) return;
-
-  const userInput = input.value.trim();
-  const { leafOptions } = cache;
-
-  // Find exact match
-  const match = leafOptions.find(opt =>
-    opt.value === userInput || opt.label.toLowerCase().includes(userInput.toLowerCase())
-  );
-
-  if (!match) {
-    input.classList.add('ring-2', 'ring-red-400');
-    setTimeout(() => input.classList.remove('ring-2', 'ring-red-400'), 800);
-    return;
-  }
-
-  // Apply reverse sync
-  NestedFieldManager.syncFromLevel3(messageId, fieldName, match.value);
-  input.classList.remove('ring-2', 'ring-red-400');
-  input.value = match.value;
-}
-
-window.handleLeafSearch = handleLeafSearch;
 
 // =============================================================================
 // [5] STREAM CLIENT (Fetch + ReadableStream)
@@ -534,6 +661,13 @@ const StreamClient = {
    * Analyze ticket with SSE streaming using fetch (real streaming)
    */
   async analyzeTicket(ticketData, ticketFields, handlers) {
+    const filteredFields = (ticketFields || []).filter(f => {
+      if (f?.type === 'nested_field') return true;
+      if (f?.name === 'ticket_type') return true;
+      if (f?.name === 'priority') return true;
+      return false;
+    });
+
     const payload = {
       ticket_id: String(ticketData.id),
       subject: ticketData.subject || '',
@@ -541,7 +675,8 @@ const StreamClient = {
       priority: ticketData.priority,
       status: ticketData.status,
       tags: ticketData.tags || [],
-      ticket_fields: ticketFields || []
+      ticket_fields: filteredFields,
+      fields_only: true
     };
 
     console.log('[StreamClient] Starting SSE stream with payload:', payload);
@@ -619,6 +754,150 @@ const StreamClient = {
 const UIRenderer = {
   elements: {},
 
+  ensureBasicFieldsCard(messageId) {
+    const container = document.getElementById(`${messageId}-fields`);
+    if (!container) return;
+
+    const cardId = `basic-fields-${messageId}`;
+    if (document.getElementById(cardId)) return;
+
+    const typeDef = state.ticketFields?.find(f => f.name === 'ticket_type');
+    const prioDef = state.ticketFields?.find(f => f.name === 'priority');
+
+    const typeOptions = normalizeChoiceOptions(typeDef?.choices);
+    const prioOptions = normalizeChoiceOptions(prioDef?.choices);
+
+    const cardHtml = `
+      <div id="${cardId}" class="field-proposal p-3 bg-gray-50 rounded border-l-4 border-blue-500 animate-fade-in">
+        <div class="font-medium text-sm">기본 필드</div>
+        <div class="text-xs text-gray-500 mt-1">Type / Priority</div>
+        <div class="mt-2 grid grid-cols-2 gap-2">
+          <div>
+            <label class="text-xs text-gray-500">${escapeHtml(typeDef?.label || 'Type')}</label>
+            <select
+              id="input-ticket_type-${messageId}"
+              data-field-name="ticket_type"
+              class="w-full px-2 py-1 text-sm border rounded"
+            >
+              <option value="">선택하세요</option>
+              ${typeOptions.map(opt => `<option value="${escapeHtml(opt.value)}">${escapeHtml(opt.label)}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label class="text-xs text-gray-500">${escapeHtml(prioDef?.label || 'Priority')}</label>
+            <select
+              id="input-priority-${messageId}"
+              data-field-name="priority"
+              class="w-full px-2 py-1 text-sm border rounded"
+            >
+              <option value="">선택하세요</option>
+              ${prioOptions.map(opt => `<option value="${escapeHtml(opt.value)}">${escapeHtml(opt.label)}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Remove placeholder on first real content
+    const placeholder = container.querySelector('.text-gray-500');
+    if (placeholder) placeholder.remove();
+
+    container.insertAdjacentHTML('beforeend', cardHtml);
+  },
+
+  setBasicFieldValue(messageId, fieldName, proposedValue) {
+    const el = document.getElementById(`input-${fieldName}-${messageId}`);
+    if (!el) return;
+    if (proposedValue === undefined || proposedValue === null) return;
+    el.value = String(proposedValue);
+  },
+
+  /**
+   * Apply a proposed value into the existing nested 3-level widget.
+   * - If proposed value is a leaf(Level 3): reverse-sync Level 1/2
+   * - If proposed value matches Level 1/2: forward-sync
+   */
+  applyNestedProposal(messageId, nestedRootName, proposedValue, explicitLevel) {
+    if (!proposedValue) return;
+
+    const cache = NestedFieldManager.getCache(messageId, nestedRootName);
+    if (!cache) return;
+
+    const { choices, pathMap } = cache;
+
+    const el1 = document.getElementById(`input-${nestedRootName}-${messageId}-1`);
+    const el2 = document.getElementById(`input-${nestedRootName}-${messageId}-2`);
+
+    // 1) Explicit level from field definition (when proposal is for a specific nested field)
+    if (explicitLevel === 1) {
+      if (el1) {
+        el1.value = proposedValue;
+        NestedFieldManager.syncFromLevel1(messageId, nestedRootName, proposedValue);
+      }
+      return;
+    }
+    if (explicitLevel === 2) {
+      // Find parent Level1 uniquely
+      const parentVal1 = choices
+        ?.find(l1 => (l1.choices || []).some(l2 => l2.value === proposedValue))
+        ?.value;
+      if (parentVal1 && el1) {
+        el1.value = parentVal1;
+        NestedFieldManager.syncFromLevel1(messageId, nestedRootName, parentVal1);
+      }
+      if (parentVal1 && el2) {
+        el2.value = proposedValue;
+        NestedFieldManager.syncFromLevel2(messageId, nestedRootName, parentVal1, proposedValue);
+      }
+      return;
+    }
+    if (explicitLevel === 3) {
+      // If it's not a leaf, fall through to auto-detect instead of warning.
+      if (pathMap?.[proposedValue]) {
+        NestedFieldManager.syncFromLevel3(messageId, nestedRootName, proposedValue);
+        return;
+      }
+    }
+
+    // 2) Auto-detect by value
+    if (pathMap?.[proposedValue]) {
+      NestedFieldManager.syncFromLevel3(messageId, nestedRootName, proposedValue);
+      return;
+    }
+
+    // Level 1 direct match
+    if (choices?.some(l1 => l1.value === proposedValue)) {
+      if (el1) {
+        el1.value = proposedValue;
+        NestedFieldManager.syncFromLevel1(messageId, nestedRootName, proposedValue);
+      }
+      return;
+    }
+
+    // Level 2 match (try to find a unique parent)
+    const matches = [];
+    for (const l1 of choices || []) {
+      for (const l2 of l1.choices || []) {
+        if (l2.value === proposedValue) matches.push({ parentVal1: l1.value });
+      }
+    }
+
+    if (matches.length === 1) {
+      const parentVal1 = matches[0].parentVal1;
+      if (el1) {
+        el1.value = parentVal1;
+        NestedFieldManager.syncFromLevel1(messageId, nestedRootName, parentVal1);
+      }
+      if (el2) {
+        el2.value = proposedValue;
+        NestedFieldManager.syncFromLevel2(messageId, nestedRootName, parentVal1, proposedValue);
+      }
+      return;
+    }
+
+    console.warn('Nested proposal value not found in choices:', proposedValue);
+  },
+
   /**
    * Cache DOM elements
    */
@@ -628,8 +907,48 @@ const UIRenderer = {
       chatInput: document.getElementById('chatInput'),
       sendButton: document.getElementById('sendBtn'),
       analyzeButton: document.getElementById('analyzeBtn'),
-      loadingIndicator: document.getElementById('loading-indicator')
+      loadingIndicator: document.getElementById('loading-indicator'),
+      headerTitle: document.getElementById('headerTitle'),
+      statusBadge: document.getElementById('statusBadge'),
+      statusText: document.getElementById('statusText')
     };
+  },
+
+  setReady(ticketData) {
+    const subject = ticketData?.subject ? `- ${ticketData.subject}` : '';
+    if (this.elements.headerTitle) {
+      this.elements.headerTitle.textContent = `티켓 준비됨 ${subject}`.trim();
+    }
+    if (this.elements.statusBadge) {
+      this.elements.statusBadge.textContent = '준비 완료';
+      this.elements.statusBadge.className = 'px-2 py-1 text-xs font-medium rounded-full bg-green-100 text-green-700';
+    }
+    if (this.elements.statusText) {
+      this.elements.statusText.textContent = '준비 완료. “티켓 분석”을 눌러 진행하세요.';
+    }
+  },
+
+  setLoading(text = '분석 중...') {
+    if (this.elements.headerTitle) {
+      this.elements.headerTitle.textContent = '티켓 분석 중...';
+    }
+    if (this.elements.statusBadge) {
+      this.elements.statusBadge.textContent = text;
+      this.elements.statusBadge.className = 'px-2 py-1 text-xs font-medium rounded-full bg-yellow-100 text-yellow-700';
+    }
+    if (this.elements.statusText) {
+      this.elements.statusText.textContent = '분석을 진행 중입니다...';
+    }
+  },
+
+  setError(text = '오류') {
+    if (this.elements.statusBadge) {
+      this.elements.statusBadge.textContent = text;
+      this.elements.statusBadge.className = 'px-2 py-1 text-xs font-medium rounded-full bg-red-100 text-red-700';
+    }
+    if (this.elements.statusText) {
+      this.elements.statusText.textContent = '오류가 발생했습니다. 콘솔 로그를 확인해주세요.';
+    }
   },
 
   /**
@@ -637,6 +956,7 @@ const UIRenderer = {
    */
   showLoading(message = '분석 중...') {
     state.isLoading = true;
+    this.setLoading(message);
     if (this.elements.analyzeButton) {
       this.elements.analyzeButton.disabled = true;
       this.elements.analyzeButton.textContent = message;
@@ -703,19 +1023,13 @@ const UIRenderer = {
           <div class="text-sm text-gray-500">필드 제안 대기 중...</div>
         </div>
 
-        <!-- Draft Response Container -->
-        <div id="${messageId}-response" class="draft-response mt-4 hidden">
-          <h4 class="text-sm font-medium text-gray-700 mb-2">📝 응답 초안</h4>
-          <div id="${messageId}-response-text" class="p-3 bg-gray-50 rounded text-sm"></div>
-        </div>
-
-        <!-- Apply Button -->
+        <!-- Field Update Button (single action) -->
         <div id="${messageId}-actions" class="actions mt-4 hidden">
           <button
             onclick="applyFieldUpdates('${messageId}')"
             class="w-full py-2 bg-green-600 text-white rounded hover:bg-green-700"
           >
-            변경 사항 적용하기
+            필드 업데이트
           </button>
         </div>
       </div>
@@ -764,64 +1078,85 @@ const UIRenderer = {
 
     const { fieldName, fieldLabel, proposedValue, reason } = fieldData;
 
+    // Focus this task on nested field correctness: skip status/product proposals.
+    if (EXCLUDED_PROPOSAL_FIELDS.has(fieldName)) {
+      return;
+    }
+
     // Check if this is a nested field
     const nestedRoot = state.ticketFields?.find(f => f.type === 'nested_field');
-    const isNestedField = nestedRoot && (
-      nestedRoot.name === fieldName ||
-      nestedRoot.nested_ticket_fields?.some(nf => nf.name === fieldName)
-    );
+    const nestedRootName = nestedRoot?.name;
+    const nestedLevelDef = nestedRoot?.nested_ticket_fields?.find(nf => nf.name === fieldName);
+    const isNestedField = Boolean(nestedRoot && (
+      nestedRootName === fieldName ||
+      nestedLevelDef
+    ));
 
     let inputHtml;
 
     if (isNestedField) {
-      // Render nested field with initial value
-      const initialValues = {};
-      const level3Field = nestedRoot.nested_ticket_fields?.find(f => f.level === 3);
-      if (level3Field) {
-        initialValues[level3Field.name] = proposedValue;
-      }
-      inputHtml = NestedFieldManager.render(messageId, nestedRoot.name, nestedRoot, initialValues);
+      // Render nested selector ONCE per analysis message to avoid duplicate 3-level UIs.
+      const nestedBlockId = `nested-proposal-${nestedRootName}-${messageId}`;
+      const existingBlock = document.getElementById(nestedBlockId);
 
-      // Trigger reverse sync after render
+      // If the block already exists, we just update its selections and skip inserting a new proposal card.
+      if (existingBlock) {
+        // Apply proposal into existing widget (best-effort by level)
+        setTimeout(() => {
+          this.applyNestedProposal(messageId, nestedRootName, proposedValue, nestedLevelDef?.level);
+        }, 0);
+
+        return;
+      }
+
+      // First time: render the widget and insert a single card
+      inputHtml = NestedFieldManager.render(messageId, nestedRootName, nestedRoot, {});
+
+      const fieldHtml = `
+        <div id="${nestedBlockId}" class="field-proposal p-3 bg-gray-50 rounded border-l-4 border-blue-500 animate-fade-in">
+          <div class="flex justify-between items-start">
+            <div class="flex-1">
+              <div class="font-medium text-sm">${escapeHtml(nestedRoot?.label || '카테고리(3단계)')}</div>
+              <div class="text-xs text-gray-500 mt-1">${escapeHtml(reason || '')}</div>
+            </div>
+          </div>
+          <div class="mt-2">
+            ${inputHtml}
+          </div>
+        </div>
+      `;
+
+      container.insertAdjacentHTML('beforeend', fieldHtml);
+
+      // Apply initial proposal (if it's a leaf, reverse-sync parents)
       setTimeout(() => {
-        if (proposedValue) {
-          NestedFieldManager.syncFromLevel3(messageId, nestedRoot.name, proposedValue);
-        }
-      }, 100);
-    } else {
-      // Check for dropdown choices
-      const fieldDef = state.ticketFields?.find(f => f.name === fieldName);
-      const choices = fieldDef?.choices;
+        this.applyNestedProposal(messageId, nestedRootName, proposedValue, nestedLevelDef?.level);
+      }, 50);
 
-      if (choices && Array.isArray(choices)) {
-        // Dropdown
-        inputHtml = `
-          <select
-            id="input-${fieldName}-${messageId}"
-            data-field-name="${escapeHtml(fieldName)}"
-            class="w-full px-2 py-1 text-sm border rounded"
-          >
-            <option value="">선택하세요</option>
-            ${choices.map(c => {
-              const val = typeof c === 'object' ? c.value || c.id : c;
-              const label = typeof c === 'object' ? c.label || c.value : c;
-              const selected = String(val) === String(proposedValue) ? 'selected' : '';
-              return `<option value="${escapeHtml(val)}" ${selected}>${escapeHtml(label)}</option>`;
-            }).join('')}
-          </select>
-        `;
-      } else {
-        // Text input
-        inputHtml = `
-          <input
-            type="text"
-            id="input-${fieldName}-${messageId}"
-            data-field-name="${escapeHtml(fieldName)}"
-            value="${escapeHtml(proposedValue || '')}"
-            class="w-full px-2 py-1 text-sm border rounded"
-          />
-        `;
+      return;
+    } else {
+      // For this task: keep only Type + Priority (dropdowns) and render them in one row.
+      if (!ALLOWED_FLAT_FIELDS.has(fieldName)) {
+        return;
       }
+
+      this.ensureBasicFieldsCard(messageId);
+
+      // Proposed values from LLM may be labels; for priority, our select values are numeric.
+      if (fieldName === 'priority') {
+        const fieldDef = state.ticketFields?.find(f => f.name === 'priority');
+        const opts = normalizeChoiceOptions(fieldDef?.choices);
+        const needle = String(proposedValue ?? '').trim().toLowerCase();
+        const match = opts.find(o => String(o.label).trim().toLowerCase() === needle || String(o.value).trim().toLowerCase() === needle);
+        if (match) {
+          this.setBasicFieldValue(messageId, 'priority', match.value);
+        }
+      } else {
+        this.setBasicFieldValue(messageId, fieldName, proposedValue);
+      }
+
+      this.showActions(messageId);
+      return;
     }
 
     const fieldHtml = `
@@ -839,19 +1174,17 @@ const UIRenderer = {
     `;
 
     container.insertAdjacentHTML('beforeend', fieldHtml);
+
+    // Once we have at least one proposal, allow user to apply updates.
+    this.showActions(messageId);
   },
 
   /**
    * Render draft response
    */
   renderDraftResponse(messageId, text) {
-    const container = document.getElementById(`${messageId}-response`);
-    const textEl = document.getElementById(`${messageId}-response-text`);
-
-    if (container && textEl) {
-      container.classList.remove('hidden');
-      textEl.textContent = text;
-    }
+    // (후순위) 응답 초안/요약 기능은 다음 태스크에서 다시 활성화
+    return;
   },
 
   /**
@@ -893,6 +1226,23 @@ async function applyFieldUpdates(messageId) {
     const updateBody = {};
     const customFields = {};
 
+    // 1) Handle nested field as a coherent group (and clear missing levels)
+    if (nestedRoot) {
+      const cache = NestedFieldManager.getCache(messageId, nestedRoot.name);
+      if (cache) {
+        const values = NestedFieldManager.collectValues(messageId, nestedRoot.name);
+
+        // Root value (level1) may not exist in nested_ticket_fields; capture it explicitly.
+        const rootEl = document.getElementById(`input-${nestedRoot.name}-${messageId}-1`);
+        customFields[nestedRoot.name] = rootEl?.value ?? null;
+
+        for (const nf of (nestedRoot.nested_ticket_fields || [])) {
+          // If a level is not selected, clear it to prevent inconsistent combinations.
+          customFields[nf.name] = values[nf.name] ?? null;
+        }
+      }
+    }
+
     // Collect regular field values
     const inputs = container.querySelectorAll('[data-field-name]');
     const processedFields = new Set();
@@ -901,29 +1251,44 @@ async function applyFieldUpdates(messageId) {
       const fieldName = input.dataset.fieldName;
       const level = input.dataset.level;
 
+      const updateFieldName = FIELD_NAME_ALIASES[fieldName] || fieldName;
+
+      if (EXCLUDED_UPDATE_FIELDS.has(fieldName) || EXCLUDED_UPDATE_FIELDS.has(updateFieldName)) return;
+
       // Skip if already processed or nested field (handled separately)
-      if (processedFields.has(fieldName) && !level) return;
+      if (processedFields.has(updateFieldName) && !level) return;
 
       const value = input.value;
       if (!value) return;
 
       if (nestedFieldNames.has(fieldName) && level) {
-        // Nested field - always goes to custom_fields
-        customFields[fieldName] = value;
-      } else if (STANDARD_FIELDS.includes(fieldName)) {
+        // Nested field handled above as a group (includes clearing). Skip here.
+        return;
+      } else if (STANDARD_FIELDS.includes(updateFieldName)) {
         // Standard field
-        if (NUMERIC_FIELDS.includes(fieldName)) {
-          updateBody[fieldName] = parseInt(value, 10);
+        if (NUMERIC_FIELDS.includes(updateFieldName)) {
+          const fieldDef = ticketFields?.find(f => f.name === fieldName || f.name === updateFieldName);
+          const coerced = coerceNumericChoiceValue(value, fieldDef?.choices);
+          if (coerced !== null) {
+            updateBody[updateFieldName] = coerced;
+          }
         } else {
-          updateBody[fieldName] = value;
+          updateBody[updateFieldName] = value;
         }
       } else {
         // Custom field
-        customFields[fieldName] = value;
+        customFields[updateFieldName] = value;
       }
 
-      processedFields.add(fieldName);
+      processedFields.add(updateFieldName);
     });
+
+    // Never send NaN numeric fields
+    for (const k of Object.keys(updateBody)) {
+      if (NUMERIC_FIELDS.includes(k) && !Number.isFinite(updateBody[k])) {
+        delete updateBody[k];
+      }
+    }
 
     if (Object.keys(customFields).length > 0) {
       updateBody.custom_fields = customFields;
@@ -954,7 +1319,14 @@ async function applyFieldUpdates(messageId) {
         button.classList.add('bg-gray-400', 'cursor-not-allowed');
       }
     } else {
-      throw new Error(`API Error: ${response.status}`);
+      let details = '';
+      try {
+        const parsed = JSON.parse(response.response);
+        details = parsed?.description || parsed?.message || JSON.stringify(parsed);
+      } catch (e) {
+        details = response.response || '';
+      }
+      throw new Error(`API Error: ${response.status}${details ? ` - ${details}` : ''}`);
     }
 
   } catch (error) {
@@ -1022,7 +1394,8 @@ async function handleAnalyzeTicket() {
       },
 
       onDraftResponse: (data) => {
-        UIRenderer.renderDraftResponse(messageId, data.text);
+        // (후순위) 응답 초안/요약 기능은 다음 태스크에서 다시 활성화
+        return;
       },
 
       onComplete: (data) => {
@@ -1055,15 +1428,35 @@ window.handleAnalyzeTicket = handleAnalyzeTicket;
 
 async function loadTicketData(client) {
   try {
-    const data = await client.data.get('ticket');
+    // In modal view, ticket data may not be immediately available.
+    // Retry a few times to avoid half-loaded state.
+    let data;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      data = await client.data.get('ticket');
+      if (data?.ticket?.id) break;
+      await new Promise(r => setTimeout(r, 200));
+    }
+
     state.ticketData = data.ticket;
 
     // Load conversations
-    try {
-      const convData = await client.data.get('ticket.conversations');
-      state.ticketData.conversations = convData.conversations || [];
-    } catch (e) {
-      console.warn('Could not load conversations:', e);
+    // NOTE:
+    // - client.data.get('ticket.conversations') can throw "잘못된 특성 입력됨" in some contexts.
+    // - Freshdesk conversations API is paginated (max 30 per page).
+    // Use request templates (config/requests.json) and paginate.
+    // Load in background so modal can become ready immediately.
+    state.ticketData.conversations = [];
+    const ticketId = state.ticketData?.id;
+    if (ticketId) {
+      (async () => {
+        try {
+          const all = await loadAllConversations(client, ticketId);
+          state.ticketData.conversations = all;
+          console.log('Ticket conversations loaded:', all.length);
+        } catch (e) {
+          console.warn('Could not load conversations:', e);
+        }
+      })();
     }
 
     console.log('Ticket data loaded:', state.ticketData.id);
@@ -1074,12 +1467,72 @@ async function loadTicketData(client) {
   }
 }
 
+async function loadAllConversations(client, ticketId) {
+  const perPage = 30;
+  // Hard cap to avoid excessive load in very long threads.
+  const maxPages = 20; // up to 600 conversations
+  const all = [];
+
+  for (let page = 1; page <= maxPages; page++) {
+    const resp = await client.request.invokeTemplate('getTicketConversations', {
+      context: { ticketId, page }
+    });
+
+    let parsed;
+    try {
+      parsed = JSON.parse(resp.response);
+    } catch (e) {
+      console.warn('Failed to parse conversations response:', e);
+      break;
+    }
+
+    const conversations = Array.isArray(parsed) ? parsed : (parsed?.conversations || []);
+    if (!Array.isArray(conversations) || conversations.length === 0) {
+      break;
+    }
+
+    all.push(...conversations);
+
+    if (conversations.length < perPage) {
+      break;
+    }
+  }
+
+  return all;
+}
+
 async function loadTicketFields(client) {
   try {
+    // 1) Prefer backend-cached schema (Supabase) to avoid hitting Freshdesk every modal open
+    try {
+      const resp = await fetch(`${API_BASE}/api/assist/ticket-fields`, {
+        method: 'GET',
+        headers: {
+          ...getHeaders(),
+          'ngrok-skip-browser-warning': 'true'
+        }
+      });
+
+      if (resp.ok) {
+        const data = await resp.json();
+        const fields = Array.isArray(data) ? data : (data?.ticket_fields || []);
+        if (Array.isArray(fields) && fields.length > 0) {
+          state.ticketFields = fields;
+          console.log('Ticket fields loaded (backend cache):', fields.length);
+          return fields;
+        }
+      } else {
+        console.warn('Backend ticket-fields returned non-OK:', resp.status);
+      }
+    } catch (e) {
+      console.warn('Backend ticket-fields fetch failed, falling back to Freshdesk:', e);
+    }
+
+    // 2) Fallback: Freshdesk API via FDK request template
     const response = await client.request.invokeTemplate('getTicketFields', {});
     const fields = JSON.parse(response.response);
     state.ticketFields = fields;
-    console.log('Ticket fields loaded:', fields.length);
+    console.log('Ticket fields loaded (freshdesk fallback):', fields.length);
     return fields;
   } catch (error) {
     console.error('Failed to load ticket fields:', error);
@@ -1128,6 +1581,9 @@ document.onreadystatechange = function() {
         await loadTicketFields(_client);
         console.log('[AI Copilot] Ticket fields loaded:', state.ticketFields?.length, 'fields');
 
+        // Mark UI as ready (default texts in index.html are placeholders)
+        UIRenderer.setReady(state.ticketData);
+
         // Setup event listeners
         const analyzeButton = document.getElementById('analyzeBtn');
         if (analyzeButton) {
@@ -1141,6 +1597,7 @@ document.onreadystatechange = function() {
 
       }).catch(function(error) {
         console.error("[AI Copilot] FDK 초기화 실패:", error);
+        try { UIRenderer.setError('초기화 실패'); } catch (e) {}
       });
     } else {
       console.error("[AI Copilot] FDK app 객체가 없습니다.");
