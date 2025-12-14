@@ -46,9 +46,7 @@
   </style>
 </head>
 <body class="bg-app-bg text-app-text">
-  
   <div class="flex flex-col h-screen max-w-4xl mx-auto">
-    
     <!-- 헤더 -->
     <header class="bg-app-card border-b border-app-border px-4 py-3 flex items-center justify-between sticky top-0 z-10">
       <div>
@@ -95,13 +93,11 @@
     <!-- 채팅 영역 -->
     <div class="flex-1 overflow-y-auto chat-container" id="chatContainer">
       <div class="p-4 space-y-4" id="chatMessages">
-        
         <!-- 웰컴 메시지 -->
         <div class="flex justify-start message-enter" id="welcomeMessage">
           <div class="max-w-[85%] bg-app-card border border-app-border rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
             <p class="text-sm text-app-text">안녕하세요! 티켓 분석 및 검색을 도와드리겠습니다.</p>
             <p class="text-sm text-app-text mt-2">아래 예시 질문을 클릭하거나, 직접 질문을 입력해주세요.</p>
-            
             <!-- 예시 질문 -->
             <div class="mt-4 flex flex-wrap gap-2" id="exampleQuestions">
               <button class="example-btn px-3 py-1.5 text-xs font-medium bg-app-bg border border-app-border rounded-full hover:border-app-primary hover:text-app-primary transition-colors">
@@ -172,6 +168,6 @@
 
   <!-- 앱 스크립트 -->
   <!-- NOTE: 기존 채팅(티켓/헬프센터/제품 매뉴얼) 기능을 유지하기 위해, 안정적으로 동작하던 스크립트를 기본으로 로드합니다. -->
-  <script src="scripts/app_20251212.js"></script>
+  <script src="scripts/app.js"></script>
 </body>
 </html>

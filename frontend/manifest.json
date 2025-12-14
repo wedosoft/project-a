@@ -1,14 +1,13 @@
 {
+  "platform-version": "3.0",
   "modules": {
-    "support_ticket": {
+    "common": {
       "location": {
-        "ticket_top_navigation": {
-          "url": "index.html",
+        "full_page_app": {
+          "url": "admin.html",
           "icon": "styles/images/icon.svg"
         }
-      }
-    },
-    "common": {
+      },
       "functions": {
         "getSecureParams": {}
       },
@@ -18,11 +17,19 @@
         "getTicketFields": {},
         "updateTicket": {},
         "backendApi": {},
-        "backendApiPost": {}
+        "backendApiPost": {},
+        "backendApiPut": {}
+      }
+    },
+    "support_ticket": {
+      "location": {
+        "ticket_top_navigation": {
+          "url": "index.html",
+          "icon": "styles/images/icon.svg"
+        }
       }
     }
   },
-  "platform-version": "3.0",
   "engines": {
     "node": "18.20.8",
     "fdk": "9.7.4"

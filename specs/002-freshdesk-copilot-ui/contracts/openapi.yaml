@@ -1,0 +1,145 @@
+openapi: 3.0.0
+info:
+  title: Freshdesk Copilot API
+  version: 1.0.0
+paths:
+  /api/analyze/{ticket_id}:
+    get:
+      summary: Analyze a ticket
+      parameters:
+        - name: ticket_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Analysis result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TicketAnalysisResponse'
+
+  /api/search:
+    post:
+      summary: Search across sources
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                query:
+                  type: string
+                filters:
+                  type: object
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SearchResult'
+
+  /api/admin/sync:
+    post:
+      summary: Trigger data sync
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                sources:
+                  type: array
+                  items:
+                    type: string
+                    enum: [tickets, articles]
+      responses:
+        '202':
+          description: Sync started
+
+  /api/admin/config:
+    get:
+      summary: Get tenant configuration
+      responses:
+        '200':
+          description: Current configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminConfig'
+    put:
+      summary: Update tenant configuration
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminConfig'
+      responses:
+        '200':
+          description: Configuration updated
+
+components:
+  schemas:
+    AdminConfig:
+      type: object
+      properties:
+        selected_fields:
+          type: array
+          items:
+            type: string
+          description: List of field names or IDs selected by Admin for AI suggestions
+        response_tone:
+          type: string
+          enum: [formal, casual]
+          default: formal
+
+    TicketAnalysisResponse:
+      type: object
+      properties:
+        analysis:
+          $ref: '#/components/schemas/TicketAnalysis'
+        suggestions:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldSuggestion'
+
+    TicketAnalysis:
+      type: object
+      properties:
+        root_cause:
+          type: string
+        solution:
+          type: string
+        intent:
+          type: string
+        sentiment:
+          type: string
+
+    FieldSuggestion:
+      type: object
+      properties:
+        field_name:
+          type: string
+        suggested_value:
+          type: string
+        confidence:
+          type: number
+
+    SearchResult:
+      type: object
+      properties:
+        source:
+          type: string
+        title:
+          type: string
+        snippet:
+          type: string
+        url:
+          type: string
+        score:
+          type: number

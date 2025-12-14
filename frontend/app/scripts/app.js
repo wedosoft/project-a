@@ -1557,12 +1557,18 @@ document.onreadystatechange = function() {
         // 메인 페이지: 클릭시 모달 열기
         if (!isModalView) {
           _client.events.on("app.activated", async () => {
-            console.log('[AI Copilot] Opening modal...');
-            await _client.interface.trigger("showModal", {
-              title: "AI Copilot",
-              template: "index.html",
-              noBackdrop: true
-            });
+            console.log('[AI Copilot] app.activated fired — attempting to open modal');
+            try {
+              const res = await _client.interface.trigger("showModal", {
+                title: "AI Copilot",
+                template: "index.html",
+                noBackdrop: true
+              });
+              console.log('[AI Copilot] showModal resolved:', res);
+            } catch (err) {
+              console.error('[AI Copilot] showModal failed:', err);
+              showNotify('danger', '모달을 열지 못했습니다: ' + (err?.message || err));
+            }
           });
           return;
         }

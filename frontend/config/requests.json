@@ -62,6 +62,21 @@
       }
     }
   },
+  "backendApiPut": {
+    "schema": {
+      "method": "PUT",
+      "protocol": "https",
+      "host": "ameer-timberless-paragogically.ngrok-free.dev",
+      "path": "/<%= context.path %>",
+      "headers": {
+        "Content-Type": "application/json",
+        "X-Freshdesk-Domain": "<%= iparam.freshdesk_domain %>",
+        "X-Freshdesk-API-Key": "<%= iparam.freshdesk_api_key %>",
+        "X-Tenant-ID": "<%= iparam.freshdesk_domain.split('.')[0] %>",
+        "X-Platform": "freshdesk"
+      }
+    }
+  },
   "backendApi": {
     "schema": {
       "method": "GET",
