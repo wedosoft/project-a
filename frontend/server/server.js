@@ -16,7 +16,9 @@ exports = {
       // 필요한 파라미터만 추출하여 반환
       const secureData = {
         apiKey: iparams?.freshdesk_api_key,
-        domain: iparams?.freshdesk_domain
+        domain: iparams?.freshdesk_domain,
+        // 테넌트 ID는 도메인에서 추출 (예: company.freshdesk.com → company)
+        tenantId: iparams?.freshdesk_domain?.split('.')[0] || ''
       };
 
       // API 키 존재 여부 확인

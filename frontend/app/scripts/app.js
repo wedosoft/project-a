@@ -19,7 +19,18 @@ const state = {
   },
   latestFilters: [],
   knownContext: {},
-  filterConfidence: null
+  filterConfidence: null,
+  // 새로운 상태
+  currentTab: 'analysis', // 'analysis' | 'chat'
+  modalCache: null,       // { title, content, uri }
+  analysisResult: null    // 분석 결과 캐시
+};
+
+// APP_CONFIG: 보안 파라미터 저장용 전역 객체
+window.APP_CONFIG = {
+  apiKey: '',
+  domain: '',
+  tenantId: ''
 };
 
 function setClient(client) {
@@ -80,9 +91,43 @@ function setFilterConfidence(confidence) {
   state.filterConfidence = confidence;
 }
 
+function setCurrentTab(tab) {
+  state.currentTab = tab;
+}
+
+function setModalCache(cache) {
+  state.modalCache = cache;
+}
+
+function setAnalysisResult(result) {
+  state.analysisResult = result;
+}
+
 // =============================================================================
 // API Section
 // =============================================================================
+
+/**
+ * 보안 파라미터 로드 (서버리스 함수 호출)
+ */
+async function loadSecureConfig() {
+  const client = state.client;
+  if (!client) return;
+
+  try {
+    const data = await client.request.invoke('getSecureParams', {});
+    const responseData = data?.response || data;
+
+    if (responseData && responseData.apiKey) {
+      window.APP_CONFIG.apiKey = responseData.apiKey;
+      window.APP_CONFIG.domain = responseData.domain;
+      window.APP_CONFIG.tenantId = responseData.tenantId || responseData.domain?.split('.')[0] || '';
+      console.log('[Config] 보안 파라미터 로드 완료');
+    }
+  } catch (error) {
+    console.error('[Config] 보안 파라미터 로드 실패:', error);
+  }
+}
 
 async function apiCall(method, path, body = null) {
   const client = state.client;
@@ -133,72 +178,46 @@ async function apiCall(method, path, body = null) {
   }
 }
 
-async function streamAnalyze(payload, onProgress, onComplete, onError) {
-  try {
-    const initialResponse = await apiCall('POST', 'api/assist/analyze', {
-      ...payload,
-      stream_progress: false,
-      async_mode: true
-    });
-
-    if (!initialResponse || !initialResponse.proposal || !initialResponse.proposal.id) {
-      throw new Error("분석 요청 실패: Proposal ID가 없습니다.");
-    }
-
-    const proposalId = initialResponse.proposal.id;
-    let attempts = 0;
-    const maxAttempts = 120;
-    let consecutivePollErrors = 0;
-
-    while (attempts < maxAttempts) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      attempts++;
-      
-      try {
-        const statusResponse = await apiCall('GET', `api/assist/status/${proposalId}`);
-        consecutivePollErrors = 0;
-        
-        if (statusResponse) {
-          if (onProgress && statusResponse.status === 'processing') {
-            onProgress(statusResponse);
-          }
-
-          if (statusResponse.status !== 'processing') {
-            if (statusResponse.status === 'error') {
-              throw new Error(statusResponse.rejectionReason || "분석 중 오류 발생");
-            }
-            onComplete(statusResponse);
-            return;
-          }
-        }
-      } catch (e) {
-        consecutivePollErrors += 1;
-        if (consecutivePollErrors >= 3) {
-           throw e;
-        }
-      }
-    }
-  } catch (e) {
-      if (onError) onError(e);
-  }
-}
-
 // =============================================================================
 // UI Section
 // =============================================================================
 
 const elements = {};
 
+// 티커 메시지 매핑
+const TICKER_MESSAGES = {
+  'router_decision': '🔍 분석 방향 결정 중...',
+  'retriever_start': '📚 유사 사례 검색 중...',
+  'retriever_results': '✅ 검색 완료',
+  'resolution_start': '🤖 AI 제안 생성 중...',
+  'resolution_complete': '✨ 분석 완료!',
+  'error': '❌ 오류 발생',
+  'polling': '⏳ 처리 중...'
+};
+
 function cacheElements() {
   elements.headerTitle = document.getElementById('headerTitle');
   elements.statusBadge = document.getElementById('statusBadge');
+  // 탭 요소
+  elements.tabAnalysis = document.getElementById('tabAnalysis');
+  elements.tabChat = document.getElementById('tabChat');
+  elements.sectionAnalysis = document.getElementById('sectionAnalysis');
+  elements.sectionChat = document.getElementById('sectionChat');
+  // 분석 섹션 요소
+  elements.analysisTicker = document.getElementById('analysisTicker');
+  elements.tickerMessage = document.getElementById('tickerMessage');
+  elements.analysisContainer = document.getElementById('analysisContainer');
+  elements.analysisContent = document.getElementById('analysisContent');
+  elements.analysisPlaceholder = document.getElementById('analysisPlaceholder');
+  elements.analyzeBtn = document.getElementById('analyzeBtn');
+  // 채팅 섹션 요소
   elements.chatContainer = document.getElementById('chatContainer');
   elements.chatMessages = document.getElementById('chatMessages');
   elements.chatForm = document.getElementById('chatForm');
   elements.chatInput = document.getElementById('chatInput');
   elements.sendBtn = document.getElementById('sendBtn');
   elements.newChatBtn = document.getElementById('newChatBtn');
-  elements.analyzeBtn = document.getElementById('analyzeBtn');
+  // 공통 요소
   elements.sourceModal = document.getElementById('sourceModal');
   elements.modalTitle = document.getElementById('modalTitle');
   elements.modalContent = document.getElementById('modalContent');
@@ -211,6 +230,68 @@ function cacheElements() {
 
 function getElements() {
   return elements;
+}
+
+// =============================================================================
+// Tab & Ticker Functions
+// =============================================================================
+
+/**
+ * 탭 전환
+ * @param {string} tabName - 'analysis' | 'chat'
+ */
+function switchTab(tabName) {
+  setCurrentTab(tabName);
+  
+  // 탭 버튼 활성화 상태 업데이트
+  if (elements.tabAnalysis && elements.tabChat) {
+    elements.tabAnalysis.classList.toggle('active', tabName === 'analysis');
+    elements.tabChat.classList.toggle('active', tabName === 'chat');
+  }
+  
+  // 섹션 표시/숨김
+  if (elements.sectionAnalysis && elements.sectionChat) {
+    elements.sectionAnalysis.classList.toggle('section-hidden', tabName !== 'analysis');
+    elements.sectionChat.classList.toggle('section-hidden', tabName !== 'chat');
+  }
+  
+  console.log(`[Tab] Switched to: ${tabName}`);
+}
+
+/**
+ * 티커 표시
+ * @param {string} eventType - 이벤트 타입
+ * @param {Object} data - 추가 데이터 (optional)
+ */
+function showTicker(eventType, data = {}) {
+  if (!elements.analysisTicker || !elements.tickerMessage) return;
+  
+  let message = TICKER_MESSAGES[eventType] || eventType;
+  
+  // 동적 메시지 생성
+  if (eventType === 'retriever_results' && data.similar_cases_count !== undefined) {
+    message = `✅ ${data.similar_cases_count}건 유사 사례, ${data.kb_articles_count || 0}건 KB 문서 발견`;
+  }
+  
+  // 티커 표시
+  elements.analysisTicker.classList.remove('hidden');
+  
+  // 페이드 아웃 후 새 메시지
+  elements.tickerMessage.classList.add('fade-out');
+  
+  setTimeout(() => {
+    elements.tickerMessage.textContent = message;
+    elements.tickerMessage.classList.remove('fade-out');
+  }, 150);
+}
+
+/**
+ * 티커 숨기기
+ */
+function hideTicker() {
+  if (elements.analysisTicker) {
+    elements.analysisTicker.classList.add('hidden');
+  }
 }
 
 function updateStatus(status, text) {
@@ -408,21 +489,38 @@ function removeMessage(messageId) {
   if (message) message.remove();
 }
 
+/**
+ * 모달 열기 (캐시 지원)
+ * @param {string} title - 제목 (없으면 캐시에서 복원)
+ * @param {string} content - 내용 (없으면 캐시에서 복원)
+ * @param {string} uri - URI (없으면 캐시에서 복원)
+ */
 function openModal(title, content, uri) {
   if (!elements.sourceModal) return;
 
-  let fixedUri = uri;
-  if (fixedUri) {
-    fixedUri = fixedUri.replace('http://localhost:10001', 'https://wedosoft.net');
-    fixedUri = fixedUri.replace('localhost:10001', 'wedosoft.net');
+  // 인자가 있으면 캐시 갱신
+  if (title || content || uri) {
+    setModalCache({ title, content, uri });
+  }
+  
+  // 캐시에서 값 가져오기
+  const cache = state.modalCache || {};
+  const displayTitle = title || cache.title || '참조 문서';
+  const displayContent = content || cache.content || '';
+  let displayUri = uri || cache.uri || '';
+
+  // URI 수정
+  if (displayUri) {
+    displayUri = displayUri.replace('http://localhost:10001', 'https://wedosoft.net');
+    displayUri = displayUri.replace('localhost:10001', 'wedosoft.net');
   }
 
-  const titleText = title || "참조 문서";
-  let headerHtml = `<span class="truncate" title="${escapeAttr(titleText)}">${escapeHtml(titleText)}</span>`;
+  // 헤더 렌더링
+  let headerHtml = `<span class="truncate" title="${escapeAttr(displayTitle)}">${escapeHtml(displayTitle)}</span>`;
   
-  if (fixedUri) {
+  if (displayUri) {
     headerHtml += `
-      <a href="${escapeAttr(fixedUri)}" target="_blank" rel="noopener noreferrer" 
+      <a href="${escapeAttr(displayUri)}" target="_blank" rel="noopener noreferrer" 
          class="flex-shrink-0 ml-2 px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 text-xs rounded flex items-center gap-1 transition-colors"
          title="새 탭에서 원문 보기">
         <span>원본 보기</span>
@@ -436,12 +534,13 @@ function openModal(title, content, uri) {
   elements.modalTitle.className = "font-semibold text-app-text flex items-center min-w-0 flex-1 mr-4";
   elements.modalTitle.innerHTML = headerHtml;
   
+  // 내용 렌더링
   let html = `
     <div class="flex items-center mb-1">
       <span class="text-xs text-gray-400">참조 내용 (발췌)</span>
       <div class="flex-grow ml-2 border-t border-gray-100"></div>
     </div>
-    <div class="bg-gray-50 p-3 rounded-lg border border-gray-200 text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">${formatMessage(content || "내용이 없습니다.")}</div>
+    <div class="bg-gray-50 p-3 rounded-lg border border-gray-200 text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">${formatMessage(displayContent || "내용이 없습니다.")}</div>
   `;
   
   elements.modalContent.innerHTML = html;
@@ -1033,10 +1132,18 @@ document.onreadystatechange = function() {
         // 모달 뷰: 비즈니스 로직 실행
         cacheElements();
         setupEventListeners();
+        
+        // 보안 파라미터 로드 (SSE fetch용)
+        await loadSecureConfig();
+        
         await loadTicketData();
-        await loadTicketFields(); // Load ticket fields for dropdowns
+        await loadTicketFields();
         await loadStatus();
         await createSession();
+        
+        // 기본 탭: 분석
+        switchTab('analysis');
+        
         updateStatus('ready', '준비 완료');
       }).catch(function(error) {
         console.error("FDK 초기화 실패:", error);
@@ -1052,6 +1159,15 @@ document.onreadystatechange = function() {
 function setupEventListeners() {
   const elements = getElements();
   
+  // 탭 전환 이벤트
+  if (elements.tabAnalysis) {
+    elements.tabAnalysis.addEventListener('click', () => switchTab('analysis'));
+  }
+  if (elements.tabChat) {
+    elements.tabChat.addEventListener('click', () => switchTab('chat'));
+  }
+  
+  // 채팅 이벤트
   elements.chatForm.addEventListener('submit', handleSubmit);
   elements.chatInput.addEventListener('input', handleInputChange);
   elements.chatInput.addEventListener('keydown', (e) => {
@@ -1061,7 +1177,13 @@ function setupEventListeners() {
     }
   });
   elements.newChatBtn.addEventListener('click', handleNewChat);
-  elements.analyzeBtn.addEventListener('click', handleAnalyzeTicket);
+  
+  // 분석 버튼
+  if (elements.analyzeBtn) {
+    elements.analyzeBtn.addEventListener('click', handleAnalyzeTicket);
+  }
+  
+  // 모달 이벤트
   elements.closeModalBtn.addEventListener('click', closeModal);
   elements.sourceModal.addEventListener('click', (e) => {
     if (e.target === elements.sourceModal) closeModal();
@@ -1073,7 +1195,9 @@ function setupEventListeners() {
       const question = btn.textContent.trim();
       elements.chatInput.value = question;
       handleInputChange();
-      handleSubmit(new Event('submit'));
+      // 채팅 탭으로 전환 후 제출
+      switchTab('chat');
+      setTimeout(() => handleSubmit(new Event('submit')), 100);
     });
   });
 }
@@ -1130,6 +1254,11 @@ async function loadTicketData() {
   }
 
   setTicketData(ticketData);
+  
+  // 티켓 전환 시 캐시 초기화
+  setModalCache(null);
+  setAnalysisResult(null);
+  
   const elements = getElements();
   if (elements.headerTitle) {
       elements.headerTitle.textContent = `티켓 #${ticketId}`;
@@ -1222,13 +1351,18 @@ async function handleSubmit(e) {
 
   setLoading(true);
   setLoadingState(true);
-  const loadingId = addLoadingMessage();
+  
+  // 스트리밍 메시지 ID 생성
+  const streamingMsgId = addStreamingMessage();
 
   try {
-    const response = await sendChat(message);
-    removeMessage(loadingId);
+    const response = await sendChatStreaming(message, (partialText, sources) => {
+      // 스트리밍 중 메시지 업데이트
+      updateStreamingMessage(streamingMsgId, partialText);
+    });
     
-    addMessage('assistant', response.text, response.groundingChunks);
+    // 스트리밍 완료 - 최종 메시지로 교체
+    finalizeStreamingMessage(streamingMsgId, response.text, response.groundingChunks);
     
     setLatestFilters(response.filters);
     setFilterConfidence(response.filterConfidence);
@@ -1240,7 +1374,7 @@ async function handleSubmit(e) {
     
   } catch (error) {
     console.error('채팅 실패:', error);
-    removeMessage(loadingId);
+    removeMessage(streamingMsgId);
     addErrorMessage(`오류: ${error.message}`);
   } finally {
     setLoading(false);
@@ -1248,7 +1382,94 @@ async function handleSubmit(e) {
   }
 }
 
-async function sendChat(message) {
+/**
+ * 스트리밍 메시지 추가 (타이핑 효과용)
+ */
+function addStreamingMessage() {
+  const welcome = document.getElementById('welcomeMessage');
+  if (welcome) welcome.remove();
+  
+  const messageId = 'streaming-' + Date.now();
+  const messageDiv = document.createElement('div');
+  messageDiv.id = messageId;
+  messageDiv.className = 'flex justify-start animate-fade-in';
+
+  messageDiv.innerHTML = `
+    <div class="max-w-[85%] bg-white border border-gray-200 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
+      <div class="text-sm whitespace-pre-wrap streaming-cursor" id="${messageId}-content"></div>
+    </div>
+  `;
+
+  elements.chatMessages.appendChild(messageDiv);
+  scrollToBottom();
+  return messageId;
+}
+
+/**
+ * 스트리밍 메시지 업데이트
+ */
+function updateStreamingMessage(messageId, text) {
+  const contentEl = document.getElementById(`${messageId}-content`);
+  if (contentEl) {
+    contentEl.innerHTML = formatMessage(text);
+    scrollToBottom();
+  }
+}
+
+/**
+ * 스트리밍 완료 - 최종 메시지로 변환
+ */
+function finalizeStreamingMessage(messageId, text, sources = []) {
+  const messageDiv = document.getElementById(messageId);
+  if (!messageDiv) return;
+
+  let sourcesHtml = '';
+  if (sources && sources.length > 0) {
+    sourcesHtml = `
+      <div class="mt-3 pt-3 border-t border-gray-100">
+        <p class="text-xs text-gray-400 mb-2">참조 문서</p>
+        <div class="flex flex-wrap gap-2">
+          ${sources.map((source, idx) => {
+            const ctx = source.retrievedContext || source.web || {};
+            const title = ctx.title || '참조 ' + (idx + 1);
+            const sourceText = ctx.text || '';
+            const uri = ctx.uri || '';
+            return `
+              <button 
+                class="source-chip px-2 py-1 text-xs bg-gray-50 border border-gray-200 rounded-md hover:border-blue-400 hover:bg-blue-50 transition-all cursor-pointer"
+                data-title="${escapeAttr(title)}"
+                data-text="${escapeAttr(sourceText)}"
+                data-uri="${escapeAttr(uri)}"
+              >📄 ${escapeHtml(title)}</button>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  messageDiv.innerHTML = `
+    <div class="max-w-[85%] bg-white border border-gray-200 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
+      <div class="text-sm whitespace-pre-wrap">${formatMessage(text)}</div>
+      ${sourcesHtml}
+    </div>
+  `;
+
+  // 참조 문서 칩 이벤트 바인딩
+  const chips = messageDiv.querySelectorAll('.source-chip');
+  chips.forEach(chip => {
+    chip.addEventListener('click', async () => {
+      await openModal(chip.dataset.title, chip.dataset.text, chip.dataset.uri);
+    });
+  });
+
+  scrollToBottom();
+}
+
+/**
+ * 채팅 메시지 전송 (SSE 스트리밍)
+ */
+async function sendChatStreaming(message, onChunk) {
   const payload = {
     query: message,
     sessionId: state.sessionId
@@ -1267,7 +1488,15 @@ async function sendChat(message) {
     console.log(`Sending chat with ticket context: ID=${minimalTicket.id}, Conversations=${convCount}`);
   }
   
-  return await apiCall('POST', 'api/chat', payload);
+  // SSE 스트리밍 시도
+  try {
+    const response = await window.StreamUtils.streamChat(payload, onChunk);
+    return response;
+  } catch (error) {
+    console.warn('[Chat] SSE 실패, fallback to invokeTemplate:', error.message);
+    // Fallback: 기존 apiCall 사용
+    return await apiCall('POST', 'api/chat', payload);
+  }
 }
 
 function minimizeTicketData(original) {
@@ -1352,90 +1581,351 @@ async function handleAnalyzeTicket() {
   if (state.isLoading || !state.ticketData) return;
   
   setLoading(true);
-  setLoadingState(true);
-  const loadingId = addLoadingMessage("티켓을 분석하고 있습니다...");
+  updateStatus('loading', '분석 중...');
+  
+  // 플레이스홀더 숨기기
+  if (elements.analysisPlaceholder) {
+    elements.analysisPlaceholder.classList.add('hidden');
+  }
+  
+  // 티커 표시
+  showTicker('router_decision');
   
   try {
-    const initialResponse = await apiCall('POST', 'api/assist/analyze', {
+    const payload = {
       ticket_id: String(state.ticketData.id),
       subject: state.ticketData.subject,
       description: state.ticketData.description_text,
-      ticket_fields: state.ticketFields,
-      stream_progress: false,
-      async_mode: true
+      ticket_fields: state.ticketFields
+    };
+    
+    // SSE 스트림으로 분석 요청 (fallback 자동 처리)
+    const result = await window.StreamUtils.streamAnalyze(payload, (event) => {
+      // 진행 상황 티커 업데이트
+      const eventType = event.type || event;
+      const eventData = event.data || {};
+      
+      showTicker(eventType, eventData);
+      console.log('[Analyze] Progress:', eventType, eventData);
     });
     
-    console.log('Initial Async Response:', initialResponse);
-
-    if (!initialResponse || !initialResponse.proposal || !initialResponse.proposal.id) {
-        throw new Error("분석 요청 실패: Proposal ID가 없습니다.");
-    }
-
-    const proposalId = initialResponse.proposal.id;
+    // 분석 완료
+    hideTicker();
     
-    let attempts = 0;
-    const maxAttempts = 30;
-    let consecutivePollErrors = 0;
-    let finalProposal = null;
-
-    while (attempts < maxAttempts) {
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        attempts++;
-        
-        try {
-            const statusResponse = await apiCall('GET', `api/assist/status/${proposalId}`);
-            console.log(`Polling attempt ${attempts}:`, statusResponse);
-            consecutivePollErrors = 0;
-            
-            if (statusResponse && statusResponse.status !== 'processing') {
-                if (statusResponse.status === 'error') {
-                    throw new Error(statusResponse.rejectionReason || "분석 중 오류 발생");
-                }
-                finalProposal = statusResponse;
-                break;
-            }
-        } catch (e) {
-            consecutivePollErrors += 1;
-            console.warn(`Polling error (${consecutivePollErrors}회 연속):`, e);
-            if (consecutivePollErrors >= 3) {
-                throw new Error(`상태 조회가 반복 실패했습니다: ${e.message || e}`);
-            }
-        }
-    }
-
-    if (!finalProposal) {
-        throw new Error("분석 시간이 초과되었습니다.");
-    }
-
-    removeMessage(loadingId);
-    
-    if (finalProposal) {
-      const summary = finalProposal.summary;
-      const intent = finalProposal.intent;
-      const sentiment = finalProposal.sentiment;
-      
-      let analysisHtml = `**[티켓 분석 결과]**\n\n`;
-      if (summary) analysisHtml += `**요약:** ${summary}\n`;
-      if (intent) analysisHtml += `**의도:** ${intent}\n`;
-      if (sentiment) analysisHtml += `**감정:** ${sentiment}\n`;
-      
-      addMessage('assistant', analysisHtml);
-
-      renderFieldSuggestions(finalProposal);
-      
-      if (finalProposal.draftResponse) {
-          addMessage('assistant', `**[제안된 답변]**\n\n${finalProposal.draftResponse}`);
-      }
+    if (result) {
+      setAnalysisResult(result);
+      renderAnalysisResult(result);
     } else {
-      addErrorMessage("분석 결과를 받을 수 없습니다.");
+      renderAnalysisError('분석 결과를 받을 수 없습니다.');
     }
     
   } catch (error) {
     console.error('티켓 분석 실패:', error);
-    removeMessage(loadingId);
-    addErrorMessage(`분석 오류: ${error.message}`);
+    hideTicker();
+    renderAnalysisError(`분석 오류: ${error.message}`);
   } finally {
     setLoading(false);
-    setLoadingState(false);
+    updateStatus('ready', '준비 완료');
   }
 }
+
+/**
+ * 분석 결과 렌더링 (분석 섹션에 표시)
+ */
+function renderAnalysisResult(proposal) {
+  if (!elements.analysisContent) return;
+  
+  const summary = proposal.summary;
+  const intent = proposal.intent;
+  const sentiment = proposal.sentiment;
+  const draftResponse = proposal.draftResponse || proposal.draft_response;
+  
+  let html = '';
+  
+  // 요약 카드
+  if (summary || intent || sentiment) {
+    html += `
+      <div class="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+        <div class="flex items-center gap-2 mb-3">
+          <svg class="w-5 h-5 text-app-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+          </svg>
+          <h3 class="text-sm font-semibold text-gray-800">티켓 분석 결과</h3>
+        </div>
+        <div class="space-y-2 text-sm">
+          ${summary ? `<p><span class="font-medium text-gray-600">요약:</span> ${escapeHtml(summary)}</p>` : ''}
+          ${intent ? `<p><span class="font-medium text-gray-600">의도:</span> ${escapeHtml(intent)}</p>` : ''}
+          ${sentiment ? `<p><span class="font-medium text-gray-600">감정:</span> ${escapeHtml(sentiment)}</p>` : ''}
+        </div>
+      </div>
+    `;
+  }
+  
+  // 필드 제안 카드
+  const fieldUpdates = proposal.field_updates || proposal.fieldUpdates || {};
+  const fieldProposals = proposal.field_proposals || [];
+  
+  if (fieldProposals.length > 0 || Object.keys(fieldUpdates).length > 0) {
+    html += renderFieldSuggestionsCard(proposal);
+  }
+  
+  // 제안 답변 카드
+  if (draftResponse) {
+    html += `
+      <div class="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+        <div class="flex items-center gap-2 mb-3">
+          <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/>
+          </svg>
+          <h3 class="text-sm font-semibold text-gray-800">제안된 답변</h3>
+        </div>
+        <div class="text-sm text-gray-700 whitespace-pre-wrap bg-gray-50 p-3 rounded-lg border border-gray-100">
+          ${formatMessage(draftResponse)}
+        </div>
+      </div>
+    `;
+  }
+  
+  // 다시 분석 버튼
+  html += `
+    <div class="flex justify-center pt-2">
+      <button onclick="handleAnalyzeTicket()" class="px-4 py-2 text-sm text-app-muted hover:text-app-primary transition-colors flex items-center gap-1">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+        다시 분석
+      </button>
+    </div>
+  `;
+  
+  elements.analysisContent.innerHTML = html;
+}
+
+/**
+ * 필드 제안 카드 렌더링 (기존 renderFieldSuggestions 로직 재사용)
+ */
+function renderFieldSuggestionsCard(proposal) {
+  const updates = proposal.field_updates || proposal.fieldUpdates || {};
+  const fieldProposals = proposal.field_proposals || [];
+  const proposalMap = {};
+  fieldProposals.forEach(p => { proposalMap[p.field_name] = p; });
+  const renderedFields = new Set();
+  const messageId = 'analysis-' + Date.now();
+
+  const ticketFields = state.ticketFields;
+  const ticketData = state.ticketData;
+
+  const renderRow = (label, currentVal, inputHtml, reason) => `
+    <tr>
+      <td class="px-2 py-2 font-medium text-gray-600">
+        ${label}
+        ${reason ? `<div class="group relative inline-block ml-1">
+          <svg class="w-3 h-3 text-gray-400 cursor-help" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+          <div class="invisible group-hover:visible absolute z-10 w-48 p-2 mt-1 text-xs text-white bg-gray-800 rounded shadow-lg -left-2">
+            ${escapeHtml(reason)}
+          </div>
+        </div>` : ''}
+      </td>
+      <td class="px-2 py-2 text-gray-400 text-xs">${currentVal || '-'}</td>
+      <td class="px-2 py-2">${inputHtml}</td>
+    </tr>
+  `;
+
+  let tableRows = '';
+
+  if (fieldProposals.length > 0) {
+    // nested_field 처리 로직 (기존 코드와 동일)
+    const nestedRoot = ticketFields ? ticketFields.find(f => f.type === 'nested_field') : null;
+    if (nestedRoot && nestedRoot.choices && nestedRoot.nested_ticket_fields) {
+      const nestedFields = nestedRoot.nested_ticket_fields;
+      const level2Name = nestedFields.find(n => n.level === 2)?.name || nestedFields[0]?.name;
+      const level3Name = nestedFields.find(n => n.level === 3)?.name || nestedFields[1]?.name;
+      const hasNestedProposal = [nestedRoot.name, level2Name, level3Name].some(n => proposalMap[n]);
+
+      if (hasNestedProposal) {
+        const choices = normalizeChoices(nestedRoot.choices);
+        window[`choices-${messageId}-${nestedRoot.name}`] = choices;
+        window[`pathMap-${messageId}-${nestedRoot.name}`] = buildValuePathMap(choices);
+        window[`leafOptions-${messageId}-${nestedRoot.name}`] = flattenLeafOptions(choices);
+
+        const proposedLeaf = proposalMap[level3Name]?.proposed_value || proposalMap[level2Name]?.proposed_value || proposalMap[nestedRoot.name]?.proposed_value || '';
+        const path = findPathToValue(choices, proposedLeaf) || [];
+        const val1 = path[0] || proposalMap[nestedRoot.name]?.proposed_value || '';
+        const val2 = path[1] || proposalMap[level2Name]?.proposed_value || '';
+        const val3 = path[2] || proposalMap[level3Name]?.proposed_value || '';
+
+        let opts1 = '<option value="">선택하세요</option>';
+        choices.forEach(c => opts1 += `<option value="${c.value}" ${c.value === val1 ? 'selected' : ''}>${c.value}</option>`);
+
+        let opts2 = '<option value="">선택하세요</option>';
+        const subChoices = val1 ? choices.find(c => c.value === val1)?.choices : [];
+        if (subChoices) subChoices.forEach(c => opts2 += `<option value="${c.value}" ${c.value === val2 ? 'selected' : ''}>${c.value}</option>`);
+
+        let opts3 = '<option value="">선택하세요</option>';
+        const itemChoices = val2 ? subChoices?.find(c => c.value === val2)?.choices : [];
+        if (itemChoices) itemChoices.forEach(c => opts3 += `<option value="${c.value}" ${c.value === val3 ? 'selected' : ''}>${c.value}</option>`);
+
+        const currentVal1 = ticketData[nestedRoot.name] !== undefined ? ticketData[nestedRoot.name] : ticketData.custom_fields?.[nestedRoot.name];
+        const currentVal2 = level2Name ? (ticketData[level2Name] !== undefined ? ticketData[level2Name] : ticketData.custom_fields?.[level2Name]) : undefined;
+        const currentVal3 = level3Name ? (ticketData[level3Name] !== undefined ? ticketData[level3Name] : ticketData.custom_fields?.[level3Name]) : undefined;
+
+        tableRows += renderRow(nestedRoot.label || 'Category', currentVal1, `
+          <select id="input-${nestedRoot.name}-${messageId}-1" data-field-name="${nestedRoot.name}" data-level="1" onchange="updateDependentFields('${messageId}', '${nestedRoot.name}', 1)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1">
+            ${opts1}
+          </select>
+        `, proposalMap[nestedRoot.name]?.reason);
+
+        if (level2Name) {
+          tableRows += renderRow('Sub Category', currentVal2, `
+            <select id="input-${nestedRoot.name}-${messageId}-2" data-field-name="${level2Name}" data-level="2" onchange="updateDependentFields('${messageId}', '${nestedRoot.name}', 2)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1" ${!val1 ? 'disabled' : ''}>
+              ${opts2}
+            </select>
+          `, proposalMap[level2Name]?.reason);
+        }
+
+        if (level3Name) {
+          const searchInputId = `leafsearch-${nestedRoot.name}-${messageId}`;
+          const datalistId = `leaflist-${nestedRoot.name}-${messageId}`;
+          
+          tableRows += renderRow('Item', currentVal3, `
+            <select id="input-${nestedRoot.name}-${messageId}-3" data-field-name="${level3Name}" data-level="3" onchange="updateParentFields('${messageId}', '${nestedRoot.name}', 3)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1" ${!val2 ? 'disabled' : ''}>
+              ${opts3}
+            </select>
+            <div class="mt-2 flex gap-2 items-center">
+              <input id="${searchInputId}" list="${datalistId}" placeholder="3단계 빠른 검색" class="flex-1 text-sm border border-gray-300 rounded-md px-2 py-1 focus:border-blue-500 focus:ring-blue-500" oninput="handleLeafSearchApply('${messageId}', '${nestedRoot.name}', '${searchInputId}')">
+              <button type="button" class="px-3 py-1 text-xs rounded-md border border-gray-300 hover:border-blue-500" onclick="handleLeafSearchApply('${messageId}', '${nestedRoot.name}', '${searchInputId}')">적용</button>
+            </div>
+            <datalist id="${datalistId}">
+              ${window[`leafOptions-${messageId}-${nestedRoot.name}`].slice(0, 2000).map(opt => `<option value="${opt.value}" label="${opt.label}"></option>`).join('')}
+            </datalist>
+            `, proposalMap[level3Name]?.reason);
+        }
+
+        renderedFields.add(nestedRoot.name);
+        if (level2Name) renderedFields.add(level2Name);
+        if (level3Name) renderedFields.add(level3Name);
+      }
+    }
+
+    // 나머지 필드 처리
+    fieldProposals.forEach(prop => {
+      if (renderedFields.has(prop.field_name)) return;
+      if (['status', 'group', 'group_id'].includes(prop.field_name)) return;
+
+      const fieldName = prop.field_name;
+      const fieldLabel = prop.field_label;
+      const proposedValue = prop.proposed_value;
+      const reason = prop.reason;
+      renderedFields.add(fieldName);
+      
+      const fieldDef = ticketFields ? ticketFields.find(f => f.name === fieldName) : null;
+      let inputHtml = '';
+
+      if (fieldDef && (fieldDef.type === 'custom_dropdown' || fieldDef.type === 'default_status' || fieldDef.type === 'default_priority' || fieldDef.choices)) {
+        const choices = normalizeChoices(fieldDef.choices);
+        let optionsHtml = '<option value="">선택하세요</option>';
+        const flatOptions = [];
+        function collectOptions(list) {
+          list.forEach(c => {
+            flatOptions.push(c.value);
+            if (c.choices) collectOptions(c.choices);
+          });
+        }
+        collectOptions(choices);
+        
+        flatOptions.forEach(val => {
+          optionsHtml += `<option value="${val}" ${val === proposedValue ? 'selected' : ''}>${val}</option>`;
+        });
+
+        inputHtml = `
+          <select id="input-${fieldName}-${messageId}" data-field-name="${fieldName}" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1">
+            ${optionsHtml}
+          </select>
+        `;
+      } else {
+        inputHtml = `
+          <input type="text" id="input-${fieldName}-${messageId}" data-field-name="${fieldName}" value="${proposedValue || ''}" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1">
+        `;
+      }
+
+      let currentVal = ticketData[fieldName];
+      if (currentVal === undefined && ticketData.custom_fields) {
+        currentVal = ticketData.custom_fields[fieldName];
+      }
+
+      tableRows += renderRow(fieldLabel, currentVal, inputHtml, reason);
+    });
+  }
+
+  const justification = proposal.justification || proposal.reasoning;
+
+  return `
+    <div class="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center gap-2">
+          <svg class="w-5 h-5 text-app-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+          </svg>
+          <h3 class="text-sm font-semibold text-gray-800">필드 업데이트 제안</h3>
+        </div>
+        <span class="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium">AI 분석</span>
+      </div>
+      
+      <div class="mb-4 overflow-x-auto">
+        <table class="w-full text-sm text-left">
+          <thead class="text-xs text-gray-500 bg-gray-50 uppercase">
+            <tr>
+              <th class="px-2 py-2 w-20">필드</th>
+              <th class="px-2 py-2 w-24">현재 값</th>
+              <th class="px-2 py-2">제안 값 (수정 가능)</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            ${tableRows}
+          </tbody>
+        </table>
+      </div>
+      
+      ${justification ? `
+        <div class="mb-3 px-2 py-2 bg-gray-50 rounded border border-gray-100">
+          <p class="text-xs text-gray-600"><span class="font-semibold">AI 근거:</span> ${escapeHtml(justification)}</p>
+        </div>
+      ` : ''}
+      
+      <button onclick="applyEditableFieldUpdates('${messageId}')" class="w-full py-2 bg-app-primary hover:bg-app-primary-hover text-white text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+        </svg>
+        변경 사항 적용하기
+      </button>
+    </div>
+  `;
+}
+
+/**
+ * 분석 에러 렌더링
+ */
+function renderAnalysisError(message) {
+  if (!elements.analysisContent) return;
+  
+  elements.analysisContent.innerHTML = `
+    <div class="flex flex-col items-center justify-center py-12 text-center">
+      <div class="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mb-4">
+        <svg class="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+      </div>
+      <h3 class="text-lg font-semibold text-gray-800 mb-2">분석 실패</h3>
+      <p class="text-sm text-red-600 mb-4">${escapeHtml(message)}</p>
+      <button onclick="handleAnalyzeTicket()" class="px-4 py-2 text-sm font-medium text-white bg-app-primary rounded-lg hover:bg-app-primary-hover transition-colors flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+        다시 시도
+      </button>
+    </div>
+  `;
+}
+
+// handleAnalyzeTicket을 전역으로 노출 (onclick 용)
+window.handleAnalyzeTicket = handleAnalyzeTicket;
