@@ -62,6 +62,10 @@ yarn-error.log*
 coverage/
 .nyc_output/
 
+# Freshdesk FDK local artifacts
+frontend/.fdk/
+frontend/.report.json
+
 # Build outputs
 *.zip
 *.tar.gz

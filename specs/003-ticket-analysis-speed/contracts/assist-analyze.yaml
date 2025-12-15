@@ -1,0 +1,136 @@
+openapi: 3.0.3
+info:
+  title: Agent Platform Assist API (Excerpt)
+  version: 0.0.0
+
+paths:
+  /api/assist/analyze:
+    post:
+      summary: Analyze a Freshdesk ticket and propose field updates
+      description: |
+        Freshdesk FDK 프론트에서 호출하는 티켓 분석 엔드포인트.
+        - 서버는 conversations API를 페이지네이션으로 순회해 전체 대화를 포함해 분석해야 한다.
+        - 응답에는 2~3개 섹션 요약(summary_sections)과 field_proposals가 포함된다.
+      parameters:
+        - in: header
+          name: X-Tenant-ID
+          required: true
+          schema: { type: string }
+        - in: header
+          name: X-Freshdesk-Domain
+          required: true
+          schema: { type: string }
+        - in: header
+          name: X-Freshdesk-API-Key
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnalyzeRequest'
+      responses:
+        '200':
+          description: Analysis result (non-streaming or final aggregated)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisResult'
+
+  /api/assist/analyze/stream:
+    post:
+      summary: Analyze a ticket (SSE stream)
+      description: |
+        진행 이벤트를 SSE로 스트리밍한다. 최종 complete 이벤트에 AnalysisResult를 포함해야 한다.
+      parameters:
+        - in: header
+          name: X-Tenant-ID
+          required: true
+          schema: { type: string }
+        - in: header
+          name: X-Freshdesk-Domain
+          required: true
+          schema: { type: string }
+        - in: header
+          name: X-Freshdesk-API-Key
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnalyzeRequest'
+      responses:
+        '200':
+          description: text/event-stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+components:
+  schemas:
+    AnalyzeRequest:
+      type: object
+      required: [ticket_id]
+      properties:
+        ticket_id:
+          type: string
+        subject:
+          type: string
+        description:
+          type: string
+        ticket_fields:
+          description: Freshdesk ticket fields schema array
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+
+    SummarySection:
+      type: object
+      required: [title, content]
+      properties:
+        title:
+          type: string
+        content:
+          type: string
+
+    FieldProposal:
+      type: object
+      required: [field_name, field_label, proposed_value, reason]
+      properties:
+        field_name:
+          type: string
+        field_label:
+          type: string
+        proposed_value:
+          description: Value to set; must match Freshdesk field schema choices when applicable
+          nullable: true
+        reason:
+          type: string
+
+    AnalysisResult:
+      type: object
+      properties:
+        intent:
+          type: string
+        sentiment:
+          type: string
+        summary:
+          type: string
+        summary_sections:
+          type: array
+          minItems: 2
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/SummarySection'
+        key_entities:
+          type: array
+          items: { type: string }
+        field_proposals:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldProposal'

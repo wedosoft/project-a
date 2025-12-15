@@ -67,10 +67,11 @@ function setSourceLabels(labels) {
 
 function toggleSource(source) {
   const index = state.selectedSources.indexOf(source);
+  // 단일 선택만 허용 (0개 또는 1개)
   if (index === -1) {
-    state.selectedSources.push(source);
-  } else if (state.selectedSources.length > 1) {
-    state.selectedSources.splice(index, 1);
+    state.selectedSources = [source];
+  } else {
+    state.selectedSources = [];
   }
   return state.selectedSources;
 }
@@ -322,7 +323,7 @@ function renderSourceSelector() {
   
   elements.sourceSelector.innerHTML = `
     <div class="flex items-center justify-between mb-2">
-      <span class="text-xs font-medium text-gray-600">검색 범위 (다중 선택 가능)</span>
+      <span class="text-xs font-medium text-gray-600">검색 범위 (1개만 선택)</span>
     </div>
     <div class="flex flex-wrap gap-2" id="sourceButtons">
       ${state.availableSources.map(source => {
@@ -676,7 +677,43 @@ function renderFieldSuggestions(proposal) {
   const ticketFields = state.ticketFields;
   const ticketData = state.ticketData;
 
-  const renderRow = (label, currentVal, inputHtml, reason) => `
+  const getFieldDefByName = (name) => {
+    if (!ticketFields || !Array.isArray(ticketFields)) return null;
+    return ticketFields.find(f => f && typeof f === 'object' && f.name === name) || null;
+  };
+
+  const formatCurrentValue = (fieldName, value) => {
+    if (value === undefined || value === null) return '-';
+    if (typeof value === 'string' && value.trim() === '') return '-';
+
+    if (Array.isArray(value)) {
+      const s = value.map(v => String(v)).filter(Boolean).join(', ');
+      return s || '-';
+    }
+
+    // priority/status: 숫자 코드를 라벨로 변환
+    if ((fieldName === 'priority' || fieldName === 'status') && (typeof value === 'number' || /^-?\d+$/.test(String(value).trim()))) {
+      const n = typeof value === 'number' ? value : parseInt(String(value).trim(), 10);
+      if (!Number.isNaN(n)) {
+        const def = getFieldDefByName(fieldName);
+        const choices = def ? def.choices : null;
+
+        if (choices && typeof choices === 'object' && !Array.isArray(choices)) {
+          const label = choices[String(n)] || choices[n];
+          if (label) return String(label);
+        }
+
+        if (fieldName === 'priority') {
+          const m = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
+          if (m[n]) return m[n];
+        }
+      }
+    }
+
+    return String(value);
+  };
+
+  const renderRow = (label, fieldName, currentVal, inputHtml, reason) => `
     <tr>
       <td class="px-2 py-2 font-medium text-gray-600">
         ${label}
@@ -687,7 +724,7 @@ function renderFieldSuggestions(proposal) {
           </div>
         </div>` : ''}
       </td>
-      <td class="px-2 py-2 text-gray-400 text-xs">${currentVal || '-'}</td>
+      <td class="px-2 py-2 text-gray-400 text-xs">${escapeHtml(formatCurrentValue(fieldName, currentVal))}</td>
       <td class="px-2 py-2">${inputHtml}</td>
     </tr>
   `;
@@ -729,23 +766,23 @@ function renderFieldSuggestions(proposal) {
         const currentVal2 = level2Name ? (ticketData[level2Name] !== undefined ? ticketData[level2Name] : ticketData.custom_fields?.[level2Name]) : undefined;
         const currentVal3 = level3Name ? (ticketData[level3Name] !== undefined ? ticketData[level3Name] : ticketData.custom_fields?.[level3Name]) : undefined;
 
-        html += renderRow(nestedRoot.label || 'Category', currentVal1, `
+        html += renderRow(nestedRoot.label || 'Category', nestedRoot.name, currentVal1, `
           <select id="input-${nestedRoot.name}-${messageId}-1" data-field-name="${nestedRoot.name}" data-level="1" onchange="updateDependentFields('${messageId}', '${nestedRoot.name}', 1)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1">
             ${opts1}
           </select>
         `, proposalMap[nestedRoot.name]?.reason);
 
         if (level2Name) {
-          html += renderRow('Sub Category', currentVal2, `
-            <select id="input-${nestedRoot.name}-${messageId}-2" data-field-name="${level2Name}" data-level="2" onchange="updateDependentFields('${messageId}', '${nestedRoot.name}', 2)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1" ${!val1 ? 'disabled' : ''}>
+          html += renderRow('Sub Category', level2Name, currentVal2, `
+            <select id="input-${nestedRoot.name}-${messageId}-2" data-field-name="${nestedRoot.name}" data-level="2" onchange="updateDependentFields('${messageId}', '${nestedRoot.name}', 2)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1" ${!val1 ? 'disabled' : ''}>
               ${opts2}
             </select>
           `, proposalMap[level2Name]?.reason);
         }
 
         if (level3Name) {
-          html += renderRow('Item', currentVal3, `
-            <select id="input-${nestedRoot.name}-${messageId}-3" data-field-name="${level3Name}" data-level="3" onchange="updateParentFields('${messageId}', '${nestedRoot.name}', 3)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1" ${!val2 ? 'disabled' : ''}>
+          html += renderRow('Item', level3Name, currentVal3, `
+            <select id="input-${nestedRoot.name}-${messageId}-3" data-field-name="${nestedRoot.name}" data-level="3" onchange="updateParentFields('${messageId}', '${nestedRoot.name}', 3)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1" ${!val2 ? 'disabled' : ''}>
               ${opts3}
             </select>
             <div class="mt-2 flex gap-2 items-center">
@@ -854,7 +891,7 @@ function renderFieldSuggestions(proposal) {
          currentVal = ticketData.custom_fields[fieldName];
       }
 
-      html += renderRow(fieldLabel, currentVal, inputHtml, reason);
+      html += renderRow(fieldLabel, fieldName, currentVal, inputHtml, reason);
     });
 
   }
@@ -1023,6 +1060,25 @@ window.handleLeafSearchApply = function(messageId, fieldName, inputId) {
 window.applyEditableFieldUpdates = async function(messageId) {
   const { client, ticketData } = state;
   if (!client || !ticketData) return;
+
+  const notify = (type, message) => {
+    try {
+      if (client.interface && typeof client.interface.trigger === 'function') {
+        const maybePromise = client.interface.trigger('showNotify', { type, message });
+        // Interface API가 존재하지만 런타임에서 사용 불가하면 Promise reject로 떨어질 수 있음
+        if (maybePromise && typeof maybePromise.catch === 'function') {
+          maybePromise.catch(() => {
+            console.log(`[Notify:${type}] ${message}`);
+          });
+        }
+        return;
+      }
+    } catch (e) {
+      // ignore and fallback
+    }
+    // Fallback for environments where InterfaceAPI isn't available (e.g., direct localhost preview)
+    console.log(`[Notify:${type}] ${message}`);
+  };
   
   try {
     const messageDiv = document.getElementById(messageId);
@@ -1035,7 +1091,84 @@ window.applyEditableFieldUpdates = async function(messageId) {
 
     const updateBody = {};
     const customFields = {};
-    const standardFields = ['status', 'priority', 'type', 'group_id', 'responder_id', 'description', 'subject', 'source', 'tags']; 
+    // NOTE: source는 Freshdesk에서 업데이트가 제한되거나 invalid_field가 날 수 있어 방어적으로 제외
+    const standardFields = ['status', 'priority', 'type', 'group_id', 'responder_id', 'description', 'subject', 'tags']; 
+
+    const coerceStandardNumeric = (fieldName, rawValue) => {
+      const raw = rawValue === null || rawValue === undefined ? '' : String(rawValue).trim();
+      if (!raw) return null;
+
+      // already numeric
+      if (/^-?\d+$/.test(raw)) {
+        const n = parseInt(raw, 10);
+        if (Number.isNaN(n)) {
+          throw new Error(`${fieldName} 값을 숫자로 해석할 수 없습니다: ${rawValue}`);
+        }
+        return n;
+      }
+
+      // attempt mapping from ticket field choices (common for default_priority/default_status)
+      const fieldDef = state.ticketFields ? state.ticketFields.find(f => f.name === fieldName) : null;
+      const choices = fieldDef ? fieldDef.choices : null;
+      const key = raw.toLowerCase();
+
+      const tryMapFromChoices = () => {
+        if (!choices) return null;
+
+        // choices as object: { "1": "Low", "2": "Medium", ... }
+        if (typeof choices === 'object' && !Array.isArray(choices)) {
+          for (const [k, v] of Object.entries(choices)) {
+            const kStr = String(k).trim();
+            const kNum = /^-?\d+$/.test(kStr) ? parseInt(kStr, 10) : null;
+            const vStr = (typeof v === 'string') ? v.trim() : '';
+
+            if (vStr && vStr.toLowerCase() === key && kNum !== null && !Number.isNaN(kNum)) {
+              return kNum;
+            }
+            if (kStr.toLowerCase() === key && kNum !== null && !Number.isNaN(kNum)) {
+              return kNum;
+            }
+          }
+        }
+
+        // choices as array of objects: [{value: 1, label: 'Low'}, ...] (best-effort)
+        if (Array.isArray(choices)) {
+          for (const item of choices) {
+            if (!item || typeof item !== 'object') continue;
+            const label = (item.label || item.name || item.value || '').toString().trim();
+            const value = item.value;
+            if (label && label.toLowerCase() === key && /^-?\d+$/.test(String(value))) {
+              const n = parseInt(String(value), 10);
+              if (!Number.isNaN(n)) return n;
+            }
+          }
+        }
+
+        return null;
+      };
+
+      const mapped = tryMapFromChoices();
+      if (mapped !== null) return mapped;
+
+      // fallback mapping for priority labels (Freshdesk commonly uses 1..4)
+      if (fieldName === 'priority') {
+        const priorityMap = {
+          low: 1,
+          medium: 2,
+          high: 3,
+          urgent: 4,
+          // Korean
+          '낮음': 1,
+          '보통': 2,
+          '중간': 2,
+          '높음': 3,
+          '긴급': 4
+        };
+        if (priorityMap[key] !== undefined) return priorityMap[key];
+      }
+
+      throw new Error(`${fieldName} 값이 숫자여야 합니다. 현재 값: ${rawValue}`);
+    };
 
     const fieldGroups = {};
     inputs.forEach(input => {
@@ -1063,8 +1196,10 @@ window.applyEditableFieldUpdates = async function(messageId) {
         if (valueToUpdate === '' || valueToUpdate === null || valueToUpdate === undefined) continue;
 
         if (standardFields.includes(fieldName)) {
-            if (['priority', 'status', 'group_id', 'responder_id', 'source'].includes(fieldName)) {
-                updateBody[fieldName] = parseInt(valueToUpdate, 10);
+          if (['priority', 'status', 'group_id', 'responder_id'].includes(fieldName)) {
+            const n = coerceStandardNumeric(fieldName, valueToUpdate);
+            if (n === null) continue;
+            updateBody[fieldName] = n;
             } else {
                 updateBody[fieldName] = valueToUpdate;
             }
@@ -1080,10 +1215,7 @@ window.applyEditableFieldUpdates = async function(messageId) {
     console.log('Updating ticket with:', updateBody);
 
     if (Object.keys(updateBody).length === 0) {
-       client.interface.trigger("showNotify", {
-        type: "warning",
-        message: "변경할 필드 값이 선택되지 않았습니다."
-      });
+      notify('warning', '변경할 필드 값이 선택되지 않았습니다.');
       return;
     }
 
@@ -1095,20 +1227,40 @@ window.applyEditableFieldUpdates = async function(messageId) {
     });
 
     if (response.status === 200) {
-      client.interface.trigger("showNotify", {
-        type: "success",
-        message: "티켓이 성공적으로 업데이트되었습니다."
-      });
+      notify('success', '티켓이 성공적으로 업데이트되었습니다.');
     } else {
-      throw new Error(`API Error: ${response.status} ${response.response}`);
+      // Try to extract validation details from Freshdesk error payload
+      let detail = '';
+      try {
+        const parsed = JSON.parse(response.response);
+        if (parsed && parsed.description) {
+          detail += parsed.description;
+        }
+        if (parsed && Array.isArray(parsed.errors) && parsed.errors.length > 0) {
+          const first = parsed.errors[0];
+          const field = first.field ? `field=${first.field}` : '';
+          const msg = first.message || '';
+          const code = first.code ? `code=${first.code}` : '';
+          const parts = [field, code].filter(Boolean).join(', ');
+          detail += (detail ? ' ' : '') + [parts, msg].filter(Boolean).join(' ');
+        }
+      } catch (e) {
+        // ignore parse errors
+      }
+      const suffix = detail ? ` (${detail})` : '';
+      throw new Error(`API Error: ${response.status}${suffix}`);
     }
     
   } catch (error) {
     console.error("필드 업데이트 실패:", error);
-    client.interface.trigger("showNotify", {
-      type: "danger",
-      message: "필드 업데이트 중 오류가 발생했습니다: " + error.message
-    });
+    const errorMsg = (error && error.message)
+      ? error.message
+      : (typeof error === 'string'
+        ? error
+        : (() => {
+          try { return JSON.stringify(error); } catch (e) { return String(error); }
+        })());
+    notify('danger', '필드 업데이트 중 오류가 발생했습니다: ' + errorMsg);
   }
 };
 
@@ -1135,12 +1287,23 @@ document.onreadystatechange = function() {
         // 메인 페이지: 클릭시 모달 열기
         if (!isModalView) {
           _client.events.on("app.activated", async () => {
-            await _client.interface.trigger("showModal", {
-              title: "AI Copilot",
-              template: "index.html",
-              noBackdrop: true,
-              data: { isModal: true } // 모달임을 명시
-            });
+            try {
+              if (_client.interface && typeof _client.interface.trigger === 'function') {
+                const p = _client.interface.trigger("showModal", {
+                  title: "AI Copilot",
+                  template: "index.html",
+                  noBackdrop: true,
+                  data: { isModal: true } // 모달임을 명시
+                });
+                if (p && typeof p.catch === 'function') {
+                  await p;
+                }
+              } else {
+                console.warn('[App] InterfaceAPI not available: cannot open modal');
+              }
+            } catch (e) {
+              console.warn('[App] Failed to open modal (InterfaceAPI unavailable):', e);
+            }
           });
           return;
         }
@@ -1248,6 +1411,7 @@ async function loadTicketData() {
   const { client } = state;
   const data = await client.data.get('ticket');
   const ticketId = data.ticket.id;
+  const fdkTicket = data && data.ticket ? data.ticket : null;
 
   const response = await client.request.invokeTemplate('getTicketWithConversations', {
     context: { ticketId }
@@ -1258,6 +1422,25 @@ async function loadTicketData() {
   }
   
   const ticketData = JSON.parse(response.response);
+
+  // Freshdesk ticket API 응답에 일부 필드가 누락/비어있는 경우가 있어(FDK 컨텍스트가 더 풍부한 경우)
+  // FDK ticket 값을 기준으로 보완합니다. (예: type)
+  if (fdkTicket && typeof fdkTicket === 'object') {
+    for (const [k, v] of Object.entries(fdkTicket)) {
+      if (ticketData[k] === undefined || ticketData[k] === null || ticketData[k] === '') {
+        ticketData[k] = v;
+      }
+    }
+
+    if (fdkTicket.custom_fields && typeof fdkTicket.custom_fields === 'object') {
+      ticketData.custom_fields = ticketData.custom_fields || {};
+      for (const [k, v] of Object.entries(fdkTicket.custom_fields)) {
+        if (ticketData.custom_fields[k] === undefined || ticketData.custom_fields[k] === null || ticketData.custom_fields[k] === '') {
+          ticketData.custom_fields[k] = v;
+        }
+      }
+    }
+  }
   
   try {
     const allConversations = await fetchAllConversations(ticketId);
@@ -1623,24 +1806,28 @@ async function handleAnalyzeTicket() {
       
       showTicker(eventType, eventData);
       console.log('[Analyze] Progress:', eventType, eventData);
+
+      // 분석 결과는 도착 즉시 렌더링 (complete 이벤트 누락에도 대비)
+      if (eventType === 'analysis_result' && eventData && typeof eventData === 'object') {
+        setAnalysisResult(eventData);
+        renderAnalysisResult(eventData);
+      }
     });
     
     // 분석 완료
     hideTicker();
     
-    console.log('[Analyze] Final Result:', result);
+    const finalResult = result || state.analysisResult;
+    console.log('[Analyze] Final Result:', finalResult);
 
-    if (result) {
+    if (finalResult) {
       // result가 { status: 'done' } 형태이고 실제 데이터가 없는 경우 처리
-      // 백엔드에서 complete 이벤트에 proposal 데이터를 포함하지 않았을 가능성
-      if (result.status === 'done' && !result.summary && !result.intent && !result.field_proposals) {
+      if (finalResult.status === 'done' && !finalResult.summary && !finalResult.intent && !finalResult.field_proposals) {
         console.warn('[Analyze] Result is empty status object, checking for cached proposal...');
-        // 여기서 캐시된 proposal을 찾거나 에러 처리
-        // 임시: 에러 메시지 표시
         renderAnalysisError('분석은 완료되었으나 데이터를 불러올 수 없습니다.');
       } else {
-        setAnalysisResult(result);
-        renderAnalysisResult(result);
+        setAnalysisResult(finalResult);
+        renderAnalysisResult(finalResult);
       }
     } else {
       renderAnalysisError('분석 결과를 받을 수 없습니다.');
@@ -1661,7 +1848,8 @@ async function handleAnalyzeTicket() {
  */
 function renderAnalysisResult(proposal) {
   if (!elements.analysisContent) return;
-  
+
+  const summarySections = proposal.summary_sections || proposal.summarySections;
   const summary = proposal.summary;
   const intent = proposal.intent;
   const sentiment = proposal.sentiment;
@@ -1681,7 +1869,22 @@ function renderAnalysisResult(proposal) {
           <h3 class="text-sm font-semibold text-gray-800">티켓 분석 결과</h3>
         </div>
         <div class="space-y-3 text-sm">
-          ${summary ? `<p><span class="font-medium text-gray-600">요약:</span> ${escapeHtml(summary)}</p>` : ''}
+          ${Array.isArray(summarySections) && summarySections.length > 0 ? `
+            <div>
+              <p class="font-medium text-gray-700 mb-2">요약:</p>
+              <div class="space-y-2">
+                ${summarySections.slice(0, 3).map(s => {
+                  const t = escapeHtml((s && s.title) ? String(s.title) : '');
+                  const c = escapeHtml((s && s.content) ? String(s.content) : '');
+                  if (!t && !c) return '';
+                  return `<div class="bg-gray-50 p-2 rounded">
+                    ${t ? `<div class="text-gray-800 font-medium">${t}</div>` : ''}
+                    ${c ? `<div class="text-gray-600">${c}</div>` : ''}
+                  </div>`;
+                }).join('')}
+              </div>
+            </div>
+          ` : (summary ? `<p><span class="font-medium text-gray-600">요약:</span> ${escapeHtml(summary)}</p>` : '')}
           ${intent ? `<p><span class="font-medium text-gray-600">의도:</span> ${escapeHtml(intent)}</p>` : ''}
           ${sentiment ? `<p><span class="font-medium text-gray-600">감정:</span> ${escapeHtml(sentiment)}</p>` : ''}
           ${cause ? `
@@ -1738,7 +1941,40 @@ function renderFieldSuggestionsCard(proposal) {
   const ticketFields = state.ticketFields;
   const ticketData = state.ticketData;
 
-  const renderRow = (label, currentVal, inputHtml, reason) => `
+  const getFieldDefByName = (name) => {
+    if (!ticketFields || !Array.isArray(ticketFields)) return null;
+    return ticketFields.find(f => f && typeof f === 'object' && f.name === name) || null;
+  };
+
+  const formatCurrentValue = (fieldName, value) => {
+    if (value === undefined || value === null) return '-';
+    if (typeof value === 'string' && value.trim() === '') return '-';
+
+    if (Array.isArray(value)) {
+      const s = value.map(v => String(v)).filter(Boolean).join(', ');
+      return s || '-';
+    }
+
+    if ((fieldName === 'priority' || fieldName === 'status') && (typeof value === 'number' || /^-?\d+$/.test(String(value).trim()))) {
+      const n = typeof value === 'number' ? value : parseInt(String(value).trim(), 10);
+      if (!Number.isNaN(n)) {
+        const def = getFieldDefByName(fieldName);
+        const choices = def ? def.choices : null;
+        if (choices && typeof choices === 'object' && !Array.isArray(choices)) {
+          const label = choices[String(n)] || choices[n];
+          if (label) return String(label);
+        }
+        if (fieldName === 'priority') {
+          const m = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
+          if (m[n]) return m[n];
+        }
+      }
+    }
+
+    return String(value);
+  };
+
+  const renderRow = (label, fieldName, currentVal, inputHtml, reason) => `
     <tr>
       <td class="px-2 py-2 font-medium text-gray-600">
         ${label}
@@ -1749,7 +1985,7 @@ function renderFieldSuggestionsCard(proposal) {
           </div>
         </div>` : ''}
       </td>
-      <td class="px-2 py-2 text-gray-400 text-xs">${currentVal || '-'}</td>
+      <td class="px-2 py-2 text-gray-400 text-xs">${escapeHtml(formatCurrentValue(fieldName, currentVal))}</td>
       <td class="px-2 py-2">${inputHtml}</td>
     </tr>
   `;
@@ -1792,15 +2028,15 @@ function renderFieldSuggestionsCard(proposal) {
         const currentVal2 = level2Name ? (ticketData[level2Name] !== undefined ? ticketData[level2Name] : ticketData.custom_fields?.[level2Name]) : undefined;
         const currentVal3 = level3Name ? (ticketData[level3Name] !== undefined ? ticketData[level3Name] : ticketData.custom_fields?.[level3Name]) : undefined;
 
-        tableRows += renderRow(nestedRoot.label || 'Category', currentVal1, `
+        tableRows += renderRow(nestedRoot.label || 'Category', nestedRoot.name, currentVal1, `
           <select id="input-${nestedRoot.name}-${messageId}-1" data-field-name="${nestedRoot.name}" data-level="1" onchange="updateDependentFields('${messageId}', '${nestedRoot.name}', 1)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1">
             ${opts1}
           </select>
         `, proposalMap[nestedRoot.name]?.reason);
 
         if (level2Name) {
-          tableRows += renderRow('Sub Category', currentVal2, `
-            <select id="input-${nestedRoot.name}-${messageId}-2" data-field-name="${level2Name}" data-level="2" onchange="updateDependentFields('${messageId}', '${nestedRoot.name}', 2)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1" ${!val1 ? 'disabled' : ''}>
+          tableRows += renderRow('Sub Category', level2Name, currentVal2, `
+            <select id="input-${nestedRoot.name}-${messageId}-2" data-field-name="${nestedRoot.name}" data-level="2" onchange="updateDependentFields('${messageId}', '${nestedRoot.name}', 2)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1" ${!val1 ? 'disabled' : ''}>
               ${opts2}
             </select>
           `, proposalMap[level2Name]?.reason);
@@ -1811,10 +2047,10 @@ function renderFieldSuggestionsCard(proposal) {
           const datalistId = `leaflist-${nestedRoot.name}-${messageId}`;
           
           // Item 필드는 검색 가능한 입력 필드로 통합 (드롭다운 제거)
-          tableRows += renderRow('Item', currentVal3, `
+          tableRows += renderRow('Item', level3Name, currentVal3, `
             <div class="relative">
               <input id="${searchInputId}" list="${datalistId}" 
-                     data-field-name="${level3Name}"
+                     data-field-name="${nestedRoot.name}"
                      placeholder="항목 검색 (전체 검색 가능)" 
                      class="w-full text-sm border border-gray-300 rounded-md px-2 py-1.5 focus:border-blue-500 focus:ring-blue-500 transition-colors" 
                      oninput="handleLeafSearchApply('${messageId}', '${nestedRoot.name}', '${searchInputId}')"
@@ -1883,14 +2119,14 @@ function renderFieldSuggestionsCard(proposal) {
         currentVal = ticketData.custom_fields[fieldName];
       }
 
-      tableRows += renderRow(fieldLabel, currentVal, inputHtml, reason);
+      tableRows += renderRow(fieldLabel, fieldName, currentVal, inputHtml, reason);
     });
   }
 
   const justification = proposal.justification || proposal.reasoning;
 
   return `
-    <div class="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+    <div id="${messageId}" class="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
       <div class="flex items-center justify-between mb-3">
         <div class="flex items-center gap-2">
           <svg class="w-5 h-5 text-app-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
