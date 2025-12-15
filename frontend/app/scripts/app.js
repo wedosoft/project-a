@@ -895,7 +895,9 @@ window.updateDependentFields = function(messageId, fieldName, level) {
     const choices = window[`choices-${messageId}-${fieldName}`];
     const el1 = document.getElementById(`input-${fieldName}-${messageId}-1`);
     const el2 = document.getElementById(`input-${fieldName}-${messageId}-2`);
-    const el3 = document.getElementById(`input-${fieldName}-${messageId}-3`);
+    // el3는 이제 검색 입력 필드와 datalist로 대체됨
+    const elSearch = document.getElementById(`leafsearch-${fieldName}-${messageId}`);
+    const elDatalist = document.getElementById(`leaflist-${fieldName}-${messageId}`);
     
     const val1 = el1 ? el1.value : '';
     
@@ -916,29 +918,32 @@ window.updateDependentFields = function(messageId, fieldName, level) {
                 el2.value = '';
             }
         }
-        if (el3) {
-            el3.innerHTML = '<option value="">선택하세요</option>';
-            el3.disabled = true;
-            el3.value = '';
+        // Level 1 변경 시 Level 3 초기화
+        if (elSearch) {
+            elSearch.value = '';
+            // datalist 업데이트 (선택된 Level 1 하위의 모든 Leaf)
+            if (elDatalist && subChoices) {
+                const leaves = flattenLeafOptions(subChoices);
+                window[`leafOptions-${messageId}-${fieldName}`] = leaves; // 캐시 업데이트
+                elDatalist.innerHTML = leaves.map(opt => `<option value="${opt.value}" label="${opt.label}"></option>`).join('');
+            } else if (elDatalist) {
+                elDatalist.innerHTML = '';
+            }
         }
     } else if (level === 2) {
         const val2 = el2 ? el2.value : '';
-        let opts3 = '<option value="">선택하세요</option>';
         const subChoices = val1 ? choices.find(c => c.value === val1)?.choices : [];
         const itemChoices = val2 ? subChoices?.find(c => c.value === val2)?.choices : [];
         
-        if (itemChoices) {
-            itemChoices.forEach(c => opts3 += `<option value="${c.value}">${c.value}</option>`);
-            if (el3) {
-                el3.innerHTML = opts3;
-                el3.disabled = false;
-                el3.value = '';
-            }
-        } else {
-            if (el3) {
-                el3.innerHTML = '<option value="">선택하세요</option>';
-                el3.disabled = true;
-                el3.value = '';
+        if (elSearch) {
+            elSearch.value = '';
+            if (itemChoices && elDatalist) {
+                const leaves = flattenLeafOptions(itemChoices);
+                window[`leafOptions-${messageId}-${fieldName}`] = leaves; // 캐시 업데이트
+                elDatalist.innerHTML = leaves.map(opt => `<option value="${opt.value}" label="${opt.label}"></option>`).join('');
+            } else if (elDatalist) {
+                // 선택된 Level 2가 없거나 하위 항목이 없으면 비움
+                elDatalist.innerHTML = '';
             }
         }
     }
@@ -949,8 +954,9 @@ window.updateParentFields = function(messageId, fieldName, level, targetValue) {
 
     const choices = window[`choices-${messageId}-${fieldName}`];
     const pathMap = window[`pathMap-${messageId}-${fieldName}`];
-    const el3 = document.getElementById(`input-${fieldName}-${messageId}-3`);
-    const val3 = targetValue !== undefined ? targetValue : (el3 ? el3.value : '');
+    // el3 대신 검색 입력 필드 사용
+    const elSearch = document.getElementById(`leafsearch-${fieldName}-${messageId}`);
+    const val3 = targetValue !== undefined ? targetValue : (elSearch ? elSearch.value : '');
     
     if (!val3) return;
 
@@ -973,15 +979,15 @@ window.updateParentFields = function(messageId, fieldName, level, targetValue) {
         }
         
         if (el2) {
-            const needUpdate = el2.value !== val2 || (el3 && (el3.disabled || el3.options.length <= 1));
+            const needUpdate = el2.value !== val2; // el3 체크 제거 (datalist는 항상 존재)
             if (needUpdate) {
                 el2.value = val2;
                 window.updateDependentFields(messageId, fieldName, 2);
             }
         }
         
-        if (el3 && el3.value !== val3) {
-            el3.value = val3;
+        if (elSearch && elSearch.value !== val3) {
+            elSearch.value = val3;
         }
     }
 };
@@ -995,17 +1001,22 @@ window.handleLeafSearchApply = function(messageId, fieldName, inputId) {
     window[`leafOptions-${messageId}-${fieldName}`] = leaves;
 
     const userInput = elInput.value;
-    const match = findLeafByInput(leaves, userInput);
-    if (!match) {
-        elInput.classList.add("ring-2", "ring-red-400");
-        setTimeout(() => elInput.classList.remove("ring-2", "ring-red-400"), 800);
-        return;
-    }
+    if (!userInput) return;
 
-    const el3 = document.getElementById(`input-${fieldName}-${messageId}-3`);
-    if (el3) {
-        window.updateParentFields(messageId, fieldName, 3, match.value);
+    // 정확히 일치하는 값이 있는지 확인 (값 또는 라벨)
+    const exactMatch = leaves.find(l => l.value === userInput || l.label === userInput);
+    
+    if (exactMatch) {
+        // 정확히 일치하면 즉시 업데이트
+        const el3 = document.getElementById(`input-${fieldName}-${messageId}-3`); // 이 요소는 제거되었으므로 가상으로 처리하거나 updateParentFields 수정 필요
+        // updateParentFields는 el3 값을 읽거나 targetValue를 받음
+        window.updateParentFields(messageId, fieldName, 3, exactMatch.value);
         elInput.classList.remove("ring-2", "ring-red-400");
+        elInput.classList.add("ring-2", "ring-green-400");
+        setTimeout(() => elInput.classList.remove("ring-2", "ring-green-400"), 1000);
+    } else {
+        // 일치하지 않으면 (타이핑 중) 아무것도 하지 않음 (빨간 테두리 제거)
+        // 사용자가 datalist에서 선택하면 exactMatch가 됨
     }
 };
 
@@ -1115,7 +1126,11 @@ document.onreadystatechange = function() {
       app.initialized().then(async function(_client) {
         setClient(_client);
         const context = await _client.instance.context();
-        isModalView = context.location !== 'ticket_top_navigation';
+        // context.location 체크 대신 data 파라미터 확인 (더 확실함)
+        // 하지만 context.location이 'modal'인 경우도 있으므로 둘 다 체크
+        isModalView = context.location === 'modal' || (context.data && context.data.isModal);
+        
+        console.log('[App] Context:', context, 'isModalView:', isModalView);
 
         // 메인 페이지: 클릭시 모달 열기
         if (!isModalView) {
@@ -1123,7 +1138,8 @@ document.onreadystatechange = function() {
             await _client.interface.trigger("showModal", {
               title: "AI Copilot",
               template: "index.html",
-              noBackdrop: true
+              noBackdrop: true,
+              data: { isModal: true } // 모달임을 명시
             });
           });
           return;
@@ -1612,9 +1628,20 @@ async function handleAnalyzeTicket() {
     // 분석 완료
     hideTicker();
     
+    console.log('[Analyze] Final Result:', result);
+
     if (result) {
-      setAnalysisResult(result);
-      renderAnalysisResult(result);
+      // result가 { status: 'done' } 형태이고 실제 데이터가 없는 경우 처리
+      // 백엔드에서 complete 이벤트에 proposal 데이터를 포함하지 않았을 가능성
+      if (result.status === 'done' && !result.summary && !result.intent && !result.field_proposals) {
+        console.warn('[Analyze] Result is empty status object, checking for cached proposal...');
+        // 여기서 캐시된 proposal을 찾거나 에러 처리
+        // 임시: 에러 메시지 표시
+        renderAnalysisError('분석은 완료되었으나 데이터를 불러올 수 없습니다.');
+      } else {
+        setAnalysisResult(result);
+        renderAnalysisResult(result);
+      }
     } else {
       renderAnalysisError('분석 결과를 받을 수 없습니다.');
     }
@@ -1638,12 +1665,13 @@ function renderAnalysisResult(proposal) {
   const summary = proposal.summary;
   const intent = proposal.intent;
   const sentiment = proposal.sentiment;
-  const draftResponse = proposal.draftResponse || proposal.draft_response;
+  const cause = proposal.cause;
+  const solution = proposal.solution;
   
   let html = '';
   
   // 요약 카드
-  if (summary || intent || sentiment) {
+  if (summary || intent || sentiment || cause || solution) {
     html += `
       <div class="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
         <div class="flex items-center gap-2 mb-3">
@@ -1652,10 +1680,22 @@ function renderAnalysisResult(proposal) {
           </svg>
           <h3 class="text-sm font-semibold text-gray-800">티켓 분석 결과</h3>
         </div>
-        <div class="space-y-2 text-sm">
+        <div class="space-y-3 text-sm">
           ${summary ? `<p><span class="font-medium text-gray-600">요약:</span> ${escapeHtml(summary)}</p>` : ''}
           ${intent ? `<p><span class="font-medium text-gray-600">의도:</span> ${escapeHtml(intent)}</p>` : ''}
           ${sentiment ? `<p><span class="font-medium text-gray-600">감정:</span> ${escapeHtml(sentiment)}</p>` : ''}
+          ${cause ? `
+            <div class="pt-2 border-t border-gray-100">
+              <p class="font-medium text-gray-700 mb-1">원인:</p>
+              <p class="text-gray-600 bg-gray-50 p-2 rounded">${escapeHtml(cause)}</p>
+            </div>
+          ` : ''}
+          ${solution ? `
+            <div class="pt-2 border-t border-gray-100">
+              <p class="font-medium text-gray-700 mb-1">해결책:</p>
+              <div class="text-gray-600 bg-gray-50 p-2 rounded whitespace-pre-wrap">${formatMessage(solution)}</div>
+            </div>
+          ` : ''}
         </div>
       </div>
     `;
@@ -1667,23 +1707,6 @@ function renderAnalysisResult(proposal) {
   
   if (fieldProposals.length > 0 || Object.keys(fieldUpdates).length > 0) {
     html += renderFieldSuggestionsCard(proposal);
-  }
-  
-  // 제안 답변 카드
-  if (draftResponse) {
-    html += `
-      <div class="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
-        <div class="flex items-center gap-2 mb-3">
-          <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/>
-          </svg>
-          <h3 class="text-sm font-semibold text-gray-800">제안된 답변</h3>
-        </div>
-        <div class="text-sm text-gray-700 whitespace-pre-wrap bg-gray-50 p-3 rounded-lg border border-gray-100">
-          ${formatMessage(draftResponse)}
-        </div>
-      </div>
-    `;
   }
   
   // 다시 분석 버튼
@@ -1787,17 +1810,24 @@ function renderFieldSuggestionsCard(proposal) {
           const searchInputId = `leafsearch-${nestedRoot.name}-${messageId}`;
           const datalistId = `leaflist-${nestedRoot.name}-${messageId}`;
           
+          // Item 필드는 검색 가능한 입력 필드로 통합 (드롭다운 제거)
           tableRows += renderRow('Item', currentVal3, `
-            <select id="input-${nestedRoot.name}-${messageId}-3" data-field-name="${level3Name}" data-level="3" onchange="updateParentFields('${messageId}', '${nestedRoot.name}', 3)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1" ${!val2 ? 'disabled' : ''}>
-              ${opts3}
-            </select>
-            <div class="mt-2 flex gap-2 items-center">
-              <input id="${searchInputId}" list="${datalistId}" placeholder="3단계 빠른 검색" class="flex-1 text-sm border border-gray-300 rounded-md px-2 py-1 focus:border-blue-500 focus:ring-blue-500" oninput="handleLeafSearchApply('${messageId}', '${nestedRoot.name}', '${searchInputId}')">
-              <button type="button" class="px-3 py-1 text-xs rounded-md border border-gray-300 hover:border-blue-500" onclick="handleLeafSearchApply('${messageId}', '${nestedRoot.name}', '${searchInputId}')">적용</button>
+            <div class="relative">
+              <input id="${searchInputId}" list="${datalistId}" 
+                     data-field-name="${level3Name}"
+                     placeholder="항목 검색 (전체 검색 가능)" 
+                     class="w-full text-sm border border-gray-300 rounded-md px-2 py-1.5 focus:border-blue-500 focus:ring-blue-500 transition-colors" 
+                     oninput="handleLeafSearchApply('${messageId}', '${nestedRoot.name}', '${searchInputId}')"
+                     value="${val3 || ''}">
+              <datalist id="${datalistId}">
+                ${window[`leafOptions-${messageId}-${nestedRoot.name}`].slice(0, 2000).map(opt => `<option value="${opt.value}" label="${opt.label}"></option>`).join('')}
+              </datalist>
+              <div class="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
+                <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                </svg>
+              </div>
             </div>
-            <datalist id="${datalistId}">
-              ${window[`leafOptions-${messageId}-${nestedRoot.name}`].slice(0, 2000).map(opt => `<option value="${opt.value}" label="${opt.label}"></option>`).join('')}
-            </datalist>
             `, proposalMap[level3Name]?.reason);
         }
 

@@ -2,6 +2,8 @@
 - Please let me know if you have any questions before making the plan!
 - 사용자와의 대화는 반드시 한국어로만 소통한다.
 
+> **Note**: The backend logic described in this document has been migrated to the `agent-platform` repository. This repository (`project-a`) now focuses on the Frontend (Freshdesk App).
+
 # AI Contact Center OS – 다중 에이전트 아키텍처
 
 ## 개요

@@ -98,7 +98,22 @@
           
           // 최종 결과 저장 (complete 또는 resolution_complete 이벤트)
           if (data.type === 'complete' || data.type === 'resolution_complete') {
-            result = data.data || data;
+            // data.data가 있으면 그것을, 없으면 data 자체를 사용하되,
+            // data.data가 문자열이면 파싱 시도
+            if (data.data) {
+              if (typeof data.data === 'string') {
+                try {
+                  result = JSON.parse(data.data);
+                } catch (e) {
+                  result = data.data;
+                }
+              } else {
+                result = data.data;
+              }
+            } else {
+              result = data;
+            }
+            console.log('[StreamUtils] Final result captured:', result);
           }
         });
         
