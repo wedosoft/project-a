@@ -1,13 +1,6 @@
 {
+  "platform-version": "3.0",
   "modules": {
-    "support_ticket": {
-      "location": {
-        "ticket_top_navigation": {
-          "url": "index.html",
-          "icon": "styles/images/icon.svg"
-        }
-      }
-    },
     "common": {
       "location": {
         "full_page_app": {
@@ -19,21 +12,24 @@
         "getSecureParams": {}
       },
       "requests": {
-        "getAgent": {},
-        "getGroup": {},
-        "getTicketField": {},
         "getTicketWithConversations": {},
         "getTicketConversations": {},
         "getTicketFields": {},
         "updateTicket": {},
         "backendApi": {},
         "backendApiPost": {},
-        "backendApiPut": {},
-        "backendApiDelete": {}
+        "backendApiPut": {}
+      }
+    },
+    "support_ticket": {
+      "location": {
+        "ticket_top_navigation": {
+          "url": "index.html",
+          "icon": "styles/images/icon.svg"
+        }
       }
     }
   },
-  "platform-version": "3.0",
   "engines": {
     "node": "18.20.8",
     "fdk": "9.7.4"

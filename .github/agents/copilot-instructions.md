@@ -1,12 +1,11 @@
 # project-a Development Guidelines
 
-Auto-generated from all feature plans. Last updated: 2025-12-15
+Auto-generated from all feature plans. Last updated: 2025-12-14
 
 ## Active Technologies
-- Frontend(Vanilla JS/HTML + Freshdesk FDK, Node 18.20.8) / Backend(Python >= 3.9) + Frontend(FDK runtime + request templates) / Backend(FastAPI, httpx, langgraph/langchain, openai client, Supabase) (003-ticket-analysis-speed)
-- Supabase(기존 캐시) / 본 기능은 DB 변경 없이 응답 스키마 확장 중심 (003-ticket-analysis-speed)
+- Supabase (PostgreSQL), Qdrant (Vector DB) (002-freshdesk-copilot-ui)
 
-- (003-ticket-analysis-speed)
+- Python 3.9+ (Backend), HTML/JS/React (Frontend/FDK) + FastAPI, LangGraph, Qdrant, Freshdesk FDK (002-freshdesk-copilot-ui)
 
 ## Project Structure
 
@@ -17,16 +16,16 @@ tests/
 
 ## Commands
 
-# Add commands for 
+cd src [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECHNOLOGIES] pytest [ONLY COMMANDS FOR ACTIVE TECHNOLOGIES][ONLY COMMANDS FOR ACTIVE TECHNOLOGIES] ruff check .
 
 ## Code Style
 
-: Follow standard conventions
+Python 3.9+ (Backend), HTML/JS/React (Frontend/FDK): Follow standard conventions
 
 ## Recent Changes
-- 003-ticket-analysis-speed: Added Frontend(Vanilla JS/HTML + Freshdesk FDK, Node 18.20.8) / Backend(Python >= 3.9) + Frontend(FDK runtime + request templates) / Backend(FastAPI, httpx, langgraph/langchain, openai client, Supabase)
+- 002-freshdesk-copilot-ui: Added Python 3.9+ (Backend), HTML/JS/React (Frontend/FDK) + FastAPI, LangGraph, Qdrant, Freshdesk FDK
 
-- 003-ticket-analysis-speed: Added
+- 002-freshdesk-copilot-ui: Added Python 3.9+ (Backend), HTML/JS/React (Frontend/FDK) + FastAPI, LangGraph, Qdrant, Freshdesk FDK
 
 <!-- MANUAL ADDITIONS START -->
 <!-- MANUAL ADDITIONS END -->
