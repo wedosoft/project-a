@@ -40,6 +40,71 @@ exports = {
   },
 
   /**
+   * Freshdesk 티켓 필드 목록 가져오기
+   * - 프론트에서 외부 호출은 'Route not allowed'로 차단될 수 있으므로 서버리스에서 호출한다.
+   * - secure iparams(api key)는 서버리스에서만 접근한다.
+   */
+  getTicketFields: function(args) {
+    try {
+      const { iparams } = args;
+
+      const apiKey = iparams?.freshdesk_api_key;
+      const domain = iparams?.freshdesk_domain;
+
+      if (!apiKey || !domain) {
+        renderData({ message: 'Freshdesk domain/api key not configured' });
+        return;
+      }
+
+      // FDK serverless runtime에서 request 모듈 사용
+      // eslint-disable-next-line global-require
+      const request = require('request');
+
+      const url = `https://${domain}/api/v2/ticket_fields`;
+      const auth = Buffer.from(`${apiKey}:X`).toString('base64');
+
+      const options = {
+        url,
+        method: 'GET',
+        headers: {
+          Authorization: `Basic ${auth}`,
+          'Content-Type': 'application/json'
+        }
+      };
+
+      request(options, function(err, res, body) {
+        if (err) {
+          renderData({ message: err.message || 'Request failed' });
+          return;
+        }
+
+        const status = res && (res.statusCode || res.status);
+        if (status >= 200 && status < 300) {
+          try {
+            const parsed = typeof body === 'string' ? JSON.parse(body) : body;
+            renderData(null, parsed);
+          } catch (e) {
+            renderData({ message: 'Failed to parse Freshdesk response' });
+          }
+          return;
+        }
+
+        // non-2xx
+        let detail = '';
+        try {
+          const parsedErr = typeof body === 'string' ? JSON.parse(body) : body;
+          detail = parsedErr?.message || parsedErr?.description || '';
+        } catch (e) {
+          // ignore
+        }
+        renderData({ message: `Freshdesk API error: ${status}${detail ? ` - ${detail}` : ''}` });
+      });
+    } catch (error) {
+      renderData({ message: error.message || 'Failed to retrieve ticket fields' });
+    }
+  },
+
+  /**
    * 티켓 생성 이벤트 핸들러
    */
   onTicketCreateHandler: function() {

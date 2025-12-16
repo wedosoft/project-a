@@ -7,6 +7,7 @@ const state = {
   client: null,
   ticketData: null,
   ticketFields: null,
+  tenantConfig: null,
   sessionId: null,
   chatHistory: [],
   isLoading: false,
@@ -43,6 +44,10 @@ function setTicketData(data) {
 
 function setTicketFields(fields) {
   state.ticketFields = fields;
+}
+
+function setTenantConfig(config) {
+  state.tenantConfig = config;
 }
 
 function setSessionId(id) {
@@ -102,6 +107,60 @@ function setModalCache(cache) {
 
 function setAnalysisResult(result) {
   state.analysisResult = result;
+}
+
+function getTenantSelectedFields() {
+  const selected = state.tenantConfig && Array.isArray(state.tenantConfig.selected_fields)
+    ? state.tenantConfig.selected_fields
+    : [];
+
+  return selected
+    .map(v => (typeof v === 'string' ? v.trim() : ''))
+    .filter(Boolean);
+}
+
+/**
+ * 테넌트 설정(selected_fields)에 따라 특정 field_name이 허용되는지 판정
+ * - selected_fields가 비어있으면: 제한 없음(모든 필드 허용)
+ * - selected_fields가 있으면: 해당 필드만 허용
+ * - nested_field의 경우: root가 선택되면 하위 nested_ticket_fields도 함께 허용(관리 편의)
+ */
+function buildTenantFieldAllowChecker() {
+  const selected = getTenantSelectedFields();
+  if (!selected.length) {
+    return () => true;
+  }
+
+  const selectedSet = new Set(selected);
+  const nestedAllowed = new Set();
+
+  if (Array.isArray(state.ticketFields)) {
+    state.ticketFields.forEach(f => {
+      if (!f || typeof f !== 'object') return;
+      if (f.type !== 'nested_field') return;
+      if (!f.name) return;
+      if (!Array.isArray(f.nested_ticket_fields)) return;
+
+      const groupNames = [f.name];
+      f.nested_ticket_fields.forEach(n => {
+        if (n && typeof n === 'object' && n.name) {
+          groupNames.push(n.name);
+        }
+      });
+
+      // 그룹 중 하나라도 선택되어 있으면, nested 필드는 일관성 있게 업데이트되어야 하므로
+      // 해당 그룹 전체를 허용 처리한다.
+      const groupSelected = groupNames.some(n => selectedSet.has(n));
+      if (!groupSelected) return;
+
+      groupNames.forEach(n => nestedAllowed.add(n));
+    });
+  }
+
+  return (fieldName) => {
+    if (!fieldName) return false;
+    return selectedSet.has(fieldName) || nestedAllowed.has(fieldName);
+  };
 }
 
 // =============================================================================
@@ -176,6 +235,25 @@ async function apiCall(method, path, body = null) {
       console.warn(`API 호출 중 예외 발생, 재시도합니다... (${i + 1}/${MAX_RETRIES})`, error);
       await new Promise(resolve => setTimeout(resolve, (i + 1) * 1000));
     }
+  }
+}
+
+/**
+ * 관리자(Admin)에서 저장한 테넌트 설정을 로드
+ * - selected_fields: AI 제안/업데이트 허용 필드
+ * - response_tone 등 기타 설정
+ */
+async function loadTenantConfig() {
+  try {
+    const cfg = await apiCall('GET', 'api/admin/config');
+    setTenantConfig(cfg);
+    console.log('[Config] tenantConfig loaded:', {
+      response_tone: cfg?.response_tone,
+      selected_fields_count: Array.isArray(cfg?.selected_fields) ? cfg.selected_fields.length : 0
+    });
+  } catch (e) {
+    console.warn('[Config] tenantConfig not available, using defaults:', e);
+    setTenantConfig(null);
   }
 }
 
@@ -724,21 +802,11 @@ function findLeafByInput(leaves, input) {
 
 function renderFieldSuggestions(proposal) {
   const updates = proposal.field_updates || proposal.fieldUpdates || {};
-  // Freshdesk 업데이트 대상으로 삼기 어려운/원치 않는 필드는 UI와 업데이트에서 제외
-  // - subject/description: 본 앱에서는 필드 업데이트 제안 범위에서 제외(요청사항)
-  // - agent/product: Freshdesk 표준 필드명(responder_id/product_id) 변형까지 포함해 제외
-  const DISALLOWED_PROPOSAL_FIELDS = new Set([
-    'subject',
-    'description',
-    'agent',
-    'responder',
-    'responder_id',
-    'product',
-    'product_id'
-  ]);
+  // 하드코딩 금지: 제안/업데이트 허용 범위는 tenantConfig.selected_fields가 단일 기준
+  const isAllowedByTenant = buildTenantFieldAllowChecker();
   const fieldProposals = (proposal.field_proposals || []).filter(p => {
     const name = p && typeof p === 'object' ? p.field_name : null;
-    return name ? !DISALLOWED_PROPOSAL_FIELDS.has(name) : true;
+    return name ? isAllowedByTenant(name) : true;
   });
   const proposalMap = {};
   fieldProposals.forEach(p => { proposalMap[p.field_name] = p; });
@@ -909,7 +977,7 @@ function renderFieldSuggestions(proposal) {
 
     fieldProposals.forEach(prop => {
       if (renderedFields.has(prop.field_name)) return;
-      if (['status', 'group', 'group_id'].includes(prop.field_name)) return;
+      if (!isAllowedByTenant(prop.field_name)) return;
 
       const fieldName = prop.field_name;
       const fieldLabel = prop.field_label;
@@ -1246,18 +1314,8 @@ window.applyEditableFieldUpdates = async function(messageId) {
 
     const updateBody = {};
     const customFields = {};
-    // 요청사항: 아래 필드는 필드 업데이트 제안/적용 대상에서 제외
-    // (invalid_field 방지 및 운영 정책 반영)
-    const DISALLOWED_UPDATE_FIELDS = new Set([
-      'subject',
-      'description',
-      'agent',
-      'responder',
-      'responder_id',
-      'product',
-      'product_id'
-    ]);
-    // NOTE: source는 Freshdesk에서 업데이트가 제한되거나 invalid_field가 날 수 있어 방어적으로 제외
+    // 하드코딩 금지: 업데이트 허용 범위는 tenantConfig.selected_fields가 단일 기준
+    const isAllowedByTenant = buildTenantFieldAllowChecker();
     const standardFields = ['status', 'priority', 'type', 'group_id', 'responder_id', 'tags']; 
 
     // Freshdesk ticket_fields 기반 allowlist: 존재하지 않는 필드 전송으로 인한 invalid_field를 선제 방지
@@ -1393,9 +1451,7 @@ window.applyEditableFieldUpdates = async function(messageId) {
     });
 
     for (const [fieldName, groupInputs] of Object.entries(fieldGroups)) {
-        if (DISALLOWED_UPDATE_FIELDS.has(fieldName)) {
-          continue;
-        }
+        if (!isAllowedByTenant(fieldName)) continue;
         let valueToUpdate = null;
 
         if (groupInputs.length > 1) {
@@ -1480,26 +1536,39 @@ window.applyEditableFieldUpdates = async function(messageId) {
       }
 
       // invalid_field가 섞여도 가능한 필드는 적용되도록: invalid 필드 제거 후 1회 재시도
-      if (parsed && updateBody.custom_fields) {
+      if (parsed) {
         const invalids = extractInvalidFieldsFromError(parsed);
         if (invalids.length > 0) {
-          const filteredCustom = { ...updateBody.custom_fields };
+          const retryBody = { ...updateBody };
           let removed = [];
 
+          // top-level 표준 필드 제거
           invalids.forEach(name => {
-            if (Object.prototype.hasOwnProperty.call(filteredCustom, name)) {
-              delete filteredCustom[name];
+            if (Object.prototype.hasOwnProperty.call(retryBody, name)) {
+              delete retryBody[name];
               removed.push(name);
             }
           });
 
-          if (removed.length > 0) {
-            const retryBody = { ...updateBody, custom_fields: filteredCustom };
-            // custom_fields가 비면 삭제
-            if (Object.keys(filteredCustom).length === 0) {
+          // custom_fields 제거
+          if (retryBody.custom_fields && typeof retryBody.custom_fields === 'object') {
+            const filteredCustom = { ...retryBody.custom_fields };
+            invalids.forEach(name => {
+              if (Object.prototype.hasOwnProperty.call(filteredCustom, name)) {
+                delete filteredCustom[name];
+                removed.push(name);
+              }
+            });
+            if (Object.keys(filteredCustom).length > 0) {
+              retryBody.custom_fields = filteredCustom;
+            } else {
               delete retryBody.custom_fields;
             }
+          }
 
+          removed = Array.from(new Set(removed));
+
+          if (removed.length > 0) {
             console.warn('Retrying update after removing invalid fields:', removed);
             response = await invokeUpdate(retryBody);
             if (response.status === 200) {
@@ -1577,6 +1646,9 @@ document.onreadystatechange = function() {
         
         // 보안 파라미터 로드 (SSE fetch용)
         await loadSecureConfig();
+
+        // 테넌트 설정 로드 (selected_fields 등)
+        await loadTenantConfig();
         
         await loadTicketData();
         await loadTicketFields();
@@ -2264,7 +2336,11 @@ function renderAnalysisResult(proposal) {
  */
 function renderFieldSuggestionsCard(proposal) {
   const updates = proposal.field_updates || proposal.fieldUpdates || {};
-  const fieldProposals = proposal.field_proposals || [];
+  const isAllowedByTenant = buildTenantFieldAllowChecker();
+  const fieldProposals = (proposal.field_proposals || []).filter(p => {
+    const name = p && typeof p === 'object' ? p.field_name : null;
+    return name ? isAllowedByTenant(name) : true;
+  });
   const proposalMap = {};
   fieldProposals.forEach(p => { proposalMap[p.field_name] = p; });
   const renderedFields = new Set();
@@ -2414,7 +2490,7 @@ function renderFieldSuggestionsCard(proposal) {
     // 나머지 필드 처리
     fieldProposals.forEach(prop => {
       if (renderedFields.has(prop.field_name)) return;
-      if (['status', 'group', 'group_id'].includes(prop.field_name)) return;
+      if (!isAllowedByTenant(prop.field_name)) return;
 
       const fieldName = prop.field_name;
       const fieldLabel = prop.field_label;

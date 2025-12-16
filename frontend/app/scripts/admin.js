@@ -1,7 +1,17 @@
+let client = null;
+
+// app.js와 동일한 방식으로 서버리스에서 보안 파라미터를 로드
+window.APP_CONFIG = window.APP_CONFIG || {
+  apiKey: '',
+  domain: '',
+  tenantId: ''
+};
+
 document.addEventListener('DOMContentLoaded', function () {
   app
     .initialized()
     .then(function (_client) {
+      client = _client;
       window.client = _client;
       init();
     })
@@ -26,6 +36,9 @@ function renderInitError(message) {
 
 async function init() {
   try {
+    // secure iparams는 프론트에서 직접 접근하지 않고, 서버리스 함수로만 가져온다.
+    await loadSecureConfig();
+
     // Load current config
     const config = await fetchConfig();
     if (config) {
@@ -48,6 +61,27 @@ async function init() {
   }
 }
 
+/**
+ * 보안 파라미터 로드 (서버리스 함수 호출)
+ * - Freshdesk API key는 secure iparams이므로 프론트에서 iparams.get()로 직접 접근하지 않는다.
+ */
+async function loadSecureConfig() {
+  if (!client) return;
+  if (!client.request || typeof client.request.invoke !== 'function') {
+    throw new Error('FDK Request invoke API is not available');
+  }
+
+  const data = await client.request.invoke('getSecureParams', {});
+  const responseData = data?.response || data;
+  if (!responseData || !responseData.apiKey || !responseData.domain) {
+    throw new Error('Secure params not configured');
+  }
+
+  window.APP_CONFIG.apiKey = responseData.apiKey;
+  window.APP_CONFIG.domain = responseData.domain;
+  window.APP_CONFIG.tenantId = responseData.tenantId || responseData.domain.split('.')[0] || '';
+}
+
 async function fetchConfig() {
   try {
     return await callBackend('/api/admin/config', 'GET');
@@ -62,8 +96,28 @@ async function loadTicketFields(selectedFields) {
   container.innerHTML = '<fw-spinner size="medium"></fw-spinner>';
 
   try {
-    const data = await client.request.invokeTemplate('getTicketFields');
-    const fields = JSON.parse(data.response);
+    if (!client) {
+      throw new Error('FDK client is not initialized');
+    }
+
+    if (!client.request || typeof client.request.invoke !== 'function') {
+      throw new Error('FDK Request invoke API is not available');
+    }
+
+    const data = await client.request.invoke('getTicketFields', {});
+    const responseData = data?.response || data;
+
+    if (!responseData) {
+      throw new Error('Empty response from serverless');
+    }
+
+    // serverless가 오류를 renderData({message})로 준 경우
+    if (responseData.message && !Array.isArray(responseData)) {
+      throw new Error(String(responseData.message));
+    }
+
+    const fields = responseData;
+    if (!Array.isArray(fields)) throw new Error('Unexpected ticket_fields response');
     
     container.innerHTML = '';
     fields.forEach(field => {
@@ -75,7 +129,8 @@ async function loadTicketFields(selectedFields) {
     });
   } catch (error) {
     console.error('Error loading fields', error);
-    container.innerHTML = '<p style="color: red;">Failed to load ticket fields. Check API Key.</p>';
+    const msg = (error && error.message) ? error.message : String(error);
+    container.innerHTML = `<p style="color: red;">Failed to load ticket fields. ${msg}</p>`;
   }
 }
 
