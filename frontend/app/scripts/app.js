@@ -1716,13 +1716,21 @@ function minimizeTicketData(original) {
   };
   
   if (original.conversations && Array.isArray(original.conversations)) {
-    minimal.conversations = original.conversations.map(c => ({
-      body_text: c.body_text,
-      incoming: c.incoming,
-      private: c.private,
-      created_at: c.created_at,
-      user_id: c.user_id
-    }));
+    minimal.conversations = original.conversations.map(c => {
+      // body_text를 최대 2000자로 제한하여 페이로드 크기 축소
+      const bodyText = c.body_text || '';
+      const truncatedBody = bodyText.length > 2000 
+        ? bodyText.substring(0, 2000) + '...[truncated]'
+        : bodyText;
+      
+      return {
+        body_text: truncatedBody,
+        incoming: c.incoming,
+        private: c.private,
+        created_at: c.created_at,
+        user_id: c.user_id
+      };
+    });
   }
   
   return minimal;
@@ -1806,7 +1814,9 @@ async function handleAnalyzeTicket() {
       conversations: minimalTicket.conversations || []
     };
     
-    console.log(`[Analyze] Sending payload with ${payload.conversations.length} conversations`);
+    // 페이로드 크기 로깅 (성능 모니터링용)
+    const payloadSize = JSON.stringify(payload).length;
+    console.log(`[Analyze] Sending payload: ${payload.conversations.length} conversations, ${Math.round(payloadSize / 1024)}KB`);
     
     // SSE 스트림으로 분석 요청 (fallback 자동 처리)
     const result = await window.StreamUtils.streamAnalyze(payload, (event) => {

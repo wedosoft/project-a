@@ -78,8 +78,17 @@
    * @returns {Promise<Object>} 최종 결과
    */
   async function fetchWithStream(url, options, onData, fallbackFn) {
+    // 타임아웃 추가 (30초)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    
     try {
-      const response = await fetch(url, options);
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -96,8 +105,8 @@
           // 콜백 호출
           if (onData) onData(data);
           
-          // 최종 결과 저장 (complete 또는 resolution_complete 이벤트)
-          if (data.type === 'complete' || data.type === 'resolution_complete') {
+          // 최종 결과 저장 (여러 이벤트 타입 지원)
+          if (data.type === 'complete' || data.type === 'resolution_complete' || data.type === 'analysis_result') {
             // data.data가 있으면 그것을, 없으면 data 자체를 사용하되,
             // data.data가 문자열이면 파싱 시도
             if (data.data) {
@@ -113,7 +122,7 @@
             } else {
               result = data;
             }
-            console.log('[StreamUtils] Final result captured:', result);
+            console.log('[StreamUtils] Final result captured from', data.type, ':', result);
           }
         });
         
@@ -125,7 +134,13 @@
       return jsonData;
 
     } catch (error) {
-      console.warn('[StreamUtils] SSE 요청 실패, fallback 시도:', error.message);
+      clearTimeout(timeoutId);
+      
+      // AbortError는 타임아웃으로 처리
+      const isTimeout = error.name === 'AbortError';
+      const errorMsg = isTimeout ? 'Request timeout (30s)' : error.message;
+      
+      console.warn(`[StreamUtils] SSE 요청 실패${isTimeout ? ' (타임아웃)' : ''}, fallback 시도:`, errorMsg);
       
       if (fallbackFn) {
         return await fallbackFn();
