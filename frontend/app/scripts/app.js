@@ -5,8 +5,10 @@
 
 // 성능 최적화 설정
 const PERFORMANCE_CONFIG = {
-  // Conversation 텍스트 최대 길이 (LLM 토큰 절약 및 페이로드 경량화)
-  MAX_CONVERSATION_TEXT_LENGTH: 2000
+  // Conversation 텍스트 최대 길이 (characters) - LLM 토큰 절약 및 페이로드 경량화
+  MAX_CONVERSATION_CHARS: 2000,
+  // 텍스트 잘림 표시 접미사
+  TRUNCATION_SUFFIX: '...[truncated]'
 };
 
 // =============================================================================
@@ -1729,9 +1731,9 @@ function minimizeTicketData(original) {
     minimal.conversations = original.conversations.map(c => {
       // body_text를 제한하여 페이로드 크기 축소
       const bodyText = c.body_text || '';
-      const maxLength = PERFORMANCE_CONFIG.MAX_CONVERSATION_TEXT_LENGTH;
+      const maxLength = PERFORMANCE_CONFIG.MAX_CONVERSATION_CHARS;
       const truncatedBody = bodyText.length > maxLength
-        ? bodyText.substring(0, maxLength) + '...[truncated]'
+        ? bodyText.substring(0, maxLength) + PERFORMANCE_CONFIG.TRUNCATION_SUFFIX
         : bodyText;
       
       return {

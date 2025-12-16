@@ -11,7 +11,7 @@
     // SSE 요청 타임아웃 (밀리초)
     SSE_TIMEOUT_MS: 30000,
     
-    // 폴링 설정
+    // 폴링 설정 (단계별 백오프 - 초기엔 빠르게, 점진적으로 느리게)
     POLLING: {
       MAX_ATTEMPTS: 30,           // 최대 폴링 시도 횟수
       INITIAL_DELAY_MS: 500,      // 첫 폴링 대기 시간
@@ -21,6 +21,18 @@
       EARLY_THRESHOLD: 3,         // 초기 단계 임계값
       MID_THRESHOLD: 6            // 중기 단계 임계값
     }
+  };
+
+  // SSE 스트림 이벤트 타입
+  const STREAM_EVENT_TYPES = {
+    COMPLETE: 'complete',
+    RESOLUTION_COMPLETE: 'resolution_complete',
+    ANALYSIS_RESULT: 'analysis_result',
+    ANSWER_CHUNK: 'answer_chunk',
+    CHUNK: 'chunk',
+    RETRIEVED_DOCUMENTS: 'retrieved_documents',
+    SOURCES: 'sources',
+    FILTERS: 'filters'
   };
 
   /**
@@ -123,7 +135,13 @@
           if (onData) onData(data);
           
           // 최종 결과 저장 (여러 이벤트 타입 지원)
-          if (data.type === 'complete' || data.type === 'resolution_complete' || data.type === 'analysis_result') {
+          const completionEvents = [
+            STREAM_EVENT_TYPES.COMPLETE,
+            STREAM_EVENT_TYPES.RESOLUTION_COMPLETE,
+            STREAM_EVENT_TYPES.ANALYSIS_RESULT
+          ];
+          
+          if (completionEvents.includes(data.type)) {
             // data.data가 있으면 그것을, 없으면 data 자체를 사용하되,
             // data.data가 문자열이면 파싱 시도
             if (data.data) {
@@ -341,18 +359,18 @@
     // SSE 스트림인 경우
     if (contentType.includes('text/event-stream') || contentType.includes('application/x-ndjson')) {
       await processStream(response, (data) => {
-        if (data.type === 'answer_chunk' || data.type === 'chunk') {
+        if (data.type === STREAM_EVENT_TYPES.ANSWER_CHUNK || data.type === STREAM_EVENT_TYPES.CHUNK) {
           fullResponse += data.content || data.text || '';
           if (onChunk) {
             onChunk(fullResponse, sources, false);
           }
-        } else if (data.type === 'retrieved_documents' || data.type === 'sources') {
+        } else if (data.type === STREAM_EVENT_TYPES.RETRIEVED_DOCUMENTS || data.type === STREAM_EVENT_TYPES.SOURCES) {
           sources = data.documents || data.sources || [];
-        } else if (data.type === 'filters') {
+        } else if (data.type === STREAM_EVENT_TYPES.FILTERS) {
           filters = data.filters || [];
           filterConfidence = data.filterConfidence;
           knownContext = data.knownContext || {};
-        } else if (data.type === 'complete') {
+        } else if (data.type === STREAM_EVENT_TYPES.COMPLETE) {
           if (data.text) fullResponse = data.text;
           if (data.groundingChunks) sources = data.groundingChunks;
           if (data.filters) filters = data.filters;
