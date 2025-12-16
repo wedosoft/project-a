@@ -192,6 +192,15 @@ const TICKER_MESSAGES = {
   'retriever_results': '✅ 검색 완료',
   'resolution_start': '🤖 AI 제안 생성 중...',
   'resolution_complete': '✨ 분석 완료!',
+  // Progressive SSE (assist/analyze/stream, field-proposals/stream)
+  'started': '🚀 요청 시작...',
+  'searching': '📚 관련 문서 검색 중...',
+  'search_result': '✅ 검색 완료',
+  'analyzing': '🧠 티켓 분석 중...',
+  'field_proposal': '🏷️ 필드 제안 생성 중...',
+  'synthesizing': '🧩 최종 정리 중...',
+  'draft_response': '✍️ 응답 생성 중...',
+  'complete': '✨ 완료!',
   'error': '❌ 오류 발생',
   'polling': '⏳ 처리 중...'
 };
@@ -211,6 +220,7 @@ function cacheElements() {
   elements.analysisContent = document.getElementById('analysisContent');
   elements.analysisPlaceholder = document.getElementById('analysisPlaceholder');
   elements.analyzeBtn = document.getElementById('analyzeBtn');
+  elements.fieldProposalsBtn = document.getElementById('fieldProposalsBtn');
   // 채팅 섹션 요소
   elements.chatContainer = document.getElementById('chatContainer');
   elements.chatMessages = document.getElementById('chatMessages');
@@ -612,6 +622,31 @@ function buildValuePathMap(choices, path = [], map = {}) {
     return map;
 }
 
+function ensureLeafOptions(messageId, fieldName) {
+  const choices = window[`choices-${messageId}-${fieldName}`];
+  if (!choices) return [];
+  const targetDepthRaw = window[`leafTargetDepth-${messageId}-${fieldName}`];
+  const targetDepth = (targetDepthRaw === undefined || targetDepthRaw === null)
+    ? null
+    : parseInt(String(targetDepthRaw), 10);
+  const minDepthRaw = window[`leafMinDepth-${messageId}-${fieldName}`];
+  const minDepth = (minDepthRaw === undefined || minDepthRaw === null)
+    ? null
+    : parseInt(String(minDepthRaw), 10);
+  let leaves = window[`leafOptions-${messageId}-${fieldName}`];
+  if (!Array.isArray(leaves) || leaves.length === 0) {
+    if (Number.isFinite(targetDepth) && targetDepth > 0) {
+      leaves = flattenLeafOptionsAtDepth(choices, targetDepth);
+    } else if (Number.isFinite(minDepth) && minDepth > 0) {
+      leaves = flattenLeafOptionsMinDepth(choices, minDepth);
+    } else {
+      leaves = flattenLeafOptions(choices);
+    }
+    window[`leafOptions-${messageId}-${fieldName}`] = leaves;
+  }
+  return leaves;
+}
+
 function flattenLeafOptions(choices, path = [], acc = []) {
     if (!Array.isArray(choices)) return acc;
     choices.forEach(choice => {
@@ -628,6 +663,55 @@ function flattenLeafOptions(choices, path = [], acc = []) {
     return acc;
 }
 
+// 최소 깊이(minDepth) 이상의 leaf(자식 없는 노드)만 수집
+// depth: 1부터 시작 (root choices의 첫 레벨이 1)
+function flattenLeafOptionsMinDepth(choices, minDepth, depth = 1, path = [], acc = []) {
+  if (!Array.isArray(choices)) return acc;
+  choices.forEach(choice => {
+    const currentPath = [...path, choice.value];
+    const hasChildren = choice.choices && choice.choices.length > 0;
+
+    if (hasChildren) {
+      flattenLeafOptionsMinDepth(choice.choices, minDepth, depth + 1, currentPath, acc);
+      return;
+    }
+
+    // leaf
+    if (depth >= minDepth) {
+      acc.push({
+        value: choice.value,
+        label: currentPath.join(" / ")
+      });
+    }
+  });
+  return acc;
+}
+
+// 특정 깊이(targetDepth)의 leaf(자식 없는 노드)만 수집
+// depth: 1부터 시작 (root choices의 첫 레벨이 1)
+function flattenLeafOptionsAtDepth(choices, targetDepth, depth = 1, path = [], acc = []) {
+  if (!Array.isArray(choices)) return acc;
+  choices.forEach(choice => {
+    const currentPath = [...path, choice.value];
+    const hasChildren = choice.choices && choice.choices.length > 0;
+
+    if (depth === targetDepth) {
+      if (!hasChildren) {
+        acc.push({
+          value: choice.value,
+          label: currentPath.join(" / ")
+        });
+      }
+      return;
+    }
+
+    if (hasChildren) {
+      flattenLeafOptionsAtDepth(choice.choices, targetDepth, depth + 1, currentPath, acc);
+    }
+  });
+  return acc;
+}
+
 function findLeafByInput(leaves, input) {
     if (!input) return null;
     const key = input.trim().toLowerCase();
@@ -640,7 +724,22 @@ function findLeafByInput(leaves, input) {
 
 function renderFieldSuggestions(proposal) {
   const updates = proposal.field_updates || proposal.fieldUpdates || {};
-  const fieldProposals = proposal.field_proposals || [];
+  // Freshdesk 업데이트 대상으로 삼기 어려운/원치 않는 필드는 UI와 업데이트에서 제외
+  // - subject/description: 본 앱에서는 필드 업데이트 제안 범위에서 제외(요청사항)
+  // - agent/product: Freshdesk 표준 필드명(responder_id/product_id) 변형까지 포함해 제외
+  const DISALLOWED_PROPOSAL_FIELDS = new Set([
+    'subject',
+    'description',
+    'agent',
+    'responder',
+    'responder_id',
+    'product',
+    'product_id'
+  ]);
+  const fieldProposals = (proposal.field_proposals || []).filter(p => {
+    const name = p && typeof p === 'object' ? p.field_name : null;
+    return name ? !DISALLOWED_PROPOSAL_FIELDS.has(name) : true;
+  });
   const proposalMap = {};
   fieldProposals.forEach(p => { proposalMap[p.field_name] = p; });
   const renderedFields = new Set();
@@ -741,13 +840,19 @@ function renderFieldSuggestions(proposal) {
         const choices = normalizeChoices(nestedRoot.choices);
         window[`choices-${messageId}-${nestedRoot.name}`] = choices;
         window[`pathMap-${messageId}-${nestedRoot.name}`] = buildValuePathMap(choices);
-        window[`leafOptions-${messageId}-${nestedRoot.name}`] = flattenLeafOptions(choices);
+        // Item 후보는 leaf 중에서도 depth>=2만 노출 (카테고리-only leaf 제외, 혼합 깊이 지원)
+        window[`leafMinDepth-${messageId}-${nestedRoot.name}`] = 2;
+        window[`leafOptions-${messageId}-${nestedRoot.name}`] = flattenLeafOptionsMinDepth(choices, 2);
+        const leafOptions = ensureLeafOptions(messageId, nestedRoot.name);
 
         const proposedLeaf = proposalMap[level3Name]?.proposed_value || proposalMap[level2Name]?.proposed_value || proposalMap[nestedRoot.name]?.proposed_value || '';
         const path = findPathToValue(choices, proposedLeaf) || [];
         const val1 = path[0] || proposalMap[nestedRoot.name]?.proposed_value || '';
         const val2 = path[1] || proposalMap[level2Name]?.proposed_value || '';
-        const val3 = path[2] || proposalMap[level3Name]?.proposed_value || '';
+        // depth=2 leaf인 경우에도 검색 입력에는 leaf 값을 보여줘야 함
+        const val3Display = (path.length === 2 ? path[1] : (path[2] || proposalMap[level3Name]?.proposed_value || ''));
+        // 실제 level3 업데이트 값은 depth=3일 때만 사용
+        const val3Hidden = (path.length >= 3 ? (path[2] || '') : '');
         const searchInputId = `leafsearch-${nestedRoot.name}-${messageId}`;
         const datalistId = `leaflist-${nestedRoot.name}-${messageId}`;
 
@@ -758,9 +863,11 @@ function renderFieldSuggestions(proposal) {
         const subChoices = val1 ? choices.find(c => c.value === val1)?.choices : [];
         if (subChoices) subChoices.forEach(c => opts2 += `<option value="${c.value}" ${c.value === val2 ? 'selected' : ''}>${c.value}</option>`);
 
+        // NOTE: Item 셀렉트는 제거됐지만, 기존 데이터 형태 보존을 위해 itemChoices 계산은 남겨둠
+        // (val3는 scope에 없으므로 val3Hidden 기준으로 비교)
         let opts3 = '<option value="">선택하세요</option>';
         const itemChoices = val2 ? subChoices?.find(c => c.value === val2)?.choices : [];
-        if (itemChoices) itemChoices.forEach(c => opts3 += `<option value="${c.value}" ${c.value === val3 ? 'selected' : ''}>${c.value}</option>`);
+        if (itemChoices) itemChoices.forEach(c => opts3 += `<option value="${c.value}" ${c.value === val3Hidden ? 'selected' : ''}>${c.value}</option>`);
 
         const currentVal1 = ticketData[nestedRoot.name] !== undefined ? ticketData[nestedRoot.name] : ticketData.custom_fields?.[nestedRoot.name];
         const currentVal2 = level2Name ? (ticketData[level2Name] !== undefined ? ticketData[level2Name] : ticketData.custom_fields?.[level2Name]) : undefined;
@@ -774,23 +881,22 @@ function renderFieldSuggestions(proposal) {
 
         if (level2Name) {
           html += renderRow('Sub Category', level2Name, currentVal2, `
-            <select id="input-${nestedRoot.name}-${messageId}-2" data-field-name="${nestedRoot.name}" data-level="2" onchange="updateDependentFields('${messageId}', '${nestedRoot.name}', 2)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1" ${!val1 ? 'disabled' : ''}>
+            <select id="input-${nestedRoot.name}-${messageId}-2" data-field-name="${level2Name}" data-level="2" onchange="updateDependentFields('${messageId}', '${nestedRoot.name}', 2)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1" ${!val1 ? 'disabled' : ''}>
               ${opts2}
             </select>
           `, proposalMap[level2Name]?.reason);
         }
 
         if (level3Name) {
+          // Item(leaf)은 전체 검색 가능하도록 datalist 기반 입력만 제공
           html += renderRow('Item', level3Name, currentVal3, `
-            <select id="input-${nestedRoot.name}-${messageId}-3" data-field-name="${nestedRoot.name}" data-level="3" onchange="updateParentFields('${messageId}', '${nestedRoot.name}', 3)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1" ${!val2 ? 'disabled' : ''}>
-              ${opts3}
-            </select>
-            <div class="mt-2 flex gap-2 items-center">
-              <input id="${searchInputId}" list="${datalistId}" placeholder="3단계 빠른 검색" class="flex-1 text-sm border border-gray-300 rounded-md px-2 py-1 focus:border-blue-500 focus:ring-blue-500" oninput="handleLeafSearchApply('${messageId}', '${nestedRoot.name}', '${searchInputId}')">
+            <div class="mt-1 flex gap-2 items-center">
+              <input id="${searchInputId}" list="${datalistId}" placeholder="항목 빠른 검색 (전체)" class="flex-1 text-sm border border-gray-300 rounded-md px-2 py-1 focus:border-blue-500 focus:ring-blue-500" value="${val3Display || ''}" oninput="handleLeafSearchApply('${messageId}', '${nestedRoot.name}', '${searchInputId}')">
+              <input type="hidden" id="leafhidden-${nestedRoot.name}-${messageId}" data-field-name="${level3Name}" value="${val3Hidden || ''}">
               <button type="button" class="px-3 py-1 text-xs rounded-md border border-gray-300 hover:border-blue-500" onclick="handleLeafSearchApply('${messageId}', '${nestedRoot.name}', '${searchInputId}')">적용</button>
             </div>
             <datalist id="${datalistId}">
-              ${window[`leafOptions-${messageId}-${nestedRoot.name}`].slice(0, 2000).map(opt => `<option value="${opt.value}" label="${opt.label}"></option>`).join('')}
+              ${leafOptions.slice(0, 2000).map(opt => `<option value="${opt.value}" label="${opt.label}"></option>`).join('')}
             </datalist>
             `, proposalMap[level3Name]?.reason);
         }
@@ -935,6 +1041,7 @@ window.updateDependentFields = function(messageId, fieldName, level) {
     // el3는 이제 검색 입력 필드와 datalist로 대체됨
     const elSearch = document.getElementById(`leafsearch-${fieldName}-${messageId}`);
     const elDatalist = document.getElementById(`leaflist-${fieldName}-${messageId}`);
+    const elHiddenLeaf = document.getElementById(`leafhidden-${fieldName}-${messageId}`);
     
     const val1 = el1 ? el1.value : '';
     
@@ -955,33 +1062,29 @@ window.updateDependentFields = function(messageId, fieldName, level) {
                 el2.value = '';
             }
         }
-        // Level 1 변경 시 Level 3 초기화
+      // Level 1 변경 시 leaf 입력만 초기화 (datalist/leafOptions는 전체 목록 유지)
         if (elSearch) {
             elSearch.value = '';
-            // datalist 업데이트 (선택된 Level 1 하위의 모든 Leaf)
-            if (elDatalist && subChoices) {
-                const leaves = flattenLeafOptions(subChoices);
-                window[`leafOptions-${messageId}-${fieldName}`] = leaves; // 캐시 업데이트
-                elDatalist.innerHTML = leaves.map(opt => `<option value="${opt.value}" label="${opt.label}"></option>`).join('');
-            } else if (elDatalist) {
-                elDatalist.innerHTML = '';
+            if (elHiddenLeaf) {
+                elHiddenLeaf.value = '';
             }
+        if (elDatalist) {
+          const leaves = ensureLeafOptions(messageId, fieldName);
+          elDatalist.innerHTML = leaves.slice(0, 2000).map(opt => `<option value="${opt.value}" label="${opt.label}"></option>`).join('');
+        }
         }
     } else if (level === 2) {
         const val2 = el2 ? el2.value : '';
-        const subChoices = val1 ? choices.find(c => c.value === val1)?.choices : [];
-        const itemChoices = val2 ? subChoices?.find(c => c.value === val2)?.choices : [];
-        
+      // Level 2는 부모 셀렉트로만 제한하고, leaf 검색은 전체에서 가능하도록 유지
         if (elSearch) {
             elSearch.value = '';
-            if (itemChoices && elDatalist) {
-                const leaves = flattenLeafOptions(itemChoices);
-                window[`leafOptions-${messageId}-${fieldName}`] = leaves; // 캐시 업데이트
-                elDatalist.innerHTML = leaves.map(opt => `<option value="${opt.value}" label="${opt.label}"></option>`).join('');
-            } else if (elDatalist) {
-                // 선택된 Level 2가 없거나 하위 항목이 없으면 비움
-                elDatalist.innerHTML = '';
+            if (elHiddenLeaf) {
+                elHiddenLeaf.value = '';
             }
+        if (elDatalist) {
+          const leaves = ensureLeafOptions(messageId, fieldName);
+          elDatalist.innerHTML = leaves.slice(0, 2000).map(opt => `<option value="${opt.value}" label="${opt.label}"></option>`).join('');
+        }
         }
     }
 };
@@ -993,6 +1096,7 @@ window.updateParentFields = function(messageId, fieldName, level, targetValue) {
     const pathMap = window[`pathMap-${messageId}-${fieldName}`];
     // el3 대신 검색 입력 필드 사용
     const elSearch = document.getElementById(`leafsearch-${fieldName}-${messageId}`);
+    const elHiddenLeaf = document.getElementById(`leafhidden-${fieldName}-${messageId}`);
     const val3 = targetValue !== undefined ? targetValue : (elSearch ? elSearch.value : '');
     
     if (!val3) return;
@@ -1026,6 +1130,59 @@ window.updateParentFields = function(messageId, fieldName, level, targetValue) {
         if (elSearch && elSearch.value !== val3) {
             elSearch.value = val3;
         }
+
+        // depth=3 leaf: hidden(field 실제 업데이트 대상)도 세팅
+        if (elHiddenLeaf) {
+          elHiddenLeaf.value = val3;
+        }
+      } else if (path && path.length === 2) {
+        // depth=2 leaf: level2에 leaf가 들어가고, level3(아이템)은 비워야 함
+        const [val1, val2Leaf] = path;
+        const el1 = document.getElementById(`input-${fieldName}-${messageId}-1`);
+        const el2 = document.getElementById(`input-${fieldName}-${messageId}-2`);
+
+        if (el1) {
+          const needUpdate = el1.value !== val1 || (el2 && (el2.disabled || el2.options.length <= 1));
+          if (needUpdate) {
+            el1.value = val1;
+            window.updateDependentFields(messageId, fieldName, 1);
+          }
+        }
+
+        if (el2) {
+          const needUpdate = el2.value !== val2Leaf;
+          if (needUpdate) {
+            el2.value = val2Leaf;
+            window.updateDependentFields(messageId, fieldName, 2);
+          }
+        }
+
+        if (elSearch && elSearch.value !== val3) {
+          elSearch.value = val3;
+        }
+
+        if (elHiddenLeaf) {
+          elHiddenLeaf.value = '';
+        }
+      } else if (path && path.length === 1) {
+        // depth=1 leaf는 Item 후보에 포함하지 않지만, 방어적으로 처리
+        const [val1Leaf] = path;
+        const el1 = document.getElementById(`input-${fieldName}-${messageId}-1`);
+        const el2 = document.getElementById(`input-${fieldName}-${messageId}-2`);
+        if (el1) {
+          el1.value = val1Leaf;
+          window.updateDependentFields(messageId, fieldName, 1);
+        }
+        if (el2) {
+          el2.value = '';
+          el2.disabled = true;
+        }
+        if (elSearch) {
+          elSearch.value = val3;
+        }
+        if (elHiddenLeaf) {
+          elHiddenLeaf.value = '';
+        }
     }
 };
 
@@ -1034,8 +1191,7 @@ window.handleLeafSearchApply = function(messageId, fieldName, inputId) {
     const elInput = document.getElementById(inputId);
     if (!choices || !elInput) return;
 
-    const leaves = window[`leafOptions-${messageId}-${fieldName}`] || flattenLeafOptions(choices);
-    window[`leafOptions-${messageId}-${fieldName}`] = leaves;
+  const leaves = ensureLeafOptions(messageId, fieldName);
 
     const userInput = elInput.value;
     if (!userInput) return;
@@ -1045,7 +1201,6 @@ window.handleLeafSearchApply = function(messageId, fieldName, inputId) {
     
     if (exactMatch) {
         // 정확히 일치하면 즉시 업데이트
-        const el3 = document.getElementById(`input-${fieldName}-${messageId}-3`); // 이 요소는 제거되었으므로 가상으로 처리하거나 updateParentFields 수정 필요
         // updateParentFields는 el3 값을 읽거나 targetValue를 받음
         window.updateParentFields(messageId, fieldName, 3, exactMatch.value);
         elInput.classList.remove("ring-2", "ring-red-400");
@@ -1091,8 +1246,66 @@ window.applyEditableFieldUpdates = async function(messageId) {
 
     const updateBody = {};
     const customFields = {};
+    // 요청사항: 아래 필드는 필드 업데이트 제안/적용 대상에서 제외
+    // (invalid_field 방지 및 운영 정책 반영)
+    const DISALLOWED_UPDATE_FIELDS = new Set([
+      'subject',
+      'description',
+      'agent',
+      'responder',
+      'responder_id',
+      'product',
+      'product_id'
+    ]);
     // NOTE: source는 Freshdesk에서 업데이트가 제한되거나 invalid_field가 날 수 있어 방어적으로 제외
-    const standardFields = ['status', 'priority', 'type', 'group_id', 'responder_id', 'description', 'subject', 'tags']; 
+    const standardFields = ['status', 'priority', 'type', 'group_id', 'responder_id', 'tags']; 
+
+    // Freshdesk ticket_fields 기반 allowlist: 존재하지 않는 필드 전송으로 인한 invalid_field를 선제 방지
+    const allowedFieldNames = new Set();
+    if (Array.isArray(state.ticketFields)) {
+      state.ticketFields.forEach(f => {
+        if (!f || typeof f !== 'object') return;
+        if (f.name) allowedFieldNames.add(f.name);
+        if (Array.isArray(f.nested_ticket_fields)) {
+          f.nested_ticket_fields.forEach(n => {
+            if (n && typeof n === 'object' && n.name) allowedFieldNames.add(n.name);
+          });
+        }
+      });
+    }
+    standardFields.forEach(n => allowedFieldNames.add(n));
+
+    const skippedUnknownFields = [];
+
+    const extractInvalidFieldsFromError = (parsedError) => {
+      const invalids = [];
+      if (!parsedError || typeof parsedError !== 'object') return invalids;
+      const errs = Array.isArray(parsedError.errors) ? parsedError.errors : [];
+
+      errs.forEach(e => {
+        if (!e || typeof e !== 'object') return;
+        const code = e.code;
+        const field = e.field;
+        const msg = typeof e.message === 'string' ? e.message : '';
+
+        if (code === 'invalid_field') {
+          if (typeof field === 'string' && field.trim()) {
+            invalids.push(field.trim());
+          }
+          // message에서 'cf_xxx' 또는 'some_field' 추출 (Freshdesk 에러 포맷 대응)
+          const m = msg.match(/'([^']+)'/g);
+          if (m && m.length) {
+            m.forEach(token => {
+              const name = token.replace(/^'+|'+$/g, '').trim();
+              if (name) invalids.push(name);
+            });
+          }
+        }
+      });
+
+      // unique
+      return Array.from(new Set(invalids));
+    };
 
     const coerceStandardNumeric = (fieldName, rawValue) => {
       const raw = rawValue === null || rawValue === undefined ? '' : String(rawValue).trim();
@@ -1180,6 +1393,9 @@ window.applyEditableFieldUpdates = async function(messageId) {
     });
 
     for (const [fieldName, groupInputs] of Object.entries(fieldGroups)) {
+        if (DISALLOWED_UPDATE_FIELDS.has(fieldName)) {
+          continue;
+        }
         let valueToUpdate = null;
 
         if (groupInputs.length > 1) {
@@ -1194,6 +1410,12 @@ window.applyEditableFieldUpdates = async function(messageId) {
         }
 
         if (valueToUpdate === '' || valueToUpdate === null || valueToUpdate === undefined) continue;
+
+        // allowlist에 없는 필드는 전송하지 않음 (invalid_field 방지)
+        if (!allowedFieldNames.has(fieldName)) {
+          skippedUnknownFields.push(fieldName);
+          continue;
+        }
 
         if (standardFields.includes(fieldName)) {
           if (['priority', 'status', 'group_id', 'responder_id'].includes(fieldName)) {
@@ -1212,6 +1434,10 @@ window.applyEditableFieldUpdates = async function(messageId) {
       updateBody.custom_fields = customFields;
     }
 
+    if (skippedUnknownFields.length > 0) {
+      console.warn('Skipped unknown fields (not in ticket_fields allowlist):', skippedUnknownFields);
+    }
+
     console.log('Updating ticket with:', updateBody);
 
     if (Object.keys(updateBody).length === 0) {
@@ -1219,20 +1445,25 @@ window.applyEditableFieldUpdates = async function(messageId) {
       return;
     }
 
-    const response = await client.request.invokeTemplate("updateTicket", {
-      context: {
-        ticketId: ticketData.id
-      },
-      body: JSON.stringify(updateBody)
-    });
+    const invokeUpdate = async (bodyObj) => {
+      return await client.request.invokeTemplate("updateTicket", {
+        context: {
+          ticketId: ticketData.id
+        },
+        body: JSON.stringify(bodyObj)
+      });
+    };
+
+    let response = await invokeUpdate(updateBody);
 
     if (response.status === 200) {
       notify('success', '티켓이 성공적으로 업데이트되었습니다.');
     } else {
       // Try to extract validation details from Freshdesk error payload
       let detail = '';
+      let parsed = null;
       try {
-        const parsed = JSON.parse(response.response);
+        parsed = JSON.parse(response.response);
         if (parsed && parsed.description) {
           detail += parsed.description;
         }
@@ -1247,6 +1478,38 @@ window.applyEditableFieldUpdates = async function(messageId) {
       } catch (e) {
         // ignore parse errors
       }
+
+      // invalid_field가 섞여도 가능한 필드는 적용되도록: invalid 필드 제거 후 1회 재시도
+      if (parsed && updateBody.custom_fields) {
+        const invalids = extractInvalidFieldsFromError(parsed);
+        if (invalids.length > 0) {
+          const filteredCustom = { ...updateBody.custom_fields };
+          let removed = [];
+
+          invalids.forEach(name => {
+            if (Object.prototype.hasOwnProperty.call(filteredCustom, name)) {
+              delete filteredCustom[name];
+              removed.push(name);
+            }
+          });
+
+          if (removed.length > 0) {
+            const retryBody = { ...updateBody, custom_fields: filteredCustom };
+            // custom_fields가 비면 삭제
+            if (Object.keys(filteredCustom).length === 0) {
+              delete retryBody.custom_fields;
+            }
+
+            console.warn('Retrying update after removing invalid fields:', removed);
+            response = await invokeUpdate(retryBody);
+            if (response.status === 200) {
+              notify('success', `티켓이 업데이트되었습니다. (제외된 필드: ${removed.join(', ')})`);
+              return;
+            }
+          }
+        }
+      }
+
       const suffix = detail ? ` (${detail})` : '';
       throw new Error(`API Error: ${response.status}${suffix}`);
     }
@@ -1361,6 +1624,11 @@ function setupEventListeners() {
   if (elements.analyzeBtn) {
     elements.analyzeBtn.addEventListener('click', handleAnalyzeTicket);
   }
+
+  // 필드 제안 버튼
+  if (elements.fieldProposalsBtn) {
+    elements.fieldProposalsBtn.addEventListener('click', handleProposeFieldsOnly);
+  }
   
   // 모달 이벤트
   elements.closeModalBtn.addEventListener('click', closeModal);
@@ -1379,6 +1647,60 @@ function setupEventListeners() {
       setTimeout(() => handleSubmit(new Event('submit')), 100);
     });
   });
+}
+
+async function handleProposeFieldsOnly() {
+  if (state.isLoading || !state.ticketData) return;
+
+  setLoading(true);
+  updateStatus('loading', '필드 제안 중...');
+
+  if (elements.analysisPlaceholder) {
+    elements.analysisPlaceholder.classList.add('hidden');
+  }
+
+  showTicker('analyzing');
+
+  try {
+    const payload = {
+      ticket_id: String(state.ticketData.id),
+      subject: state.ticketData.subject,
+      description: state.ticketData.description_text,
+      ticket_fields: state.ticketFields,
+      fields_only: true,
+      fieldsOnly: true
+    };
+
+    const result = await window.StreamUtils.streamFieldProposals(payload, (event) => {
+      const eventType = event.type || event;
+      const eventData = event.data || {};
+      showTicker(eventType, eventData);
+      console.log('[FieldProposals] Progress:', eventType, eventData);
+    });
+
+    hideTicker();
+
+    // result는 complete.data (proposal/analysis/search/timingMs)
+    const analysis = (result && result.analysis) ? result.analysis : null;
+    const proposal = (result && result.proposal) ? result.proposal : null;
+
+    // 기존 렌더러는 proposal 형태를 기대하므로 proposal을 우선 사용
+    const merged = {
+      ...(analysis || {}),
+      ...(proposal || {})
+    };
+
+    setAnalysisResult(merged);
+    renderAnalysisResult(merged);
+
+  } catch (error) {
+    console.error('필드 제안 실패:', error);
+    hideTicker();
+    renderAnalysisError(`필드 제안 오류: ${error.message}`);
+  } finally {
+    setLoading(false);
+    updateStatus('ready', '준비 완료');
+  }
 }
 
 async function createSession() {
@@ -1440,6 +1762,15 @@ async function loadTicketData() {
         }
       }
     }
+  }
+
+  // Freshdesk 환경에 따라 type 필드명이 다를 수 있어(ticket_fields에서 ticket_type 등)
+  // 서로 보완해 UI 표시/업데이트 제안에 활용한다.
+  if ((ticketData.type === undefined || ticketData.type === null || ticketData.type === '') && ticketData.ticket_type) {
+    ticketData.type = ticketData.ticket_type;
+  }
+  if ((ticketData.ticket_type === undefined || ticketData.ticket_type === null || ticketData.ticket_type === '') && ticketData.type) {
+    ticketData.ticket_type = ticketData.type;
   }
   
   try {
@@ -1791,15 +2122,16 @@ async function handleAnalyzeTicket() {
   showTicker('router_decision');
   
   try {
+    // NOTE: 원인/해결 분석은 ticket_fields(거대 스키마)를 보내지 않아도 된다.
+    //       (필드 제안은 별도 버튼/엔드포인트로 분리)
     const payload = {
       ticket_id: String(state.ticketData.id),
       subject: state.ticketData.subject,
-      description: state.ticketData.description_text,
-      ticket_fields: state.ticketFields
+      description: state.ticketData.description_text
     };
-    
-    // SSE 스트림으로 분석 요청 (fallback 자동 처리)
-    const result = await window.StreamUtils.streamAnalyze(payload, (event) => {
+
+    // SSE 스트림으로 원인/해결 분석 요청
+    const result = await window.StreamUtils.streamSolution(payload, (event) => {
       // 진행 상황 티커 업데이트
       const eventType = event.type || event;
       const eventData = event.data || {};
@@ -1807,28 +2139,28 @@ async function handleAnalyzeTicket() {
       showTicker(eventType, eventData);
       console.log('[Analyze] Progress:', eventType, eventData);
 
-      // 분석 결과는 도착 즉시 렌더링 (complete 이벤트 누락에도 대비)
-      if (eventType === 'analysis_result' && eventData && typeof eventData === 'object') {
-        setAnalysisResult(eventData);
-        renderAnalysisResult(eventData);
-      }
+      // progressive complete가 오면 result로 처리하되,
+      // 도중에 draft_response 등 일부 이벤트만 와도 티커는 갱신한다.
     });
     
     // 분석 완료
     hideTicker();
     
+    // result는 complete.data (proposal/analysis/search/timingMs)
     const finalResult = result || state.analysisResult;
     console.log('[Analyze] Final Result:', finalResult);
 
     if (finalResult) {
-      // result가 { status: 'done' } 형태이고 실제 데이터가 없는 경우 처리
-      if (finalResult.status === 'done' && !finalResult.summary && !finalResult.intent && !finalResult.field_proposals) {
-        console.warn('[Analyze] Result is empty status object, checking for cached proposal...');
-        renderAnalysisError('분석은 완료되었으나 데이터를 불러올 수 없습니다.');
-      } else {
-        setAnalysisResult(finalResult);
-        renderAnalysisResult(finalResult);
-      }
+      const analysis = finalResult.analysis || null;
+      const proposal = finalResult.proposal || null;
+
+      const merged = {
+        ...(analysis || {}),
+        ...(proposal || {})
+      };
+
+      setAnalysisResult(merged);
+      renderAnalysisResult(merged);
     } else {
       renderAnalysisError('분석 결과를 받을 수 없습니다.');
     }
@@ -2005,13 +2337,17 @@ function renderFieldSuggestionsCard(proposal) {
         const choices = normalizeChoices(nestedRoot.choices);
         window[`choices-${messageId}-${nestedRoot.name}`] = choices;
         window[`pathMap-${messageId}-${nestedRoot.name}`] = buildValuePathMap(choices);
-        window[`leafOptions-${messageId}-${nestedRoot.name}`] = flattenLeafOptions(choices);
+        // Item 후보는 leaf 중에서도 depth>=2만 노출 (카테고리-only leaf 제외, 혼합 깊이 지원)
+        window[`leafMinDepth-${messageId}-${nestedRoot.name}`] = 2;
+        window[`leafOptions-${messageId}-${nestedRoot.name}`] = flattenLeafOptionsMinDepth(choices, 2);
+        const leafOptions = ensureLeafOptions(messageId, nestedRoot.name);
 
         const proposedLeaf = proposalMap[level3Name]?.proposed_value || proposalMap[level2Name]?.proposed_value || proposalMap[nestedRoot.name]?.proposed_value || '';
         const path = findPathToValue(choices, proposedLeaf) || [];
         const val1 = path[0] || proposalMap[nestedRoot.name]?.proposed_value || '';
         const val2 = path[1] || proposalMap[level2Name]?.proposed_value || '';
-        const val3 = path[2] || proposalMap[level3Name]?.proposed_value || '';
+        const val3Display = (path.length === 2 ? path[1] : (path[2] || proposalMap[level3Name]?.proposed_value || ''));
+        const val3Hidden = (path.length >= 3 ? (path[2] || '') : '');
 
         let opts1 = '<option value="">선택하세요</option>';
         choices.forEach(c => opts1 += `<option value="${c.value}" ${c.value === val1 ? 'selected' : ''}>${c.value}</option>`);
@@ -2020,9 +2356,11 @@ function renderFieldSuggestionsCard(proposal) {
         const subChoices = val1 ? choices.find(c => c.value === val1)?.choices : [];
         if (subChoices) subChoices.forEach(c => opts2 += `<option value="${c.value}" ${c.value === val2 ? 'selected' : ''}>${c.value}</option>`);
 
+        // NOTE: Item 셀렉트는 제거됐지만, 기존 데이터 형태 보존을 위해 itemChoices 계산은 남겨둠
+        // (val3는 scope에 없으므로 val3Hidden 기준으로 비교)
         let opts3 = '<option value="">선택하세요</option>';
         const itemChoices = val2 ? subChoices?.find(c => c.value === val2)?.choices : [];
-        if (itemChoices) itemChoices.forEach(c => opts3 += `<option value="${c.value}" ${c.value === val3 ? 'selected' : ''}>${c.value}</option>`);
+        if (itemChoices) itemChoices.forEach(c => opts3 += `<option value="${c.value}" ${c.value === val3Hidden ? 'selected' : ''}>${c.value}</option>`);
 
         const currentVal1 = ticketData[nestedRoot.name] !== undefined ? ticketData[nestedRoot.name] : ticketData.custom_fields?.[nestedRoot.name];
         const currentVal2 = level2Name ? (ticketData[level2Name] !== undefined ? ticketData[level2Name] : ticketData.custom_fields?.[level2Name]) : undefined;
@@ -2036,7 +2374,7 @@ function renderFieldSuggestionsCard(proposal) {
 
         if (level2Name) {
           tableRows += renderRow('Sub Category', level2Name, currentVal2, `
-            <select id="input-${nestedRoot.name}-${messageId}-2" data-field-name="${nestedRoot.name}" data-level="2" onchange="updateDependentFields('${messageId}', '${nestedRoot.name}', 2)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1" ${!val1 ? 'disabled' : ''}>
+              <select id="input-${nestedRoot.name}-${messageId}-2" data-field-name="${level2Name}" data-level="2" onchange="updateDependentFields('${messageId}', '${nestedRoot.name}', 2)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1" ${!val1 ? 'disabled' : ''}>
               ${opts2}
             </select>
           `, proposalMap[level2Name]?.reason);
@@ -2050,13 +2388,13 @@ function renderFieldSuggestionsCard(proposal) {
           tableRows += renderRow('Item', level3Name, currentVal3, `
             <div class="relative">
               <input id="${searchInputId}" list="${datalistId}" 
-                     data-field-name="${nestedRoot.name}"
                      placeholder="항목 검색 (전체 검색 가능)" 
                      class="w-full text-sm border border-gray-300 rounded-md px-2 py-1.5 focus:border-blue-500 focus:ring-blue-500 transition-colors" 
                      oninput="handleLeafSearchApply('${messageId}', '${nestedRoot.name}', '${searchInputId}')"
-                     value="${val3 || ''}">
+                     value="${val3Display || ''}">
+              <input type="hidden" id="leafhidden-${nestedRoot.name}-${messageId}" data-field-name="${level3Name}" value="${val3Hidden || ''}">
               <datalist id="${datalistId}">
-                ${window[`leafOptions-${messageId}-${nestedRoot.name}`].slice(0, 2000).map(opt => `<option value="${opt.value}" label="${opt.label}"></option>`).join('')}
+                ${leafOptions.slice(0, 2000).map(opt => `<option value="${opt.value}" label="${opt.label}"></option>`).join('')}
               </datalist>
               <div class="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
                 <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">

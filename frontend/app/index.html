@@ -180,12 +180,20 @@
               AI가 티켓을 분석하여 요약, 감정, 의도를 파악하고<br>
               필드 업데이트를 제안해 드립니다.
             </p>
-            <button id="analyzeBtn" class="px-4 py-2 text-sm font-medium text-white bg-app-primary rounded-lg hover:bg-app-primary-hover transition-colors flex items-center gap-2">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
-              </svg>
-              분석 시작
-            </button>
+            <div class="flex flex-col sm:flex-row gap-2 items-center justify-center">
+              <button id="analyzeBtn" class="px-4 py-2 text-sm font-medium text-white bg-app-primary rounded-lg hover:bg-app-primary-hover transition-colors flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+                </svg>
+                원인/해결 분석
+              </button>
+              <button id="fieldProposalsBtn" class="px-4 py-2 text-sm font-medium text-app-primary bg-white border border-app-border rounded-lg hover:border-app-primary hover:bg-app-bg transition-colors flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m-7 4h8a2 2 0 002-2V6a2 2 0 00-2-2H9a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                </svg>
+                티켓 필드 제안
+              </button>
+            </div>
           </div>
         </div>
       </div>

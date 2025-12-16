@@ -142,7 +142,8 @@
    * @returns {Promise<Object>} 분석 결과
    */
   async function streamAnalyze(payload, onProgress) {
-    const url = window.BACKEND_CONFIG.getUrl('/api/assist/analyze');
+    // NOTE: 기존 /assist/analyze(LangGraph astream) 대신 progressive SSE(/assist/analyze/stream) 사용
+    const url = window.BACKEND_CONFIG.getUrl('/api/assist/analyze/stream');
     const headers = window.BACKEND_CONFIG.getHeaders();
 
     // SSE 스트림 모드로 요청
@@ -152,7 +153,7 @@
       async_mode: false
     };
 
-    // Fallback: 폴링 모드
+    // Fallback: 폴링 모드(legacy /assist/analyze)
     const fallbackFn = async () => {
       console.log('[StreamUtils] Fallback to polling mode');
       return await pollAnalyze(payload, onProgress);
@@ -167,6 +168,67 @@
       },
       onProgress,
       fallbackFn
+    );
+  }
+
+  /**
+   * 티켓 필드 제안(필드만) SSE 요청
+   * @param {Object} payload - 요청 본문
+   * @param {Function} onProgress - 진행 상황 콜백
+   * @returns {Promise<Object>} 최종 결과 (complete.data)
+   */
+  async function streamFieldProposals(payload, onProgress) {
+    const url = window.BACKEND_CONFIG.getUrl('/api/assist/field-proposals/stream');
+    const headers = window.BACKEND_CONFIG.getHeaders();
+
+    const streamPayload = {
+      ...payload,
+      fields_only: true,
+      fieldsOnly: true,
+      stream_progress: true,
+      async_mode: false
+    };
+
+    // 필드 제안은 fallback을 단순화(필요 시 추후 추가)
+    return await fetchWithStream(
+      url,
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(streamPayload)
+      },
+      onProgress,
+      null
+    );
+  }
+
+  /**
+   * 원인/해결 분석 SSE 요청
+   * @param {Object} payload - 요청 본문
+   * @param {Function} onProgress - 진행 상황 콜백
+   * @returns {Promise<Object>} 최종 결과 (complete.data)
+   */
+  async function streamSolution(payload, onProgress) {
+    const url = window.BACKEND_CONFIG.getUrl('/api/assist/analyze/stream');
+    const headers = window.BACKEND_CONFIG.getHeaders();
+
+    const streamPayload = {
+      ...payload,
+      fields_only: false,
+      fieldsOnly: false,
+      stream_progress: true,
+      async_mode: false
+    };
+
+    return await fetchWithStream(
+      url,
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(streamPayload)
+      },
+      onProgress,
+      null
     );
   }
 
@@ -337,6 +399,8 @@
   // 전역 노출
   window.StreamUtils = {
     processStream,
+    streamFieldProposals,
+    streamSolution,
     fetchWithStream,
     streamAnalyze,
     pollAnalyze,

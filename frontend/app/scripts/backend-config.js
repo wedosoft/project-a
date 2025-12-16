@@ -63,8 +63,12 @@
           'Content-Type': 'application/json',
           'X-Tenant-ID': config.tenantId || '',
           'X-Platform': 'freshdesk',
+          // Backward/compat headers (some backends may read these)
           'X-Domain': config.domain || '',
           'X-API-Key': config.apiKey || '',
+          // Agent-platform assist routes expect these for Freshdesk enrichment
+          'X-Freshdesk-Domain': config.domain || '',
+          'X-Freshdesk-API-Key': config.apiKey || '',
           'ngrok-skip-browser-warning': 'true'
         };
       }
