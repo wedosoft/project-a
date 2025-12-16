@@ -1,17 +1,5 @@
 /* eslint-disable */
 // =============================================================================
-// Configuration
-// =============================================================================
-
-// 성능 최적화 설정
-const PERFORMANCE_CONFIG = {
-  // Conversation 텍스트 최대 길이 (characters) - LLM 토큰 절약 및 페이로드 경량화
-  MAX_CONVERSATION_CHARS: 2000,
-  // 텍스트 잘림 표시 접미사
-  TRUNCATION_SUFFIX: '...[truncated]'
-};
-
-// =============================================================================
 // Store Section
 // =============================================================================
 
@@ -1728,22 +1716,14 @@ function minimizeTicketData(original) {
   };
   
   if (original.conversations && Array.isArray(original.conversations)) {
-    minimal.conversations = original.conversations.map(c => {
-      // body_text를 제한하여 페이로드 크기 축소
-      const bodyText = c.body_text || '';
-      const maxLength = PERFORMANCE_CONFIG.MAX_CONVERSATION_CHARS;
-      const truncatedBody = bodyText.length > maxLength
-        ? bodyText.substring(0, maxLength) + PERFORMANCE_CONFIG.TRUNCATION_SUFFIX
-        : bodyText;
-      
-      return {
-        body_text: truncatedBody,
-        incoming: c.incoming,
-        private: c.private,
-        created_at: c.created_at,
-        user_id: c.user_id
-      };
-    });
+    // 이미 로드된 conversations를 그대로 전송 (백엔드에서 맥락 분석에 필요)
+    minimal.conversations = original.conversations.map(c => ({
+      body_text: c.body_text,
+      incoming: c.incoming,
+      private: c.private,
+      created_at: c.created_at,
+      user_id: c.user_id
+    }));
   }
   
   return minimal;
