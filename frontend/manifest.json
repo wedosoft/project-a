@@ -9,16 +9,27 @@
       }
     },
     "common": {
+      "location": {
+        "full_page_app": {
+          "url": "admin.html",
+          "icon": "styles/images/icon.svg"
+        }
+      },
       "functions": {
         "getSecureParams": {}
       },
       "requests": {
+        "getAgent": {},
+        "getGroup": {},
+        "getTicketField": {},
         "getTicketWithConversations": {},
         "getTicketConversations": {},
         "getTicketFields": {},
         "updateTicket": {},
         "backendApi": {},
-        "backendApiPost": {}
+        "backendApiPost": {},
+        "backendApiPut": {},
+        "backendApiDelete": {}
       }
     }
   },

@@ -1,4 +1,40 @@
 {
+  "getAgent": {
+    "schema": {
+      "method": "GET",
+      "protocol": "https",
+      "host": "<%= iparam.freshdesk_domain %>",
+      "path": "/api/v2/agents/<%= context.agentId %>",
+      "headers": {
+        "Authorization": "Basic <%= encode(iparam.freshdesk_api_key + ':X') %>",
+        "Content-Type": "application/json"
+      }
+    }
+  },
+  "getGroup": {
+    "schema": {
+      "method": "GET",
+      "protocol": "https",
+      "host": "<%= iparam.freshdesk_domain %>",
+      "path": "/api/v2/groups/<%= context.groupId %>",
+      "headers": {
+        "Authorization": "Basic <%= encode(iparam.freshdesk_api_key + ':X') %>",
+        "Content-Type": "application/json"
+      }
+    }
+  },
+  "getTicketField": {
+    "schema": {
+      "method": "GET",
+      "protocol": "https",
+      "host": "<%= iparam.freshdesk_domain %>",
+      "path": "/api/v2/ticket_fields?type=<%= context.fieldType %>",
+      "headers": {
+        "Authorization": "Basic <%= encode(iparam.freshdesk_api_key + ':X') %>",
+        "Content-Type": "application/json"
+      }
+    }
+  },
   "getTicketWithConversations": {
     "schema": {
       "method": "GET",
@@ -47,21 +83,6 @@
       }
     }
   },
-  "backendApiPost": {
-    "schema": {
-      "method": "POST",
-      "protocol": "https",
-      "host": "ameer-timberless-paragogically.ngrok-free.dev",
-      "path": "/<%= context.path %>",
-      "headers": {
-        "Content-Type": "application/json",
-        "X-Freshdesk-Domain": "<%= iparam.freshdesk_domain %>",
-        "X-Freshdesk-API-Key": "<%= iparam.freshdesk_api_key %>",
-        "X-Tenant-ID": "<%= iparam.freshdesk_domain.split('.')[0] %>",
-        "X-Platform": "freshdesk"
-      }
-    }
-  },
   "backendApi": {
     "schema": {
       "method": "GET",
@@ -70,6 +91,55 @@
       "path": "/<%= context.path %>",
       "headers": {
         "Content-Type": "application/json",
+        "Accept": "application/json",
+        "X-Freshdesk-Domain": "<%= iparam.freshdesk_domain %>",
+        "X-Freshdesk-API-Key": "<%= iparam.freshdesk_api_key %>",
+        "X-Tenant-ID": "<%= iparam.freshdesk_domain.split('.')[0] %>",
+        "X-Platform": "freshdesk"
+      }
+    }
+  },
+  "backendApiPost": {
+    "schema": {
+      "method": "POST",
+      "protocol": "https",
+      "host": "ameer-timberless-paragogically.ngrok-free.dev",
+      "path": "/<%= context.path %>",
+      "headers": {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "X-Freshdesk-Domain": "<%= iparam.freshdesk_domain %>",
+        "X-Freshdesk-API-Key": "<%= iparam.freshdesk_api_key %>",
+        "X-Tenant-ID": "<%= iparam.freshdesk_domain.split('.')[0] %>",
+        "X-Platform": "freshdesk"
+      }
+    }
+  },
+  "backendApiPut": {
+    "schema": {
+      "method": "PUT",
+      "protocol": "https",
+      "host": "ameer-timberless-paragogically.ngrok-free.dev",
+      "path": "/<%= context.path %>",
+      "headers": {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "X-Freshdesk-Domain": "<%= iparam.freshdesk_domain %>",
+        "X-Freshdesk-API-Key": "<%= iparam.freshdesk_api_key %>",
+        "X-Tenant-ID": "<%= iparam.freshdesk_domain.split('.')[0] %>",
+        "X-Platform": "freshdesk"
+      }
+    }
+  },
+  "backendApiDelete": {
+    "schema": {
+      "method": "DELETE",
+      "protocol": "https",
+      "host": "ameer-timberless-paragogically.ngrok-free.dev",
+      "path": "/<%= context.path %>",
+      "headers": {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
         "X-Freshdesk-Domain": "<%= iparam.freshdesk_domain %>",
         "X-Freshdesk-API-Key": "<%= iparam.freshdesk_api_key %>",
         "X-Tenant-ID": "<%= iparam.freshdesk_domain.split('.')[0] %>",

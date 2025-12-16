@@ -5,12 +5,6 @@
 		},
 		{
 			"path": "../agent-platform"
-		},
-		{
-			"path": "../homepage"
-		},
-		{
-			"path": "../onboarding"
 		}
 	],
 	"settings": {}
