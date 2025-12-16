@@ -193,7 +193,8 @@ const TICKER_MESSAGES = {
   'resolution_start': '🤖 AI 제안 생성 중...',
   'resolution_complete': '✨ 분석 완료!',
   'error': '❌ 오류 발생',
-  'polling': '⏳ 처리 중...'
+  'polling': '⏳ 처리 중...',
+  'analysis_result': '📊 결과 수신 중...'
 };
 
 function cacheElements() {
@@ -272,6 +273,9 @@ function showTicker(eventType, data = {}) {
   // 동적 메시지 생성
   if (eventType === 'retriever_results' && data.similar_cases_count !== undefined) {
     message = `✅ ${data.similar_cases_count}건 유사 사례, ${data.kb_articles_count || 0}건 KB 문서 발견`;
+  } else if (eventType === 'retriever_start' && data.attempt !== undefined) {
+    // 폴링 모드에서 시도 횟수 표시
+    message = `⏳ 분석 진행 중... (${data.attempt}번째 확인)`;
   }
   
   // 티커 표시
@@ -1791,12 +1795,18 @@ async function handleAnalyzeTicket() {
   showTicker('router_decision');
   
   try {
+    // 이미 로드된 conversations를 포함하여 백엔드 재조회 방지
+    const minimalTicket = minimizeTicketData(state.ticketData);
     const payload = {
       ticket_id: String(state.ticketData.id),
       subject: state.ticketData.subject,
       description: state.ticketData.description_text,
-      ticket_fields: state.ticketFields
+      ticket_fields: state.ticketFields,
+      // 백엔드 재조회를 피하기 위해 이미 로드된 conversations 포함
+      conversations: minimalTicket.conversations || []
     };
+    
+    console.log(`[Analyze] Sending payload with ${payload.conversations.length} conversations`);
     
     // SSE 스트림으로 분석 요청 (fallback 자동 처리)
     const result = await window.StreamUtils.streamAnalyze(payload, (event) => {

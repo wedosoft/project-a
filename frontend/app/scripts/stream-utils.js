@@ -142,6 +142,7 @@
    * @returns {Promise<Object>} 분석 결과
    */
   async function streamAnalyze(payload, onProgress) {
+    const startTime = Date.now();
     const url = window.BACKEND_CONFIG.getUrl('/api/assist/analyze');
     const headers = window.BACKEND_CONFIG.getHeaders();
 
@@ -154,11 +155,12 @@
 
     // Fallback: 폴링 모드
     const fallbackFn = async () => {
-      console.log('[StreamUtils] Fallback to polling mode');
+      const elapsed = Date.now() - startTime;
+      console.log(`[StreamUtils] SSE failed after ${elapsed}ms, fallback to polling mode`);
       return await pollAnalyze(payload, onProgress);
     };
 
-    return await fetchWithStream(
+    const result = await fetchWithStream(
       url,
       {
         method: 'POST',
@@ -168,6 +170,11 @@
       onProgress,
       fallbackFn
     );
+    
+    const totalTime = Date.now() - startTime;
+    console.log(`[StreamUtils] Analysis completed in ${totalTime}ms`);
+    
+    return result;
   }
 
   /**
@@ -210,13 +217,23 @@
       onProgress({ type: 'router_decision', data: { decision: 'polling' } });
     }
 
-    // 폴링
+    // 폴링 (지수 백오프 적용으로 초기 응답 시간 단축)
     let attempts = 0;
-    const maxAttempts = 60;
+    const maxAttempts = 30; // 60 → 30으로 줄임 (최대 대기 시간 단축)
     let consecutiveErrors = 0;
+    
+    // 지수 백오프: 처음엔 빠르게, 나중엔 느리게 폴링
+    const getDelay = (attempt) => {
+      if (attempt === 0) return 500;   // 첫 폴링: 0.5초
+      if (attempt < 3) return 800;     // 2-3번째: 0.8초
+      if (attempt < 6) return 1200;    // 4-6번째: 1.2초
+      return 2000;                      // 7번째 이후: 2초
+    };
 
     while (attempts < maxAttempts) {
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // 지수 백오프 적용
+      const delay = getDelay(attempts);
+      await new Promise(resolve => setTimeout(resolve, delay));
       attempts++;
 
       try {
@@ -246,6 +263,7 @@
           onProgress({ type: 'resolution_complete', data: statusData });
         }
 
+        console.log(`[PollAnalyze] Completed after ${attempts} attempts`);
         return statusData;
 
       } catch (e) {
