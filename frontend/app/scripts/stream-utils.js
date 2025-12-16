@@ -6,6 +6,23 @@
 (function() {
   'use strict';
 
+  // === 설정 상수 ===
+  const CONFIG = {
+    // SSE 요청 타임아웃 (밀리초)
+    SSE_TIMEOUT_MS: 30000,
+    
+    // 폴링 설정
+    POLLING: {
+      MAX_ATTEMPTS: 30,           // 최대 폴링 시도 횟수
+      INITIAL_DELAY_MS: 500,      // 첫 폴링 대기 시간
+      EARLY_DELAY_MS: 800,        // 초기(2-3회) 폴링 대기 시간
+      MID_DELAY_MS: 1200,         // 중기(4-6회) 폴링 대기 시간
+      DEFAULT_DELAY_MS: 2000,     // 이후 기본 폴링 대기 시간
+      EARLY_THRESHOLD: 3,         // 초기 단계 임계값
+      MID_THRESHOLD: 6            // 중기 단계 임계값
+    }
+  };
+
   /**
    * ReadableStream을 SSE 이벤트로 파싱
    * @param {Response} response - fetch 응답 객체
@@ -78,9 +95,9 @@
    * @returns {Promise<Object>} 최종 결과
    */
   async function fetchWithStream(url, options, onData, fallbackFn) {
-    // 타임아웃 추가 (30초)
+    // 타임아웃 추가
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    const timeoutId = setTimeout(() => controller.abort(), CONFIG.SSE_TIMEOUT_MS);
     
     try {
       const response = await fetch(url, {
@@ -234,15 +251,15 @@
 
     // 폴링 (지수 백오프 적용으로 초기 응답 시간 단축)
     let attempts = 0;
-    const maxAttempts = 30; // 60 → 30으로 줄임 (최대 대기 시간 단축)
+    const maxAttempts = CONFIG.POLLING.MAX_ATTEMPTS;
     let consecutiveErrors = 0;
     
     // 지수 백오프: 처음엔 빠르게, 나중엔 느리게 폴링
     const getDelay = (attempt) => {
-      if (attempt === 0) return 500;   // 첫 폴링: 0.5초
-      if (attempt < 3) return 800;     // 2-3번째: 0.8초
-      if (attempt < 6) return 1200;    // 4-6번째: 1.2초
-      return 2000;                      // 7번째 이후: 2초
+      if (attempt === 0) return CONFIG.POLLING.INITIAL_DELAY_MS;
+      if (attempt < CONFIG.POLLING.EARLY_THRESHOLD) return CONFIG.POLLING.EARLY_DELAY_MS;
+      if (attempt < CONFIG.POLLING.MID_THRESHOLD) return CONFIG.POLLING.MID_DELAY_MS;
+      return CONFIG.POLLING.DEFAULT_DELAY_MS;
     };
 
     while (attempts < maxAttempts) {
