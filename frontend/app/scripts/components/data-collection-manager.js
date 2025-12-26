@@ -284,72 +284,7 @@ class DataCollectionManager extends HTMLElement {
         }
     }
 
-    async checkRunningJobs() {
-        try {
-
-            // 데이터 수집 상태 API 호출
-            const response = await fetch(window.BACKEND_CONFIG.getUrl('/admin/data-collection/status'), {
-                headers: this.getHeaders()
-            });
-
-            if (response.ok) {
-                const result = await response.json();
-
-                // 상태에 따라 UI 복원
-                if (result.is_running) {
-                    // 실행 중인 작업이 있는 경우
-                    const runningJob = result.recent_jobs.find(job => job.status === 'running');
-                    if (runningJob) {
-                        this.currentJobId = runningJob.job_id;
-                        this.isRunning = true;
-                        this.updateStatus('running');
-                        // 폴링 시작하지 않음 - 페이지 로딩 시에만 확인
-                        this.addLog('info', `진행 중인 작업 복원됨: ${runningJob.job_id}`);
-
-                        // 현재 진행률로 UI 업데이트
-                        this.updateProgress(result);
-                    }
-                } else if (result.is_paused) {
-                    // 일시정지된 작업이 있는 경우
-                    const pausedJob = result.recent_jobs.find(job => job.status === 'paused');
-                    if (pausedJob) {
-                        console.log('⏸️ 일시정지된 작업 복원:', pausedJob.job_id);
-                        this.currentJobId = pausedJob.job_id;
-                        this.isRunning = false;
-                        this.updateStatus('paused');
-                        this.addLog('info', `⏸️ 일시정지된 작업 복원됨: ${pausedJob.job_id}`);
-
-                        // 현재 진행률로 UI 업데이트
-                        this.updateProgress(result);
-                    }
-                } else {
-                    // 활성 작업이 없는 경우
-                    this.resetState('idle');
-                    this.initializeProgressBar(); // 진행률 바 초기화
-
-                    if (result.total_jobs === 0) {
-                        this.addLog('info', '🎯 최초 사용 - 데이터 수집을 시작하세요');
-                    } else {
-                        this.addLog('info', '📋 대기 중 - 모든 작업 완료');
-                        // 완료된 작업의 최신 상태 표시
-                        this.updateProgress(result);
-                    }
-                }
-
-                // 페이지 새로고침 감지를 위한 이벤트 리스너 추가
-                this.setupPageRefreshHandling();
-
-            } else {
-                console.warn('상태 API 호출 실패:', response.status, response.statusText);
-                this.addLog('warning', `⚠️ 상태 확인 실패: ${response.status}`);
-                this.initializeProgressBar();
-            }
-        } catch (error) {
-            console.error('실행 중인 작업 확인 실패:', error);
-            this.addLog('error', `❌ 상태 복원 실패: ${error.message}`);
-            this.initializeProgressBar();
-        }
-    }
+    // NOTE: checkRunningJobs는 아래(단일 구현)만 유지합니다.
 
     resetState(status) {
         this.currentJobId = null;
@@ -426,9 +361,6 @@ class DataCollectionManager extends HTMLElement {
                         this.isRunning = true;
                         this.updateStatus('running');
                         this.addLog('info', `🔄 실행 중인 작업 복원됨: ${runningJob.job_id}`);
-
-                        // 진행률 폴링 시작
-                        this.startProgressPolling();
 
                         // 현재 진행률로 UI 업데이트
                         this.updateProgress(result);
@@ -819,7 +751,6 @@ class DataCollectionManager extends HTMLElement {
         const steps = Math.ceil((duration / 1000) * fps);
 
         let currentStep = 0;
-        let currentWidth = startWidth;
 
         // CSS 전환 비활성화
         progressBar.classList.add('progress-bar-smooth');
@@ -832,7 +763,7 @@ class DataCollectionManager extends HTMLElement {
             const progress = currentStep / steps;
             const easedProgress = easeOutCubic(progress);
 
-            currentWidth = startWidth + (targetWidth - startWidth) * easedProgress;
+            const currentWidth = startWidth + (targetWidth - startWidth) * easedProgress;
 
             // CSS 변수와 직접 스타일 모두 설정
             progressBar.style.setProperty('--progress-width', `${currentWidth}%`);

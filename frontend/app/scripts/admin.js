@@ -1,4 +1,9 @@
-let client = null;
+function getClient() {
+  if (!window.client) {
+    throw new Error('FDK client is not initialized');
+  }
+  return window.client;
+}
 
 // app.js와 동일한 방식으로 서버리스에서 보안 파라미터를 로드
 window.APP_CONFIG = window.APP_CONFIG || {
@@ -11,7 +16,6 @@ document.addEventListener('DOMContentLoaded', function () {
   app
     .initialized()
     .then(function (_client) {
-      client = _client;
       window.client = _client;
       init();
     })
@@ -66,7 +70,7 @@ async function init() {
  * - Freshdesk API key는 secure iparams이므로 프론트에서 iparams.get()로 직접 접근하지 않는다.
  */
 async function loadSecureConfig() {
-  if (!client) return;
+  const client = getClient();
   if (!client.request || typeof client.request.invoke !== 'function') {
     throw new Error('FDK Request invoke API is not available');
   }
@@ -96,27 +100,29 @@ async function loadTicketFields(selectedFields) {
   container.innerHTML = '<fw-spinner size="medium"></fw-spinner>';
 
   try {
-    if (!client) {
-      throw new Error('FDK client is not initialized');
+    const client = getClient();
+
+    if (!client.request || typeof client.request.invokeTemplate !== 'function') {
+      throw new Error('FDK Request invokeTemplate API is not available');
     }
 
-    if (!client.request || typeof client.request.invoke !== 'function') {
-      throw new Error('FDK Request invoke API is not available');
+    const response = await client.request.invokeTemplate('getTicketFields', {});
+    const status = response && (response.status || response.statusCode);
+    if (!(status >= 200 && status < 300)) {
+      throw new Error((response && response.response) ? String(response.response) : 'Failed to load ticket fields');
     }
 
-    const data = await client.request.invoke('getTicketFields', {});
-    const responseData = data?.response || data;
-
-    if (!responseData) {
-      throw new Error('Empty response from serverless');
+    if (!response || typeof response.response !== 'string') {
+      throw new Error('Empty response from template');
     }
 
-    // serverless가 오류를 renderData({message})로 준 경우
-    if (responseData.message && !Array.isArray(responseData)) {
-      throw new Error(String(responseData.message));
+    let fields;
+    try {
+      fields = JSON.parse(response.response);
+    } catch (e) {
+      throw new Error('Failed to parse ticket_fields response');
     }
 
-    const fields = responseData;
     if (!Array.isArray(fields)) throw new Error('Unexpected ticket_fields response');
     
     container.innerHTML = '';
@@ -203,6 +209,7 @@ async function callBackend(path, method, body) {
 }
 
 function showNotification(type, message) {
+  const client = getClient();
   client.interface.trigger('showNotify', {
     type: type,
     message: message

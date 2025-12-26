@@ -331,11 +331,13 @@
     const url = window.BACKEND_CONFIG.getUrl('/api/chat');
     const headers = window.BACKEND_CONFIG.getHeaders();
 
-    let fullResponse = '';
-    let sources = [];
-    let filters = [];
-    let filterConfidence = null;
-    let knownContext = {};
+    const streamState = {
+      fullResponse: '',
+      sources: [],
+      filters: [],
+      filterConfidence: null,
+      knownContext: {}
+    };
 
     const response = await fetch(url, {
       method: 'POST',
@@ -354,35 +356,35 @@
     if (contentType.includes('text/event-stream') || contentType.includes('application/x-ndjson')) {
       await processStream(response, (data) => {
         if (data.type === 'answer_chunk' || data.type === 'chunk') {
-          fullResponse += data.content || data.text || '';
+          streamState.fullResponse += data.content || data.text || '';
           if (onChunk) {
-            onChunk(fullResponse, sources, false);
+            onChunk(streamState.fullResponse, streamState.sources, false);
           }
         } else if (data.type === 'retrieved_documents' || data.type === 'sources') {
-          sources = data.documents || data.sources || [];
+          streamState.sources = data.documents || data.sources || [];
         } else if (data.type === 'filters') {
-          filters = data.filters || [];
-          filterConfidence = data.filterConfidence;
-          knownContext = data.knownContext || {};
+          streamState.filters = data.filters || [];
+          streamState.filterConfidence = data.filterConfidence;
+          streamState.knownContext = data.knownContext || {};
         } else if (data.type === 'complete') {
-          if (data.text) fullResponse = data.text;
-          if (data.groundingChunks) sources = data.groundingChunks;
-          if (data.filters) filters = data.filters;
-          if (data.filterConfidence) filterConfidence = data.filterConfidence;
-          if (data.knownContext) knownContext = data.knownContext;
+          if (data.text) streamState.fullResponse = data.text;
+          if (data.groundingChunks) streamState.sources = data.groundingChunks;
+          if (data.filters) streamState.filters = data.filters;
+          if (data.filterConfidence) streamState.filterConfidence = data.filterConfidence;
+          if (data.knownContext) streamState.knownContext = data.knownContext;
         }
       });
 
       if (onChunk) {
-        onChunk(fullResponse, sources, true);
+        onChunk(streamState.fullResponse, streamState.sources, true);
       }
 
       return {
-        text: fullResponse,
-        groundingChunks: sources,
-        filters: filters,
-        filterConfidence: filterConfidence,
-        knownContext: knownContext
+        text: streamState.fullResponse,
+        groundingChunks: streamState.sources,
+        filters: streamState.filters,
+        filterConfidence: streamState.filterConfidence,
+        knownContext: streamState.knownContext
       };
     }
 
