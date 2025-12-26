@@ -104,6 +104,28 @@
       0%, 50% { opacity: 1; }
       51%, 100% { opacity: 0; }
     }
+
+    /* Evidence 필터 버튼 */
+    .evidence-filter-btn {
+      border-color: #e2e8f0;
+      color: #64748b;
+      background: #f8fafc;
+    }
+    .evidence-filter-btn:hover {
+      border-color: #2563eb;
+      color: #2563eb;
+    }
+    .evidence-filter-btn.active {
+      border-color: #2563eb;
+      background: #2563eb;
+      color: white;
+    }
+
+    /* Gate 뱃지 색상 */
+    .gate-confirm { background: #dcfce7; color: #166534; }
+    .gate-edit { background: #fef3c7; color: #92400e; }
+    .gate-decide { background: #fed7aa; color: #9a3412; }
+    .gate-teach { background: #fecaca; color: #991b1b; }
   </style>
 </head>
 <body class="bg-app-bg text-app-text">
@@ -128,31 +150,47 @@
       </div>
     </header>
 
-    <!-- 탭 네비게이션 -->
+    <!-- 탭 네비게이션 (4탭: Analyze, Evidence, Teach, History) -->
     <div class="bg-app-card border-b border-app-border px-4">
-      <div class="flex gap-1">
-        <button id="tabAnalysis" class="tab-btn active px-4 py-2.5 text-sm text-app-muted rounded-t-lg" data-tab="analysis">
+      <div class="flex gap-1 overflow-x-auto">
+        <button id="tabAnalyze" class="tab-btn active px-3 py-2.5 text-sm text-app-muted rounded-t-lg whitespace-nowrap" data-tab="analyze">
           <span class="flex items-center gap-1.5">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
             </svg>
-            티켓 분석
+            Analyze
           </span>
         </button>
-        <button id="tabChat" class="tab-btn px-4 py-2.5 text-sm text-app-muted rounded-t-lg" data-tab="chat">
+        <button id="tabEvidence" class="tab-btn px-3 py-2.5 text-sm text-app-muted rounded-t-lg whitespace-nowrap" data-tab="evidence">
           <span class="flex items-center gap-1.5">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
             </svg>
-            채팅
+            Evidence
+          </span>
+        </button>
+        <button id="tabTeach" class="tab-btn px-3 py-2.5 text-sm text-app-muted rounded-t-lg whitespace-nowrap" data-tab="teach">
+          <span class="flex items-center gap-1.5">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+            </svg>
+            Teach
+          </span>
+        </button>
+        <button id="tabHistory" class="tab-btn px-3 py-2.5 text-sm text-app-muted rounded-t-lg whitespace-nowrap" data-tab="history">
+          <span class="flex items-center gap-1.5">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            History
           </span>
         </button>
       </div>
     </div>
 
-    <!-- ==================== 분석 섹션 ==================== -->
-    <div id="sectionAnalysis" class="section-content flex flex-col flex-1 overflow-hidden">
-      
+    <!-- ==================== Analyze 섹션 ==================== -->
+    <div id="sectionAnalyze" class="section-content flex flex-col flex-1 overflow-hidden">
+
       <!-- 분석 티커 (진행 상황 표시) -->
       <div id="analysisTicker" class="bg-blue-50 border-b border-blue-100 px-4 py-2 hidden">
         <div class="ticker-container flex items-center gap-2">
@@ -177,101 +215,228 @@
             </div>
             <h3 class="text-lg font-semibold text-app-text mb-2">티켓 분석</h3>
             <p class="text-sm text-app-muted mb-4 max-w-sm">
-              AI가 티켓을 분석하여 요약, 감정, 의도를 파악하고<br>
-              필드 업데이트를 제안해 드립니다.
+              AI가 티켓을 분석하여 요약, 원인, 해결책을 제시하고<br>
+              신뢰도 기반의 게이트 결정을 제공합니다.
             </p>
-            <div class="flex flex-col sm:flex-row gap-2 items-center justify-center">
-              <button id="analyzeBtn" class="px-4 py-2 text-sm font-medium text-white bg-app-primary rounded-lg hover:bg-app-primary-hover transition-colors flex items-center gap-2">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+            <button id="analyzeBtn" class="px-6 py-3 text-sm font-medium text-white bg-app-primary rounded-lg hover:bg-app-primary-hover transition-colors flex items-center gap-2">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+              </svg>
+              티켓 분석 실행
+            </button>
+          </div>
+
+          <!-- 분석 결과 (숨김 상태로 시작) -->
+          <div id="analysisResult" class="hidden space-y-4">
+            <!-- Gate 뱃지 -->
+            <div id="gateBadgeContainer" class="flex items-center gap-3">
+              <span id="gateBadge" class="px-3 py-1.5 text-sm font-semibold rounded-full"></span>
+              <span id="confidenceBar" class="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+                <div id="confidenceFill" class="h-full bg-green-500 transition-all duration-500"></div>
+              </span>
+              <span id="confidenceText" class="text-sm font-medium text-app-muted"></span>
+            </div>
+
+            <!-- Summary -->
+            <div class="bg-app-card border border-app-border rounded-lg p-4">
+              <h4 class="text-sm font-semibold text-app-text mb-2 flex items-center gap-2">
+                <svg class="w-4 h-4 text-app-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                 </svg>
-                원인/해결 분석
-              </button>
-              <button id="fieldProposalsBtn" class="px-4 py-2 text-sm font-medium text-app-primary bg-white border border-app-border rounded-lg hover:border-app-primary hover:bg-app-bg transition-colors flex items-center gap-2">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m-7 4h8a2 2 0 002-2V6a2 2 0 00-2-2H9a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                요약
+              </h4>
+              <p id="summaryText" class="text-sm text-app-text"></p>
+            </div>
+
+            <!-- Root Cause -->
+            <div id="rootCauseSection" class="bg-app-card border border-app-border rounded-lg p-4">
+              <h4 class="text-sm font-semibold text-app-text mb-2 flex items-center gap-2">
+                <svg class="w-4 h-4 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
                 </svg>
-                티켓 필드 제안
-              </button>
+                원인 분석
+              </h4>
+              <p id="rootCauseText" class="text-sm text-app-text"></p>
+            </div>
+
+            <!-- Resolution Steps -->
+            <div id="resolutionSection" class="bg-app-card border border-app-border rounded-lg p-4">
+              <h4 class="text-sm font-semibold text-app-text mb-3 flex items-center gap-2">
+                <svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                해결 단계
+              </h4>
+              <div id="resolutionSteps" class="space-y-2"></div>
+            </div>
+
+            <!-- Field Proposals -->
+            <div id="fieldProposalsSection" class="bg-app-card border border-app-border rounded-lg p-4">
+              <h4 class="text-sm font-semibold text-app-text mb-3 flex items-center gap-2">
+                <svg class="w-4 h-4 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/>
+                </svg>
+                필드 업데이트 제안
+              </h4>
+              <div id="fieldProposalsList" class="space-y-2"></div>
+            </div>
+
+            <!-- Intent & Sentiment -->
+            <div class="flex gap-4">
+              <div class="flex-1 bg-app-card border border-app-border rounded-lg p-4">
+                <h4 class="text-xs font-semibold text-app-muted uppercase mb-1">Intent</h4>
+                <p id="intentText" class="text-sm font-medium text-app-text"></p>
+              </div>
+              <div class="flex-1 bg-app-card border border-app-border rounded-lg p-4">
+                <h4 class="text-xs font-semibold text-app-muted uppercase mb-1">Sentiment</h4>
+                <p id="sentimentText" class="text-sm font-medium text-app-text"></p>
+              </div>
+            </div>
+
+            <!-- Risk Tags -->
+            <div id="riskTagsSection" class="hidden">
+              <div class="flex flex-wrap gap-2">
+                <span class="text-xs font-medium text-app-muted">Risk Tags:</span>
+                <div id="riskTagsList" class="flex flex-wrap gap-1"></div>
+              </div>
+            </div>
+
+            <!-- Meta Info -->
+            <div class="text-xs text-app-muted flex items-center gap-4 pt-2 border-t border-app-border">
+              <span id="metaAnalysisId"></span>
+              <span id="metaLatency"></span>
+              <span id="metaModel"></span>
             </div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- ==================== 채팅 섹션 ==================== -->
-    <div id="sectionChat" class="section-content flex flex-col flex-1 overflow-hidden section-hidden">
-      
-      <!-- 검색 대상 선택 -->
-      <div class="bg-app-card border-b border-app-border px-4 py-3" id="sourceSelector">
-        <p class="text-xs font-medium text-app-muted">검색 소스를 불러오는 중...</p>
-      </div>
-
-      <!-- 필터 표시 (응답 후 표시) -->
-      <div class="bg-gray-50 border-b border-app-border px-4 py-2 hidden" id="filterDisplay">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <span class="text-xs font-medium text-gray-500">적용된 필터:</span>
-            <div class="flex flex-wrap gap-1" id="filterChips"></div>
-          </div>
-          <span id="filterConfidence" class="text-xs text-gray-500"></span>
-        </div>
-      </div>
-
-      <!-- 채팅 영역 -->
-      <div class="flex-1 overflow-y-auto chat-container" id="chatContainer">
-        <div class="p-4 space-y-4" id="chatMessages">
-          
-          <!-- 웰컴 메시지 -->
-          <div class="flex justify-start message-enter" id="welcomeMessage">
-            <div class="max-w-[85%] bg-app-card border border-app-border rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
-              <p class="text-sm text-app-text">안녕하세요! 티켓 분석 및 검색을 도와드리겠습니다.</p>
-              <p class="text-sm text-app-text mt-2">아래 예시 질문을 클릭하거나, 직접 질문을 입력해주세요.</p>
-              
-              <!-- 예시 질문 -->
-              <div class="mt-4 flex flex-wrap gap-2" id="exampleQuestions">
-                <button class="example-btn px-3 py-1.5 text-xs font-medium bg-app-bg border border-app-border rounded-full hover:border-app-primary hover:text-app-primary transition-colors">
-                  이 티켓을 분석해줘
-                </button>
-                <button class="example-btn px-3 py-1.5 text-xs font-medium bg-app-bg border border-app-border rounded-full hover:border-app-primary hover:text-app-primary transition-colors">
-                  유사한 티켓을 찾아줘
-                </button>
-                <button class="example-btn px-3 py-1.5 text-xs font-medium bg-app-bg border border-app-border rounded-full hover:border-app-primary hover:text-app-primary transition-colors">
-                  응답 초안을 작성해줘
-                </button>
-              </div>
+    <!-- ==================== Evidence 섹션 ==================== -->
+    <div id="sectionEvidence" class="section-content flex flex-col flex-1 overflow-hidden section-hidden">
+      <div class="flex-1 overflow-y-auto p-4">
+        <div id="evidenceContent" class="space-y-4">
+          <!-- 증거가 없는 경우 -->
+          <div id="evidencePlaceholder" class="flex flex-col items-center justify-center py-12 text-center">
+            <div class="w-16 h-16 bg-app-bg rounded-full flex items-center justify-center mb-4">
+              <svg class="w-8 h-8 text-app-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+              </svg>
             </div>
+            <h3 class="text-lg font-semibold text-app-text mb-2">Evidence</h3>
+            <p class="text-sm text-app-muted max-w-sm">
+              분석을 먼저 실행하면 AI가 참조한 근거 자료를<br>
+              여기서 확인할 수 있습니다.
+            </p>
           </div>
 
+          <!-- Evidence 목록 (숨김 상태) -->
+          <div id="evidenceList" class="hidden space-y-3">
+            <!-- 필터 -->
+            <div class="flex gap-2 flex-wrap">
+              <button class="evidence-filter-btn active px-3 py-1.5 text-xs font-medium rounded-full border transition-colors" data-filter="all">전체</button>
+              <button class="evidence-filter-btn px-3 py-1.5 text-xs font-medium rounded-full border transition-colors" data-filter="conversation">대화</button>
+              <button class="evidence-filter-btn px-3 py-1.5 text-xs font-medium rounded-full border transition-colors" data-filter="ticket_field">필드</button>
+              <button class="evidence-filter-btn px-3 py-1.5 text-xs font-medium rounded-full border transition-colors" data-filter="kb_article">KB</button>
+              <button class="evidence-filter-btn px-3 py-1.5 text-xs font-medium rounded-full border transition-colors" data-filter="similar_case">유사 사례</button>
+            </div>
+            <!-- Evidence 아이템 컨테이너 -->
+            <div id="evidenceItems" class="space-y-2"></div>
+          </div>
         </div>
       </div>
+    </div>
 
-      <!-- 입력 영역 -->
-      <div class="bg-app-card border-t border-app-border p-4 sticky bottom-0">
-        <form id="chatForm" class="flex items-end gap-3">
-          <div class="flex-1 relative">
-            <textarea 
-              id="chatInput"
-              rows="1"
-              placeholder="메시지를 입력하세요..."
-              class="w-full px-4 py-3 pr-12 text-sm bg-app-bg border border-app-border rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-app-primary focus:border-transparent transition-all"
-              style="max-height: 120px;"
-            ></textarea>
+    <!-- ==================== Teach 섹션 ==================== -->
+    <div id="sectionTeach" class="section-content flex flex-col flex-1 overflow-hidden section-hidden">
+      <div class="flex-1 overflow-y-auto p-4">
+        <div id="teachContent" class="space-y-4">
+          <!-- Teach 안내 -->
+          <div id="teachPlaceholder" class="flex flex-col items-center justify-center py-8 text-center">
+            <div class="w-16 h-16 bg-app-bg rounded-full flex items-center justify-center mb-4">
+              <svg class="w-8 h-8 text-app-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+              </svg>
+            </div>
+            <h3 class="text-lg font-semibold text-app-text mb-2">AI에게 교훈 전달</h3>
+            <p class="text-sm text-app-muted max-w-sm mb-4">
+              분석 결과가 부정확했다면 여기서 피드백을 제출하여<br>
+              AI가 더 나은 판단을 할 수 있도록 도와주세요.
+            </p>
           </div>
-          <button 
-            type="submit" 
-            id="sendBtn"
-            class="p-3 bg-app-primary hover:bg-app-primary-hover text-white rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            disabled
-          >
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
-            </svg>
-          </button>
-        </form>
-        <p class="text-xs text-app-muted mt-2 text-center" id="statusText">
-          티켓 정보를 불러오는 중...
-        </p>
+
+          <!-- Teach 폼 -->
+          <form id="teachForm" class="space-y-4">
+            <input type="hidden" id="teachAnalysisId" value="">
+
+            <div>
+              <label class="block text-sm font-medium text-app-text mb-1">잘못된 패턴 (Mistake Pattern)</label>
+              <textarea id="teachMistakePattern" rows="2"
+                class="w-full px-3 py-2 text-sm bg-app-bg border border-app-border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-app-primary"
+                placeholder="AI가 잘못 판단한 패턴을 설명해주세요..."></textarea>
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-app-text mb-1">잘못된 가정 (Wrong Assumption)</label>
+              <textarea id="teachWrongAssumption" rows="2"
+                class="w-full px-3 py-2 text-sm bg-app-bg border border-app-border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-app-primary"
+                placeholder="AI가 잘못 가정한 것이 무엇인가요?"></textarea>
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-app-text mb-1">교정 휴리스틱 (Corrective Heuristic)</label>
+              <textarea id="teachCorrectiveHeuristic" rows="2"
+                class="w-full px-3 py-2 text-sm bg-app-bg border border-app-border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-app-primary"
+                placeholder="올바른 판단 기준을 알려주세요..."></textarea>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <input type="checkbox" id="teachAutomationPossible" class="w-4 h-4 text-app-primary rounded border-app-border focus:ring-app-primary">
+              <label for="teachAutomationPossible" class="text-sm text-app-text">이 패턴은 자동화가 가능합니다</label>
+            </div>
+
+            <div class="flex gap-2">
+              <button type="submit" id="teachSubmitBtn"
+                class="flex-1 px-4 py-2 text-sm font-medium text-white bg-app-primary rounded-lg hover:bg-app-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                교훈 제출
+              </button>
+              <button type="button" id="teachResetBtn"
+                class="px-4 py-2 text-sm font-medium text-app-muted bg-app-bg border border-app-border rounded-lg hover:bg-gray-100 transition-colors">
+                초기화
+              </button>
+            </div>
+          </form>
+
+          <!-- 제출 결과 -->
+          <div id="teachResult" class="hidden mt-4 p-4 rounded-lg"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== History 섹션 ==================== -->
+    <div id="sectionHistory" class="section-content flex flex-col flex-1 overflow-hidden section-hidden">
+      <div class="flex-1 overflow-y-auto p-4">
+        <div id="historyContent" class="space-y-4">
+          <!-- History 안내 -->
+          <div id="historyPlaceholder" class="flex flex-col items-center justify-center py-12 text-center">
+            <div class="w-16 h-16 bg-app-bg rounded-full flex items-center justify-center mb-4">
+              <svg class="w-8 h-8 text-app-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+            </div>
+            <h3 class="text-lg font-semibold text-app-text mb-2">분석 이력</h3>
+            <p class="text-sm text-app-muted max-w-sm mb-4">
+              이 티켓의 과거 분석 기록을 확인하고<br>
+              결과를 비교해 볼 수 있습니다.
+            </p>
+            <button id="loadHistoryBtn" class="px-4 py-2 text-sm font-medium text-app-primary bg-white border border-app-border rounded-lg hover:border-app-primary transition-colors">
+              이력 불러오기
+            </button>
+          </div>
+
+          <!-- History 목록 (숨김 상태) -->
+          <div id="historyList" class="hidden space-y-2"></div>
+        </div>
       </div>
     </div>
 
@@ -301,7 +466,10 @@
   <script src="scripts/backend-config.js"></script>
   <script src="scripts/stream-utils.js"></script>
 
-  <!-- 앱 스크립트 (ES Module) -->
+  <!-- 분석 UI 모듈 (PR3) -->
+  <script src="scripts/analysis-ui.js"></script>
+
+  <!-- 앱 스크립트 -->
   <script src="scripts/app.js"></script>
 </body>
 </html>
