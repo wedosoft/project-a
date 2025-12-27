@@ -35,20 +35,25 @@ function buildTenantHeaders(iparams) {
   };
 }
 
-function resolveBackendBaseUrl() {
-  const env = process.env;
-
-  if (!env.BACKEND_BASE_URL) {
-    throw new Error('BACKEND_BASE_URL이 설정되지 않았습니다. 환경변수(프로덕션/스테이징/로컬)로 반드시 지정해 주세요.');
+function resolveBackendBaseUrl(iparams) {
+  // First try to get from iparams (configured by admin)
+  if (iparams?.backend_url) {
+    return iparams.backend_url;
   }
 
-  return env.BACKEND_BASE_URL;
+  // Fallback to environment variable
+  const env = process.env;
+  if (env.BACKEND_BASE_URL) {
+    return env.BACKEND_BASE_URL;
+  }
+
+  throw new Error('백엔드 URL이 설정되지 않았습니다. 관리자 설정에서 백엔드 URL을 입력하세요.');
 }
 
 async function callSyncEndpoint(iparams, payload) {
   let backendUrl;
   try {
-    backendUrl = resolveBackendBaseUrl().replace(/\/+$/, '');
+    backendUrl = resolveBackendBaseUrl(iparams).replace(/\/+$/, '');
   } catch (error) {
     return { ok: false, message: error.message || 'Backend URL not configured' };
   }
