@@ -6,6 +6,7 @@ const state = {
 const elements = {
   freshdeskDomain: () => document.getElementById('freshdesk_domain'),
   freshdeskApiKey: () => document.getElementById('freshdesk_api_key'),
+  backendUrl: () => document.getElementById('backend_url'),
   collectTickets: () => document.getElementById('collect_tickets'),
   collectArticles: () => document.getElementById('collect_articles'),
   scheduleEnabled: () => document.getElementById('schedule_enabled'),
@@ -120,9 +121,11 @@ function bindScheduleToggle() {
 function collectConfig() {
   const freshdeskDomain = (elements.freshdeskDomain()?.value || '').trim();
   const freshdeskApiKey = (elements.freshdeskApiKey()?.value || '').trim();
+  const backendUrl = (elements.backendUrl()?.value || '').trim();
 
   const config = {
     freshdesk_domain: freshdeskDomain,
+    backend_url: backendUrl,
     collect_tickets: elements.collectTickets()?.checked || false,
     collect_articles: elements.collectArticles()?.checked || false,
     schedule_enabled: elements.scheduleEnabled()?.checked || false,
@@ -155,6 +158,7 @@ async function updateScheduleFromConfig(config) {
 function validateConfig() {
   const freshdeskDomain = (elements.freshdeskDomain()?.value || '').trim();
   const freshdeskApiKey = (elements.freshdeskApiKey()?.value || '').trim();
+  const backendUrl = (elements.backendUrl()?.value || '').trim();
   const scheduleEnabled = elements.scheduleEnabled()?.checked || false;
   const interval = Number(elements.scheduleInterval()?.value || 0);
 
@@ -163,9 +167,18 @@ function validateConfig() {
     return false;
   }
 
-
   if (!freshdeskApiKey && !state.hasSecureApiKey) {
     setError('Freshdesk API 키를 입력하세요.');
+    return false;
+  }
+
+  if (!backendUrl) {
+    setError('백엔드 URL을 입력하세요.');
+    return false;
+  }
+
+  if (!backendUrl.startsWith('https://') && !backendUrl.startsWith('http://')) {
+    setError('백엔드 URL은 http:// 또는 https://로 시작해야 합니다.');
     return false;
   }
 
@@ -181,6 +194,7 @@ function validateConfig() {
 function preloadConfig(configs) {
   if (!configs) return;
   if (configs.freshdesk_domain) elements.freshdeskDomain().value = configs.freshdesk_domain;
+  if (configs.backend_url) elements.backendUrl().value = configs.backend_url;
   if (configs.collect_tickets !== undefined) elements.collectTickets().checked = configs.collect_tickets;
   if (configs.collect_articles !== undefined) elements.collectArticles().checked = configs.collect_articles;
   if (configs.schedule_enabled !== undefined) elements.scheduleEnabled().checked = configs.schedule_enabled;
@@ -224,13 +238,15 @@ window.IParams = {
     setStatus('설정을 불러왔습니다.', 'success');
     setError('');
   },
-  postConfigs: async function() {
+  postConfigs: function() {
     const config = collectConfig();
-    try {
-      await updateScheduleFromConfig(config);
-    } catch (error) {
-      console.error('Schedule update failed:', error);
-      setStatus('스케줄 업데이트 실패. 저장 후 다시 시도하세요.', 'error');
+    // Schedule update is done asynchronously after config is saved
+    // FDK expects postConfigs to return synchronously
+    if (client) {
+      updateScheduleFromConfig(config).catch((error) => {
+        console.error('Schedule update failed:', error);
+        // Don't block config save - schedule can be retried
+      });
     }
     return config;
   },

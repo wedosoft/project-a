@@ -51,7 +51,7 @@
     "schema": {
       "method": "POST",
       "protocol": "https",
-      "host": "ameer-timberless-paragogically.ngrok-free.dev",
+      "host": "<%= iparam.backend_url.replace(/^https?:\\/\\//, '').replace(/\\/$/, '') %>",
       "path": "/<%= context.path %>",
       "headers": {
         "Content-Type": "application/json",
@@ -66,7 +66,7 @@
     "schema": {
       "method": "PUT",
       "protocol": "https",
-      "host": "ameer-timberless-paragogically.ngrok-free.dev",
+      "host": "<%= iparam.backend_url.replace(/^https?:\\/\\//, '').replace(/\\/$/, '') %>",
       "path": "/<%= context.path %>",
       "headers": {
         "Content-Type": "application/json",
@@ -81,7 +81,7 @@
     "schema": {
       "method": "GET",
       "protocol": "https",
-      "host": "ameer-timberless-paragogically.ngrok-free.dev",
+      "host": "<%= iparam.backend_url.replace(/^https?:\\/\\//, '').replace(/\\/$/, '') %>",
       "path": "/<%= context.path %>",
       "headers": {
         "Content-Type": "application/json",

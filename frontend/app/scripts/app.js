@@ -299,6 +299,23 @@ function cacheElements() {
   elements.analysisPlaceholder = document.getElementById('analysisPlaceholder');
   elements.analyzeBtn = document.getElementById('analyzeBtn');
   elements.fieldProposalsBtn = document.getElementById('fieldProposalsBtn');
+  // 분석 서브탭 요소 (4개 탭: 요약, 유사 사례, KB 절차, AI 제안)
+  elements.analysisSubTabs = document.getElementById('analysisSubTabs');
+  elements.subTabSummary = document.getElementById('subTabSummary');
+  elements.subTabSimilar = document.getElementById('subTabSimilar');
+  elements.subTabKB = document.getElementById('subTabKB');
+  elements.subTabSuggestions = document.getElementById('subTabSuggestions');
+  elements.subTabContents = document.getElementById('subTabContents');
+  elements.subTabContentSummary = document.getElementById('subTabContentSummary');
+  elements.subTabContentSimilar = document.getElementById('subTabContentSimilar');
+  elements.subTabContentKB = document.getElementById('subTabContentKB');
+  elements.subTabContentSuggestions = document.getElementById('subTabContentSuggestions');
+  // 게이트 상태 표시 요소
+  elements.gateIndicator = document.getElementById('gateIndicator');
+  elements.gateIcon = document.getElementById('gateIcon');
+  elements.gateLabel = document.getElementById('gateLabel');
+  elements.confidenceBar = document.getElementById('confidenceBar');
+  elements.confidenceValue = document.getElementById('confidenceValue');
   // 채팅 섹션 요소
   elements.chatContainer = document.getElementById('chatContainer');
   elements.chatMessages = document.getElementById('chatMessages');
@@ -346,6 +363,425 @@ function switchTab(tabName) {
   
   console.log(`[Tab] Switched to: ${tabName}`);
 }
+
+/**
+ * 분석 서브탭 전환 (4개 탭: summary, similar, kb, suggestions)
+ * @param {string} subTabName - 'summary' | 'similar' | 'kb' | 'suggestions'
+ */
+function switchAnalysisSubTab(subTabName) {
+  state.currentAnalysisSubTab = subTabName;
+  
+  // 서브탭 버튼 활성화 상태 업데이트
+  const subTabs = [
+    { btn: elements.subTabSummary, content: elements.subTabContentSummary, name: 'summary' },
+    { btn: elements.subTabSimilar, content: elements.subTabContentSimilar, name: 'similar' },
+    { btn: elements.subTabKB, content: elements.subTabContentKB, name: 'kb' },
+    { btn: elements.subTabSuggestions, content: elements.subTabContentSuggestions, name: 'suggestions' }
+  ];
+  
+  subTabs.forEach(tab => {
+    if (tab.btn) {
+      tab.btn.classList.toggle('active', tab.name === subTabName);
+    }
+    if (tab.content) {
+      tab.content.classList.toggle('hidden', tab.name !== subTabName);
+    }
+  });
+  
+  console.log(`[SubTab] Switched to: ${subTabName}`);
+}
+
+/**
+ * 게이트 상태 표시 업데이트
+ * @param {string} gate - 'CONFIRM' | 'EDIT' | 'DECIDE' | 'TEACH'
+ * @param {number} confidence - 0.0 ~ 1.0
+ */
+function updateGateIndicator(gate, confidence) {
+  if (!elements.gateIndicator) return;
+  
+  const gateConfig = {
+    CONFIRM: { icon: 'C', label: '자동 적용 가능', color: 'gate-confirm', textColor: 'text-green-700' },
+    EDIT: { icon: 'E', label: '검토 후 적용', color: 'gate-edit', textColor: 'text-blue-700' },
+    DECIDE: { icon: 'D', label: '에이전트 결정 필요', color: 'gate-decide', textColor: 'text-yellow-700' },
+    TEACH: { icon: 'T', label: '학습 피드백 필요', color: 'gate-teach', textColor: 'text-red-700' }
+  };
+  
+  const config = gateConfig[gate] || gateConfig.TEACH;
+  
+  // 게이트 아이콘 업데이트
+  if (elements.gateIcon) {
+    elements.gateIcon.textContent = config.icon;
+    elements.gateIcon.className = `w-6 h-6 rounded-full flex items-center justify-center text-white text-xs font-bold ${config.color}`;
+  }
+  
+  // 게이트 라벨 업데이트
+  if (elements.gateLabel) {
+    elements.gateLabel.textContent = config.label;
+    elements.gateLabel.className = `text-sm font-medium ${config.textColor}`;
+  }
+  
+  // 신뢰도 바 업데이트
+  const confidencePercent = Math.round(confidence * 100);
+  if (elements.confidenceBar) {
+    elements.confidenceBar.style.width = `${confidencePercent}%`;
+  }
+  if (elements.confidenceValue) {
+    elements.confidenceValue.textContent = `${confidencePercent}%`;
+  }
+  
+  // 게이트 표시 영역 보이기
+  elements.gateIndicator.classList.remove('hidden');
+}
+
+/**
+ * 분석 결과를 4개 서브탭에 렌더링
+ * @param {Object} result - 분석 결과 객체
+ */
+function renderAnalysisToSubTabs(result) {
+  if (!result) return;
+  
+  const analysis = result.analysis || result;
+  const gate = result.gate || 'TEACH';
+  const confidence = analysis.confidence || 0;
+  const meta = result.meta || {};
+  
+  // 플레이스홀더 숨기기, 서브탭 표시
+  if (elements.analysisPlaceholder) {
+    elements.analysisPlaceholder.classList.add('hidden');
+  }
+  if (elements.analysisContent) {
+    elements.analysisContent.classList.add('hidden');
+  }
+  if (elements.analysisSubTabs) {
+    elements.analysisSubTabs.classList.remove('hidden');
+  }
+  if (elements.subTabContents) {
+    elements.subTabContents.classList.remove('hidden');
+  }
+  
+  // 게이트 상태 표시
+  updateGateIndicator(gate, confidence);
+  
+  // 1. 요약 탭 렌더링
+  renderSummaryTab(analysis);
+  
+  // 2. 유사 사례 탭 렌더링
+  renderSimilarCasesTab(analysis, meta);
+  
+  // 3. KB 절차 탭 렌더링
+  renderKBTab(analysis, meta);
+  
+  // 4. AI 제안 탭 렌더링
+  renderSuggestionsTab(analysis, result);
+  
+  // 기본 탭으로 요약 탭 선택
+  switchAnalysisSubTab('summary');
+  
+  console.log(`[Analysis] Rendered to sub-tabs: gate=${gate}, confidence=${confidence}`);
+}
+
+/**
+ * 요약 탭 렌더링
+ */
+function renderSummaryTab(analysis) {
+  if (!elements.subTabContentSummary) return;
+  
+  const narrative = analysis.narrative || analysis.summary || '';
+  const rootCause = analysis.root_cause || analysis.cause || '';
+  const resolution = analysis.resolution || analysis.solution || '';
+  const intent = analysis.intent || '';
+  const sentiment = analysis.sentiment || '';
+  const summarySections = analysis.summary_sections || analysis.summarySections || [];
+  
+  let html = '';
+  
+  // 요약 섹션
+  if (summarySections.length > 0) {
+    html += `
+      <div class="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+        <h4 class="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
+          <svg class="w-4 h-4 text-app-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+          </svg>
+          요약
+        </h4>
+        <div class="space-y-2">
+          ${summarySections.slice(0, 5).map(s => {
+            const title = escapeHtml((s && s.title) ? String(s.title) : '');
+            const content = escapeHtml((s && s.content) ? String(s.content) : '');
+            if (!title && !content) return '';
+            return `<div class="bg-gray-50 p-3 rounded-lg">
+              ${title ? `<div class="text-gray-800 font-medium text-sm">${title}</div>` : ''}
+              ${content ? `<div class="text-gray-600 text-sm mt-1">${content}</div>` : ''}
+            </div>`;
+          }).join('')}
+        </div>
+      </div>
+    `;
+  } else if (narrative) {
+    html += `
+      <div class="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+        <h4 class="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
+          <svg class="w-4 h-4 text-app-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+          </svg>
+          분석 요약
+        </h4>
+        <p class="text-sm text-gray-600 whitespace-pre-wrap">${escapeHtml(narrative)}</p>
+      </div>
+    `;
+  }
+  
+  // 의도/감정 섹션
+  if (intent || sentiment) {
+    html += `
+      <div class="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+        <h4 class="text-sm font-semibold text-gray-800 mb-3">고객 분석</h4>
+        <div class="grid grid-cols-2 gap-4">
+          ${intent ? `
+            <div class="bg-blue-50 p-3 rounded-lg">
+              <span class="text-xs font-medium text-blue-600">의도</span>
+              <p class="text-sm text-gray-800 mt-1">${escapeHtml(intent)}</p>
+            </div>
+          ` : ''}
+          ${sentiment ? `
+            <div class="bg-purple-50 p-3 rounded-lg">
+              <span class="text-xs font-medium text-purple-600">감정</span>
+              <p class="text-sm text-gray-800 mt-1">${escapeHtml(sentiment)}</p>
+            </div>
+          ` : ''}
+        </div>
+      </div>
+    `;
+  }
+  
+  // 원인/해결책 섹션
+  if (rootCause || resolution) {
+    html += `
+      <div class="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+        <h4 class="text-sm font-semibold text-gray-800 mb-3">원인 및 해결책</h4>
+        <div class="space-y-3">
+          ${rootCause ? `
+            <div class="bg-red-50 p-3 rounded-lg">
+              <span class="text-xs font-medium text-red-600">원인</span>
+              <p class="text-sm text-gray-800 mt-1 whitespace-pre-wrap">${escapeHtml(rootCause)}</p>
+            </div>
+          ` : ''}
+          ${resolution ? `
+            <div class="bg-green-50 p-3 rounded-lg">
+              <span class="text-xs font-medium text-green-600">해결책</span>
+              <p class="text-sm text-gray-800 mt-1 whitespace-pre-wrap">${formatMessage(resolution)}</p>
+            </div>
+          ` : ''}
+        </div>
+      </div>
+    `;
+  }
+  
+  if (!html) {
+    html = `
+      <div class="flex flex-col items-center justify-center py-8 text-center">
+        <svg class="w-12 h-12 text-gray-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+        </svg>
+        <p class="text-sm text-gray-500">요약 정보가 없습니다.</p>
+      </div>
+    `;
+  }
+  
+  elements.subTabContentSummary.innerHTML = html;
+}
+
+/**
+ * 유사 사례 탭 렌더링
+ */
+function renderSimilarCasesTab(analysis, meta) {
+  if (!elements.subTabContentSimilar) return;
+  
+  const similarCases = analysis.similar_cases || analysis.evidence?.similar_cases || [];
+  const retrievalCount = meta.retrieval_count || 0;
+  
+  let html = '';
+  
+  if (similarCases.length > 0) {
+    html += `
+      <div class="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+        <h4 class="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
+          <svg class="w-4 h-4 text-app-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+          </svg>
+          유사 사례 (${similarCases.length}건)
+        </h4>
+        <div class="space-y-3">
+          ${similarCases.map((c, idx) => {
+            const title = escapeHtml(c.title || c.subject || `사례 ${idx + 1}`);
+            const summary = escapeHtml(c.summary || c.description || '');
+            const score = c.score || c.similarity || 0;
+            const ticketId = c.ticket_id || c.id || '';
+            return `
+              <div class="bg-gray-50 p-3 rounded-lg border-l-4 border-blue-400">
+                <div class="flex items-center justify-between mb-1">
+                  <span class="text-sm font-medium text-gray-800">${title}</span>
+                  ${score ? `<span class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">${Math.round(score * 100)}% 유사</span>` : ''}
+                </div>
+                ${summary ? `<p class="text-xs text-gray-600 line-clamp-2">${summary}</p>` : ''}
+                ${ticketId ? `<span class="text-xs text-gray-400 mt-1 inline-block">#${ticketId}</span>` : ''}
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    `;
+  } else {
+    html = `
+      <div class="flex flex-col items-center justify-center py-8 text-center">
+        <svg class="w-12 h-12 text-gray-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+        </svg>
+        <p class="text-sm text-gray-500">유사한 사례를 찾지 못했습니다.</p>
+        <p class="text-xs text-gray-400 mt-1">데이터 수집 후 유사 사례 검색이 가능합니다.</p>
+      </div>
+    `;
+  }
+  
+  elements.subTabContentSimilar.innerHTML = html;
+}
+
+/**
+ * KB 절차 탭 렌더링
+ */
+function renderKBTab(analysis, meta) {
+  if (!elements.subTabContentKB) return;
+  
+  const kbArticles = analysis.kb_articles || analysis.evidence?.kb_articles || [];
+  
+  let html = '';
+  
+  if (kbArticles.length > 0) {
+    html += `
+      <div class="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+        <h4 class="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
+          <svg class="w-4 h-4 text-app-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+          </svg>
+          관련 KB 문서 (${kbArticles.length}건)
+        </h4>
+        <div class="space-y-3">
+          ${kbArticles.map((article, idx) => {
+            const title = escapeHtml(article.title || `문서 ${idx + 1}`);
+            const content = escapeHtml(article.content || article.summary || '');
+            const url = article.url || article.link || '';
+            const score = article.score || article.relevance || 0;
+            return `
+              <div class="bg-gray-50 p-3 rounded-lg border-l-4 border-green-400">
+                <div class="flex items-center justify-between mb-1">
+                  <span class="text-sm font-medium text-gray-800">${title}</span>
+                  ${score ? `<span class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">${Math.round(score * 100)}% 관련</span>` : ''}
+                </div>
+                ${content ? `<p class="text-xs text-gray-600 line-clamp-3">${content}</p>` : ''}
+                ${url ? `<a href="${escapeAttr(url)}" target="_blank" class="text-xs text-blue-500 hover:underline mt-1 inline-block">문서 보기 →</a>` : ''}
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    `;
+  } else {
+    html = `
+      <div class="flex flex-col items-center justify-center py-8 text-center">
+        <svg class="w-12 h-12 text-gray-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+        </svg>
+        <p class="text-sm text-gray-500">관련 KB 문서를 찾지 못했습니다.</p>
+        <p class="text-xs text-gray-400 mt-1">헬프센터 아티클 수집 후 검색이 가능합니다.</p>
+      </div>
+    `;
+  }
+  
+  elements.subTabContentKB.innerHTML = html;
+}
+
+/**
+ * AI 제안 탭 렌더링
+ */
+function renderSuggestionsTab(analysis, result) {
+  if (!elements.subTabContentSuggestions) return;
+  
+  const fieldProposals = analysis.field_proposals || [];
+  const draftResponse = analysis.draft_response || '';
+  const confidence = analysis.confidence || 0;
+  const gate = result.gate || 'TEACH';
+  
+  let html = '';
+  
+  // 필드 제안 섹션
+  if (fieldProposals.length > 0) {
+    html += renderFieldSuggestionsCard(result);
+  }
+  
+  // 응답 초안 섹션
+  if (draftResponse) {
+    html += `
+      <div class="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+        <h4 class="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
+          <svg class="w-4 h-4 text-app-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/>
+          </svg>
+          응답 초안
+        </h4>
+        <div class="bg-gray-50 p-3 rounded-lg">
+          <p class="text-sm text-gray-700 whitespace-pre-wrap">${formatMessage(draftResponse)}</p>
+        </div>
+        <div class="mt-3 flex gap-2">
+          <button onclick="copyDraftResponse()" class="px-3 py-1.5 text-xs font-medium text-app-primary bg-blue-50 rounded-lg hover:bg-blue-100 transition-colors">
+            복사하기
+          </button>
+        </div>
+      </div>
+    `;
+  }
+  
+  if (!html) {
+    html = `
+      <div class="flex flex-col items-center justify-center py-8 text-center">
+        <svg class="w-12 h-12 text-gray-300 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+        </svg>
+        <p class="text-sm text-gray-500">AI 제안이 없습니다.</p>
+        <p class="text-xs text-gray-400 mt-1">분석을 다시 실행해 보세요.</p>
+      </div>
+    `;
+  }
+  
+  // 다시 분석 버튼
+  html += `
+    <div class="flex justify-center pt-2">
+      <button onclick="handleAnalyzeTicket()" class="px-4 py-2 text-sm text-app-muted hover:text-app-primary transition-colors flex items-center gap-1">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+        다시 분석
+      </button>
+    </div>
+  `;
+  
+  elements.subTabContentSuggestions.innerHTML = html;
+}
+
+/**
+ * 응답 초안 복사
+ */
+window.copyDraftResponse = function() {
+  const analysis = state.analysisResult?.analysis || state.analysisResult || {};
+  const draftResponse = analysis.draft_response || '';
+  if (draftResponse) {
+    navigator.clipboard.writeText(draftResponse).then(() => {
+      alert('응답 초안이 클립보드에 복사되었습니다.');
+    }).catch(err => {
+      console.error('복사 실패:', err);
+    });
+  }
+};
 
 /**
  * 티커 표시
@@ -1702,6 +2138,20 @@ function setupEventListeners() {
     elements.fieldProposalsBtn.addEventListener('click', handleProposeFieldsOnly);
   }
   
+  // 분석 서브탭 이벤트 (4개 탭: 요약, 유사 사례, KB 절차, AI 제안)
+  if (elements.subTabSummary) {
+    elements.subTabSummary.addEventListener('click', () => switchAnalysisSubTab('summary'));
+  }
+  if (elements.subTabSimilar) {
+    elements.subTabSimilar.addEventListener('click', () => switchAnalysisSubTab('similar'));
+  }
+  if (elements.subTabKB) {
+    elements.subTabKB.addEventListener('click', () => switchAnalysisSubTab('kb'));
+  }
+  if (elements.subTabSuggestions) {
+    elements.subTabSuggestions.addEventListener('click', () => switchAnalysisSubTab('suggestions'));
+  }
+  
   // 모달 이벤트
   elements.closeModalBtn.addEventListener('click', closeModal);
   elements.sourceModal.addEventListener('click', (e) => {
@@ -2227,12 +2677,17 @@ async function handleAnalyzeTicket() {
       const proposal = finalResult.proposal || null;
 
       const merged = {
-        ...(analysis || {}),
-        ...(proposal || {})
+        analysis: {
+          ...(analysis || {}),
+          ...(proposal || {})
+        },
+        gate: finalResult.gate || 'TEACH',
+        meta: finalResult.meta || {}
       };
 
       setAnalysisResult(merged);
-      renderAnalysisResult(merged);
+      // 4개 서브탭으로 분석 결과 렌더링
+      renderAnalysisToSubTabs(merged);
     } else {
       renderAnalysisError('분석 결과를 받을 수 없습니다.');
     }
