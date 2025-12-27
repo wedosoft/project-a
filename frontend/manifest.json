@@ -2,14 +2,15 @@
   "platform-version": "3.0",
   "modules": {
     "common": {
-      "location": {
-        "full_page_app": {
-          "url": "admin.html",
-          "icon": "styles/images/icon.svg"
-        }
-      },
       "functions": {
-        "getSecureParams": {}
+        "getSecureParams": {},
+        "triggerSyncJob": {},
+        "upsertIncrementalSchedule": {}
+      },
+      "events": {
+        "onScheduledEvent": {
+          "handler": "onIncrementalSyncSchedule"
+        }
       },
       "requests": {
         "getTicketWithConversations": {},

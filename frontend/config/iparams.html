@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="iparams" content="secure: freshdesk_api_key" />
+    <title>AI Copilot 설정</title>
+    <link rel="stylesheet" href="https://static.freshdev.io/fdk/2.0/assets/freshdesk.css" />
+    <link rel="stylesheet" href="assets/iparams.css" />
+    <script src="{{{appclient}}}"></script>
+  </head>
+  <body>
+    <div class="container">
+      <header class="page-header">
+        <h1>AI Copilot 설정</h1>
+        <p class="subtitle">Freshdesk 데이터 수집 및 동기화 설정</p>
+      </header>
+
+      <section class="card">
+        <h2>연동 설정</h2>
+        <div class="form-grid">
+          <label class="field">
+            <span>Freshdesk 도메인</span>
+            <input id="freshdesk_domain" type="text" placeholder="yourcompany.freshdesk.com" required />
+          </label>
+          <label class="field">
+            <span>Freshdesk API 키</span>
+            <input id="freshdesk_api_key" type="password" placeholder="설정 시에만 입력" />
+            <small class="hint">보안 값은 표시되지 않습니다. 변경 시에만 입력하세요.</small>
+          </label>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>수집 대상</h2>
+        <div class="option-row">
+          <label class="checkbox">
+            <input id="collect_tickets" type="checkbox" checked />
+            <span>티켓</span>
+          </label>
+          <label class="checkbox">
+            <input id="collect_articles" type="checkbox" checked />
+            <span>아티클</span>
+          </label>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>수집 실행</h2>
+        <p class="hint">선택한 대상 기준으로 수집을 실행합니다.</p>
+        <div class="button-row">
+          <button id="sync_incremental" class="btn primary">증분 수집</button>
+          <button id="sync_full" class="btn warning">전체 재수집(퍼지)</button>
+          <button id="sync_purge" class="btn danger">데이터 퍼지</button>
+        </div>
+        <div id="sync_status" class="status"></div>
+      </section>
+
+      <section class="card">
+        <h2>정기 증분 수집</h2>
+        <div class="form-grid">
+          <label class="field inline">
+            <input id="schedule_enabled" type="checkbox" />
+            <span>정기 수집 활성화</span>
+          </label>
+          <label class="field">
+            <span>주기(시간)</span>
+            <input id="schedule_interval_hours" type="number" min="1" max="168" value="24" />
+            <small class="hint">1~168시간 범위에서 설정하세요.</small>
+          </label>
+        </div>
+        <p class="hint">설정 저장 시 스케줄이 적용됩니다.</p>
+      </section>
+
+      <section class="card">
+        <h2>상태</h2>
+        <div id="status_message" class="status neutral">설정을 불러오는 중...</div>
+        <div id="error_message" class="status error hidden"></div>
+      </section>
+    </div>
+
+    <script src="assets/iparams.js"></script>
+    <script>
+      function getConfigs(configs) {
+        if (window.IParams && typeof window.IParams.getConfigs === 'function') {
+          window.IParams.getConfigs(configs);
+        }
+      }
+
+      function postConfigs() {
+        if (window.IParams && typeof window.IParams.postConfigs === 'function') {
+          return window.IParams.postConfigs();
+        }
+        return {};
+      }
+
+      function validate() {
+        if (window.IParams && typeof window.IParams.validate === 'function') {
+          return window.IParams.validate();
+        }
+        return true;
+      }
+    </script>
+  </body>
+</html>
