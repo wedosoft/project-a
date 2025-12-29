@@ -17,9 +17,10 @@ function logWarn(...args) {
 }
 
 function buildTenantHeaders(iparams) {
-  const domain = iparams?.freshdesk_domain || '';
-  const apiKey = iparams?.freshdesk_api_key || '';
-  const tenantId = domain.split('.')[0] || '';
+  var params = iparams || {};
+  var domain = params.freshdesk_domain || '';
+  var apiKey = params.freshdesk_api_key || '';
+  var tenantId = domain.split('.')[0] || '';
 
   return {
     domain,
@@ -74,146 +75,145 @@ async function callSyncEndpoint(iparams, payload) {
   }
 
   if (!response.ok) {
-    const detail = responseData?.detail || responseData?.message || responseText;
+    var detail = (responseData && responseData.detail) || (responseData && responseData.message) || responseText;
     return { ok: false, status: response.status, message: detail || 'Sync request failed' };
   }
 
   return { ok: true, status: response.status, data: responseData };
 }
 
-exports = {
-  /**
-   * 보안 파라미터 (API 키 등) 가져오기
-   * 프론트엔드에서 직접 접근할 수 없는 secure iparams를 서버사이드에서 접근
-   */
-  getSecureParams: function(args) {
-    try {
-      const { iparams } = args;
+/**
+ * 보안 파라미터 (API 키 등) 가져오기
+ * 프론트엔드에서 직접 접근할 수 없는 secure iparams를 서버사이드에서 접근
+ */
+exports.getSecureParams = function(args) {
+  try {
+    var iparams = args.iparams || {};
 
-      const secureData = {
-        apiKey: iparams?.freshdesk_api_key,
-        domain: iparams?.freshdesk_domain,
-        // 테넌트 ID는 도메인에서 추출 (예: company.freshdesk.com → company)
-        tenantId: iparams?.freshdesk_domain?.split('.')[0] || ''
-      };
+    var secureData = {
+      apiKey: iparams.freshdesk_api_key || null,
+      domain: iparams.freshdesk_domain || null,
+      // 테넌트 ID는 도메인에서 추출 (예: company.freshdesk.com → company)
+      tenantId: (iparams.freshdesk_domain || '').split('.')[0] || ''
+    };
 
-      if (!secureData.apiKey) {
-        console.error('❌ 서버리스: API 키가 설정되지 않았습니다');
-        renderData({ message: 'API key not configured' });
-        return;
-      }
-
-      renderData(null, secureData);
-    } catch (error) {
-      console.error('❌ 서버리스 오류:', error);
-      renderData({ message: error.message || 'Failed to retrieve secure parameters' });
+    if (!secureData.apiKey) {
+      console.error('서버리스: API 키가 설정되지 않았습니다');
+      renderData({ message: 'API key not configured' });
+      return;
     }
-  },
 
-  /**
-   * 수동 수집 트리거
-   */
-  triggerSyncJob: async function(args) {
-    try {
-      const { iparams, data } = args;
-      const payload = {
-        include_tickets: data?.include_tickets !== false,
-        include_articles: data?.include_articles !== false,
-        incremental: data?.incremental === true,
-        batch_size: data?.batch_size || 10,
-        max_concurrency: data?.max_concurrency || 5
-      };
+    renderData(null, secureData);
+  } catch (error) {
+    console.error('서버리스 오류:', error);
+    renderData({ message: error.message || 'Failed to retrieve secure parameters' });
+  }
+};
 
-      if (data?.purge !== undefined) {
-        payload.purge = data.purge;
-      }
-      if (data?.purge_only !== undefined) {
-        payload.purge_only = data.purge_only;
-      }
+/**
+ * 수동 수집 트리거
+ */
+exports.triggerSyncJob = async function(args) {
+  try {
+    var iparams = args.iparams || {};
+    var data = args.data || {};
+    var payload = {
+      include_tickets: data.include_tickets !== false,
+      include_articles: data.include_articles !== false,
+      incremental: data.incremental === true,
+      batch_size: data.batch_size || 10,
+      max_concurrency: data.max_concurrency || 5
+    };
 
-      const result = await callSyncEndpoint(iparams, payload);
-      if (!result.ok) {
-        renderData({ message: result.message || 'Sync trigger failed' });
-        return;
-      }
-      renderData(null, result.data || {});
-    } catch (error) {
-      console.error('❌ 서버리스 오류:', error);
-      renderData({ message: error.message || 'Failed to trigger sync' });
+    if (data.purge !== undefined) {
+      payload.purge = data.purge;
     }
-  },
+    if (data.purge_only !== undefined) {
+      payload.purge_only = data.purge_only;
+    }
 
-  /**
-   * 정기 증분 수집 스케줄 생성/갱신/삭제
-   */
-  upsertIncrementalSchedule: async function(args) {
-    try {
-      const { data } = args;
-      const enabled = data?.enabled === true;
+    var result = await callSyncEndpoint(iparams, payload);
+    if (!result.ok) {
+      renderData({ message: result.message || 'Sync trigger failed' });
+      return;
+    }
+    renderData(null, result.data || {});
+  } catch (error) {
+    console.error('서버리스 오류:', error);
+    renderData({ message: error.message || 'Failed to trigger sync' });
+  }
+};
 
-      if (!enabled) {
-        try {
-          await $schedule.delete({ name: SCHEDULE_NAME });
-        } catch (error) {
-          logWarn('⚠️ 기존 스케줄이 없어 삭제를 건너뜁니다.');
-        }
-        renderData(null, { status: 'deleted' });
-        return;
-      }
+/**
+ * 정기 증분 수집 스케줄 생성/갱신/삭제
+ */
+exports.upsertIncrementalSchedule = async function(args) {
+  try {
+    var data = args.data || {};
+    var enabled = data.enabled === true;
 
-      const frequencyHours = Number(data?.interval_hours || 24);
-      const scheduleAt = new Date(Date.now() + 60 * 1000).toISOString();
-      const scheduleData = {
-        include_tickets: data?.include_tickets !== false,
-        include_articles: data?.include_articles !== false
-      };
-
-      const scheduleConfig = {
-        name: SCHEDULE_NAME,
-        schedule_at: scheduleAt,
-        repeat: {
-          time_unit: 'hours',
-          frequency: frequencyHours
-        },
-        data: scheduleData
-      };
-
+    if (!enabled) {
       try {
-        await $schedule.update(scheduleConfig);
-        renderData(null, { status: 'updated', interval_hours: frequencyHours });
+        await $schedule.delete({ name: SCHEDULE_NAME });
       } catch (error) {
-        await $schedule.create(scheduleConfig);
-        renderData(null, { status: 'scheduled', interval_hours: frequencyHours });
+        logWarn('기존 스케줄이 없어 삭제를 건너뜁니다.');
       }
-    } catch (error) {
-      console.error('❌ 스케줄 설정 실패:', error);
-      renderData({ message: error.message || 'Failed to update schedule' });
+      renderData(null, { status: 'deleted' });
+      return;
     }
-  },
 
-  /**
-   * 정기 증분 수집 스케줄 핸들러
-   */
-  onIncrementalSyncSchedule: async function(payload) {
+    var frequencyHours = Number(data.interval_hours || 24);
+    var scheduleAt = new Date(Date.now() + 60 * 1000).toISOString();
+    var scheduleData = {
+      include_tickets: data.include_tickets !== false,
+      include_articles: data.include_articles !== false
+    };
+
+    var scheduleConfig = {
+      name: SCHEDULE_NAME,
+      schedule_at: scheduleAt,
+      repeat: {
+        time_unit: 'hours',
+        frequency: frequencyHours
+      },
+      data: scheduleData
+    };
+
     try {
-      const iparams = payload?.iparams || {};
-      const data = payload?.data || {};
-      const payloadBody = {
-        include_tickets: data.include_tickets !== false,
-        include_articles: data.include_articles !== false,
-        incremental: true,
-        batch_size: 10,
-        max_concurrency: 5
-      };
-
-      const result = await callSyncEndpoint(iparams, payloadBody);
-      if (!result.ok) {
-        console.error('❌ 스케줄 수집 실패:', result.message);
-      } else {
-        console.log('✅ 스케줄 수집 시작됨:', result.data?.job_id || 'scheduled');
-      }
+      await $schedule.update(scheduleConfig);
+      renderData(null, { status: 'updated', interval_hours: frequencyHours });
     } catch (error) {
-      console.error('❌ 스케줄 핸들러 오류:', error);
+      await $schedule.create(scheduleConfig);
+      renderData(null, { status: 'scheduled', interval_hours: frequencyHours });
     }
+  } catch (error) {
+    console.error('스케줄 설정 실패:', error);
+    renderData({ message: error.message || 'Failed to update schedule' });
+  }
+};
+
+/**
+ * 정기 증분 수집 스케줄 핸들러
+ */
+exports.onIncrementalSyncSchedule = async function(payload) {
+  try {
+    var iparams = (payload && payload.iparams) ? payload.iparams : {};
+    var data = (payload && payload.data) ? payload.data : {};
+    var payloadBody = {
+      include_tickets: data.include_tickets !== false,
+      include_articles: data.include_articles !== false,
+      incremental: true,
+      batch_size: 10,
+      max_concurrency: 5
+    };
+
+    var result = await callSyncEndpoint(iparams, payloadBody);
+    if (!result.ok) {
+      console.error('스케줄 수집 실패:', result.message);
+    } else {
+      console.log('스케줄 수집 시작됨:', (result.data && result.data.job_id) ? result.data.job_id : 'scheduled');
+    }
+  } catch (error) {
+    console.error('스케줄 핸들러 오류:', error);
   }
 };
