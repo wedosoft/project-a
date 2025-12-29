@@ -538,7 +538,7 @@
       setCurrentTab('analyze');
     } catch (error) {
       console.error('[AnalysisUI] Failed to load past analysis:', error);
-      alert(`분석 로드 실패: ${error.message}`);
+      showHistoryError(`분석 로드 실패: ${error.message}`);
     }
   }
 
