@@ -34,6 +34,9 @@ window.APP_CONFIG = {
   tenantId: ''
 };
 
+// state를 전역으로 노출 (analysis-ui.js 등에서 window.state로 접근)
+window.state = state;
+
 function setClient(client) {
   state.client = client;
 }
@@ -644,6 +647,14 @@ function closeModal() {
 
 function formatMessage(text) {
   if (!text) return '';
+  // 객체나 배열이면 JSON 문자열로 변환
+  if (typeof text !== 'string') {
+    try {
+      text = JSON.stringify(text, null, 2);
+    } catch (e) {
+      text = String(text);
+    }
+  }
   return text
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.*?)\*/g, '<em>$1</em>')
@@ -2310,7 +2321,7 @@ function renderAnalysisResult(proposal) {
           ${solution ? `
             <div class="pt-2 border-t border-gray-100">
               <p class="font-medium text-gray-700 mb-1">해결책:</p>
-              <div class="text-gray-600 bg-gray-50 p-2 rounded whitespace-pre-wrap">${formatMessage(solution)}</div>
+              <div class="text-gray-600 bg-gray-50 p-2 rounded whitespace-pre-wrap">${formatMessage(typeof solution === 'string' ? solution : (solution.text || solution.action || JSON.stringify(solution)))}</div>
             </div>
           ` : ''}
         </div>
