@@ -1,3 +1,4 @@
+'use strict';
 /**
  * FDK Serverless Functions
  * - secure iparams(시크릿) 접근은 서버리스에서만 가능
@@ -38,8 +39,9 @@ function buildTenantHeaders(iparams) {
 function resolveBackendBaseUrl() {
   const env = process.env;
 
+  // 로컬 개발 환경 (FDK Run)
   if (!env.BACKEND_BASE_URL) {
-    throw new Error('BACKEND_BASE_URL이 설정되지 않았습니다. 환경변수(프로덕션/스테이징/로컬)로 반드시 지정해 주세요.');
+    return 'https://ameer-timberless-paragogically.ngrok-free.dev';
   }
 
   return env.BACKEND_BASE_URL;
@@ -81,12 +83,11 @@ async function callSyncEndpoint(iparams, payload) {
   return { ok: true, status: response.status, data: responseData };
 }
 
-exports = {
   /**
    * 보안 파라미터 (API 키 등) 가져오기
    * 프론트엔드에서 직접 접근할 수 없는 secure iparams를 서버사이드에서 접근
    */
-  getSecureParams: function(args) {
+exports.getSecureParams = function(args) {
     try {
       const { iparams } = args;
 
@@ -108,12 +109,12 @@ exports = {
       console.error('❌ 서버리스 오류:', error);
       renderData({ message: error.message || 'Failed to retrieve secure parameters' });
     }
-  },
+  };
 
   /**
    * 수동 수집 트리거
    */
-  triggerSyncJob: async function(args) {
+  exports.triggerSyncJob = async function(args) {
     try {
       const { iparams, data } = args;
       const payload = {
@@ -141,12 +142,12 @@ exports = {
       console.error('❌ 서버리스 오류:', error);
       renderData({ message: error.message || 'Failed to trigger sync' });
     }
-  },
+  };
 
   /**
    * 정기 증분 수집 스케줄 생성/갱신/삭제
    */
-  upsertIncrementalSchedule: async function(args) {
+exports.upsertIncrementalSchedule = async function(args) {
     try {
       const { data } = args;
       const enabled = data?.enabled === true;
@@ -189,12 +190,12 @@ exports = {
       console.error('❌ 스케줄 설정 실패:', error);
       renderData({ message: error.message || 'Failed to update schedule' });
     }
-  },
+  };
 
   /**
    * 정기 증분 수집 스케줄 핸들러
    */
-  onIncrementalSyncSchedule: async function(payload) {
+  exports.onIncrementalSyncSchedule = async function(payload) {
     try {
       const iparams = payload?.iparams || {};
       const data = payload?.data || {};
@@ -215,5 +216,4 @@ exports = {
     } catch (error) {
       console.error('❌ 스케줄 핸들러 오류:', error);
     }
-  }
 };

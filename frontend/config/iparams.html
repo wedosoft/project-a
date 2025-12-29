@@ -3,7 +3,6 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="iparams" content="secure: freshdesk_api_key" />
     <title>AI Copilot 설정</title>
     <link rel="stylesheet" href="https://static.freshdev.io/fdk/2.0/assets/freshdesk.css" />
     <link rel="stylesheet" href="assets/iparams.css" />
@@ -69,7 +68,11 @@
             <small class="hint">1~168시간 범위에서 설정하세요.</small>
           </label>
         </div>
-        <p class="hint">설정 저장 시 스케줄이 적용됩니다.</p>
+        <p class="hint">스케줄 저장 버튼을 눌러 적용하세요.</p>
+        <div class="button-row">
+          <button id="schedule_save" class="btn primary">스케줄 저장</button>
+        </div>
+        <div id="schedule_status" class="status"></div>
       </section>
 
       <section class="card">

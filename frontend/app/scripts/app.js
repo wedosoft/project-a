@@ -1682,15 +1682,21 @@ function setupEventListeners() {
   }
   
   // 채팅 이벤트
-  elements.chatForm.addEventListener('submit', handleSubmit);
-  elements.chatInput.addEventListener('input', handleInputChange);
-  elements.chatInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit(e);
-    }
-  });
-  elements.newChatBtn.addEventListener('click', handleNewChat);
+  if (elements.chatForm) {
+    elements.chatForm.addEventListener('submit', handleSubmit);
+  }
+  if (elements.chatInput) {
+    elements.chatInput.addEventListener('input', handleInputChange);
+    elements.chatInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        handleSubmit(e);
+      }
+    });
+  }
+  if (elements.newChatBtn) {
+    elements.newChatBtn.addEventListener('click', handleNewChat);
+  }
   
   // 분석 버튼
   if (elements.analyzeBtn) {
@@ -1703,10 +1709,14 @@ function setupEventListeners() {
   }
   
   // 모달 이벤트
-  elements.closeModalBtn.addEventListener('click', closeModal);
-  elements.sourceModal.addEventListener('click', (e) => {
-    if (e.target === elements.sourceModal) closeModal();
-  });
+  if (elements.closeModalBtn) {
+    elements.closeModalBtn.addEventListener('click', closeModal);
+  }
+  if (elements.sourceModal) {
+    elements.sourceModal.addEventListener('click', (e) => {
+      if (e.target === elements.sourceModal) closeModal();
+    });
+  }
 
   // 예시 질문
   document.querySelectorAll('.example-btn').forEach(btn => {

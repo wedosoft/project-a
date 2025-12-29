@@ -10,6 +10,7 @@ const elements = {
   collectArticles: () => document.getElementById('collect_articles'),
   scheduleEnabled: () => document.getElementById('schedule_enabled'),
   scheduleInterval: () => document.getElementById('schedule_interval_hours'),
+  scheduleStatus: () => document.getElementById('schedule_status'),
   statusMessage: () => document.getElementById('status_message'),
   errorMessage: () => document.getElementById('error_message'),
   syncStatus: () => document.getElementById('sync_status')
@@ -36,6 +37,13 @@ function setError(message) {
 
 function setSyncStatus(message, type = 'neutral') {
   const el = elements.syncStatus();
+  if (!el) return;
+  el.textContent = message;
+  el.className = `status ${type}`;
+}
+
+function setScheduleStatus(message, type = 'neutral') {
+  const el = elements.scheduleStatus();
   if (!el) return;
   el.textContent = message;
   el.className = `status ${type}`;
@@ -117,6 +125,46 @@ function bindScheduleToggle() {
   updateDisabled();
 }
 
+function bindScheduleSave() {
+  const button = document.getElementById('schedule_save');
+  if (!button) return;
+
+  button.addEventListener('click', async () => {
+    if (!client) {
+      setScheduleStatus('클라이언트 초기화가 필요합니다.', 'error');
+      return;
+    }
+
+    if (!validateConfig()) {
+      setScheduleStatus('스케줄 저장 전에 설정을 확인하세요.', 'error');
+      return;
+    }
+
+    const payload = {
+      enabled: elements.scheduleEnabled()?.checked === true,
+      interval_hours: Number(elements.scheduleInterval()?.value || 24),
+      include_tickets: elements.collectTickets()?.checked !== false,
+      include_articles: elements.collectArticles()?.checked !== false
+    };
+
+    try {
+      setScheduleStatus('스케줄 저장 중...', 'neutral');
+      const response = await client.request.invoke('upsertIncrementalSchedule', { data: payload });
+      const result = response?.response || response;
+
+      if (response?.status && response.status >= 400) {
+        const detail = result?.message || result?.detail || '스케줄 저장 실패';
+        setScheduleStatus(detail, 'error');
+        return;
+      }
+
+      setScheduleStatus('스케줄이 저장되었습니다.', 'success');
+    } catch (error) {
+      setScheduleStatus(error.message || '스케줄 저장 실패', 'error');
+    }
+  });
+}
+
 function collectConfig() {
   const freshdeskDomain = (elements.freshdeskDomain()?.value || '').trim();
   const freshdeskApiKey = (elements.freshdeskApiKey()?.value || '').trim();
@@ -137,19 +185,6 @@ function collectConfig() {
   }
 
   return config;
-}
-
-async function updateScheduleFromConfig(config) {
-  if (!client) return;
-
-  const payload = {
-    enabled: config.schedule_enabled === true,
-    interval_hours: Number(config.schedule_interval_hours || 24),
-    include_tickets: config.collect_tickets !== false,
-    include_articles: config.collect_articles !== false
-  };
-
-  await client.request.invoke('upsertIncrementalSchedule', { data: payload });
 }
 
 function validateConfig() {
@@ -210,8 +245,10 @@ document.addEventListener('DOMContentLoaded', () => {
       await checkSecureConfig();
       bindSyncButtons();
       bindScheduleToggle();
+      bindScheduleSave();
       setStatus('설정이 준비되었습니다.', 'success');
       setSyncStatus('수집 실행 대기 중입니다.');
+      setScheduleStatus('스케줄 저장 대기 중입니다.');
     })
     .catch(() => {
       setStatus('클라이언트를 초기화하지 못했습니다.', 'error');
@@ -224,14 +261,9 @@ window.IParams = {
     setStatus('설정을 불러왔습니다.', 'success');
     setError('');
   },
-  postConfigs: async function() {
+  postConfigs: function() {
     const config = collectConfig();
-    try {
-      await updateScheduleFromConfig(config);
-    } catch (error) {
-      console.error('Schedule update failed:', error);
-      setStatus('스케줄 업데이트 실패. 저장 후 다시 시도하세요.', 'error');
-    }
+
     return config;
   },
   validate: function() {
