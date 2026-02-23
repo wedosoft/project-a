@@ -2383,6 +2383,25 @@ function renderAnalysisResult(proposal) {
     html += renderFieldSuggestionsCard(proposal);
   }
   
+  // HITL 피드백 섹션
+  html += `
+    <div id="feedbackSection" class="bg-app-card border border-app-border rounded-lg p-4 hidden">
+      <h4 class="text-sm font-semibold text-app-text mb-3">이 분석이 도움이 되었나요?</h4>
+      <div class="flex items-center gap-2">
+        <button id="feedbackHelpfulBtn" class="feedback-btn flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg border border-app-border hover:border-green-400 hover:bg-green-50 transition-colors" data-type="helpful">
+          <span>👍</span> 도움됨
+        </button>
+        <button id="feedbackNotHelpfulBtn" class="feedback-btn flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg border border-app-border hover:border-red-400 hover:bg-red-50 transition-colors" data-type="not_helpful">
+          <span>👎</span> 부정확
+        </button>
+        <button id="feedbackEditBtn" class="feedback-btn flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg border border-app-border hover:border-blue-400 hover:bg-blue-50 transition-colors">
+          <span>✏️</span> 수정
+        </button>
+      </div>
+      <div id="feedbackResult" class="hidden mt-3 p-3 rounded-lg text-sm"></div>
+    </div>
+  `;
+
   // 다시 분석 버튼
   html += `
     <div class="flex justify-center pt-2">
@@ -2394,8 +2413,14 @@ function renderAnalysisResult(proposal) {
       </button>
     </div>
   `;
-  
+
   elements.analysisContent.innerHTML = html;
+
+  // HITL 피드백 섹션 표시 (analysis_id 또는 proposal.id 사용)
+  const analysisId = proposal.analysis_id || proposal.analysisId || proposal.id;
+  if (window.AnalysisUI?.showFeedbackSection) {
+    window.AnalysisUI.showFeedbackSection(analysisId || 'pending');
+  }
 }
 
 /**

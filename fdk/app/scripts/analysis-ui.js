@@ -998,7 +998,8 @@
     AnalysisState,
     submitFeedback,
     openEditModal,
-    toggleDarkMode
+    toggleDarkMode,
+    showFeedbackSection
   };
 
 })();
