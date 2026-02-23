@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "FDK (project-a frontend)",
+      "runtimeExecutable": "fdk",
+      "runtimeArgs": ["run"],
+      "port": 10001
+    },
+    {
+      "name": "agent-platform API",
+      "runtimeExecutable": "uvicorn",
+      "runtimeArgs": ["app.main:app", "--reload", "--port", "8000"],
+      "port": 8000
+    }
+  ]
+}

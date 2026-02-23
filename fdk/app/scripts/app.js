@@ -482,14 +482,14 @@ function addMessage(role, content, sources = []) {
   messageDiv.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'} animate-fade-in`;
 
   const isUser = role === 'user';
-  const bgClass = isUser ? 'bg-blue-500 text-white' : 'bg-white border border-gray-200';
+  const bgClass = isUser ? 'bg-blue-500 text-white' : 'bg-app-card border border-app-border';
   const roundedClass = isUser ? 'rounded-2xl rounded-tr-sm' : 'rounded-2xl rounded-tl-sm';
 
   let sourcesHtml = '';
   if (sources && sources.length > 0) {
     sourcesHtml = `
-      <div class="mt-3 pt-3 border-t border-gray-100">
-        <p class="text-xs text-gray-400 mb-2">참조 문서</p>
+      <div class="mt-3 pt-3 border-t border-app-border">
+        <p class="text-xs text-app-muted mb-2">참조 문서</p>
         <div class="flex flex-wrap gap-2">
           ${sources.map((source, idx) => {
             const ctx = source.retrievedContext || source.web || {};
@@ -498,7 +498,7 @@ function addMessage(role, content, sources = []) {
             const uri = ctx.uri || '';
             return `
               <button 
-                class="source-chip px-2 py-1 text-xs bg-gray-50 border border-gray-200 rounded-md hover:border-blue-400 hover:bg-blue-50 transition-all cursor-pointer"
+                class="source-chip px-2 py-1 text-xs bg-app-bg border border-app-border text-app-muted rounded-md hover:border-blue-400 hover:bg-blue-50 transition-all cursor-pointer"
                 data-title="${escapeAttr(title)}"
                 data-text="${escapeAttr(text)}"
                 data-uri="${escapeAttr(uri)}"
@@ -559,7 +559,7 @@ function addLoadingMessage(text = '검색 중...') {
   messageDiv.className = 'flex justify-start';
 
   messageDiv.innerHTML = `
-    <div class="max-w-[85%] bg-white border border-gray-200 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
+    <div class="max-w-[85%] bg-app-card border border-app-border rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
       <div class="flex items-center gap-2">
         <div class="flex gap-1">
           <span class="w-2 h-2 bg-gray-300 rounded-full animate-bounce" style="animation-delay: 0ms"></span>
@@ -632,7 +632,7 @@ function openModal(title, content, uri) {
       <span class="text-xs text-gray-400">참조 내용 (발췌)</span>
       <div class="flex-grow ml-2 border-t border-gray-100"></div>
     </div>
-    <div class="bg-gray-50 p-3 rounded-lg border border-gray-200 text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">${formatMessage(displayContent || "내용이 없습니다.")}</div>
+    <div class="bg-app-bg p-3 rounded-lg border border-app-border text-sm text-app-text leading-relaxed whitespace-pre-wrap">${formatMessage(displayContent || "내용이 없습니다.")}</div>
   `;
   
   elements.modalContent.innerHTML = html;
@@ -658,7 +658,7 @@ function formatMessage(text) {
   return text
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.*?)\*/g, '<em>$1</em>')
-    .replace(/`([^`]+)`/g, '<code class="px-1 py-0.5 bg-gray-100 rounded text-xs font-mono">$1</code>')
+    .replace(/`([^`]+)`/g, '<code class="px-1 py-0.5 bg-app-bg border border-app-border rounded text-xs font-mono text-app-text">$1</code>')
     .replace(/\n/g, '<br>');
 }
 
@@ -829,9 +829,9 @@ function renderFieldSuggestions(proposal) {
   messageDiv.id = messageId;
   
   let html = `
-    <div class="max-w-[95%] bg-white border border-gray-200 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
+    <div class="max-w-[95%] bg-app-card border border-app-border rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
       <div class="flex items-center justify-between mb-3">
-        <h3 class="text-sm font-bold text-gray-800 flex items-center gap-2">
+        <h3 class="text-sm font-bold text-app-text flex items-center gap-2">
           <svg class="w-4 h-4 text-app-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
           </svg>
@@ -839,17 +839,17 @@ function renderFieldSuggestions(proposal) {
         </h3>
         <span class="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium">AI 분석</span>
       </div>
-      
+
       <div class="mb-4 overflow-x-auto">
         <table class="w-full text-sm text-left">
-          <thead class="text-xs text-gray-500 bg-gray-50 uppercase">
+          <thead class="text-xs text-app-muted bg-app-bg uppercase">
             <tr>
               <th class="px-2 py-2 w-20">필드</th>
               <th class="px-2 py-2 w-24">현재 값</th>
               <th class="px-2 py-2">제안 값 (수정 가능)</th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-gray-100">
+          <tbody class="divide-y divide-app-border">
   `;
   
   const ticketFields = state.ticketFields;
@@ -893,7 +893,7 @@ function renderFieldSuggestions(proposal) {
 
   const renderRow = (label, fieldName, currentVal, inputHtml, reason) => `
     <tr>
-      <td class="px-2 py-2 font-medium text-gray-600">
+      <td class="px-2 py-2 font-medium text-app-muted">
         ${label}
         ${reason ? `<div class="group relative inline-block ml-1">
           <svg class="w-3 h-3 text-gray-400 cursor-help" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
@@ -902,7 +902,7 @@ function renderFieldSuggestions(proposal) {
           </div>
         </div>` : ''}
       </td>
-      <td class="px-2 py-2 text-gray-400 text-xs">${escapeHtml(formatCurrentValue(fieldName, currentVal))}</td>
+      <td class="px-2 py-2 text-app-muted text-xs">${escapeHtml(formatCurrentValue(fieldName, currentVal))}</td>
       <td class="px-2 py-2">${inputHtml}</td>
     </tr>
   `;
@@ -1090,8 +1090,8 @@ function renderFieldSuggestions(proposal) {
   const justification = proposal.justification || proposal.reasoning;
   if (justification) {
     html += `
-      <div class="mb-3 px-2 py-2 bg-gray-50 rounded border border-gray-100">
-        <p class="text-xs text-gray-600"><span class="font-semibold">AI 근거:</span> ${justification}</p>
+      <div class="mb-3 px-2 py-2 bg-app-bg rounded border border-app-border">
+        <p class="text-xs text-app-muted"><span class="font-semibold text-app-text">AI 근거:</span> ${justification}</p>
       </div>
     `;
   }
@@ -2018,7 +2018,7 @@ function addStreamingMessage() {
   messageDiv.className = 'flex justify-start animate-fade-in';
 
   messageDiv.innerHTML = `
-    <div class="max-w-[85%] bg-white border border-gray-200 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
+    <div class="max-w-[85%] bg-app-card border border-app-border rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
       <div class="text-sm whitespace-pre-wrap streaming-cursor" id="${messageId}-content"></div>
     </div>
   `;
@@ -2049,8 +2049,8 @@ function finalizeStreamingMessage(messageId, text, sources = []) {
   let sourcesHtml = '';
   if (sources && sources.length > 0) {
     sourcesHtml = `
-      <div class="mt-3 pt-3 border-t border-gray-100">
-        <p class="text-xs text-gray-400 mb-2">참조 문서</p>
+      <div class="mt-3 pt-3 border-t border-app-border">
+        <p class="text-xs text-app-muted mb-2">참조 문서</p>
         <div class="flex flex-wrap gap-2">
           ${sources.map((source, idx) => {
             const ctx = source.retrievedContext || source.web || {};
@@ -2059,7 +2059,7 @@ function finalizeStreamingMessage(messageId, text, sources = []) {
             const uri = ctx.uri || '';
             return `
               <button 
-                class="source-chip px-2 py-1 text-xs bg-gray-50 border border-gray-200 rounded-md hover:border-blue-400 hover:bg-blue-50 transition-all cursor-pointer"
+                class="source-chip px-2 py-1 text-xs bg-app-bg border border-app-border text-app-muted rounded-md hover:border-blue-400 hover:bg-blue-50 transition-all cursor-pointer"
                 data-title="${escapeAttr(title)}"
                 data-text="${escapeAttr(sourceText)}"
                 data-uri="${escapeAttr(uri)}"
@@ -2072,7 +2072,7 @@ function finalizeStreamingMessage(messageId, text, sources = []) {
   }
 
   messageDiv.innerHTML = `
-    <div class="max-w-[85%] bg-white border border-gray-200 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
+    <div class="max-w-[85%] bg-app-card border border-app-border rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
       <div class="text-sm whitespace-pre-wrap">${formatMessage(text)}</div>
       ${sourcesHtml}
     </div>
@@ -2165,9 +2165,9 @@ function handleNewChat() {
   const elements = getElements();
   elements.chatMessages.innerHTML = `
     <div id="welcomeMessage" class="flex justify-start">
-      <div class="max-w-[85%] bg-white border border-gray-200 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
-        <p class="text-sm text-gray-800 font-medium mb-2">안녕하세요! 👋</p>
-        <p class="text-sm text-gray-600 mb-3">티켓, 헬프센터 문서, 공통 문서에서 정보를 검색해드립니다.</p>
+      <div class="max-w-[85%] bg-app-card border border-app-border rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
+        <p class="text-sm text-app-text font-medium mb-2">안녕하세요! 👋</p>
+        <p class="text-sm text-app-muted mb-3">티켓, 헬프센터 문서, 공통 문서에서 정보를 검색해드립니다.</p>
         <div class="flex flex-wrap gap-2">
           <button class="example-btn px-3 py-1.5 text-xs bg-blue-50 text-blue-700 rounded-full hover:bg-blue-100 transition-all">
             비밀번호 재설정 방법
@@ -2271,6 +2271,52 @@ async function handleAnalyzeTicket() {
 /**
  * 분석 결과 렌더링 (분석 섹션에 표시)
  */
+/**
+ * solution 필드를 단계별 목록으로 렌더링
+ * - 문자열 배열 JSON: ["step1","step2"] → 번호 목록
+ * - 객체 배열: [{action, rationale}] → 번호 목록
+ * - 일반 문자열 → 텍스트 블록
+ */
+function renderSolutionSteps(solution) {
+  let items = solution;
+
+  // JSON 문자열이면 파싱 시도
+  if (typeof solution === 'string') {
+    const trimmed = solution.trim();
+    if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+      try { items = JSON.parse(trimmed); } catch (e) { /* 파싱 실패 시 원문 사용 */ }
+    }
+  }
+
+  // 배열인 경우 → 번호 목록
+  if (Array.isArray(items) && items.length > 0) {
+    const listItems = items.map((item, i) => {
+      const text = typeof item === 'string'
+        ? item
+        : (item.action || item.text || item.step || JSON.stringify(item));
+      const rationale = typeof item === 'object' ? (item.rationale || '') : '';
+      return `
+        <li class="flex gap-2 items-start">
+          <span class="flex-shrink-0 w-5 h-5 bg-green-100 text-green-700 rounded-full flex items-center justify-center text-xs font-semibold mt-0.5">${i + 1}</span>
+          <div class="flex-1">
+            <span class="text-app-text">${escapeHtml(text)}</span>
+            ${rationale ? `<p class="text-xs text-app-muted mt-0.5">${escapeHtml(rationale)}</p>` : ''}
+          </div>
+        </li>`;
+    }).join('');
+    return `<ol class="space-y-2 list-none">${listItems}</ol>`;
+  }
+
+  // 객체인 경우 → 텍스트 추출
+  if (items && typeof items === 'object' && !Array.isArray(items)) {
+    const text = items.text || items.action || items.steps || JSON.stringify(items);
+    return `<div class="text-app-muted bg-app-bg border border-app-border p-2 rounded whitespace-pre-wrap">${escapeHtml(String(text))}</div>`;
+  }
+
+  // 일반 텍스트
+  return `<div class="text-app-muted bg-app-bg border border-app-border p-2 rounded whitespace-pre-wrap">${formatMessage(String(solution))}</div>`;
+}
+
 function renderAnalysisResult(proposal) {
   if (!elements.analysisContent) return;
 
@@ -2286,42 +2332,42 @@ function renderAnalysisResult(proposal) {
   // 요약 카드
   if (summary || intent || sentiment || cause || solution) {
     html += `
-      <div class="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+      <div class="bg-app-card border border-app-border rounded-xl p-4 shadow-sm">
         <div class="flex items-center gap-2 mb-3">
           <svg class="w-5 h-5 text-app-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
           </svg>
-          <h3 class="text-sm font-semibold text-gray-800">티켓 분석 결과</h3>
+          <h3 class="text-sm font-semibold text-app-text">티켓 분석 결과</h3>
         </div>
         <div class="space-y-3 text-sm">
           ${Array.isArray(summarySections) && summarySections.length > 0 ? `
             <div>
-              <p class="font-medium text-gray-700 mb-2">요약:</p>
+              <p class="font-medium text-app-text mb-2">요약:</p>
               <div class="space-y-2">
                 ${summarySections.slice(0, 3).map(s => {
                   const t = escapeHtml((s && s.title) ? String(s.title) : '');
                   const c = escapeHtml((s && s.content) ? String(s.content) : '');
                   if (!t && !c) return '';
-                  return `<div class="bg-gray-50 p-2 rounded">
-                    ${t ? `<div class="text-gray-800 font-medium">${t}</div>` : ''}
-                    ${c ? `<div class="text-gray-600">${c}</div>` : ''}
+                  return `<div class="bg-app-bg p-2 rounded border border-app-border">
+                    ${t ? `<div class="text-app-text font-medium">${t}</div>` : ''}
+                    ${c ? `<div class="text-app-muted">${c}</div>` : ''}
                   </div>`;
                 }).join('')}
               </div>
             </div>
-          ` : (summary ? `<p><span class="font-medium text-gray-600">요약:</span> ${escapeHtml(summary)}</p>` : '')}
-          ${intent ? `<p><span class="font-medium text-gray-600">의도:</span> ${escapeHtml(intent)}</p>` : ''}
-          ${sentiment ? `<p><span class="font-medium text-gray-600">감정:</span> ${escapeHtml(sentiment)}</p>` : ''}
+          ` : (summary ? `<p><span class="font-medium text-app-muted">요약:</span> <span class="text-app-text">${escapeHtml(summary)}</span></p>` : '')}
+          ${intent ? `<p><span class="font-medium text-app-muted">의도:</span> <span class="text-app-text">${escapeHtml(intent)}</span></p>` : ''}
+          ${sentiment ? `<p><span class="font-medium text-app-muted">감정:</span> <span class="text-app-text">${escapeHtml(sentiment)}</span></p>` : ''}
           ${cause ? `
-            <div class="pt-2 border-t border-gray-100">
-              <p class="font-medium text-gray-700 mb-1">원인:</p>
-              <p class="text-gray-600 bg-gray-50 p-2 rounded">${escapeHtml(cause)}</p>
+            <div class="pt-2 border-t border-app-border">
+              <p class="font-medium text-app-text mb-1">원인:</p>
+              <p class="text-app-muted bg-app-bg border border-app-border p-2 rounded">${escapeHtml(cause)}</p>
             </div>
           ` : ''}
           ${solution ? `
-            <div class="pt-2 border-t border-gray-100">
-              <p class="font-medium text-gray-700 mb-1">해결책:</p>
-              <div class="text-gray-600 bg-gray-50 p-2 rounded whitespace-pre-wrap">${formatMessage(typeof solution === 'string' ? solution : (solution.text || solution.action || JSON.stringify(solution)))}</div>
+            <div class="pt-2 border-t border-app-border">
+              <p class="font-medium text-app-text mb-1">해결책:</p>
+              ${renderSolutionSteps(solution)}
             </div>
           ` : ''}
         </div>
@@ -2405,7 +2451,7 @@ function renderFieldSuggestionsCard(proposal) {
 
   const renderRow = (label, fieldName, currentVal, inputHtml, reason) => `
     <tr>
-      <td class="px-2 py-2 font-medium text-gray-600">
+      <td class="px-2 py-2 font-medium text-app-muted">
         ${label}
         ${reason ? `<div class="group relative inline-block ml-1">
           <svg class="w-3 h-3 text-gray-400 cursor-help" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
@@ -2414,7 +2460,7 @@ function renderFieldSuggestionsCard(proposal) {
           </div>
         </div>` : ''}
       </td>
-      <td class="px-2 py-2 text-gray-400 text-xs">${escapeHtml(formatCurrentValue(fieldName, currentVal))}</td>
+      <td class="px-2 py-2 text-app-muted text-xs">${escapeHtml(formatCurrentValue(fieldName, currentVal))}</td>
       <td class="px-2 py-2">${inputHtml}</td>
     </tr>
   `;
@@ -2561,35 +2607,35 @@ function renderFieldSuggestionsCard(proposal) {
   const justification = proposal.justification || proposal.reasoning;
 
   return `
-    <div id="${messageId}" class="bg-white border border-gray-200 rounded-xl p-4 shadow-sm">
+    <div id="${messageId}" class="bg-app-card border border-app-border rounded-xl p-4 shadow-sm">
       <div class="flex items-center justify-between mb-3">
         <div class="flex items-center gap-2">
           <svg class="w-5 h-5 text-app-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
           </svg>
-          <h3 class="text-sm font-semibold text-gray-800">필드 업데이트 제안</h3>
+          <h3 class="text-sm font-semibold text-app-text">필드 업데이트 제안</h3>
         </div>
         <span class="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium">AI 분석</span>
       </div>
-      
+
       <div class="mb-4 overflow-x-auto">
         <table class="w-full text-sm text-left">
-          <thead class="text-xs text-gray-500 bg-gray-50 uppercase">
+          <thead class="text-xs text-app-muted bg-app-bg uppercase">
             <tr>
               <th class="px-2 py-2 w-20">필드</th>
               <th class="px-2 py-2 w-24">현재 값</th>
               <th class="px-2 py-2">제안 값 (수정 가능)</th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-gray-100">
+          <tbody class="divide-y divide-app-border">
             ${tableRows}
           </tbody>
         </table>
       </div>
-      
+
       ${justification ? `
-        <div class="mb-3 px-2 py-2 bg-gray-50 rounded border border-gray-100">
-          <p class="text-xs text-gray-600"><span class="font-semibold">AI 근거:</span> ${escapeHtml(justification)}</p>
+        <div class="mb-3 px-2 py-2 bg-app-bg rounded border border-app-border">
+          <p class="text-xs text-app-muted"><span class="font-semibold text-app-text">AI 근거:</span> ${escapeHtml(justification)}</p>
         </div>
       ` : ''}
       
@@ -2616,7 +2662,7 @@ function renderAnalysisError(message) {
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
         </svg>
       </div>
-      <h3 class="text-lg font-semibold text-gray-800 mb-2">분석 실패</h3>
+      <h3 class="text-lg font-semibold text-app-text mb-2">분석 실패</h3>
       <p class="text-sm text-red-600 mb-4">${escapeHtml(message)}</p>
       <button onclick="handleAnalyzeTicket()" class="px-4 py-2 text-sm font-medium text-white bg-app-primary rounded-lg hover:bg-app-primary-hover transition-colors flex items-center gap-2">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

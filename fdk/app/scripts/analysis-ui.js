@@ -340,7 +340,7 @@
 
     if (handoffs.length > 0) {
       html += '<div class="space-y-3">';
-      handoffs.forEach((h, idx) => {
+      handoffs.forEach((h) => {
         html += `
           <div class="escalation-handoff pl-4 py-2">
             <div class="flex items-center gap-2 mb-1">
@@ -463,7 +463,7 @@
         throw new Error(`HTTP ${response.status}`);
       }
 
-      const data = await response.json();
+      await response.json();
 
       // Update button visual state
       document.querySelectorAll('.feedback-btn').forEach(btn => {
@@ -563,7 +563,7 @@
 
     } catch (error) {
       console.error('[AnalysisUI] Save edited response failed:', error);
-      alert(`저장 실패: ${error.message}`);
+      console.error('[AnalysisUI] Save failed:', error.message);
     } finally {
       if (saveBtn) saveBtn.disabled = false;
     }
