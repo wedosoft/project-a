@@ -1,0 +1,38 @@
+{
+  "platform-version": "3.0",
+  "modules": {
+    "common": {
+      "functions": {
+        "getSecureParams": {},
+        "triggerSyncJob": {},
+        "upsertIncrementalSchedule": {}
+      },
+      "events": {
+        "onScheduledEvent": {
+          "handler": "onIncrementalSyncSchedule"
+        }
+      },
+      "requests": {
+        "getTicketWithConversations": {},
+        "getTicketConversations": {},
+        "getTicketFields": {},
+        "updateTicket": {},
+        "backendApi": {},
+        "backendApiPost": {},
+        "backendApiPut": {}
+      }
+    },
+    "support_ticket": {
+      "location": {
+        "ticket_top_navigation": {
+          "url": "index.html",
+          "icon": "styles/images/icon.svg"
+        }
+      }
+    }
+  },
+  "engines": {
+    "node": "18.20.8",
+    "fdk": "9.8.2"
+  }
+}

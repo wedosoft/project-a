@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Copilot</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            'app-bg': 'var(--color-app-bg)',
+            'app-card': 'var(--color-app-card)',
+            'app-border': 'var(--color-app-border)',
+            'app-text': 'var(--color-app-text)',
+            'app-muted': 'var(--color-app-muted)',
+            'app-primary': 'var(--color-app-primary)',
+            'app-primary-hover': 'var(--color-app-primary-hover)',
+            'app-success': '#10b981',
+            'app-danger': '#ef4444',
+          }
+        }
+      }
+    }
+  </script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    /* Light mode (default) */
+    :root {
+      --color-app-bg: #f8fafc;
+      --color-app-card: #ffffff;
+      --color-app-border: #e2e8f0;
+      --color-app-text: #1e293b;
+      --color-app-muted: #64748b;
+      --color-app-primary: #2563eb;
+      --color-app-primary-hover: #1d4ed8;
+    }
+
+    /* Dark mode */
+    html.dark {
+      --color-app-bg: #0f172a;
+      --color-app-card: #1e293b;
+      --color-app-border: #334155;
+      --color-app-text: #e2e8f0;
+      --color-app-muted: #94a3b8;
+      --color-app-primary: #3b82f6;
+      --color-app-primary-hover: #2563eb;
+    }
+
+    html.dark body {
+      background-color: var(--color-app-bg);
+      color: var(--color-app-text);
+    }
+
+    html.dark .bg-blue-50 { background-color: rgba(59, 130, 246, 0.1); }
+    html.dark .text-blue-700 { color: #93c5fd; }
+    html.dark .border-blue-100 { border-color: rgba(59, 130, 246, 0.2); }
+    html.dark .bg-gray-100 { background-color: #334155; }
+    html.dark .text-gray-700 { color: #cbd5e1; }
+    html.dark .bg-green-50, html.dark .bg-green-100 { background-color: rgba(16, 185, 129, 0.15); }
+    html.dark .text-green-700 { color: #6ee7b7; }
+    html.dark .bg-red-50, html.dark .bg-red-100 { background-color: rgba(239, 68, 68, 0.15); }
+    html.dark .text-red-700, html.dark .text-red-600 { color: #fca5a5; }
+    html.dark .bg-orange-100 { background-color: rgba(251, 146, 60, 0.15); }
+    html.dark .text-orange-700 { color: #fdba74; }
+    html.dark .bg-yellow-100 { background-color: rgba(250, 204, 21, 0.15); }
+    html.dark .text-yellow-700 { color: #fde047; }
+    html.dark .bg-purple-50 { background-color: rgba(168, 85, 247, 0.15); }
+    html.dark .border-purple-200 { border-color: rgba(168, 85, 247, 0.3); }
+    html.dark .hover\:bg-gray-100:hover { background-color: #334155; }
+    html.dark .bg-white { background-color: #1e293b; }
+    html.dark input, html.dark textarea, html.dark select {
+      background-color: #0f172a;
+      color: #e2e8f0;
+      border-color: #475569;
+    }
+
+    /* Escalation handoff styling */
+    .escalation-handoff {
+      position: relative;
+      padding-left: 1.5rem;
+    }
+    .escalation-handoff::before {
+      content: '';
+      position: absolute;
+      left: 0.5rem;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: #e2e8f0;
+    }
+    html.dark .escalation-handoff::before {
+      background: #475569;
+    }
+
+    /* Status badge variants */
+    .status-resolved { background: #dcfce7; color: #166534; }
+    .status-pending { background: #fef3c7; color: #92400e; }
+    .status-unresolved { background: #fecaca; color: #991b1b; }
+    html.dark .status-resolved { background: rgba(16, 185, 129, 0.2); color: #6ee7b7; }
+    html.dark .status-pending { background: rgba(250, 204, 21, 0.2); color: #fde047; }
+    html.dark .status-unresolved { background: rgba(239, 68, 68, 0.2); color: #fca5a5; }
+
+    /* Feedback button states */
+    .feedback-btn.selected-helpful {
+      background: #dcfce7;
+      border-color: #16a34a;
+      color: #166534;
+    }
+    .feedback-btn.selected-not-helpful {
+      background: #fecaca;
+      border-color: #dc2626;
+      color: #991b1b;
+    }
+    html.dark .feedback-btn.selected-helpful {
+      background: rgba(16, 185, 129, 0.2);
+      border-color: #10b981;
+      color: #6ee7b7;
+    }
+    html.dark .feedback-btn.selected-not-helpful {
+      background: rgba(239, 68, 68, 0.2);
+      border-color: #ef4444;
+      color: #fca5a5;
+    }
+
+    * { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+    .chat-container { height: calc(100vh - 220px); }
+    .typing-indicator span {
+      animation: blink 1.4s infinite both;
+    }
+    .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+    .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes blink {
+      0%, 60%, 100% { opacity: 0.3; }
+      30% { opacity: 1; }
+    }
+    .source-chip:hover { transform: translateY(-1px); }
+    .message-enter { animation: messageSlide 0.3s ease-out; }
+    @keyframes messageSlide {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    
+    /* 탭 스타일 */
+    .tab-btn {
+      position: relative;
+      transition: all 0.2s ease;
+    }
+    .tab-btn.active {
+      color: #2563eb;
+      font-weight: 600;
+    }
+    .tab-btn.active::after {
+      content: '';
+      position: absolute;
+      bottom: -1px;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: #2563eb;
+      border-radius: 2px 2px 0 0;
+    }
+    .tab-btn:not(.active):hover {
+      color: #475569;
+      background: #f1f5f9;
+    }
+    
+    /* 섹션 표시/숨김 */
+    .section-hidden {
+      display: none !important;
+    }
+    
+    /* 티커 애니메이션 */
+    .ticker-container {
+      min-height: 24px;
+      overflow: hidden;
+    }
+    .ticker-message {
+      animation: tickerFadeIn 0.3s ease-out;
+    }
+    @keyframes tickerFadeIn {
+      from { opacity: 0; transform: translateY(-8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .ticker-message.fade-out {
+      animation: tickerFadeOut 0.3s ease-out forwards;
+    }
+    @keyframes tickerFadeOut {
+      from { opacity: 1; transform: translateY(0); }
+      to { opacity: 0; transform: translateY(8px); }
+    }
+    
+    /* 스트리밍 텍스트 커서 */
+    .streaming-cursor::after {
+      content: '▊';
+      animation: cursorBlink 0.8s infinite;
+      color: #2563eb;
+      margin-left: 2px;
+    }
+    @keyframes cursorBlink {
+      0%, 50% { opacity: 1; }
+      51%, 100% { opacity: 0; }
+    }
+
+    /* Evidence 필터 버튼 */
+    .evidence-filter-btn {
+      border-color: #e2e8f0;
+      color: #64748b;
+      background: #f8fafc;
+    }
+    .evidence-filter-btn:hover {
+      border-color: #2563eb;
+      color: #2563eb;
+    }
+    .evidence-filter-btn.active {
+      border-color: #2563eb;
+      background: #2563eb;
+      color: white;
+    }
+
+    /* Gate 뱃지 색상 */
+    .gate-confirm { background: #dcfce7; color: #166534; }
+    .gate-edit { background: #fef3c7; color: #92400e; }
+    .gate-decide { background: #fed7aa; color: #9a3412; }
+    .gate-teach { background: #fecaca; color: #991b1b; }
+  </style>
+</head>
+<body class="bg-app-bg text-app-text">
+  
+  <div class="flex flex-col h-screen max-w-4xl mx-auto">
+    
+    <!-- 헤더 -->
+    <header class="bg-app-card border-b border-app-border px-4 py-3 flex items-center justify-between sticky top-0 z-10">
+      <div>
+        <p class="text-xs font-semibold text-app-primary uppercase tracking-wide">AI Copilot</p>
+        <h1 class="text-lg font-bold text-app-text" id="headerTitle">티켓 분석 중...</h1>
+      </div>
+      <div class="flex items-center gap-2">
+        <span id="statusBadge" class="px-2 py-1 text-xs font-medium rounded-full bg-yellow-100 text-yellow-700">
+          준비 중
+        </span>
+        <!-- Dark Mode Toggle -->
+        <button id="darkModeToggle" class="p-2 rounded-lg hover:bg-app-border transition-colors" title="다크모드 전환">
+          <svg id="darkModeIcon" class="w-5 h-5 text-app-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+          </svg>
+          <svg id="lightModeIcon" class="w-5 h-5 text-app-muted hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
+          </svg>
+        </button>
+        <button id="newChatBtn" class="p-2 rounded-lg hover:bg-app-border transition-colors" title="새 대화">
+          <svg class="w-5 h-5 text-app-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- 탭 네비게이션 (4탭: Analyze, Evidence, Teach, History) -->
+    <div class="bg-app-card border-b border-app-border px-4">
+      <div class="flex gap-1 overflow-x-auto">
+        <button id="tabAnalyze" class="tab-btn active px-3 py-2.5 text-sm text-app-muted rounded-t-lg whitespace-nowrap" data-tab="analyze">
+          <span class="flex items-center gap-1.5">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+            </svg>
+            Analyze
+          </span>
+        </button>
+        <button id="tabEvidence" class="tab-btn px-3 py-2.5 text-sm text-app-muted rounded-t-lg whitespace-nowrap" data-tab="evidence">
+          <span class="flex items-center gap-1.5">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+            </svg>
+            Evidence
+          </span>
+        </button>
+        <button id="tabTeach" class="tab-btn px-3 py-2.5 text-sm text-app-muted rounded-t-lg whitespace-nowrap" data-tab="teach">
+          <span class="flex items-center gap-1.5">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+            </svg>
+            Teach
+          </span>
+        </button>
+        <button id="tabHistory" class="tab-btn px-3 py-2.5 text-sm text-app-muted rounded-t-lg whitespace-nowrap" data-tab="history">
+          <span class="flex items-center gap-1.5">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
+            History
+          </span>
+        </button>
+      </div>
+    </div>
+
+    <!-- ==================== Analyze 섹션 ==================== -->
+    <div id="sectionAnalyze" class="section-content flex flex-col flex-1 overflow-hidden">
+
+      <!-- 분석 티커 (진행 상황 표시) -->
+      <div id="analysisTicker" class="bg-blue-50 border-b border-blue-100 px-4 py-2 hidden">
+        <div class="ticker-container flex items-center gap-2">
+          <div class="flex gap-1">
+            <span class="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style="animation-delay: 0ms"></span>
+            <span class="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style="animation-delay: 150ms"></span>
+            <span class="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style="animation-delay: 300ms"></span>
+          </div>
+          <span id="tickerMessage" class="ticker-message text-sm text-blue-700">분석 준비 중...</span>
+        </div>
+      </div>
+
+      <!-- 분석 결과 영역 -->
+      <div class="flex-1 overflow-y-auto p-4" id="analysisContainer">
+        <div id="analysisContent" class="space-y-4">
+          <!-- 초기 상태: 분석 시작 안내 -->
+          <div id="analysisPlaceholder" class="flex flex-col items-center justify-center py-12 text-center">
+            <div class="w-16 h-16 bg-app-bg rounded-full flex items-center justify-center mb-4">
+              <svg class="w-8 h-8 text-app-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+              </svg>
+            </div>
+            <h3 class="text-lg font-semibold text-app-text mb-2">티켓 분석</h3>
+            <p class="text-sm text-app-muted mb-4 max-w-sm">
+              AI가 티켓을 분석하여 요약, 원인, 해결책을 제시하고<br>
+              신뢰도 기반의 게이트 결정을 제공합니다.
+            </p>
+            <button id="analyzeBtn" class="px-6 py-3 text-sm font-medium text-white bg-app-primary rounded-lg hover:bg-app-primary-hover transition-colors flex items-center gap-2">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+              </svg>
+              티켓 분석 실행
+            </button>
+          </div>
+
+          <!-- 분석 결과 (숨김 상태로 시작) -->
+          <div id="analysisResult" class="hidden space-y-4">
+            <!-- Gate 뱃지 -->
+            <div id="gateBadgeContainer" class="flex items-center gap-3">
+              <span id="gateBadge" class="px-3 py-1.5 text-sm font-semibold rounded-full"></span>
+              <span id="confidenceBar" class="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+                <div id="confidenceFill" class="h-full bg-green-500 transition-all duration-500"></div>
+              </span>
+              <span id="confidenceText" class="text-sm font-medium text-app-muted"></span>
+            </div>
+
+            <!-- Summary -->
+            <div class="bg-app-card border border-app-border rounded-lg p-4">
+              <h4 class="text-sm font-semibold text-app-text mb-2 flex items-center gap-2">
+                <svg class="w-4 h-4 text-app-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                </svg>
+                요약
+              </h4>
+              <p id="summaryText" class="text-sm text-app-text"></p>
+            </div>
+
+            <!-- Root Cause -->
+            <div id="rootCauseSection" class="bg-app-card border border-app-border rounded-lg p-4">
+              <h4 class="text-sm font-semibold text-app-text mb-2 flex items-center gap-2">
+                <svg class="w-4 h-4 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                </svg>
+                원인 분석
+              </h4>
+              <p id="rootCauseText" class="text-sm text-app-text"></p>
+            </div>
+
+            <!-- Resolution Steps -->
+            <div id="resolutionSection" class="bg-app-card border border-app-border rounded-lg p-4">
+              <h4 class="text-sm font-semibold text-app-text mb-3 flex items-center gap-2">
+                <svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                해결 단계
+              </h4>
+              <div id="resolutionSteps" class="space-y-2"></div>
+            </div>
+
+            <!-- Field Proposals -->
+            <div id="fieldProposalsSection" class="bg-app-card border border-app-border rounded-lg p-4">
+              <h4 class="text-sm font-semibold text-app-text mb-3 flex items-center gap-2">
+                <svg class="w-4 h-4 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/>
+                </svg>
+                필드 업데이트 제안
+              </h4>
+              <div id="fieldProposalsList" class="space-y-2"></div>
+            </div>
+
+            <!-- Intent & Sentiment -->
+            <div class="flex gap-4">
+              <div class="flex-1 bg-app-card border border-app-border rounded-lg p-4">
+                <h4 class="text-xs font-semibold text-app-muted uppercase mb-1">Intent</h4>
+                <p id="intentText" class="text-sm font-medium text-app-text"></p>
+              </div>
+              <div class="flex-1 bg-app-card border border-app-border rounded-lg p-4">
+                <h4 class="text-xs font-semibold text-app-muted uppercase mb-1">Sentiment</h4>
+                <p id="sentimentText" class="text-sm font-medium text-app-text"></p>
+              </div>
+            </div>
+
+            <!-- Risk Tags -->
+            <div id="riskTagsSection" class="hidden">
+              <div class="flex flex-wrap gap-2">
+                <span class="text-xs font-medium text-app-muted">Risk Tags:</span>
+                <div id="riskTagsList" class="flex flex-wrap gap-1"></div>
+              </div>
+            </div>
+
+            <!-- Escalation History -->
+            <div id="escalationSection" class="bg-app-card border border-app-border rounded-lg p-4 hidden">
+              <h4 class="text-sm font-semibold text-app-text mb-3 flex items-center gap-2">
+                <svg class="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
+                </svg>
+                에스컬레이션 이력
+              </h4>
+              <div id="escalationContent" class="space-y-2"></div>
+            </div>
+
+            <!-- Current Status -->
+            <div id="currentStatusSection" class="bg-app-card border border-app-border rounded-lg p-4 hidden">
+              <h4 class="text-sm font-semibold text-app-text mb-3 flex items-center gap-2">
+                <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                현재 상태
+              </h4>
+              <div id="currentStatusContent" class="space-y-2"></div>
+            </div>
+
+            <!-- HITL Feedback Buttons -->
+            <div id="feedbackSection" class="bg-app-card border border-app-border rounded-lg p-4 hidden">
+              <h4 class="text-sm font-semibold text-app-text mb-3">이 분석이 도움이 되었나요?</h4>
+              <div class="flex items-center gap-2">
+                <button id="feedbackHelpfulBtn" class="feedback-btn flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg border border-app-border hover:border-green-400 hover:bg-green-50 transition-colors" data-type="helpful">
+                  <span>👍</span> 도움됨
+                </button>
+                <button id="feedbackNotHelpfulBtn" class="feedback-btn flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg border border-app-border hover:border-red-400 hover:bg-red-50 transition-colors" data-type="not_helpful">
+                  <span>👎</span> 부정확
+                </button>
+                <button id="feedbackEditBtn" class="feedback-btn flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg border border-app-border hover:border-blue-400 hover:bg-blue-50 transition-colors">
+                  <span>✏️</span> 수정
+                </button>
+              </div>
+              <div id="feedbackResult" class="hidden mt-3 p-3 rounded-lg text-sm"></div>
+            </div>
+
+            <!-- Meta Info -->
+            <div class="text-xs text-app-muted flex items-center gap-4 pt-2 border-t border-app-border">
+              <span id="metaAnalysisId"></span>
+              <span id="metaLatency"></span>
+              <span id="metaModel"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== Evidence 섹션 ==================== -->
+    <div id="sectionEvidence" class="section-content flex flex-col flex-1 overflow-hidden section-hidden">
+      <div class="flex-1 overflow-y-auto p-4">
+        <div id="evidenceContent" class="space-y-4">
+          <!-- 증거가 없는 경우 -->
+          <div id="evidencePlaceholder" class="flex flex-col items-center justify-center py-12 text-center">
+            <div class="w-16 h-16 bg-app-bg rounded-full flex items-center justify-center mb-4">
+              <svg class="w-8 h-8 text-app-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+              </svg>
+            </div>
+            <h3 class="text-lg font-semibold text-app-text mb-2">Evidence</h3>
+            <p class="text-sm text-app-muted max-w-sm">
+              분석을 먼저 실행하면 AI가 참조한 근거 자료를<br>
+              여기서 확인할 수 있습니다.
+            </p>
+          </div>
+
+          <!-- Evidence 목록 (숨김 상태) -->
+          <div id="evidenceList" class="hidden space-y-3">
+            <!-- 필터 -->
+            <div class="flex gap-2 flex-wrap">
+              <button class="evidence-filter-btn active px-3 py-1.5 text-xs font-medium rounded-full border transition-colors" data-filter="all">전체</button>
+              <button class="evidence-filter-btn px-3 py-1.5 text-xs font-medium rounded-full border transition-colors" data-filter="conversation">대화</button>
+              <button class="evidence-filter-btn px-3 py-1.5 text-xs font-medium rounded-full border transition-colors" data-filter="ticket_field">필드</button>
+              <button class="evidence-filter-btn px-3 py-1.5 text-xs font-medium rounded-full border transition-colors" data-filter="kb_article">KB</button>
+              <button class="evidence-filter-btn px-3 py-1.5 text-xs font-medium rounded-full border transition-colors" data-filter="similar_case">유사 사례</button>
+            </div>
+            <!-- Evidence 아이템 컨테이너 -->
+            <div id="evidenceItems" class="space-y-2"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== Teach 섹션 ==================== -->
+    <div id="sectionTeach" class="section-content flex flex-col flex-1 overflow-hidden section-hidden">
+      <div class="flex-1 overflow-y-auto p-4">
+        <div id="teachContent" class="space-y-4">
+          <!-- Teach 안내 -->
+          <div id="teachPlaceholder" class="flex flex-col items-center justify-center py-8 text-center">
+            <div class="w-16 h-16 bg-app-bg rounded-full flex items-center justify-center mb-4">
+              <svg class="w-8 h-8 text-app-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
+              </svg>
+            </div>
+            <h3 class="text-lg font-semibold text-app-text mb-2">AI에게 교훈 전달</h3>
+            <p class="text-sm text-app-muted max-w-sm mb-4">
+              분석 결과가 부정확했다면 여기서 피드백을 제출하여<br>
+              AI가 더 나은 판단을 할 수 있도록 도와주세요.
+            </p>
+          </div>
+
+          <!-- Teach 폼 -->
+          <form id="teachForm" class="space-y-4">
+            <input type="hidden" id="teachAnalysisId" value="">
+
+            <div>
+              <label class="block text-sm font-medium text-app-text mb-1">잘못된 패턴 (Mistake Pattern)</label>
+              <textarea id="teachMistakePattern" rows="2"
+                class="w-full px-3 py-2 text-sm bg-app-bg border border-app-border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-app-primary"
+                placeholder="AI가 잘못 판단한 패턴을 설명해주세요..."></textarea>
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-app-text mb-1">잘못된 가정 (Wrong Assumption)</label>
+              <textarea id="teachWrongAssumption" rows="2"
+                class="w-full px-3 py-2 text-sm bg-app-bg border border-app-border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-app-primary"
+                placeholder="AI가 잘못 가정한 것이 무엇인가요?"></textarea>
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-app-text mb-1">교정 휴리스틱 (Corrective Heuristic)</label>
+              <textarea id="teachCorrectiveHeuristic" rows="2"
+                class="w-full px-3 py-2 text-sm bg-app-bg border border-app-border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-app-primary"
+                placeholder="올바른 판단 기준을 알려주세요..."></textarea>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <input type="checkbox" id="teachAutomationPossible" class="w-4 h-4 text-app-primary rounded border-app-border focus:ring-app-primary">
+              <label for="teachAutomationPossible" class="text-sm text-app-text">이 패턴은 자동화가 가능합니다</label>
+            </div>
+
+            <div class="flex gap-2">
+              <button type="submit" id="teachSubmitBtn"
+                class="flex-1 px-4 py-2 text-sm font-medium text-white bg-app-primary rounded-lg hover:bg-app-primary-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                교훈 제출
+              </button>
+              <button type="button" id="teachResetBtn"
+                class="px-4 py-2 text-sm font-medium text-app-muted bg-app-bg border border-app-border rounded-lg hover:bg-gray-100 transition-colors">
+                초기화
+              </button>
+            </div>
+          </form>
+
+          <!-- 제출 결과 -->
+          <div id="teachResult" class="hidden mt-4 p-4 rounded-lg"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== History 섹션 ==================== -->
+    <div id="sectionHistory" class="section-content flex flex-col flex-1 overflow-hidden section-hidden">
+      <div class="flex-1 overflow-y-auto p-4">
+        <div id="historyContent" class="space-y-4">
+          <!-- History 안내 -->
+          <div id="historyPlaceholder" class="flex flex-col items-center justify-center py-12 text-center">
+            <div class="w-16 h-16 bg-app-bg rounded-full flex items-center justify-center mb-4">
+              <svg class="w-8 h-8 text-app-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+            </div>
+            <h3 class="text-lg font-semibold text-app-text mb-2">분석 이력</h3>
+            <p class="text-sm text-app-muted max-w-sm mb-4">
+              이 티켓의 과거 분석 기록을 확인하고<br>
+              결과를 비교해 볼 수 있습니다.
+            </p>
+            <button id="loadHistoryBtn" class="px-4 py-2 text-sm font-medium text-app-primary bg-white border border-app-border rounded-lg hover:border-app-primary transition-colors">
+              이력 불러오기
+            </button>
+          </div>
+
+          <!-- History 목록 (숨김 상태) -->
+          <div id="historyList" class="hidden space-y-2"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- HITL 수정 모달 -->
+  <div id="editModal" class="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 hidden">
+    <div class="bg-app-card rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden mx-4">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-app-border">
+        <h3 class="font-semibold text-app-text">AI 응답 수정</h3>
+        <button id="closeEditModalBtn" class="p-1 hover:bg-app-border rounded-lg transition-colors">
+          <svg class="w-5 h-5 text-app-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div class="p-4 overflow-y-auto max-h-[60vh] space-y-4">
+        <!-- Summary Edit -->
+        <div>
+          <label class="block text-sm font-medium text-app-text mb-1">요약 (Summary)</label>
+          <textarea id="editSummary" rows="3"
+            class="w-full px-3 py-2 text-sm bg-app-bg border border-app-border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-app-primary"
+            placeholder="수정된 요약을 입력하세요..."></textarea>
+        </div>
+        <!-- Root Cause Edit -->
+        <div>
+          <label class="block text-sm font-medium text-app-text mb-1">원인 분석 (Root Cause)</label>
+          <textarea id="editRootCause" rows="3"
+            class="w-full px-3 py-2 text-sm bg-app-bg border border-app-border rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-app-primary"
+            placeholder="수정된 원인 분석을 입력하세요..."></textarea>
+        </div>
+        <!-- Confidence Edit -->
+        <div>
+          <label class="block text-sm font-medium text-app-text mb-1">신뢰도 (0.0 ~ 1.0)</label>
+          <input id="editConfidence" type="number" min="0" max="1" step="0.1"
+            class="w-full px-3 py-2 text-sm bg-app-bg border border-app-border rounded-lg focus:outline-none focus:ring-2 focus:ring-app-primary"
+            placeholder="0.8">
+        </div>
+      </div>
+      <div class="flex justify-end gap-2 px-4 py-3 border-t border-app-border">
+        <button id="cancelEditBtn" class="px-4 py-2 text-sm font-medium text-app-muted bg-app-bg border border-app-border rounded-lg hover:bg-gray-100 transition-colors">
+          취소
+        </button>
+        <button id="saveEditBtn" class="px-4 py-2 text-sm font-medium text-white bg-app-primary rounded-lg hover:bg-app-primary-hover transition-colors">
+          저장
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 참조 문서 모달 -->
+  <div id="sourceModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 hidden">
+    <div class="bg-app-card rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden mx-4">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-app-border">
+        <h3 class="font-semibold text-app-text" id="modalTitle">참조 문서</h3>
+        <button id="closeModalBtn" class="p-1 hover:bg-app-border rounded-lg transition-colors">
+          <svg class="w-5 h-5 text-app-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div class="p-4 overflow-y-auto max-h-[60vh]">
+        <div id="modalContent" class="text-sm text-app-text whitespace-pre-wrap"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FDK Client 스크립트 -->
+  <script src="{{{appclient}}}"></script>
+
+  <!-- 백엔드 설정 및 스트림 유틸 -->
+  <script src="scripts/backend-config.js"></script>
+  <script src="scripts/stream-utils.js"></script>
+
+  <!-- 분석 UI 모듈 (PR3) -->
+  <script src="scripts/analysis-ui.js"></script>
+
+  <!-- 앱 스크립트 -->
+  <script src="scripts/app.js"></script>
+</body>
+</html>
