@@ -8,7 +8,7 @@
             "skills": ["skill-developer", "error-tracking"]
         },
         "freshworks": {
-            "enabled": false,
+            "enabled": true,
             "description": "Freshworks App SDK (FDK) development",
             "skills": ["fdk-guidelines"]
         },
@@ -31,6 +31,21 @@
             "enabled": false,
             "description": "Next.js specific patterns",
             "skills": ["nextjs-guidelines"]
+        },
+        "quality": {
+            "enabled": true,
+            "description": "Universal code quality standards and best practices",
+            "skills": ["coding-standards"]
+        },
+        "security": {
+            "enabled": true,
+            "description": "Security review, vulnerability prevention, and secure coding patterns",
+            "skills": ["security-review"]
+        },
+        "frontend": {
+            "enabled": true,
+            "description": "Frontend component patterns and UI best practices",
+            "skills": ["frontend-patterns"]
         }
     },
     "skills": {
@@ -327,6 +342,114 @@
                     "fw-input",
                     "fw-modal",
                     "@freshworks"
+                ]
+            }
+        },
+        "coding-standards": {
+            "module": "quality",
+            "type": "guardrail",
+            "enforcement": "suggest",
+            "priority": "high",
+            "description": "Universal coding standards: naming, immutability, error handling, DRY/KISS/YAGNI",
+            "skillPath": "quality/coding-standards",
+            "promptTriggers": {
+                "keywords": [
+                    "code quality",
+                    "naming convention",
+                    "immutability",
+                    "dry principle",
+                    "code smell",
+                    "magic number",
+                    "deep nesting",
+                    "early return"
+                ],
+                "intentPatterns": [
+                    "(improve|review|check).*?(code quality|naming|style)",
+                    "(how to|best practice).*?(naming|function|variable|error handling)",
+                    "code.*?(smell|standard|convention)"
+                ]
+            }
+        },
+        "security-review": {
+            "module": "security",
+            "type": "guardrail",
+            "enforcement": "suggest",
+            "priority": "critical",
+            "description": "Security checklist: secrets, input validation, XSS, CSRF, auth, rate limiting",
+            "skillPath": "security/security-review",
+            "promptTriggers": {
+                "keywords": [
+                    "security",
+                    "api key",
+                    "secret",
+                    "password",
+                    "token",
+                    "authentication",
+                    "authorization",
+                    "injection",
+                    "xss",
+                    "csrf",
+                    "vulnerability",
+                    "iparams",
+                    "env variable"
+                ],
+                "intentPatterns": [
+                    "(add|implement|review|check).*?(auth|security|api.*?key|secret|token)",
+                    "(security|vulnerability).*?(review|audit|check|scan)",
+                    "(protect|prevent|secure).*?(injection|xss|csrf|attack)"
+                ]
+            },
+            "fileTriggers": {
+                "pathPatterns": [
+                    "fdk/config/**/*",
+                    "**/iparams.json",
+                    "fdk/server/**/*.js"
+                ],
+                "contentPatterns": [
+                    "apiKey",
+                    "api_key",
+                    "password",
+                    "secret",
+                    "token",
+                    "client\\.request"
+                ]
+            }
+        },
+        "frontend-patterns": {
+            "module": "frontend",
+            "type": "domain",
+            "enforcement": "suggest",
+            "priority": "medium",
+            "description": "Frontend patterns: composition, state management, performance, accessibility",
+            "skillPath": "frontend/frontend-patterns",
+            "promptTriggers": {
+                "keywords": [
+                    "component pattern",
+                    "composition",
+                    "state management",
+                    "lazy loading",
+                    "memoization",
+                    "performance",
+                    "accessibility",
+                    "crayons component"
+                ],
+                "intentPatterns": [
+                    "(implement|design|create).*?(component|ui pattern|state)",
+                    "(optimize|improve).*?(performance|rendering|loading)",
+                    "(how to|best practice).*?(component|state|ui|frontend)"
+                ]
+            },
+            "fileTriggers": {
+                "pathPatterns": [
+                    "fdk/app/**/*.js",
+                    "fdk/app/**/*.html",
+                    "fdk/app/**/*.css"
+                ],
+                "contentPatterns": [
+                    "fw-button",
+                    "fw-input",
+                    "fw-modal",
+                    "crayons"
                 ]
             }
         }

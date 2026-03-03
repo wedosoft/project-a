@@ -5,7 +5,8 @@
       "functions": {
         "getSecureParams": {},
         "triggerSyncJob": {},
-        "upsertIncrementalSchedule": {}
+        "upsertIncrementalSchedule": {},
+        "getTicketInsights": {}
       },
       "events": {
         "onScheduledEvent": {
@@ -19,7 +20,9 @@
         "updateTicket": {},
         "backendApi": {},
         "backendApiPost": {},
-        "backendApiPut": {}
+        "backendApiPut": {},
+        "fetchTicket": {},
+        "fetchConversations": {}
       }
     },
     "support_ticket": {

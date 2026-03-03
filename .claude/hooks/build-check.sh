@@ -22,10 +22,16 @@ detect_project_type() {
         types="python"
     fi
     
+    # Check for FDK (Freshworks Developer Kit)
+    if [ -f "$CLAUDE_PROJECT_DIR/fdk/manifest.json" ]; then
+        [ -n "$types" ] && types="$types "
+        types="${types}fdk"
+    fi
+
     # Check for TypeScript/JavaScript
     if [ -f "$CLAUDE_PROJECT_DIR/tsconfig.json" ] || \
        [ -f "$CLAUDE_PROJECT_DIR/package.json" ]; then
-        [ -n "$types" ] && types="$types " 
+        [ -n "$types" ] && types="$types "
         types="${types}typescript"
     fi
     
@@ -93,6 +99,30 @@ run_python_check() {
     return 0
 }
 
+# Run FDK ESLint check
+run_fdk_check() {
+    echo "🔧 FDK ESLint 검사 중..." >&2
+
+    local fdk_dir="$CLAUDE_PROJECT_DIR/fdk"
+
+    if [ ! -f "$fdk_dir/.eslintrc.json" ] && [ ! -f "$fdk_dir/.eslintrc.js" ]; then
+        echo "  ⚠️ ESLint 설정 없음 - 건너뜀" >&2
+        return 0
+    fi
+
+    cd "$fdk_dir" || return 1
+    local errors
+    errors=$(ESLINT_USE_FLAT_CONFIG=false npx eslint app/scripts/ --max-warnings 0 2>/dev/null)
+    if [ $? -ne 0 ]; then
+        echo "$errors" > "$CACHE_DIR/fdk-errors.txt"
+        echo "  ❌ FDK ESLint 오류 발견" >&2
+        return 1
+    fi
+
+    echo "  ✅ FDK ESLint OK" >&2
+    return 0
+}
+
 # Run TypeScript check
 run_typescript_check() {
     echo "📘 TypeScript 검사 중..." >&2
@@ -139,6 +169,9 @@ for ptype in $PROJECT_TYPES; do
     case "$ptype" in
         python)
             run_python_check || TOTAL_ERRORS=$((TOTAL_ERRORS + 1))
+            ;;
+        fdk)
+            run_fdk_check || TOTAL_ERRORS=$((TOTAL_ERRORS + 1))
             ;;
         typescript)
             run_typescript_check || TOTAL_ERRORS=$((TOTAL_ERRORS + 1))

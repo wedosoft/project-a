@@ -42,6 +42,10 @@ detect_repo() {
 
     # Common project directory patterns
     case "$repo" in
+        # Freshworks FDK
+        fdk)
+            echo "$repo"
+            ;;
         # Frontend variations
         frontend|client|web|app|ui)
             echo "$repo"

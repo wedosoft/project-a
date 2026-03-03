@@ -7,6 +7,181 @@
 
 const SCHEDULE_NAME = 'incremental_sync';
 
+// =============================================================================
+// getTicketInsights 헬퍼 함수들 (nexus-ai 출처)
+// =============================================================================
+
+function toText(htmlOrText) {
+  if (!htmlOrText) return '';
+  return String(htmlOrText)
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeDomain(domain) {
+  return String(domain || '')
+    .replace(/^https?:\/\//, '')
+    .split('/')[0]
+    .trim();
+}
+
+function toStructuredConversation({ domain, ticket, conversations, actor_agent_id }) {
+  const freshdesk_domain = normalizeDomain(domain);
+  const subject = ticket?.subject ?? null;
+  const conversation = [];
+
+  const firstText = toText(ticket?.description || ticket?.description_text || '');
+  if (firstText) {
+    conversation.push({
+      id: String(ticket?.id ?? 'ticket'),
+      ts: ticket?.created_at ?? null,
+      author_role: 'customer',
+      author_id: ticket?.requester_id ? String(ticket.requester_id) : null,
+      channel: 'email',
+      text: firstText
+    });
+  }
+
+  for (const c of conversations || []) {
+    const text = toText(c?.body_text || c?.body || '');
+    if (!text) continue;
+
+    const isAgent = Boolean(c?.user_id);
+    conversation.push({
+      id: c?.id ? String(c.id) : null,
+      ts: c?.created_at ?? null,
+      author_role: isAgent ? 'agent' : 'customer',
+      author_id: (c?.user_id || c?.from_email) ? String(c.user_id || c.from_email) : null,
+      channel: 'email',
+      text
+    });
+  }
+
+  return {
+    freshdesk_domain,
+    ticket_id: String(ticket?.id ?? ''),
+    actor_agent_id: actor_agent_id ?? null,
+    locale: 'ko-KR',
+    subject,
+    conversation,
+    force_refresh: false
+  };
+}
+
+function getTotalPages(linkHeader) {
+  if (!linkHeader) return 1;
+  const lastMatch = linkHeader.match(/page=(\d+)>;\s*rel="last"/);
+  if (lastMatch) {
+    return parseInt(lastMatch[1], 10);
+  }
+  return 1;
+}
+
+function getTicketInsights(args) {
+  const ticket_id = args.ticket_id;
+  const actor_agent_id = args.actor_agent_id || null;
+  const iparams = args.iparams || {};
+  const domain = iparams.freshdesk_domain;
+  const api_key = iparams.freshdesk_api_key;
+
+  if (!ticket_id) {
+    renderData({ status: 400, message: 'ticket_id is required' });
+    return;
+  }
+
+  if (!domain) {
+    renderData({ status: 400, message: 'freshdesk_domain not configured in iparams' });
+    return;
+  }
+
+  if (!api_key) {
+    renderData({ status: 400, message: 'freshdesk_api_key not configured in iparams' });
+    return;
+  }
+
+  const normalizedDomain = normalizeDomain(domain);
+
+  console.log('Fetching ticket:', ticket_id);
+  console.log('Using domain:', normalizedDomain);
+
+  $request.invokeTemplate('fetchTicket', {
+    context: { ticket_id: ticket_id },
+    iparams: { freshdesk_domain: normalizedDomain, freshdesk_api_key: api_key }
+  }).then(function(ticketData) {
+    const ticket = JSON.parse(ticketData.response);
+    console.log('Ticket fetched:', ticket.id);
+
+    return $request.invokeTemplate('fetchConversations', {
+      context: { ticket_id: ticket_id, page: 1 },
+      iparams: { freshdesk_domain: normalizedDomain, freshdesk_api_key: api_key }
+    }).then(function(firstPageData) {
+      return { ticket: ticket, firstPageData: firstPageData };
+    });
+  }).then(function(result) {
+    const ticket = result.ticket;
+    const firstPageData = result.firstPageData;
+    const firstPageConversations = JSON.parse(firstPageData.response);
+
+    const linkHeader = firstPageData.headers && firstPageData.headers.link;
+    const totalPages = getTotalPages(linkHeader);
+
+    console.log('Total conversation pages:', totalPages);
+    console.log('First page conversations:', firstPageConversations.length);
+
+    if (totalPages === 1) {
+      const structured = toStructuredConversation({
+        domain: normalizedDomain,
+        ticket: ticket,
+        conversations: firstPageConversations,
+        actor_agent_id: actor_agent_id
+      });
+
+      console.log('Total conversations:', structured.conversation.length);
+      renderData(null, { status: 'success', data: structured });
+      return;
+    }
+
+    const remainingPromises = [];
+    for (let page = 2; page <= totalPages; page++) {
+      remainingPromises.push(
+        $request.invokeTemplate('fetchConversations', {
+          context: { ticket_id: ticket_id, page: page },
+          iparams: { freshdesk_domain: normalizedDomain, freshdesk_api_key: api_key }
+        })
+      );
+    }
+
+    return Promise.all(remainingPromises).then(function(remainingPagesData) {
+      let allConversations = firstPageConversations;
+      for (let i = 0; i < remainingPagesData.length; i++) {
+        const pageConversations = JSON.parse(remainingPagesData[i].response);
+        allConversations = allConversations.concat(pageConversations);
+      }
+
+      console.log('Total conversations fetched:', allConversations.length);
+
+      const structured = toStructuredConversation({
+        domain: normalizedDomain,
+        ticket: ticket,
+        conversations: allConversations,
+        actor_agent_id: actor_agent_id
+      });
+
+      console.log('Total conversation messages:', structured.conversation.length);
+      renderData(null, { status: 'success', data: structured });
+    }, function(err) {
+      console.error('Promise.all error:', err);
+      renderData({ status: 500, message: 'Failed to fetch remaining pages: ' + (err.message || 'Unknown error') });
+    });
+  }, function(err) {
+    console.error('Freshdesk API error:', err);
+    renderData({ status: err.status || 500, message: 'Failed to fetch ticket and conversations: ' + (err.message || 'Unknown error') });
+  });
+}
+
 // 환경별 백엔드 주소 정책
 // - 운영: 코드 기본값으로 api.wedosoft.net 사용
 // - 로컬 개발: BACKEND_BASE_URL 환경변수로 ngrok 등 오버라이드
@@ -238,5 +413,8 @@ exports = {
   },
   onIncrementalSyncSchedule: async function(payload) {
     return await onIncrementalSyncSchedule(payload);
+  },
+  getTicketInsights: function(args) {
+    return getTicketInsights(args);
   }
 };

@@ -119,17 +119,21 @@
     showTicker('티켓 분석 중...');
 
     try {
-      // conversations 가져오기 (FDK API 사용)
+      // conversations 가져오기 (getTicketInsights 서버리스 사용)
       let conversations = [];
       try {
         if (window.state?.client) {
-          const convResponse = await window.state.client.request.invoke('getConversations', {
-            ticketId: ticketData.id
+          const serverlessResult = await window.state.client.request.invoke('getTicketInsights', {
+            ticket_id: String(ticketData.id),
+            actor_agent_id: null
           });
-          conversations = convResponse?.response || [];
+          const actualResponse = serverlessResult.response || serverlessResult;
+          if (actualResponse?.status === 'success' && actualResponse.data) {
+            conversations = actualResponse.data.conversation || [];
+          }
         }
       } catch (convError) {
-        console.warn('[AnalysisUI] Failed to fetch conversations:', convError);
+        console.warn('[AnalysisUI] Failed to fetch conversations via serverless:', convError);
       }
 
       // V2 API 호출
