@@ -107,3 +107,4 @@ claude-flow
 # Removed Windows wrapper files per user request
 hive-mind-prompt-*.txt
 fdk/.fdk/localstore
+fdk/.report.json
