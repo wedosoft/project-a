@@ -60,6 +60,14 @@ For multi-step tasks, state a brief plan:
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
+## 5. Verify Before Reporting
+
+**Explore agent 결과를 그대로 전달하지 말 것.**
+
+- Explore agent가 "X 파일의 Y 함수에 있다"고 하면, 전달 전 Read 도구로 직접 확인
+- agent 결론과 실제 코드가 불일치하면 재탐색 후 보고
+- 확인하지 않은 주장은 "agent 결과에 따르면"이라고 명시하거나 직접 검증
+
 ---
 
 ## Backend Platform

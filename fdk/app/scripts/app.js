@@ -1825,55 +1825,14 @@ async function loadStatus() {
 async function loadTicketData() {
   const { client } = state;
   const data = await client.data.get('ticket');
-  const ticketId = data.ticket.id;
-  const fdkTicket = data && data.ticket ? data.ticket : null;
+  const ticketData = data.ticket;
 
-  const response = await client.request.invokeTemplate('getTicketWithConversations', {
-    context: { ticketId }
-  });
-
-  if (response.status !== 200) {
-    throw new Error(`티켓 로드 실패: ${response.status}`);
-  }
-  
-  const ticketData = JSON.parse(response.response);
-
-  // Freshdesk ticket API 응답에 일부 필드가 누락/비어있는 경우가 있어(FDK 컨텍스트가 더 풍부한 경우)
-  // FDK ticket 값을 기준으로 보완합니다. (예: type)
-  if (fdkTicket && typeof fdkTicket === 'object') {
-    for (const [k, v] of Object.entries(fdkTicket)) {
-      if (ticketData[k] === undefined || ticketData[k] === null || ticketData[k] === '') {
-        ticketData[k] = v;
-      }
-    }
-
-    if (fdkTicket.custom_fields && typeof fdkTicket.custom_fields === 'object') {
-      ticketData.custom_fields = ticketData.custom_fields || {};
-      for (const [k, v] of Object.entries(fdkTicket.custom_fields)) {
-        if (ticketData.custom_fields[k] === undefined || ticketData.custom_fields[k] === null || ticketData.custom_fields[k] === '') {
-          ticketData.custom_fields[k] = v;
-        }
-      }
-    }
-  }
-
-  // Freshdesk 환경에 따라 type 필드명이 다를 수 있어(ticket_fields에서 ticket_type 등)
-  // 서로 보완해 UI 표시/업데이트 제안에 활용한다.
-  if ((ticketData.type === undefined || ticketData.type === null || ticketData.type === '') && ticketData.ticket_type) {
-    ticketData.type = ticketData.ticket_type;
-  }
-  if ((ticketData.ticket_type === undefined || ticketData.ticket_type === null || ticketData.ticket_type === '') && ticketData.type) {
-    ticketData.ticket_type = ticketData.type;
-  }
-  
   try {
-    const allConversations = await fetchAllConversations(ticketId);
-    if (allConversations.length > (ticketData.conversations?.length || 0)) {
-      ticketData.conversations = allConversations;
-      console.log(`전체 대화 내역 로드 완료: ${allConversations.length}개`);
-    }
+    ticketData.conversations = await fetchAllConversations(ticketData.id);
+    console.log(`대화 내역 로드 완료: ${ticketData.conversations.length}개`);
   } catch (error) {
-    console.error('대화 내역 추가 로드 실패:', error);
+    console.error('대화 내역 로드 실패:', error);
+    ticketData.conversations = [];
   }
 
   setTicketData(ticketData);
@@ -1884,7 +1843,7 @@ async function loadTicketData() {
   
   const elements = getElements();
   if (elements.headerTitle) {
-      elements.headerTitle.textContent = `티켓 #${ticketId}`;
+      elements.headerTitle.textContent = `티켓 #${ticketData.id}`;
   }
   console.log('티켓 로드 완료:', ticketData);
 }
