@@ -1,0 +1,26 @@
+data: {"type": "progress", "step": "analyzing", "analysis_id": "0e6f1c0d-c803-4abe-a53e-030f2e18ca0c"}
+
+data: {"type": "field", "name": "narrative", "data": {"summary": "제공된 티켓 정보, 대화 이력, 티켓 필드 스키마, 현재 필드 값, 유사 사례, 관련 KB 문서를 기반으로 티켓을 분석하고 구조화된 JSON 응답을 생성합니다.", "timeline": []}}
+
+data: {"type": "field", "name": "confidence", "data": 0.0}
+
+data: {"type": "field", "name": "root_cause", "data": null}
+
+data: {"type": "field", "name": "resolution", "data": []}
+
+data: {"type": "field", "name": "intent", "data": "unknown"}
+
+data: {"type": "field", "name": "sentiment", "data": "neutral"}
+
+data: {"type": "field", "name": "risk_tags", "data": []}
+
+data: {"type": "field", "name": "field_proposals", "data": []}
+
+data: {"type": "field", "name": "escalation_history", "data": {"has_escalation": false, "handoffs": [], "notes": null}}
+
+data: {"type": "field", "name": "current_status", "data": {"state": "unresolved", "pending_items": [], "notes": "티켓 내용이 제공되지 않아 분석을 진행할 수 없습니다."}}
+
+data: {"type": "field", "name": "evidence", "data": []}
+
+data: {"type": "complete", "analysis_id": "0e6f1c0d-c803-4abe-a53e-030f2e18ca0c", "gate": "TEACH", "meta": {"llm_provider": "gemini", "llm_model": "gemini-2.0-flash", "prompt_version": "ticket_analysis_cot_v1", "latency_ms": 2498, "token_usage": {"input": 0, "output": 0}, "retrieval_count": 0, "created_at": "2026-03-04T08:07:25.391478+00:00", "used_fallback": false, "attempts": 1}}
+

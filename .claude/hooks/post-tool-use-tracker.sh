@@ -1,13 +1,10 @@
 #!/bin/bash
-set -e
 
 # Post-tool-use hook that tracks edited files and their repos
 # This runs after Edit, MultiEdit, or Write tools complete successfully
 
-
 # Read tool information from stdin
-tool_info=$(cat)
-
+tool_info=$(cat) || exit 0
 
 # Validate JSON before parsing (non-JSON stdin → skip)
 if ! echo "$tool_info" | jq empty 2>/dev/null; then
@@ -15,9 +12,9 @@ if ! echo "$tool_info" | jq empty 2>/dev/null; then
 fi
 
 # Extract relevant data
-tool_name=$(echo "$tool_info" | jq -r '.tool_name // empty')
-file_path=$(echo "$tool_info" | jq -r '.tool_input.file_path // empty')
-session_id=$(echo "$tool_info" | jq -r '.session_id // empty')
+tool_name=$(echo "$tool_info" | jq -r '.tool_name // empty' 2>/dev/null) || true
+file_path=$(echo "$tool_info" | jq -r '.tool_input.file_path // empty' 2>/dev/null) || true
+session_id=$(echo "$tool_info" | jq -r '.session_id // empty' 2>/dev/null) || true
 
 
 # Skip if not an edit tool or no file path
@@ -166,22 +163,25 @@ if ! grep -q "^$repo$" "$cache_dir/affected-repos.txt" 2>/dev/null; then
 fi
 
 # Store build commands
-build_cmd=$(get_build_command "$repo")
-tsc_cmd=$(get_tsc_command "$repo")
+build_cmd=$(get_build_command "$repo") || true
+tsc_cmd=$(get_tsc_command "$repo") || true
+
+# Use PID-scoped temp file to avoid race conditions
+tmp_file="$cache_dir/commands.txt.$$"
 
 if [[ -n "$build_cmd" ]]; then
-    echo "$repo:build:$build_cmd" >> "$cache_dir/commands.txt.tmp"
+    echo "$repo:build:$build_cmd" >> "$tmp_file"
 fi
 
 if [[ -n "$tsc_cmd" ]]; then
-    echo "$repo:tsc:$tsc_cmd" >> "$cache_dir/commands.txt.tmp"
+    echo "$repo:tsc:$tsc_cmd" >> "$tmp_file"
 fi
 
-# Remove duplicates from commands
-if [[ -f "$cache_dir/commands.txt.tmp" ]]; then
-    sort -u "$cache_dir/commands.txt.tmp" > "$cache_dir/commands.txt"
-    rm -f "$cache_dir/commands.txt.tmp"
+# Merge into commands.txt atomically
+if [[ -f "$tmp_file" ]]; then
+    cat "$tmp_file" >> "$cache_dir/commands.txt" 2>/dev/null
+    sort -u "$cache_dir/commands.txt" -o "$cache_dir/commands.txt" 2>/dev/null
+    rm -f "$tmp_file"
 fi
 
-# Exit cleanly
 exit 0

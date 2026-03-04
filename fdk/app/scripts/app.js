@@ -1756,12 +1756,11 @@ async function handleProposeFieldsOnly() {
     };
 
     setAnalysisResult(merged);
-    renderAnalysisResult(merged);
+    // TODO: 필드 제안 UI 재구현 시 렌더링 연결
 
   } catch (error) {
     console.error('필드 제안 실패:', error);
     hideTicker();
-    renderAnalysisError(`필드 제안 오류: ${error.message}`);
   } finally {
     setLoading(false);
     updateStatus('ready', '준비 완료');
@@ -2138,103 +2137,16 @@ function handleNewChat() {
 
 async function handleAnalyzeTicket() {
   if (state.isLoading || !state.ticketData) return;
-  
+
   setLoading(true);
   updateStatus('loading', '분석 중...');
-  
-  // 플레이스홀더 숨기기
-  if (elements.analysisPlaceholder) {
-    elements.analysisPlaceholder.classList.add('hidden');
-  }
-  
-  // 티커 표시
-  showTicker('router_decision');
-  
+
   try {
-    // NOTE: 원인/해결 분석은 ticket_fields(거대 스키마)를 보내지 않아도 된다.
-    //       (필드 제안은 별도 버튼/엔드포인트로 분리)
-    const payload = {
-      ticket_id: String(state.ticketData.id),
-      subject: state.ticketData.subject,
-      description: state.ticketData.description_text
-    };
-
-    // SSE 스트림으로 원인/해결 분석 요청
-    const result = await window.StreamUtils.streamSolution(payload, (event) => {
-      // 진행 상황 티커 업데이트
-      const eventType = event.type || event;
-      const eventData = event.data || {};
-      
-      showTicker(eventType, eventData);
-      console.log('[Analyze] Progress:', eventType, eventData);
-
-      // progressive complete가 오면 result로 처리하되,
-      // 도중에 draft_response 등 일부 이벤트만 와도 티커는 갱신한다.
-    });
-    
-    // 분석 완료
-    hideTicker();
-    
-    // result는 complete.data (proposal/analysis/search/timingMs)
-    const finalResult = result || state.analysisResult;
-    console.log('[Analyze] Final Result:', finalResult);
-
-    if (finalResult) {
-      const analysis = finalResult.analysis || null;
-      const proposal = finalResult.proposal || null;
-
-      const merged = {
-        ...(analysis || {}),
-        ...(proposal || {})
-      };
-
-      setAnalysisResult(merged);
-      renderAnalysisResult(merged);
-    } else {
-      renderAnalysisError('분석 결과를 받을 수 없습니다.');
-    }
-    
-  } catch (error) {
-    console.error('티켓 분석 실패:', error);
-    hideTicker();
-    renderAnalysisError(`분석 오류: ${error.message}`);
+    await window.AnalysisUI.runAnalysis();
   } finally {
     setLoading(false);
     updateStatus('ready', '준비 완료');
   }
-}
-
-// __BACKUP_REMOVED__ 분석 렌더링 함수 전체 → analysis-ui.js로 재구성 예정
-// 삭제된 함수: renderSolutionSteps, renderAnalysisResult, renderFieldSuggestionsCard, renderAnalysisError
-
-// =============================================================================
-// [NEW] 스트리밍 렌더링 — 여기에 새 구현 추가
-// =============================================================================
-
-// TODO: renderAnalysisResult(proposal) — 스트리밍 방식으로 재구현
-function renderAnalysisResult(proposal) {
-  console.log('[Render] renderAnalysisResult called (stub)', proposal);
-  if (!elements.analysisContent) return;
-  elements.analysisContent.innerHTML = `
-    <div class="flex flex-col items-center justify-center py-12 text-center text-app-muted">
-      <p class="text-sm">렌더링 리팩터 진행 중...</p>
-      <p class="text-xs mt-2">데이터 수신 완료 (콘솔 확인)</p>
-    </div>
-  `;
-}
-
-// TODO: renderAnalysisError(message) — 스트리밍 방식으로 재구현
-function renderAnalysisError(message) {
-  console.log('[Render] renderAnalysisError called (stub)', message);
-  if (!elements.analysisContent) return;
-  elements.analysisContent.innerHTML = `
-    <div class="flex flex-col items-center justify-center py-12 text-center">
-      <p class="text-sm text-red-600">${escapeHtml(message)}</p>
-      <button onclick="handleAnalyzeTicket()" class="mt-4 px-4 py-2 text-sm font-medium text-white bg-app-primary rounded-lg hover:bg-app-primary-hover transition-colors">
-        다시 시도
-      </button>
-    </div>
-  `;
 }
 
 // handleAnalyzeTicket을 전역으로 노출 (onclick 용)

@@ -20,7 +20,52 @@
     ERROR: 'ERROR'
   };
 
-  // 타이핑 효과 엔진 — 재구성 시 구현 예정
+  // =============================================================================
+  // Typing Engine
+  // =============================================================================
+
+  const TYPING_SPEED_MS = 12;
+  const _typingState = { timer: null, currentText: '', targetText: '', element: null };
+
+  function _startTyping(targetText, element) {
+    _stopTyping();
+    _typingState.targetText = targetText;
+    _typingState.currentText = '';
+    _typingState.element = element;
+
+    const cursor = document.createElement('span');
+    cursor.className = 'typewriter-cursor';
+    element.textContent = '';
+    element.appendChild(cursor);
+
+    _typingState.timer = setInterval(() => {
+      if (_typingState.currentText.length >= _typingState.targetText.length) {
+        _stopTyping();
+        return;
+      }
+      _typingState.currentText += _typingState.targetText[_typingState.currentText.length];
+      element.textContent = _typingState.currentText;
+      element.appendChild(cursor);
+    }, TYPING_SPEED_MS);
+  }
+
+  function _confidenceColor(value) {
+    if (value >= 0.7) return 'bg-green-500';
+    if (value >= 0.5) return 'bg-yellow-500';
+    return 'bg-red-500';
+  }
+
+  function _stopTyping() {
+    if (_typingState.timer) {
+      clearInterval(_typingState.timer);
+      _typingState.timer = null;
+    }
+    if (_typingState.element) {
+      _typingState.element.textContent = _typingState.targetText || _typingState.currentText;
+      const cursor = _typingState.element.querySelector('.typewriter-cursor');
+      if (cursor) cursor.remove();
+    }
+  }
 
   const analysisStore = {
     state: AnalysisState.IDLE,
@@ -180,14 +225,107 @@
     }
   }
 
-  // TODO: 재구성 예정
-  function showResultContainer() { /* 재구성 예정 */ }
-  function showFeedbackSection() { /* 재구성 예정 */ }
+  function showResultContainer() {
+    _stopTyping();
 
-  // TODO: 재구성 예정
-  function renderStreamField() { /* 재구성 예정 */ }
-  function renderGateAndMeta() { /* 재구성 예정 */ }
-  function renderAnalysisResult() { /* 재구성 예정 */ }
+    const placeholder = document.getElementById('analysisPlaceholder');
+    const errorEl = document.getElementById('analysisError');
+    const result = document.getElementById('analysisResult');
+
+    if (placeholder) placeholder.classList.add('hidden');
+    if (errorEl) errorEl.remove();
+
+    if (result) {
+      result.classList.remove('hidden');
+      // 스켈레톤 표시 상태로 리셋
+      const narrativeSkeleton = document.getElementById('narrativeSkeleton');
+      const narrativeText = document.getElementById('narrativeText');
+      const confidenceSkeleton = document.getElementById('confidenceSkeleton');
+      const confidenceBar = document.getElementById('confidenceBar');
+      const confidenceValue = document.getElementById('confidenceValue');
+      const confidenceFill = document.getElementById('confidenceFill');
+
+      if (narrativeSkeleton) narrativeSkeleton.classList.remove('hidden');
+      if (narrativeText) { narrativeText.classList.add('hidden'); narrativeText.textContent = ''; }
+      if (confidenceSkeleton) confidenceSkeleton.classList.remove('hidden');
+      if (confidenceBar) confidenceBar.classList.add('hidden');
+      if (confidenceValue) confidenceValue.textContent = '-';
+      if (confidenceFill) confidenceFill.style.width = '0%';
+    }
+  }
+
+  function showFeedbackSection() { /* 다음 단계에서 구현 */ }
+
+  function renderStreamField(name, data) {
+    if (name === 'narrative') {
+      const skeleton = document.getElementById('narrativeSkeleton');
+      const textEl = document.getElementById('narrativeText');
+      if (skeleton) skeleton.classList.add('hidden');
+      if (textEl) {
+        textEl.classList.remove('hidden');
+        _startTyping(data.summary || '', textEl);
+      }
+    } else if (name === 'confidence') {
+      const skeleton = document.getElementById('confidenceSkeleton');
+      const bar = document.getElementById('confidenceBar');
+      const valueEl = document.getElementById('confidenceValue');
+      const fill = document.getElementById('confidenceFill');
+
+      if (skeleton) skeleton.classList.add('hidden');
+      if (bar) bar.classList.remove('hidden');
+      if (valueEl) valueEl.textContent = Math.round(data * 100) + '%';
+      if (fill) {
+        fill.style.width = (data * 100) + '%';
+        fill.className = 'confidence-fill ' + _confidenceColor(data);
+      }
+    }
+    // 그 외 필드: 무시 (다음 단계에서 추가)
+  }
+
+  function renderGateAndMeta() { /* 다음 단계에서 구현 */ }
+
+  function renderAnalysisResult(result) {
+    const placeholder = document.getElementById('analysisPlaceholder');
+    const errorEl = document.getElementById('analysisError');
+    const resultEl = document.getElementById('analysisResult');
+
+    if (placeholder) placeholder.classList.add('hidden');
+    if (errorEl) errorEl.remove();
+    if (resultEl) resultEl.classList.remove('hidden');
+
+    _stopTyping();
+
+    // narrative — 즉시 표시 (타이핑 없음)
+    const narrativeSkeleton = document.getElementById('narrativeSkeleton');
+    const narrativeText = document.getElementById('narrativeText');
+    if (narrativeSkeleton) narrativeSkeleton.classList.add('hidden');
+    if (narrativeText) {
+      narrativeText.classList.remove('hidden');
+      narrativeText.textContent = result?.analysis?.narrative?.summary || '';
+    }
+
+    // confidence — 즉시 채움 (transition 없이)
+    const confidenceSkeleton = document.getElementById('confidenceSkeleton');
+    const confidenceBar = document.getElementById('confidenceBar');
+    const confidenceValue = document.getElementById('confidenceValue');
+    const confidenceFill = document.getElementById('confidenceFill');
+    const conf = result?.analysis?.confidence;
+
+    if (confidenceSkeleton) confidenceSkeleton.classList.add('hidden');
+    if (confidenceBar) confidenceBar.classList.remove('hidden');
+
+    if (conf !== null && conf !== undefined) {
+      if (confidenceValue) confidenceValue.textContent = Math.round(conf * 100) + '%';
+      if (confidenceFill) {
+        confidenceFill.style.transition = 'none';
+        confidenceFill.style.width = (conf * 100) + '%';
+        confidenceFill.className = 'confidence-fill ' + _confidenceColor(conf);
+      }
+    } else {
+      if (confidenceValue) confidenceValue.textContent = '-';
+      if (confidenceFill) confidenceFill.style.width = '0%';
+    }
+  }
 
   // 재구성 예정
   function setupEvidenceFilters() { /* 재구성 예정 */ }
@@ -512,7 +650,8 @@
     submitFeedback,
     openEditModal,
     toggleDarkMode,
-    showFeedbackSection
+    showFeedbackSection,
+    renderAnalysisResult
   };
 
 })();
