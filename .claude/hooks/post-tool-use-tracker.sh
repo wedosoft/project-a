@@ -9,6 +9,11 @@ set -e
 tool_info=$(cat)
 
 
+# Validate JSON before parsing (non-JSON stdin → skip)
+if ! echo "$tool_info" | jq empty 2>/dev/null; then
+    exit 0
+fi
+
 # Extract relevant data
 tool_name=$(echo "$tool_info" | jq -r '.tool_name // empty')
 file_path=$(echo "$tool_info" | jq -r '.tool_input.file_path // empty')

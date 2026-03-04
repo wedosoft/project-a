@@ -225,6 +225,40 @@
     .gate-edit { background: #fef3c7; color: #92400e; }
     .gate-decide { background: #fed7aa; color: #9a3412; }
     .gate-teach { background: #fecaca; color: #991b1b; }
+
+    /* 스켈레톤 로딩 */
+    .skeleton-line {
+      height: 14px;
+      background: linear-gradient(90deg, #e2e8f0 25%, #f1f5f9 50%, #e2e8f0 75%);
+      background-size: 200% 100%;
+      animation: skeleton-shimmer 1.5s infinite;
+      border-radius: 4px;
+    }
+    @keyframes skeleton-shimmer {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
+    }
+    html.dark .skeleton-line {
+      background: linear-gradient(90deg, #334155 25%, #475569 50%, #334155 75%);
+      background-size: 200% 100%;
+      animation: skeleton-shimmer 1.5s infinite;
+    }
+
+    /* 타이프라이터 커서 */
+    .typewriter-cursor {
+      display: inline-block;
+      width: 2px;
+      height: 1em;
+      background-color: #2563eb;
+      margin-left: 1px;
+      vertical-align: text-bottom;
+      animation: tw-cursor-blink 0.8s infinite;
+    }
+    html.dark .typewriter-cursor { background-color: #3b82f6; }
+    @keyframes tw-cursor-blink {
+      0%, 49% { opacity: 1; }
+      50%, 100% { opacity: 0; }
+    }
   </style>
 </head>
 <body class="bg-app-bg text-app-text">
@@ -269,47 +303,17 @@
             Analyze
           </span>
         </button>
-        <button id="tabEvidence" class="tab-btn px-3 py-2.5 text-sm text-app-muted rounded-t-lg whitespace-nowrap" data-tab="evidence">
-          <span class="flex items-center gap-1.5">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-            </svg>
-            Evidence
-          </span>
-        </button>
-        <button id="tabTeach" class="tab-btn px-3 py-2.5 text-sm text-app-muted rounded-t-lg whitespace-nowrap" data-tab="teach">
-          <span class="flex items-center gap-1.5">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/>
-            </svg>
-            Teach
-          </span>
-        </button>
-        <button id="tabHistory" class="tab-btn px-3 py-2.5 text-sm text-app-muted rounded-t-lg whitespace-nowrap" data-tab="history">
-          <span class="flex items-center gap-1.5">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
-            </svg>
-            History
-          </span>
-        </button>
+        <!-- TODO: Evidence / Teach / History 탭 - 분석 탭 완성 후 활성화 예정 -->
+        <!--
+        <button id="tabEvidence" ...>Evidence</button>
+        <button id="tabTeach" ...>Teach</button>
+        <button id="tabHistory" ...>History</button>
+        -->
       </div>
     </div>
 
     <!-- ==================== Analyze 섹션 ==================== -->
     <div id="sectionAnalyze" class="section-content flex flex-col flex-1 overflow-hidden">
-
-      <!-- 분석 티커 (진행 상황 표시) -->
-      <div id="analysisTicker" class="bg-blue-50 border-b border-blue-100 px-4 py-2 hidden">
-        <div class="ticker-container flex items-center gap-2">
-          <div class="flex gap-1">
-            <span class="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style="animation-delay: 0ms"></span>
-            <span class="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style="animation-delay: 150ms"></span>
-            <span class="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style="animation-delay: 300ms"></span>
-          </div>
-          <span id="tickerMessage" class="ticker-message text-sm text-blue-700">분석 준비 중...</span>
-        </div>
-      </div>
 
       <!-- 분석 결과 영역 -->
       <div class="flex-1 overflow-y-auto p-4" id="analysisContainer">
@@ -334,126 +338,9 @@
             </button>
           </div>
 
-          <!-- 분석 결과 (숨김 상태로 시작) -->
-          <div id="analysisResult" class="hidden space-y-4">
-            <!-- Gate 뱃지 -->
-            <div id="gateBadgeContainer" class="flex items-center gap-3">
-              <span id="gateBadge" class="px-3 py-1.5 text-sm font-semibold rounded-full"></span>
-              <span id="confidenceBar" class="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
-                <div id="confidenceFill" class="h-full bg-green-500 transition-all duration-500"></div>
-              </span>
-              <span id="confidenceText" class="text-sm font-medium text-app-muted"></span>
-            </div>
-
-            <!-- Summary -->
-            <div class="bg-app-card border border-app-border rounded-lg p-4">
-              <h4 class="text-sm font-semibold text-app-text mb-2 flex items-center gap-2">
-                <svg class="w-4 h-4 text-app-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-                </svg>
-                요약
-              </h4>
-              <p id="summaryText" class="text-sm text-app-text"></p>
-            </div>
-
-            <!-- Root Cause -->
-            <div id="rootCauseSection" class="bg-app-card border border-app-border rounded-lg p-4">
-              <h4 class="text-sm font-semibold text-app-text mb-2 flex items-center gap-2">
-                <svg class="w-4 h-4 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
-                </svg>
-                원인 분석
-              </h4>
-              <p id="rootCauseText" class="text-sm text-app-text"></p>
-            </div>
-
-            <!-- Resolution Steps -->
-            <div id="resolutionSection" class="bg-app-card border border-app-border rounded-lg p-4">
-              <h4 class="text-sm font-semibold text-app-text mb-3 flex items-center gap-2">
-                <svg class="w-4 h-4 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                </svg>
-                해결 단계
-              </h4>
-              <div id="resolutionSteps" class="space-y-2"></div>
-            </div>
-
-            <!-- Field Proposals -->
-            <div id="fieldProposalsSection" class="bg-app-card border border-app-border rounded-lg p-4">
-              <h4 class="text-sm font-semibold text-app-text mb-3 flex items-center gap-2">
-                <svg class="w-4 h-4 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/>
-                </svg>
-                필드 업데이트 제안
-              </h4>
-              <div id="fieldProposalsList" class="space-y-2"></div>
-            </div>
-
-            <!-- Intent & Sentiment -->
-            <div class="flex gap-4">
-              <div class="flex-1 bg-app-card border border-app-border rounded-lg p-4">
-                <h4 class="text-xs font-semibold text-app-muted uppercase mb-1">Intent</h4>
-                <p id="intentText" class="text-sm font-medium text-app-text"></p>
-              </div>
-              <div class="flex-1 bg-app-card border border-app-border rounded-lg p-4">
-                <h4 class="text-xs font-semibold text-app-muted uppercase mb-1">Sentiment</h4>
-                <p id="sentimentText" class="text-sm font-medium text-app-text"></p>
-              </div>
-            </div>
-
-            <!-- Risk Tags -->
-            <div id="riskTagsSection" class="hidden">
-              <div class="flex flex-wrap gap-2">
-                <span class="text-xs font-medium text-app-muted">Risk Tags:</span>
-                <div id="riskTagsList" class="flex flex-wrap gap-1"></div>
-              </div>
-            </div>
-
-            <!-- Escalation History -->
-            <div id="escalationSection" class="bg-app-card border border-app-border rounded-lg p-4 hidden">
-              <h4 class="text-sm font-semibold text-app-text mb-3 flex items-center gap-2">
-                <svg class="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/>
-                </svg>
-                에스컬레이션 이력
-              </h4>
-              <div id="escalationContent" class="space-y-2"></div>
-            </div>
-
-            <!-- Current Status -->
-            <div id="currentStatusSection" class="bg-app-card border border-app-border rounded-lg p-4 hidden">
-              <h4 class="text-sm font-semibold text-app-text mb-3 flex items-center gap-2">
-                <svg class="w-4 h-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                </svg>
-                현재 상태
-              </h4>
-              <div id="currentStatusContent" class="space-y-2"></div>
-            </div>
-
-            <!-- HITL Feedback Buttons -->
-            <div id="feedbackSection" class="bg-app-card border border-app-border rounded-lg p-4 hidden">
-              <h4 class="text-sm font-semibold text-app-text mb-3">이 분석이 도움이 되었나요?</h4>
-              <div class="flex items-center gap-2">
-                <button id="feedbackHelpfulBtn" class="feedback-btn flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg border border-app-border hover:border-green-400 hover:bg-green-50 transition-colors" data-type="helpful">
-                  <span>👍</span> 도움됨
-                </button>
-                <button id="feedbackNotHelpfulBtn" class="feedback-btn flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg border border-app-border hover:border-red-400 hover:bg-red-50 transition-colors" data-type="not_helpful">
-                  <span>👎</span> 부정확
-                </button>
-                <button id="feedbackEditBtn" class="feedback-btn flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg border border-app-border hover:border-blue-400 hover:bg-blue-50 transition-colors">
-                  <span>✏️</span> 수정
-                </button>
-              </div>
-              <div id="feedbackResult" class="hidden mt-3 p-3 rounded-lg text-sm"></div>
-            </div>
-
-            <!-- Meta Info -->
-            <div class="text-xs text-app-muted flex items-center gap-4 pt-2 border-t border-app-border">
-              <span id="metaAnalysisId"></span>
-              <span id="metaLatency"></span>
-              <span id="metaModel"></span>
-            </div>
+          <!-- 분석 결과 (재구성 예정) -->
+          <div id="analysisResult" class="hidden">
+            <!-- TODO: 분석 결과 UI 재구성 -->
           </div>
         </div>
       </div>

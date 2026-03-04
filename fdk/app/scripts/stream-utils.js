@@ -399,6 +399,60 @@
   }
 
   /**
+   * Ticket Analysis SSE Stream
+   * POST /api/tickets/{ticket_id}/analyze/stream
+   * @param {string} ticketId
+   * @param {Object} ticketData
+   * @param {Object} options
+   * @param {Function} onEvent - called for each SSE event: (event) => void
+   * @returns {Promise<void>}
+   */
+  async function fetchAnalysisStream(ticketId, ticketData, options = {}, onEvent) {
+    const url = window.BACKEND_CONFIG.getUrl(`/api/tickets/${ticketId}/analyze/stream`);
+    const headers = window.BACKEND_CONFIG.getHeaders();
+
+    const payload = {
+      subject: ticketData.subject || null,
+      description_text: ticketData.description_text || null,
+      priority: ticketData.priority || null,
+      status: ticketData.status || null,
+      source: ticketData.source || null,
+      type: ticketData.type || null,
+      tags: ticketData.tags || null,
+      requester_id: ticketData.requester_id || null,
+      responder_id: ticketData.responder_id || null,
+      group_id: ticketData.group_id || null,
+      custom_fields: ticketData.custom_fields || null,
+      conversations: ticketData.conversations || null,
+      ticketFields: ticketData.ticketFields || null,
+      created_at: ticketData.created_at || null,
+      updated_at: ticketData.updated_at || null,
+      options: {
+        skip_retrieval: options.skip_retrieval || false,
+        include_evidence: options.include_evidence !== false,
+        confidence_threshold: options.confidence_threshold || 0.7,
+        selected_fields: options.selected_fields || null,
+        response_tone: options.response_tone || 'formal'
+      }
+    };
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ message: response.statusText }));
+      throw new Error(errorData.detail?.message || errorData.message || `HTTP ${response.status}`);
+    }
+
+    await processStream(response, (data) => {
+      if (onEvent) onEvent(data);
+    });
+  }
+
+  /**
    * Ticket Analysis V2 API (PR2 Orchestrator)
    * POST /api/tickets/{ticket_id}/analyze
    * @param {string} ticketId - 티켓 ID
@@ -626,6 +680,7 @@
     streamAnalyze,
     pollAnalyze,
     streamChat,
+    fetchAnalysisStream,
     fetchAnalysis,
     getAnalysisHistory,
     getAnalysisById,

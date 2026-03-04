@@ -20,6 +20,8 @@
     ERROR: 'ERROR'
   };
 
+  // 타이핑 효과 엔진 — 재구성 시 구현 예정
+
   const analysisStore = {
     state: AnalysisState.IDLE,
     currentTab: 'analyze',
@@ -116,14 +118,14 @@
     }
 
     setState(AnalysisState.RUNNING);
-    showTicker('티켓 분석 중...');
+    showResultContainer();
+
+    const customFieldKeys = Object.keys(ticketData.custom_fields || {});
+    const relevantTicketFields = ticketFields?.filter(f => customFieldKeys.includes(f.name)) || null;
+    const partialAnalysis = {};
 
     try {
-      // 티켓에 실제 값이 있는 커스텀 필드 정의만 필터링
-      const customFieldKeys = Object.keys(ticketData.custom_fields || {});
-      const relevantTicketFields = ticketFields?.filter(f => customFieldKeys.includes(f.name)) || null;
-
-      const result = await window.StreamUtils.fetchAnalysis(
+      await window.StreamUtils.fetchAnalysisStream(
         String(ticketData.id),
         {
           subject: ticketData.subject,
@@ -142,521 +144,56 @@
           created_at: ticketData.created_at,
           updated_at: ticketData.updated_at
         },
-        {
-          include_evidence: true,
-          response_tone: 'formal'
+        { include_evidence: true, response_tone: 'formal' },
+        (event) => {
+          if (event.type === 'progress' && event.analysis_id) {
+            const teachEl = document.getElementById('teachAnalysisId');
+            if (teachEl) teachEl.value = event.analysis_id;
+          } else if (event.type === 'field') {
+            partialAnalysis[event.name] = event.data;
+            renderStreamField(event.name, event.data);
+          } else if (event.type === 'complete') {
+            renderGateAndMeta(event.gate, event.analysis_id, event.meta);
+            showFeedbackSection(event.analysis_id);
+            const fullResult = {
+              analysis_id: event.analysis_id,
+              gate: event.gate,
+              analysis: partialAnalysis,
+              meta: event.meta
+            };
+            setAnalysisResult(fullResult);
+            setState(
+              (event.gate === 'DECIDE' || event.gate === 'TEACH')
+                ? AnalysisState.NEEDS_REVIEW
+                : AnalysisState.COMPLETED
+            );
+          } else if (event.type === 'error') {
+            setState(AnalysisState.ERROR);
+            showError(`분석 실패: ${event.message}`);
+          }
         }
       );
-
-      hideTicker();
-      setAnalysisResult(result);
-      renderAnalysisResult(result);
-
-      // Teach 탭에 analysis_id 설정
-      const teachAnalysisId = document.getElementById('teachAnalysisId');
-      if (teachAnalysisId && result.analysis_id) {
-        teachAnalysisId.value = result.analysis_id;
-      }
-
     } catch (error) {
-      console.error('[AnalysisUI] Analysis failed:', error);
-      hideTicker();
+      console.error('[AnalysisUI] Analysis stream failed:', error);
       setState(AnalysisState.ERROR);
-      analysisStore.error = error.message;
       showError(`분석 실패: ${error.message}`);
     }
   }
 
-  function renderAnalysisResult(result) {
-    const placeholder = document.getElementById('analysisPlaceholder');
-    const resultSection = document.getElementById('analysisResult');
-
-    if (!placeholder || !resultSection) return;
-
-    placeholder.classList.add('hidden');
-    resultSection.classList.remove('hidden');
-
-    const analysis = result.analysis || {};
-    const meta = result.meta || {};
-
-    // Gate Badge
-    const gateBadge = document.getElementById('gateBadge');
-    if (gateBadge) {
-      const gateClass = {
-        'CONFIRM': 'gate-confirm',
-        'EDIT': 'gate-edit',
-        'DECIDE': 'gate-decide',
-        'TEACH': 'gate-teach'
-      }[result.gate] || 'gate-teach';
-      gateBadge.textContent = result.gate;
-      gateBadge.className = `px-3 py-1.5 text-sm font-semibold rounded-full ${gateClass}`;
-    }
-
-    // Confidence
-    const confidence = analysis.confidence || 0;
-    const confidenceFill = document.getElementById('confidenceFill');
-    const confidenceText = document.getElementById('confidenceText');
-    if (confidenceFill) {
-      confidenceFill.style.width = `${confidence * 100}%`;
-      confidenceFill.className = `h-full transition-all duration-500 ${
-        confidence >= 0.7 ? 'bg-green-500' : confidence >= 0.5 ? 'bg-yellow-500' : 'bg-red-500'
-      }`;
-    }
-    if (confidenceText) {
-      confidenceText.textContent = `${Math.round(confidence * 100)}%`;
-    }
-
-    // Summary
-    const summaryText = document.getElementById('summaryText');
-    if (summaryText) {
-      summaryText.textContent = analysis.narrative?.summary || '요약 정보 없음';
-    }
-
-    // Root Cause
-    const rootCauseText = document.getElementById('rootCauseText');
-    const rootCauseSection = document.getElementById('rootCauseSection');
-    if (rootCauseText && rootCauseSection) {
-      if (analysis.root_cause) {
-        rootCauseText.textContent = analysis.root_cause;
-        rootCauseSection.classList.remove('hidden');
-      } else {
-        rootCauseSection.classList.add('hidden');
-      }
-    }
-
-    // Resolution Steps
-    const resolutionSteps = document.getElementById('resolutionSteps');
-    const resolutionSection = document.getElementById('resolutionSection');
-    if (resolutionSteps && resolutionSection) {
-      const resolution = analysis.resolution || [];
-      if (resolution.length > 0) {
-        resolutionSteps.innerHTML = resolution.map((step, idx) => `
-          <div class="flex gap-3 items-start">
-            <span class="flex-shrink-0 w-6 h-6 bg-green-100 text-green-700 rounded-full flex items-center justify-center text-xs font-semibold">${step.step || idx + 1}</span>
-            <div class="flex-1">
-              <p class="text-sm font-medium text-app-text">${escapeHtml(step.action || '')}</p>
-              ${step.rationale ? `<p class="text-xs text-app-muted mt-1">${escapeHtml(step.rationale)}</p>` : ''}
-            </div>
-          </div>
-        `).join('');
-        resolutionSection.classList.remove('hidden');
-      } else {
-        resolutionSection.classList.add('hidden');
-      }
-    }
-
-    // Field Proposals
-    const fieldProposalsList = document.getElementById('fieldProposalsList');
-    const fieldProposalsSection = document.getElementById('fieldProposalsSection');
-    if (fieldProposalsList && fieldProposalsSection) {
-      const proposals = analysis.field_proposals || [];
-      if (proposals.length > 0) {
-        fieldProposalsList.innerHTML = proposals.map(p => `
-          <div class="flex items-center justify-between p-2 bg-purple-50 rounded-lg">
-            <div>
-              <span class="text-sm font-medium text-app-text">${escapeHtml(p.field_label || p.field_name || '')}</span>
-              <span class="text-xs text-app-muted ml-2">${escapeHtml(p.reason || '')}</span>
-            </div>
-            <span class="px-2 py-1 text-xs font-medium bg-white rounded border border-purple-200">${escapeHtml(String(p.proposed_value || ''))}</span>
-          </div>
-        `).join('');
-        fieldProposalsSection.classList.remove('hidden');
-      } else {
-        fieldProposalsSection.classList.add('hidden');
-      }
-    }
-
-    // Intent & Sentiment
-    const intentText = document.getElementById('intentText');
-    const sentimentText = document.getElementById('sentimentText');
-    if (intentText) intentText.textContent = analysis.intent || '-';
-    if (sentimentText) sentimentText.textContent = analysis.sentiment || '-';
-
-    // Risk Tags
-    const riskTagsList = document.getElementById('riskTagsList');
-    const riskTagsSection = document.getElementById('riskTagsSection');
-    if (riskTagsList && riskTagsSection) {
-      const riskTags = analysis.risk_tags || [];
-      if (riskTags.length > 0) {
-        riskTagsList.innerHTML = riskTags.map(tag => `
-          <span class="px-2 py-1 text-xs font-medium bg-red-100 text-red-700 rounded-full">${escapeHtml(tag)}</span>
-        `).join('');
-        riskTagsSection.classList.remove('hidden');
-      } else {
-        riskTagsSection.classList.add('hidden');
-      }
-    }
-
-    // Meta
-    const metaAnalysisId = document.getElementById('metaAnalysisId');
-    const metaLatency = document.getElementById('metaLatency');
-    const metaModel = document.getElementById('metaModel');
-    if (metaAnalysisId) metaAnalysisId.textContent = `ID: ${result.analysis_id?.substring(0, 8) || '-'}`;
-    if (metaLatency) metaLatency.textContent = `${meta.latency_ms || 0}ms`;
-    if (metaModel) metaModel.textContent = meta.llm_model || '-';
-
-    // Escalation History
-    renderEscalationHistory(analysis.escalation_history);
-
-    // Current Status
-    renderCurrentStatus(analysis.current_status);
-
-    // HITL Feedback
-    showFeedbackSection(result.analysis_id);
-
-    // Evidence 업데이트
-    renderEvidence(analysis.evidence || []);
-  }
-
-  // =============================================================================
-  // Escalation History
-  // =============================================================================
-
-  function renderEscalationHistory(escalation) {
-    const section = document.getElementById('escalationSection');
-    const content = document.getElementById('escalationContent');
-    if (!section || !content) return;
-
-    if (!escalation || !escalation.has_escalation) {
-      section.classList.add('hidden');
-      return;
-    }
-
-    section.classList.remove('hidden');
-
-    const handoffs = escalation.handoffs || [];
-    let html = '';
-
-    if (handoffs.length > 0) {
-      html += '<div class="space-y-3">';
-      handoffs.forEach((h) => {
-        html += `
-          <div class="escalation-handoff pl-4 py-2">
-            <div class="flex items-center gap-2 mb-1">
-              <span class="px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800 rounded">${escapeHtml(h.from || '?')}</span>
-              <svg class="w-4 h-4 text-app-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/>
-              </svg>
-              <span class="px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-800 rounded">${escapeHtml(h.to || '?')}</span>
-            </div>
-            ${h.reason ? `<p class="text-sm text-app-text">${escapeHtml(h.reason)}</p>` : ''}
-            ${h.evidence && h.evidence.length > 0
-              ? `<p class="text-xs text-app-muted mt-1">Evidence: msg #${h.evidence.join(', #')}</p>`
-              : ''}
-          </div>
-        `;
-      });
-      html += '</div>';
-    }
-
-    if (escalation.notes) {
-      html += `<p class="text-sm text-app-muted mt-2 italic">${escapeHtml(escalation.notes)}</p>`;
-    }
-
-    content.innerHTML = html;
-  }
-
-  // =============================================================================
-  // Current Status
-  // =============================================================================
-
-  function renderCurrentStatus(status) {
-    const section = document.getElementById('currentStatusSection');
-    const content = document.getElementById('currentStatusContent');
-    if (!section || !content) return;
-
-    if (!status || !status.state) {
-      section.classList.add('hidden');
-      return;
-    }
-
-    section.classList.remove('hidden');
-
-    const stateConfig = {
-      'resolved': { label: '해결됨', class: 'status-resolved' },
-      'pending': { label: '대기 중', class: 'status-pending' },
-      'unresolved': { label: '미해결', class: 'status-unresolved' }
-    };
-
-    const config = stateConfig[status.state] || stateConfig['unresolved'];
-    let html = `
-      <div class="flex items-center gap-2 mb-2">
-        <span class="px-3 py-1 text-sm font-semibold rounded-full ${config.class}">${config.label}</span>
-      </div>
-    `;
-
-    const pendingItems = status.pending_items || [];
-    if (pendingItems.length > 0) {
-      html += '<div class="space-y-1 mt-2">';
-      html += '<p class="text-xs font-medium text-app-muted uppercase">대기 항목</p>';
-      pendingItems.forEach(item => {
-        html += `
-          <div class="flex items-center gap-2 text-sm text-app-text">
-            <span class="w-1.5 h-1.5 bg-amber-400 rounded-full flex-shrink-0"></span>
-            ${escapeHtml(item)}
-          </div>
-        `;
-      });
-      html += '</div>';
-    }
-
-    if (status.notes) {
-      html += `<p class="text-sm text-app-muted mt-2 italic">${escapeHtml(status.notes)}</p>`;
-    }
-
-    content.innerHTML = html;
-  }
-
-  // =============================================================================
-  // HITL Feedback
-  // =============================================================================
-
-  let _currentAnalysisId = null;
-
-  function showFeedbackSection(analysisId) {
-    const section = document.getElementById('feedbackSection');
-    if (!section) return;
-
-    _currentAnalysisId = analysisId;
-    section.classList.remove('hidden');
-
-    // Reset button states
-    document.querySelectorAll('.feedback-btn').forEach(btn => {
-      btn.classList.remove('selected-helpful', 'selected-not-helpful');
-      btn.disabled = false;
-    });
-    const resultDiv = document.getElementById('feedbackResult');
-    if (resultDiv) resultDiv.classList.add('hidden');
-  }
-
-  async function submitFeedback(eventType) {
-    if (!_currentAnalysisId) return;
-
-    const resultDiv = document.getElementById('feedbackResult');
-
-    try {
-      const url = window.BACKEND_CONFIG.getUrl('/api/assist/feedback/submit');
-      const headers = window.BACKEND_CONFIG.getHeaders();
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: headers,
-        body: JSON.stringify({
-          analysis_id: _currentAnalysisId,
-          event_type: eventType,
-          rating: eventType === 'helpful' ? 5 : 1
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      await response.json();
-
-      // Update button visual state
-      document.querySelectorAll('.feedback-btn').forEach(btn => {
-        btn.classList.remove('selected-helpful', 'selected-not-helpful');
-      });
-
-      if (eventType === 'helpful') {
-        document.getElementById('feedbackHelpfulBtn')?.classList.add('selected-helpful');
-      } else {
-        document.getElementById('feedbackNotHelpfulBtn')?.classList.add('selected-not-helpful');
-      }
-
-      // Show result
-      if (resultDiv) {
-        resultDiv.textContent = eventType === 'helpful'
-          ? '감사합니다! 피드백이 저장되었습니다.'
-          : '피드백이 저장되었습니다. 수정 버튼을 눌러 더 정확한 응답을 제출할 수 있습니다.';
-        resultDiv.className = `mt-3 p-3 rounded-lg text-sm ${
-          eventType === 'helpful' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
-        }`;
-        resultDiv.classList.remove('hidden');
-      }
-
-    } catch (error) {
-      console.error('[AnalysisUI] Feedback submit failed:', error);
-      if (resultDiv) {
-        resultDiv.textContent = `피드백 전송 실패: ${error.message}`;
-        resultDiv.className = 'mt-3 p-3 rounded-lg text-sm bg-red-50 text-red-700';
-        resultDiv.classList.remove('hidden');
-      }
-    }
-  }
-
-  function openEditModal() {
-    const modal = document.getElementById('editModal');
-    if (!modal) return;
-
-    const analysis = analysisStore.analysisResult?.analysis || {};
-
-    // Pre-fill form with current analysis data
-    const summaryField = document.getElementById('editSummary');
-    const rootCauseField = document.getElementById('editRootCause');
-    const confidenceField = document.getElementById('editConfidence');
-
-    if (summaryField) summaryField.value = analysis.narrative?.summary || '';
-    if (rootCauseField) rootCauseField.value = analysis.root_cause || '';
-    if (confidenceField) confidenceField.value = analysis.confidence || 0.7;
-
-    modal.classList.remove('hidden');
-  }
-
-  function closeEditModal() {
-    const modal = document.getElementById('editModal');
-    if (modal) modal.classList.add('hidden');
-  }
-
-  async function saveEditedResponse() {
-    if (!_currentAnalysisId) return;
-
-    const summary = document.getElementById('editSummary')?.value || '';
-    const rootCause = document.getElementById('editRootCause')?.value || '';
-    const confidence = parseFloat(document.getElementById('editConfidence')?.value) || 0.7;
-
-    const saveBtn = document.getElementById('saveEditBtn');
-    if (saveBtn) saveBtn.disabled = true;
-
-    try {
-      const url = window.BACKEND_CONFIG.getUrl('/api/assist/feedback/edit');
-      const headers = window.BACKEND_CONFIG.getHeaders();
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: headers,
-        body: JSON.stringify({
-          analysis_id: _currentAnalysisId,
-          approved_response: {
-            narrative: { summary: summary },
-            root_cause: rootCause,
-            confidence: confidence
-          }
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      closeEditModal();
-
-      // Show success in feedback area
-      const resultDiv = document.getElementById('feedbackResult');
-      if (resultDiv) {
-        resultDiv.textContent = '수정된 응답이 저장되었습니다. 학습 데이터로 활용됩니다.';
-        resultDiv.className = 'mt-3 p-3 rounded-lg text-sm bg-green-50 text-green-700';
-        resultDiv.classList.remove('hidden');
-      }
-
-    } catch (error) {
-      console.error('[AnalysisUI] Save edited response failed:', error);
-      console.error('[AnalysisUI] Save failed:', error.message);
-    } finally {
-      if (saveBtn) saveBtn.disabled = false;
-    }
-  }
-
-  function setupFeedbackHandlers() {
-    // Helpful/Not Helpful buttons
-    document.getElementById('feedbackHelpfulBtn')?.addEventListener('click', () => submitFeedback('helpful'));
-    document.getElementById('feedbackNotHelpfulBtn')?.addEventListener('click', () => submitFeedback('not_helpful'));
-
-    // Edit button → open modal
-    document.getElementById('feedbackEditBtn')?.addEventListener('click', openEditModal);
-
-    // Modal close/cancel
-    document.getElementById('closeEditModalBtn')?.addEventListener('click', closeEditModal);
-    document.getElementById('cancelEditBtn')?.addEventListener('click', closeEditModal);
-
-    // Modal save
-    document.getElementById('saveEditBtn')?.addEventListener('click', saveEditedResponse);
-
-    // Close modal on backdrop click
-    document.getElementById('editModal')?.addEventListener('click', (e) => {
-      if (e.target.id === 'editModal') closeEditModal();
-    });
-  }
-
-  // =============================================================================
-  // Evidence Tab
-  // =============================================================================
-
-  function renderEvidence(evidenceList) {
-    const placeholder = document.getElementById('evidencePlaceholder');
-    const list = document.getElementById('evidenceList');
-    const items = document.getElementById('evidenceItems');
-
-    if (!placeholder || !list || !items) return;
-
-    if (evidenceList.length === 0) {
-      placeholder.classList.remove('hidden');
-      list.classList.add('hidden');
-      return;
-    }
-
-    placeholder.classList.add('hidden');
-    list.classList.remove('hidden');
-
-    // Store evidence for filtering
-    window._evidenceData = evidenceList;
-
-    renderEvidenceItems(evidenceList);
-  }
-
-  function renderEvidenceItems(evidenceList, filter = 'all') {
-    const items = document.getElementById('evidenceItems');
-    if (!items) return;
-
-    const filtered = filter === 'all'
-      ? evidenceList
-      : evidenceList.filter(e => e.source_type === filter);
-
-    if (filtered.length === 0) {
-      items.innerHTML = '<p class="text-sm text-app-muted text-center py-4">해당하는 증거가 없습니다.</p>';
-      return;
-    }
-
-    items.innerHTML = filtered.map(e => {
-      const typeLabels = {
-        'conversation': '대화',
-        'ticket_field': '필드',
-        'kb_article': 'KB',
-        'similar_case': '유사 사례'
-      };
-      const typeLabel = typeLabels[e.source_type] || e.source_type;
-      const relevancePercent = Math.round((e.relevance_score || 0) * 100);
-
-      return `
-        <div class="bg-app-card border border-app-border rounded-lg p-3">
-          <div class="flex items-center justify-between mb-2">
-            <span class="px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-700 rounded">${escapeHtml(typeLabel)}</span>
-            <span class="text-xs text-app-muted">관련도: ${relevancePercent}%</span>
-          </div>
-          <p class="text-sm text-app-text">${escapeHtml(e.excerpt || '')}</p>
-          ${e.source_id ? `<p class="text-xs text-app-muted mt-1">ID: ${escapeHtml(e.source_id)}</p>` : ''}
-        </div>
-      `;
-    }).join('');
-  }
-
-  function setupEvidenceFilters() {
-    document.querySelectorAll('.evidence-filter-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        const filter = e.currentTarget.dataset.filter;
-
-        // Active 상태 업데이트
-        document.querySelectorAll('.evidence-filter-btn').forEach(b => b.classList.remove('active'));
-        e.currentTarget.classList.add('active');
-
-        // 필터링
-        if (window._evidenceData) {
-          renderEvidenceItems(window._evidenceData, filter);
-        }
-      });
-    });
-  }
+  // TODO: 재구성 예정
+  function showResultContainer() { /* 재구성 예정 */ }
+  function showFeedbackSection() { /* 재구성 예정 */ }
+
+  // TODO: 재구성 예정
+  function renderStreamField() { /* 재구성 예정 */ }
+  function renderGateAndMeta() { /* 재구성 예정 */ }
+  function renderAnalysisResult() { /* 재구성 예정 */ }
+
+  // 재구성 예정
+  function setupEvidenceFilters() { /* 재구성 예정 */ }
+  async function submitFeedback() { /* 재구성 예정 */ }
+  function openEditModal() { /* 재구성 예정 */ }
+  function setupFeedbackHandlers() { /* 재구성 예정 */ }
 
   // =============================================================================
   // Teach Tab
@@ -867,18 +404,6 @@
   // Utilities
   // =============================================================================
 
-  function showTicker(message) {
-    const ticker = document.getElementById('analysisTicker');
-    const tickerMessage = document.getElementById('tickerMessage');
-    if (ticker) ticker.classList.remove('hidden');
-    if (tickerMessage) tickerMessage.textContent = message;
-  }
-
-  function hideTicker() {
-    const ticker = document.getElementById('analysisTicker');
-    if (ticker) ticker.classList.add('hidden');
-  }
-
   function showError(message) {
     const content = document.getElementById('analysisContent');
     if (!content) return;
@@ -909,11 +434,13 @@
     errorDiv.innerHTML = errorHtml;
     content.insertBefore(errorDiv, content.firstChild);
 
-    // Retry button
+    // Retry button — app.js의 handleAnalyzeTicket()으로 통일
     document.getElementById('retryAnalyzeBtn')?.addEventListener('click', () => {
       errorDiv.remove();
       if (placeholder) placeholder.classList.remove('hidden');
-      runAnalysis();
+      if (window.handleAnalyzeTicket) {
+        window.handleAnalyzeTicket();
+      }
     });
   }
 
@@ -941,11 +468,8 @@
       }
     });
 
-    // Analyze button
-    const analyzeBtn = document.getElementById('analyzeBtn');
-    if (analyzeBtn) {
-      analyzeBtn.addEventListener('click', runAnalysis);
-    }
+    // Analyze button — app.js의 handleAnalyzeTicket()이 단일 핸들러로 담당
+    // (이중 바인딩 방지: 여기서는 바인딩하지 않음)
 
     // Load History button
     const loadHistoryBtn = document.getElementById('loadHistoryBtn');

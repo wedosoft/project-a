@@ -289,11 +289,8 @@ const TICKER_MESSAGES = {
 function cacheElements() {
   elements.headerTitle = document.getElementById('headerTitle');
   elements.statusBadge = document.getElementById('statusBadge');
-  // 탭 요소
-  elements.tabAnalysis = document.getElementById('tabAnalysis');
-  elements.tabChat = document.getElementById('tabChat');
-  elements.sectionAnalysis = document.getElementById('sectionAnalysis');
-  elements.sectionChat = document.getElementById('sectionChat');
+  // 탭 요소 — HTML의 실제 ID 기준 (4탭: analyze/evidence/teach/history)
+  // 탭 전환은 analysis-ui.js의 AnalysisUI.setCurrentTab()이 담당
   // 분석 섹션 요소
   elements.analysisTicker = document.getElementById('analysisTicker');
   elements.tickerMessage = document.getElementById('tickerMessage');
@@ -328,27 +325,7 @@ function getElements() {
 // Tab & Ticker Functions
 // =============================================================================
 
-/**
- * 탭 전환
- * @param {string} tabName - 'analysis' | 'chat'
- */
-function switchTab(tabName) {
-  setCurrentTab(tabName);
-  
-  // 탭 버튼 활성화 상태 업데이트
-  if (elements.tabAnalysis && elements.tabChat) {
-    elements.tabAnalysis.classList.toggle('active', tabName === 'analysis');
-    elements.tabChat.classList.toggle('active', tabName === 'chat');
-  }
-  
-  // 섹션 표시/숨김
-  if (elements.sectionAnalysis && elements.sectionChat) {
-    elements.sectionAnalysis.classList.toggle('section-hidden', tabName !== 'analysis');
-    elements.sectionChat.classList.toggle('section-hidden', tabName !== 'chat');
-  }
-  
-  console.log(`[Tab] Switched to: ${tabName}`);
-}
+// 탭 전환은 analysis-ui.js의 AnalysisUI.setCurrentTab()로 단일화
 
 /**
  * 티커 표시
@@ -811,6 +788,11 @@ function findLeafByInput(leaves, input) {
     return leaves.find(l => l.label.toLowerCase().includes(key));
 }
 
+// =============================================================================
+// [BACKUP] 렌더링 함수 — 스트리밍 렌더링 리팩터 시 교체 예정
+// =============================================================================
+
+/*__BACKUP_START__ renderFieldSuggestions (레거시 채팅용 — dead code)
 function renderFieldSuggestions(proposal) {
   const updates = proposal.field_updates || proposal.fieldUpdates || {};
   // 하드코딩 금지: 제안/업데이트 허용 범위는 tenantConfig.selected_fields가 단일 기준
@@ -1110,6 +1092,7 @@ function renderFieldSuggestions(proposal) {
   elements.chatMessages.appendChild(messageDiv);
   scrollToBottom();
 }
+__BACKUP_END__ renderFieldSuggestions */
 
 // --- Global Window Handlers ---
 
@@ -1665,8 +1648,10 @@ document.onreadystatechange = function() {
         await loadTicketFields();
         await createSession();
 
-        // 기본 탭: 분석
-        switchTab('analysis');
+        // 기본 탭: 분석 (analysis-ui.js의 탭 시스템 사용)
+        if (window.AnalysisUI?.setCurrentTab) {
+          window.AnalysisUI.setCurrentTab('analyze');
+        }
 
         updateStatus('ready', '준비 완료');
 
@@ -1686,14 +1671,8 @@ document.onreadystatechange = function() {
 function setupEventListeners() {
   const elements = getElements();
   
-  // 탭 전환 이벤트
-  if (elements.tabAnalysis) {
-    elements.tabAnalysis.addEventListener('click', () => switchTab('analysis'));
-  }
-  if (elements.tabChat) {
-    elements.tabChat.addEventListener('click', () => switchTab('chat'));
-  }
-  
+  // 탭 전환은 analysis-ui.js init()에서 처리
+
   // 채팅 이벤트
   if (elements.chatForm) {
     elements.chatForm.addEventListener('submit', handleSubmit);
@@ -1731,17 +1710,8 @@ function setupEventListeners() {
     });
   }
 
-  // 예시 질문
-  document.querySelectorAll('.example-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const question = btn.textContent.trim();
-      elements.chatInput.value = question;
-      handleInputChange();
-      // 채팅 탭으로 전환 후 제출
-      switchTab('chat');
-      setTimeout(() => handleSubmit(new Event('submit')), 100);
-    });
-  });
+  // 예시 질문 (채팅 탭이 HTML에 없으므로 현재 비활성)
+  // TODO: 채팅 UI 재도입 시 복원
 }
 
 async function handleProposeFieldsOnly() {
@@ -2234,431 +2204,33 @@ async function handleAnalyzeTicket() {
   }
 }
 
-/**
- * 분석 결과 렌더링 (분석 섹션에 표시)
- */
-/**
- * solution 필드를 단계별 목록으로 렌더링
- * - 문자열 배열 JSON: ["step1","step2"] → 번호 목록
- * - 객체 배열: [{action, rationale}] → 번호 목록
- * - 일반 문자열 → 텍스트 블록
- */
-function renderSolutionSteps(solution) {
-  let items = solution;
+// __BACKUP_REMOVED__ 분석 렌더링 함수 전체 → analysis-ui.js로 재구성 예정
+// 삭제된 함수: renderSolutionSteps, renderAnalysisResult, renderFieldSuggestionsCard, renderAnalysisError
 
-  // JSON 문자열이면 파싱 시도
-  if (typeof solution === 'string') {
-    const trimmed = solution.trim();
-    if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
-      try { items = JSON.parse(trimmed); } catch (e) { /* 파싱 실패 시 원문 사용 */ }
-    }
-  }
+// =============================================================================
+// [NEW] 스트리밍 렌더링 — 여기에 새 구현 추가
+// =============================================================================
 
-  // 배열인 경우 → 번호 목록
-  if (Array.isArray(items) && items.length > 0) {
-    const listItems = items.map((item, i) => {
-      const text = typeof item === 'string'
-        ? item
-        : (item.action || item.text || item.step || JSON.stringify(item));
-      const rationale = typeof item === 'object' ? (item.rationale || '') : '';
-      return `
-        <li class="flex gap-2 items-start">
-          <span class="flex-shrink-0 w-5 h-5 bg-green-100 text-green-700 rounded-full flex items-center justify-center text-xs font-semibold mt-0.5">${i + 1}</span>
-          <div class="flex-1">
-            <span class="text-app-text">${escapeHtml(text)}</span>
-            ${rationale ? `<p class="text-xs text-app-muted mt-0.5">${escapeHtml(rationale)}</p>` : ''}
-          </div>
-        </li>`;
-    }).join('');
-    return `<ol class="space-y-2 list-none">${listItems}</ol>`;
-  }
-
-  // 객체인 경우 → 텍스트 추출
-  if (items && typeof items === 'object' && !Array.isArray(items)) {
-    const text = items.text || items.action || items.steps || JSON.stringify(items);
-    return `<div class="text-app-muted bg-app-bg border border-app-border p-2 rounded whitespace-pre-wrap">${escapeHtml(String(text))}</div>`;
-  }
-
-  // 일반 텍스트
-  return `<div class="text-app-muted bg-app-bg border border-app-border p-2 rounded whitespace-pre-wrap">${formatMessage(String(solution))}</div>`;
-}
-
+// TODO: renderAnalysisResult(proposal) — 스트리밍 방식으로 재구현
 function renderAnalysisResult(proposal) {
+  console.log('[Render] renderAnalysisResult called (stub)', proposal);
   if (!elements.analysisContent) return;
-
-  const summarySections = proposal.summary_sections || proposal.summarySections;
-  const summary = proposal.summary;
-  const intent = proposal.intent;
-  const sentiment = proposal.sentiment;
-  const cause = proposal.cause;
-  const solution = proposal.solution;
-  
-  let html = '';
-  
-  // 요약 카드
-  if (summary || intent || sentiment || cause || solution) {
-    html += `
-      <div class="bg-app-card border border-app-border rounded-xl p-4 shadow-sm">
-        <div class="flex items-center gap-2 mb-3">
-          <svg class="w-5 h-5 text-app-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-          </svg>
-          <h3 class="text-sm font-semibold text-app-text">티켓 분석 결과</h3>
-        </div>
-        <div class="space-y-3 text-sm">
-          ${Array.isArray(summarySections) && summarySections.length > 0 ? `
-            <div>
-              <p class="font-medium text-app-text mb-2">요약:</p>
-              <div class="space-y-2">
-                ${summarySections.slice(0, 3).map(s => {
-                  const t = escapeHtml((s && s.title) ? String(s.title) : '');
-                  const c = escapeHtml((s && s.content) ? String(s.content) : '');
-                  if (!t && !c) return '';
-                  return `<div class="bg-app-bg p-2 rounded border border-app-border">
-                    ${t ? `<div class="text-app-text font-medium">${t}</div>` : ''}
-                    ${c ? `<div class="text-app-muted">${c}</div>` : ''}
-                  </div>`;
-                }).join('')}
-              </div>
-            </div>
-          ` : (summary ? `<p><span class="font-medium text-app-muted">요약:</span> <span class="text-app-text">${escapeHtml(summary)}</span></p>` : '')}
-          ${intent ? `<p><span class="font-medium text-app-muted">의도:</span> <span class="text-app-text">${escapeHtml(intent)}</span></p>` : ''}
-          ${sentiment ? `<p><span class="font-medium text-app-muted">감정:</span> <span class="text-app-text">${escapeHtml(sentiment)}</span></p>` : ''}
-          ${cause ? `
-            <div class="pt-2 border-t border-app-border">
-              <p class="font-medium text-app-text mb-1">원인:</p>
-              <p class="text-app-muted bg-app-bg border border-app-border p-2 rounded">${escapeHtml(cause)}</p>
-            </div>
-          ` : ''}
-          ${solution ? `
-            <div class="pt-2 border-t border-app-border">
-              <p class="font-medium text-app-text mb-1">해결책:</p>
-              ${renderSolutionSteps(solution)}
-            </div>
-          ` : ''}
-        </div>
-      </div>
-    `;
-  }
-  
-  // 필드 제안 카드
-  const fieldUpdates = proposal.field_updates || proposal.fieldUpdates || {};
-  const fieldProposals = proposal.field_proposals || [];
-  
-  if (fieldProposals.length > 0 || Object.keys(fieldUpdates).length > 0) {
-    html += renderFieldSuggestionsCard(proposal);
-  }
-  
-  // HITL 피드백 섹션
-  html += `
-    <div id="feedbackSection" class="bg-app-card border border-app-border rounded-lg p-4 hidden">
-      <h4 class="text-sm font-semibold text-app-text mb-3">이 분석이 도움이 되었나요?</h4>
-      <div class="flex items-center gap-2">
-        <button id="feedbackHelpfulBtn" class="feedback-btn flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg border border-app-border hover:border-green-400 hover:bg-green-50 transition-colors" data-type="helpful">
-          <span>👍</span> 도움됨
-        </button>
-        <button id="feedbackNotHelpfulBtn" class="feedback-btn flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg border border-app-border hover:border-red-400 hover:bg-red-50 transition-colors" data-type="not_helpful">
-          <span>👎</span> 부정확
-        </button>
-        <button id="feedbackEditBtn" class="feedback-btn flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg border border-app-border hover:border-blue-400 hover:bg-blue-50 transition-colors">
-          <span>✏️</span> 수정
-        </button>
-      </div>
-      <div id="feedbackResult" class="hidden mt-3 p-3 rounded-lg text-sm"></div>
-    </div>
-  `;
-
-  // 다시 분석 버튼
-  html += `
-    <div class="flex justify-center pt-2">
-      <button onclick="handleAnalyzeTicket()" class="px-4 py-2 text-sm text-app-muted hover:text-app-primary transition-colors flex items-center gap-1">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-        </svg>
-        다시 분석
-      </button>
-    </div>
-  `;
-
-  elements.analysisContent.innerHTML = html;
-
-  // HITL 피드백 섹션 표시 (analysis_id 또는 proposal.id 사용)
-  const analysisId = proposal.analysis_id || proposal.analysisId || proposal.id;
-  if (window.AnalysisUI?.showFeedbackSection) {
-    window.AnalysisUI.showFeedbackSection(analysisId || 'pending');
-  }
-}
-
-/**
- * 필드 제안 카드 렌더링 (기존 renderFieldSuggestions 로직 재사용)
- */
-function renderFieldSuggestionsCard(proposal) {
-  const updates = proposal.field_updates || proposal.fieldUpdates || {};
-  const isAllowedByTenant = buildTenantFieldAllowChecker();
-  const fieldProposals = (proposal.field_proposals || []).filter(p => {
-    const name = p && typeof p === 'object' ? p.field_name : null;
-    return name ? isAllowedByTenant(name) : true;
-  });
-  const proposalMap = {};
-  fieldProposals.forEach(p => { proposalMap[p.field_name] = p; });
-  const renderedFields = new Set();
-  const messageId = 'analysis-' + Date.now();
-
-  const ticketFields = state.ticketFields;
-  const ticketData = state.ticketData;
-
-  const getFieldDefByName = (name) => {
-    if (!ticketFields || !Array.isArray(ticketFields)) return null;
-    return ticketFields.find(f => f && typeof f === 'object' && f.name === name) || null;
-  };
-
-  const formatCurrentValue = (fieldName, value) => {
-    if (value === undefined || value === null) return '-';
-    if (typeof value === 'string' && value.trim() === '') return '-';
-
-    if (Array.isArray(value)) {
-      const s = value.map(v => String(v)).filter(Boolean).join(', ');
-      return s || '-';
-    }
-
-    if ((fieldName === 'priority' || fieldName === 'status') && (typeof value === 'number' || /^-?\d+$/.test(String(value).trim()))) {
-      const n = typeof value === 'number' ? value : parseInt(String(value).trim(), 10);
-      if (!Number.isNaN(n)) {
-        const def = getFieldDefByName(fieldName);
-        const choices = def ? def.choices : null;
-        if (choices && typeof choices === 'object' && !Array.isArray(choices)) {
-          const label = choices[String(n)] || choices[n];
-          if (label) return String(label);
-        }
-        if (fieldName === 'priority') {
-          const m = { 1: 'Low', 2: 'Medium', 3: 'High', 4: 'Urgent' };
-          if (m[n]) return m[n];
-        }
-      }
-    }
-
-    return String(value);
-  };
-
-  const renderRow = (label, fieldName, currentVal, inputHtml, reason) => `
-    <tr>
-      <td class="px-2 py-2 font-medium text-app-muted">
-        ${label}
-        ${reason ? `<div class="group relative inline-block ml-1">
-          <svg class="w-3 h-3 text-gray-400 cursor-help" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-          <div class="invisible group-hover:visible absolute z-10 w-48 p-2 mt-1 text-xs text-white bg-gray-800 rounded shadow-lg -left-2">
-            ${escapeHtml(reason)}
-          </div>
-        </div>` : ''}
-      </td>
-      <td class="px-2 py-2 text-app-muted text-xs">${escapeHtml(formatCurrentValue(fieldName, currentVal))}</td>
-      <td class="px-2 py-2">${inputHtml}</td>
-    </tr>
-  `;
-
-  let tableRows = '';
-
-  if (fieldProposals.length > 0) {
-    // nested_field 처리 로직 (기존 코드와 동일)
-    const nestedRoot = ticketFields ? ticketFields.find(f => f.type === 'nested_field') : null;
-    if (nestedRoot && nestedRoot.choices && nestedRoot.nested_ticket_fields) {
-      const nestedFields = nestedRoot.nested_ticket_fields;
-      const level2Name = nestedFields.find(n => n.level === 2)?.name || nestedFields[0]?.name;
-      const level3Name = nestedFields.find(n => n.level === 3)?.name || nestedFields[1]?.name;
-      const hasNestedProposal = [nestedRoot.name, level2Name, level3Name].some(n => proposalMap[n]);
-
-      if (hasNestedProposal) {
-        const choices = normalizeChoices(nestedRoot.choices);
-        window[`choices-${messageId}-${nestedRoot.name}`] = choices;
-        window[`pathMap-${messageId}-${nestedRoot.name}`] = buildValuePathMap(choices);
-        // Item 후보는 leaf 중에서도 depth>=2만 노출 (카테고리-only leaf 제외, 혼합 깊이 지원)
-        window[`leafMinDepth-${messageId}-${nestedRoot.name}`] = 2;
-        window[`leafOptions-${messageId}-${nestedRoot.name}`] = flattenLeafOptionsMinDepth(choices, 2);
-        const leafOptions = ensureLeafOptions(messageId, nestedRoot.name);
-
-        const proposedLeaf = proposalMap[level3Name]?.proposed_value || proposalMap[level2Name]?.proposed_value || proposalMap[nestedRoot.name]?.proposed_value || '';
-        const path = findPathToValue(choices, proposedLeaf) || [];
-        const val1 = path[0] || proposalMap[nestedRoot.name]?.proposed_value || '';
-        const val2 = path[1] || proposalMap[level2Name]?.proposed_value || '';
-        const val3Display = (path.length === 2 ? path[1] : (path[2] || proposalMap[level3Name]?.proposed_value || ''));
-        const val3Hidden = (path.length >= 3 ? (path[2] || '') : '');
-
-        let opts1 = '<option value="">선택하세요</option>';
-        choices.forEach(c => opts1 += `<option value="${c.value}" ${c.value === val1 ? 'selected' : ''}>${c.value}</option>`);
-
-        let opts2 = '<option value="">선택하세요</option>';
-        const subChoices = val1 ? choices.find(c => c.value === val1)?.choices : [];
-        if (subChoices) subChoices.forEach(c => opts2 += `<option value="${c.value}" ${c.value === val2 ? 'selected' : ''}>${c.value}</option>`);
-
-        // NOTE: Item 셀렉트는 제거됐지만, 기존 데이터 형태 보존을 위해 itemChoices 계산은 남겨둠
-        // (val3는 scope에 없으므로 val3Hidden 기준으로 비교)
-        let opts3 = '<option value="">선택하세요</option>';
-        const itemChoices = val2 ? subChoices?.find(c => c.value === val2)?.choices : [];
-        if (itemChoices) itemChoices.forEach(c => opts3 += `<option value="${c.value}" ${c.value === val3Hidden ? 'selected' : ''}>${c.value}</option>`);
-
-        const currentVal1 = ticketData[nestedRoot.name] !== undefined ? ticketData[nestedRoot.name] : ticketData.custom_fields?.[nestedRoot.name];
-        const currentVal2 = level2Name ? (ticketData[level2Name] !== undefined ? ticketData[level2Name] : ticketData.custom_fields?.[level2Name]) : undefined;
-        const currentVal3 = level3Name ? (ticketData[level3Name] !== undefined ? ticketData[level3Name] : ticketData.custom_fields?.[level3Name]) : undefined;
-
-        tableRows += renderRow(nestedRoot.label || 'Category', nestedRoot.name, currentVal1, `
-          <select id="input-${nestedRoot.name}-${messageId}-1" data-field-name="${nestedRoot.name}" data-level="1" onchange="updateDependentFields('${messageId}', '${nestedRoot.name}', 1)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1">
-            ${opts1}
-          </select>
-        `, proposalMap[nestedRoot.name]?.reason);
-
-        if (level2Name) {
-          tableRows += renderRow('Sub Category', level2Name, currentVal2, `
-              <select id="input-${nestedRoot.name}-${messageId}-2" data-field-name="${level2Name}" data-level="2" onchange="updateDependentFields('${messageId}', '${nestedRoot.name}', 2)" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1" ${!val1 ? 'disabled' : ''}>
-              ${opts2}
-            </select>
-          `, proposalMap[level2Name]?.reason);
-        }
-
-        if (level3Name) {
-          const searchInputId = `leafsearch-${nestedRoot.name}-${messageId}`;
-          const datalistId = `leaflist-${nestedRoot.name}-${messageId}`;
-          
-          // Item 필드는 검색 가능한 입력 필드로 통합 (드롭다운 제거)
-          tableRows += renderRow('Item', level3Name, currentVal3, `
-            <div class="relative">
-              <input id="${searchInputId}" list="${datalistId}" 
-                     placeholder="항목 검색 (전체 검색 가능)" 
-                     class="w-full text-sm border border-gray-300 rounded-md px-2 py-1.5 focus:border-blue-500 focus:ring-blue-500 transition-colors" 
-                     oninput="handleLeafSearchApply('${messageId}', '${nestedRoot.name}', '${searchInputId}')"
-                     value="${val3Display || ''}">
-              <input type="hidden" id="leafhidden-${nestedRoot.name}-${messageId}" data-field-name="${level3Name}" value="${val3Hidden || ''}">
-              <datalist id="${datalistId}">
-                ${leafOptions.slice(0, 2000).map(opt => `<option value="${opt.value}" label="${opt.label}"></option>`).join('')}
-              </datalist>
-              <div class="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
-                <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-                </svg>
-              </div>
-            </div>
-            `, proposalMap[level3Name]?.reason);
-        }
-
-        renderedFields.add(nestedRoot.name);
-        if (level2Name) renderedFields.add(level2Name);
-        if (level3Name) renderedFields.add(level3Name);
-      }
-    }
-
-    // 나머지 필드 처리
-    fieldProposals.forEach(prop => {
-      if (renderedFields.has(prop.field_name)) return;
-      if (!isAllowedByTenant(prop.field_name)) return;
-
-      const fieldName = prop.field_name;
-      const fieldLabel = prop.field_label;
-      const proposedValue = prop.proposed_value;
-      const reason = prop.reason;
-      renderedFields.add(fieldName);
-      
-      const fieldDef = ticketFields ? ticketFields.find(f => f.name === fieldName) : null;
-      let inputHtml = '';
-
-      if (fieldDef && (fieldDef.type === 'custom_dropdown' || fieldDef.type === 'default_status' || fieldDef.type === 'default_priority' || fieldDef.choices)) {
-        const choices = normalizeChoices(fieldDef.choices);
-        let optionsHtml = '<option value="">선택하세요</option>';
-        const flatOptions = [];
-        function collectOptions(list) {
-          list.forEach(c => {
-            flatOptions.push(c.value);
-            if (c.choices) collectOptions(c.choices);
-          });
-        }
-        collectOptions(choices);
-        
-        flatOptions.forEach(val => {
-          optionsHtml += `<option value="${val}" ${val === proposedValue ? 'selected' : ''}>${val}</option>`;
-        });
-
-        inputHtml = `
-          <select id="input-${fieldName}-${messageId}" data-field-name="${fieldName}" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1">
-            ${optionsHtml}
-          </select>
-        `;
-      } else {
-        inputHtml = `
-          <input type="text" id="input-${fieldName}-${messageId}" data-field-name="${fieldName}" value="${proposedValue || ''}" class="w-full text-sm border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1">
-        `;
-      }
-
-      let currentVal = ticketData[fieldName];
-      if (currentVal === undefined && ticketData.custom_fields) {
-        currentVal = ticketData.custom_fields[fieldName];
-      }
-
-      tableRows += renderRow(fieldLabel, fieldName, currentVal, inputHtml, reason);
-    });
-  }
-
-  const justification = proposal.justification || proposal.reasoning;
-
-  return `
-    <div id="${messageId}" class="bg-app-card border border-app-border rounded-xl p-4 shadow-sm">
-      <div class="flex items-center justify-between mb-3">
-        <div class="flex items-center gap-2">
-          <svg class="w-5 h-5 text-app-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-          </svg>
-          <h3 class="text-sm font-semibold text-app-text">필드 업데이트 제안</h3>
-        </div>
-        <span class="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded-full font-medium">AI 분석</span>
-      </div>
-
-      <div class="mb-4 overflow-x-auto">
-        <table class="w-full text-sm text-left">
-          <thead class="text-xs text-app-muted bg-app-bg uppercase">
-            <tr>
-              <th class="px-2 py-2 w-20">필드</th>
-              <th class="px-2 py-2 w-24">현재 값</th>
-              <th class="px-2 py-2">제안 값 (수정 가능)</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-app-border">
-            ${tableRows}
-          </tbody>
-        </table>
-      </div>
-
-      ${justification ? `
-        <div class="mb-3 px-2 py-2 bg-app-bg rounded border border-app-border">
-          <p class="text-xs text-app-muted"><span class="font-semibold text-app-text">AI 근거:</span> ${escapeHtml(justification)}</p>
-        </div>
-      ` : ''}
-      
-      <button onclick="applyEditableFieldUpdates('${messageId}')" class="w-full py-2 bg-app-primary hover:bg-app-primary-hover text-white text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-        </svg>
-        변경 사항 적용하기
-      </button>
+  elements.analysisContent.innerHTML = `
+    <div class="flex flex-col items-center justify-center py-12 text-center text-app-muted">
+      <p class="text-sm">렌더링 리팩터 진행 중...</p>
+      <p class="text-xs mt-2">데이터 수신 완료 (콘솔 확인)</p>
     </div>
   `;
 }
 
-/**
- * 분석 에러 렌더링
- */
+// TODO: renderAnalysisError(message) — 스트리밍 방식으로 재구현
 function renderAnalysisError(message) {
+  console.log('[Render] renderAnalysisError called (stub)', message);
   if (!elements.analysisContent) return;
-  
   elements.analysisContent.innerHTML = `
     <div class="flex flex-col items-center justify-center py-12 text-center">
-      <div class="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mb-4">
-        <svg class="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-        </svg>
-      </div>
-      <h3 class="text-lg font-semibold text-app-text mb-2">분석 실패</h3>
-      <p class="text-sm text-red-600 mb-4">${escapeHtml(message)}</p>
-      <button onclick="handleAnalyzeTicket()" class="px-4 py-2 text-sm font-medium text-white bg-app-primary rounded-lg hover:bg-app-primary-hover transition-colors flex items-center gap-2">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-        </svg>
+      <p class="text-sm text-red-600">${escapeHtml(message)}</p>
+      <button onclick="handleAnalyzeTicket()" class="mt-4 px-4 py-2 text-sm font-medium text-white bg-app-primary rounded-lg hover:bg-app-primary-hover transition-colors">
         다시 시도
       </button>
     </div>
