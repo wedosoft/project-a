@@ -119,29 +119,14 @@
     showTicker('티켓 분석 중...');
 
     try {
-      // conversations 가져오기 (getTicketInsights 서버리스 사용)
-      let conversations = [];
-      try {
-        if (window.state?.client) {
-          const serverlessResult = await window.state.client.request.invoke('getTicketInsights', {
-            ticket_id: String(ticketData.id),
-            actor_agent_id: null
-          });
-          const actualResponse = serverlessResult.response || serverlessResult;
-          if (actualResponse?.status === 'success' && actualResponse.data) {
-            conversations = actualResponse.data.conversation || [];
-          }
-        }
-      } catch (convError) {
-        console.warn('[AnalysisUI] Failed to fetch conversations via serverless:', convError);
-      }
+      // 티켓에 실제 값이 있는 커스텀 필드 정의만 필터링
+      const customFieldKeys = Object.keys(ticketData.custom_fields || {});
+      const relevantTicketFields = ticketFields?.filter(f => customFieldKeys.includes(f.name)) || null;
 
-      // V2 API 호출
-      const result = await window.StreamUtils.analyzeTicketV2(
+      const result = await window.StreamUtils.fetchAnalysis(
         String(ticketData.id),
         {
           subject: ticketData.subject,
-          description: ticketData.description,
           description_text: ticketData.description_text,
           priority: ticketData.priority,
           status: ticketData.status,
@@ -152,8 +137,8 @@
           responder_id: ticketData.responder_id,
           group_id: ticketData.group_id,
           custom_fields: ticketData.custom_fields,
-          conversations: conversations,
-          ticketFields: ticketFields,
+          conversations: ticketData.conversations || [],
+          ticketFields: relevantTicketFields,
           created_at: ticketData.created_at,
           updated_at: ticketData.updated_at
         },

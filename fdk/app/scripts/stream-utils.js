@@ -177,7 +177,7 @@
    * @param {Function} onProgress - 진행 상황 콜백
    * @returns {Promise<Object>} 최종 결과 (complete.data)
    */
-  async function streamFieldProposals(payload, onProgress) {
+  async function streamProposals(payload, onProgress) {
     const url = window.BACKEND_CONFIG.getUrl('/api/assist/field-proposals/stream');
     const headers = window.BACKEND_CONFIG.getHeaders();
 
@@ -406,14 +406,13 @@
    * @param {Object} options - 분석 옵션
    * @returns {Promise<Object>} 분석 결과 (ticket_analysis_v1)
    */
-  async function analyzeTicketV2(ticketId, ticketData, options = {}) {
+  async function fetchAnalysis(ticketId, ticketData, options = {}) {
     const url = window.BACKEND_CONFIG.getUrl(`/api/tickets/${ticketId}/analyze`);
     const headers = window.BACKEND_CONFIG.getHeaders();
 
     // ticket_normalized_v1 형식으로 페이로드 구성
     const payload = {
       subject: ticketData.subject || null,
-      description: ticketData.description || null,
       description_text: ticketData.description_text || null,
       priority: ticketData.priority || null,
       status: ticketData.status || null,
@@ -437,7 +436,7 @@
       }
     };
 
-    console.log('[StreamUtils] analyzeTicketV2 request:', { ticketId, payload });
+    console.log('[StreamUtils] fetchAnalysis request:', { ticketId, payload });
 
     const response = await fetch(url, {
       method: 'POST',
@@ -447,12 +446,12 @@
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ message: response.statusText }));
-      console.error('[StreamUtils] analyzeTicketV2 error:', response.status, errorData);
+      console.error('[StreamUtils] fetchAnalysis error:', response.status, errorData);
       throw new Error(errorData.detail?.message || errorData.message || `HTTP ${response.status}`);
     }
 
     const result = await response.json();
-    console.log('[StreamUtils] analyzeTicketV2 result:', result);
+    console.log('[StreamUtils] fetchAnalysis result:', result);
     return result;
   }
 
@@ -621,14 +620,13 @@
   // 전역 노출
   window.StreamUtils = {
     processStream,
-    streamFieldProposals,
+    streamProposals,
     streamSolution,
     fetchWithStream,
     streamAnalyze,
     pollAnalyze,
     streamChat,
-    // V2 API
-    analyzeTicketV2,
+    fetchAnalysis,
     getAnalysisHistory,
     getAnalysisById,
     submitTeachFeedback,

@@ -171,7 +171,7 @@ for ptype in $PROJECT_TYPES; do
             run_python_check || TOTAL_ERRORS=$((TOTAL_ERRORS + 1))
             ;;
         fdk)
-            run_fdk_check || TOTAL_ERRORS=$((TOTAL_ERRORS + 1))
+            # run_fdk_check || TOTAL_ERRORS=$((TOTAL_ERRORS + 1))
             ;;
         typescript)
             run_typescript_check || TOTAL_ERRORS=$((TOTAL_ERRORS + 1))

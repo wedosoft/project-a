@@ -1663,13 +1663,15 @@ document.onreadystatechange = function() {
         
         await loadTicketData();
         await loadTicketFields();
-        await loadStatus();
         await createSession();
-        
+
         // 기본 탭: 분석
         switchTab('analysis');
-        
+
         updateStatus('ready', '준비 완료');
+
+        // 고급 기능(RAG 소스)은 비차단으로 로드 — 실패해도 기본 모드 유지
+        loadAdvancedFeatures();
       }).catch(function(error) {
         console.error("FDK 초기화 실패:", error);
         updateStatus('error', '초기화 실패: ' + error.message);
@@ -1764,7 +1766,7 @@ async function handleProposeFieldsOnly() {
       fieldsOnly: true
     };
 
-    const result = await window.StreamUtils.streamFieldProposals(payload, (event) => {
+    const result = await window.StreamUtils.streamProposals(payload, (event) => {
       const eventType = event.type || event;
       const eventData = event.data || {};
       showTicker(eventType, eventData);
@@ -1802,24 +1804,29 @@ async function createSession() {
   console.log('세션 생성:', result.sessionId);
 }
 
-async function loadStatus() {
-  const status = await apiCall('GET', 'api/status');
-  console.log('Status:', status);
-  
-  if (!status.availableSources || status.availableSources.length === 0) {
-    throw new Error('사용 가능한 검색 소스가 없습니다.');
+async function loadAdvancedFeatures() {
+  try {
+    const status = await apiCall('GET', 'api/status');
+    console.log('Advanced status:', status);
+
+    if (!status.availableSources || status.availableSources.length === 0) {
+      console.log('고급 기능 소스 없음 — 기본 모드로 동작');
+      return;
+    }
+
+    setAvailableSources(status.availableSources);
+    setSelectedSources([status.availableSources[0]]);
+
+    setSourceLabels({
+      tickets: '🎫 티켓',
+      articles: '📄 헬프센터',
+      common: '📦 제품 매뉴얼'
+    });
+
+    renderSourceSelector();
+  } catch (error) {
+    console.warn('고급 기능 로드 실패 — 기본 모드로 동작:', error.message);
   }
-  
-  setAvailableSources(status.availableSources);
-  setSelectedSources([status.availableSources[0]]);
-  
-  setSourceLabels({
-    tickets: '🎫 티켓',
-    articles: '📄 헬프센터',
-    common: '📦 제품 매뉴얼'
-  });
-  
-  renderSourceSelector();
 }
 
 async function loadTicketData() {
@@ -1893,7 +1900,7 @@ async function fetchAllConversations(ticketId) {
       const data = JSON.parse(response.response);
       if (Array.isArray(data) && data.length > 0) {
         console.log(`Page ${page} loaded: ${data.length} conversations`);
-        conversations = conversations.concat(data);
+        conversations = conversations.concat(data.map(({ body: _, ...c }) => c));
         
         if (data.length < PER_PAGE) {
           hasMore = false;
