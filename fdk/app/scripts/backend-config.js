@@ -7,7 +7,7 @@
   'use strict';
 
   const BACKEND_HOSTS = {
-    production: 'api.wedosoft.net',
+    production: 'agent-platform.fly.dev',
     development: 'ameer-timberless-paragogically.ngrok-free.dev',
     local: 'localhost:8000'
   };

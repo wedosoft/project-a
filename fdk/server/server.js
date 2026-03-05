@@ -185,7 +185,7 @@ function getTicketInsights(args) {
 // 환경별 백엔드 주소 정책
 // - 운영: 코드 기본값으로 api.wedosoft.net 사용
 // - 로컬 개발: BACKEND_BASE_URL 환경변수로 ngrok 등 오버라이드
-const PROD_BACKEND_BASE_URL = 'https://api.wedosoft.net';
+const PROD_BACKEND_BASE_URL = 'https://agent-platform.fly.dev';
 
 function logWarn(...args) {
   if (console && typeof console.warn === 'function') {
