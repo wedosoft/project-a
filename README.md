@@ -4,7 +4,7 @@ This repository contains the Frontend application for the AI Contact Center OS, 
 
 ## Backend
 
-The backend for this project has been migrated to the `agent-platform` repository.
+The backend for this project has been migrated to the `project-a-backend` repository.
 Please refer to that repository for backend setup, API documentation, and agent logic.
 
 ## Frontend Setup (Freshdesk FDK)

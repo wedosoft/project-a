@@ -71,8 +71,8 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ---
 
 ## Backend Platform
-- 현재 저장소의 백엔드 플랫폼은 **agent-platform** 저장소입니다.
-- 백엔드 참조 또는 백엔드 작업 시 다음 경로를 사용하세요: `/Users/alan/GitHub/agent-platform`
+- 현재 저장소의 백엔드 플랫폼은 **project-a-backend** 저장소입니다.
+- 백엔드 참조 또는 백엔드 작업 시 다음 경로를 사용하세요: `/Users/alan/GitHub/project-a-backend`
 
 ---
 
