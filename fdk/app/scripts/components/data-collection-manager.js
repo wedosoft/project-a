@@ -2,6 +2,40 @@
  * Data Collection Manager Web Component
  * 데이터 수집 관리 컴포넌트 - 시작/중지/재개/취소 제어
  */
+
+function _extractProgressState(data) {
+    if (data.is_running && data.recent_jobs && data.recent_jobs.length > 0) {
+        const runningJob = data.recent_jobs.find(job => job.status === 'running');
+        if (runningJob && runningJob.progress) {
+            const percentage = Math.round(runningJob.progress.percentage || 0);
+            const isCompleted = percentage >= 100;
+            return {
+                percentage,
+                message: isCompleted ? '수집 완료' : (runningJob.progress.current_step_name || '진행 중...'),
+                stage: isCompleted ? 'completed' : (runningJob.progress.current_stage || 'initializing'),
+                status: isCompleted ? 'completed' : 'running',
+                isCompleted
+            };
+        }
+    }
+    if (data.is_paused && data.recent_jobs && data.recent_jobs.length > 0) {
+        const pausedJob = data.recent_jobs.find(job => job.status === 'paused');
+        if (pausedJob && pausedJob.progress) {
+            return {
+                percentage: pausedJob.progress.percentage || 0,
+                message: `일시정지: ${pausedJob.progress.current_step_name || '진행 중...'}`,
+                stage: pausedJob.progress.current_stage || 'initializing',
+                status: 'paused',
+                isCompleted: false
+            };
+        }
+    }
+    if (data.completed_jobs > 0 && data.total_jobs > 0) {
+        return { percentage: 100, message: '데이터 수집이 완료되었습니다.', stage: 'completed', status: 'completed', isCompleted: true };
+    }
+    return { percentage: 0, message: '대기중...', stage: 'idle', status: 'idle', isCompleted: false };
+}
+
 class DataCollectionManager extends HTMLElement {
     constructor() {
         super();
@@ -333,6 +367,39 @@ class DataCollectionManager extends HTMLElement {
         return window.adminUtils?.getApiHeaders !== undefined;
     }
 
+    _restoreJobState(result) {
+        if (result.is_running) {
+            const runningJob = result.recent_jobs.find(job => job.status === 'running');
+            if (runningJob) {
+                this.currentJobId = runningJob.job_id;
+                this.isRunning = true;
+                this.updateStatus('running');
+                this.addLog('info', `🔄 실행 중인 작업 복원됨: ${runningJob.job_id}`);
+                this.updateProgress(result);
+            }
+            return;
+        }
+        if (result.is_paused) {
+            const pausedJob = result.recent_jobs.find(job => job.status === 'paused');
+            if (pausedJob) {
+                this.currentJobId = pausedJob.job_id;
+                this.isRunning = false;
+                this.updateStatus('paused');
+                this.addLog('info', `⏸️ 일시정지된 작업 복원됨: ${pausedJob.job_id}`);
+                this.updateProgress(result);
+            }
+            return;
+        }
+        this.resetState('idle');
+        this.initializeProgressBar();
+        if (result.total_jobs === 0) {
+            this.addLog('info', '🎯 최초 사용 - 데이터 수집을 시작하세요');
+        } else {
+            this.addLog('info', '📋 대기 중 - 모든 작업 완료');
+            this.updateProgress(result);
+        }
+    }
+
     async checkRunningJobs() {
         try {
             // adminUtils가 준비될 때까지 대기
@@ -350,47 +417,7 @@ class DataCollectionManager extends HTMLElement {
 
             if (response.ok) {
                 const result = await response.json();
-
-                // 상태에 따라 UI 복원
-                if (result.is_running) {
-                    // 실행 중인 작업이 있는 경우
-                    const runningJob = result.recent_jobs.find(job => job.status === 'running');
-                    if (runningJob) {
-                        console.log('🔄 실행 중인 작업 복원:', runningJob.job_id);
-                        this.currentJobId = runningJob.job_id;
-                        this.isRunning = true;
-                        this.updateStatus('running');
-                        this.addLog('info', `🔄 실행 중인 작업 복원됨: ${runningJob.job_id}`);
-
-                        // 현재 진행률로 UI 업데이트
-                        this.updateProgress(result);
-                    }
-                } else if (result.is_paused) {
-                    // 일시정지된 작업이 있는 경우
-                    const pausedJob = result.recent_jobs.find(job => job.status === 'paused');
-                    if (pausedJob) {
-                        console.log('⏸️ 일시정지된 작업 복원:', pausedJob.job_id);
-                        this.currentJobId = pausedJob.job_id;
-                        this.isRunning = false;
-                        this.updateStatus('paused');
-                        this.addLog('info', `⏸️ 일시정지된 작업 복원됨: ${pausedJob.job_id}`);
-
-                        // 현재 진행률로 UI 업데이트
-                        this.updateProgress(result);
-                    }
-                } else {
-                    // 활성 작업이 없는 경우
-                    this.resetState('idle');
-                    this.initializeProgressBar(); // 진행률 바 초기화
-
-                    if (result.total_jobs === 0) {
-                        this.addLog('info', '🎯 최초 사용 - 데이터 수집을 시작하세요');
-                    } else {
-                        this.addLog('info', '📋 대기 중 - 모든 작업 완료');
-                        // 완료된 작업의 최신 상태 표시
-                        this.updateProgress(result);
-                    }
-                }
+                this._restoreJobState(result);
 
                 // 페이지 새로고침 감지를 위한 이벤트 리스너 추가
                 this.setupPageRefreshHandling();
@@ -405,6 +432,25 @@ class DataCollectionManager extends HTMLElement {
             this.addLog('error', `❌ 상태 복원 실패: ${error.message}`);
             this.initializeProgressBar();
         }
+    }
+
+    _buildCollectionRequestBody(collectTickets, collectKb, collectionMode, startDate, endDate) {
+        const isFullCollection = collectionMode === 'initial';
+        const body = {
+            tenant_id: window.adminConsole.tenantId,
+            config: {
+                incremental: !isFullCollection,
+                purge: isFullCollection,
+                collect_tickets: collectTickets,
+                collect_kb: collectKb,
+                max_tickets: null,
+                max_articles: null,
+                batch_size: 10
+            }
+        };
+        if (startDate) body.config.start_date = startDate;
+        if (endDate) body.config.end_date = endDate;
+        return body;
     }
 
     async startCollection() {
@@ -434,7 +480,6 @@ class DataCollectionManager extends HTMLElement {
             this.updateStatus('starting');
 
             const collectionMode = this.querySelector('input[name="collection_mode"]:checked').value;
-            const isFullCollection = collectionMode === 'initial';
 
             // 수집 기간 가져오기
             const startDate = this.querySelector('#start_date').value;
@@ -450,27 +495,7 @@ class DataCollectionManager extends HTMLElement {
                 throw new Error('tenant_id를 찾을 수 없습니다. 관리자 콘솔이 초기화되지 않았습니다.');
             }
 
-            // 운영 백엔드 호환성을 위해 tenant_id를 본문에 포함
-            const requestBody = {
-                tenant_id: window.adminConsole.tenantId, // 기본값 제거, 없으면 실패
-                config: {
-                    incremental: !isFullCollection,
-                    purge: isFullCollection,
-                    collect_tickets: collectTickets,
-                    collect_kb: collectKb,
-                    max_tickets: null, // 증분수집에서는 제한 없음 (변경된 데이터만 수집)
-                    max_articles: null, // 증분수집에서는 제한 없음 (변경된 데이터만 수집)
-                    batch_size: 10
-                }
-            };
-
-            // 날짜 범위가 설정되어 있으면 포함
-            if (startDate) {
-                requestBody.config.start_date = startDate;
-            }
-            if (endDate) {
-                requestBody.config.end_date = endDate;
-            }
+            const requestBody = this._buildCollectionRequestBody(collectTickets, collectKb, collectionMode, startDate, endDate);
 
             console.log('📅 데이터 수집 시작 요청:', requestBody);
 
@@ -605,63 +630,27 @@ class DataCollectionManager extends HTMLElement {
     }
 
     updateStatus(status) {
+        const cfg = {
+            idle:      { text: '대기중',    play: false, pause: true,  stop: true,  cancel: true  },
+            starting:  { text: '시작중...', play: true,  pause: true,  stop: true,  cancel: true  },
+            running:   { text: '수집중',    play: true,  pause: false, stop: false, cancel: false },
+            paused:    { text: '일시정지',  play: false, pause: true,  stop: false, cancel: false },
+            stopped:   { text: '중지됨',    play: false, pause: true,  stop: true,  cancel: true  },
+            cancelled: { text: '취소됨',    play: false, pause: true,  stop: true,  cancel: true  },
+            error:     { text: '오류 발생', play: false, pause: true,  stop: true,  cancel: true  }
+        };
+        const c = cfg[status];
+        if (!c) return;
         const statusEl = this.querySelector('#collectionStatus');
-        const playBtn = this.querySelector('#playBtn');
+        const playBtn  = this.querySelector('#playBtn');
         const pauseBtn = this.querySelector('#pauseBtn');
-        const stopBtn = this.querySelector('#stopBtn');
+        const stopBtn  = this.querySelector('#stopBtn');
         const cancelBtn = this.querySelector('#cancelBtn');
-
-        switch (status) {
-            case 'idle':
-                statusEl.textContent = '대기중';
-                playBtn.disabled = false;
-                pauseBtn.disabled = true;
-                stopBtn.disabled = true;
-                cancelBtn.disabled = true;
-                break;
-            case 'starting':
-                statusEl.textContent = '시작중...';
-                playBtn.disabled = true;
-                pauseBtn.disabled = true;
-                stopBtn.disabled = true;
-                cancelBtn.disabled = true;
-                break;
-            case 'running':
-                statusEl.textContent = '수집중';
-                playBtn.disabled = true;
-                pauseBtn.disabled = false;
-                stopBtn.disabled = false;
-                cancelBtn.disabled = false;
-                break;
-            case 'paused':
-                statusEl.textContent = '일시정지';
-                playBtn.disabled = false;
-                pauseBtn.disabled = true;
-                stopBtn.disabled = false;
-                cancelBtn.disabled = false;
-                break;
-            case 'stopped':
-                statusEl.textContent = '중지됨';
-                playBtn.disabled = false;
-                pauseBtn.disabled = true;
-                stopBtn.disabled = true;
-                cancelBtn.disabled = true;
-                break;
-            case 'cancelled':
-                statusEl.textContent = '취소됨';
-                playBtn.disabled = false;
-                pauseBtn.disabled = true;
-                stopBtn.disabled = true;
-                cancelBtn.disabled = true;
-                break;
-            case 'error':
-                statusEl.textContent = '오류 발생';
-                playBtn.disabled = false;
-                pauseBtn.disabled = true;
-                stopBtn.disabled = true;
-                cancelBtn.disabled = true;
-                break;
-        }
+        if (statusEl) statusEl.textContent = c.text;
+        if (playBtn)  playBtn.disabled  = c.play;
+        if (pauseBtn) pauseBtn.disabled = c.pause;
+        if (stopBtn)  stopBtn.disabled  = c.stop;
+        if (cancelBtn) cancelBtn.disabled = c.cancel;
     }
 
     updateControlsState() {
@@ -803,6 +792,24 @@ class DataCollectionManager extends HTMLElement {
         requestAnimationFrame(animate);
     }
 
+    _applyProgressBarUI(progressBar, percentage, stage, status) {
+        if (!progressBar) return;
+        const oldWidth = parseFloat(progressBar.style.width) || 0;
+        progressBar.setAttribute('data-stage', stage);
+        if (status === 'running' && percentage > 0 && percentage < 100) {
+            progressBar.classList.add('progress-bar-animated');
+        } else {
+            progressBar.classList.remove('progress-bar-animated');
+        }
+        if (Math.abs(percentage - oldWidth) > 15 && status === 'running' && oldWidth > 0) {
+            this.animateProgressBar(progressBar, oldWidth, percentage);
+        } else {
+            progressBar.style.setProperty('--progress-width', `${percentage}%`);
+            progressBar.style.setProperty('width', `${percentage}%`, 'important');
+        }
+        progressBar.setAttribute('aria-valuenow', percentage);
+    }
+
     updateProgress(data) {
         // 중복 호출 방지
         if (this._isUpdatingProgress) {
@@ -815,60 +822,7 @@ class DataCollectionManager extends HTMLElement {
         const progressPercentage = this.querySelector('#progressPercentage');
         const progressDetails = this.querySelector('#progressDetails');
 
-        let percentage = 0;
-        let message = '대기중...';
-        let stage = 'idle';
-        let isCompleted = false;
-        let status = 'idle';
-
-        // 백엔드 응답 구조에 맞게 처리
-        if (data.is_running && data.recent_jobs && data.recent_jobs.length > 0) {
-            // 실행 중인 작업이 있는 경우
-            const runningJob = data.recent_jobs.find(job => job.status === 'running');
-
-            if (runningJob && runningJob.progress) {
-                percentage = Math.round(runningJob.progress.percentage || 0);
-                message = runningJob.progress.current_step_name || '진행 중...';
-                stage = runningJob.progress.current_stage || 'initializing';
-                status = 'running';
-                isCompleted = false;
-
-                // 진행률이 100%에 도달했는지 확인
-                if (percentage >= 100) {
-                    isCompleted = true;
-                    status = 'completed';
-                    stage = 'completed';
-                    message = '수집 완료';
-                }
-            }
-        } else if (data.is_paused && data.recent_jobs && data.recent_jobs.length > 0) {
-            // 일시정지된 작업이 있는 경우
-            const pausedJob = data.recent_jobs.find(job => job.status === 'paused');
-            if (pausedJob && pausedJob.progress) {
-                percentage = pausedJob.progress.percentage || 0;
-                message = `일시정지: ${pausedJob.progress.current_step_name || '진행 중...'}`;
-                stage = pausedJob.progress.current_stage || 'initializing';
-                status = 'paused';
-                isCompleted = false;
-            }
-        } else {
-            // 실행 중인 작업이 없는 경우
-            if (data.completed_jobs > 0 && data.total_jobs > 0) {
-                // 최근에 완료된 작업이 있는 경우
-                percentage = 100;
-                message = '데이터 수집이 완료되었습니다.';
-                stage = 'completed';
-                status = 'completed';
-                isCompleted = true;
-            } else {
-                // 완전히 대기 상태
-                percentage = 0;
-                message = '대기중...';
-                stage = 'idle';
-                status = 'idle';
-                isCompleted = false;
-            }
-        }
+        const { percentage, message, stage, status, isCompleted } = _extractProgressState(data);
 
         // UI 업데이트
         // 진행률이 유의미하게 변경되었을 때만 로그 출력 (5% 단위 또는 상태 변경)
@@ -883,35 +837,7 @@ class DataCollectionManager extends HTMLElement {
             this.lastLoggedProgress = percentage;
         }
 
-        if (progressBar) {
-            const oldWidth = parseFloat(progressBar.style.width) || 0;
-            const newWidth = percentage;
-
-            // 급격한 변화 방지 (15% 이상 차이나면 점진적 업데이트)
-            const widthDiff = Math.abs(newWidth - oldWidth);
-
-            // 단계별 색상 설정
-            progressBar.setAttribute('data-stage', stage);
-
-            // 상태에 따른 애니메이션 클래스 관리
-            if (status === 'running' && percentage > 0 && percentage < 100) {
-                progressBar.classList.add('progress-bar-animated');
-            } else {
-                progressBar.classList.remove('progress-bar-animated');
-            }
-
-            if (widthDiff > 15 && status === 'running' && oldWidth > 0) {
-                // 점진적 업데이트 (급격한 변화 방지)
-                this.animateProgressBar(progressBar, oldWidth, newWidth);
-            } else {
-                // 일반적인 업데이트
-                progressBar.style.setProperty('--progress-width', `${percentage}%`);
-                progressBar.style.setProperty('width', `${percentage}%`, 'important');
-            }
-
-            progressBar.setAttribute('aria-valuenow', percentage);
-
-        }
+        this._applyProgressBarUI(progressBar, percentage, stage, status);
         if (progressPercentage) {
             progressPercentage.textContent = `${percentage}%`;
         }
@@ -951,11 +877,8 @@ class DataCollectionManager extends HTMLElement {
 
         if (ticketCountEl) ticketCountEl.textContent = ticketCount !== undefined ? ticketCount : '-';
         if (articleCountEl) articleCountEl.textContent = articleCount !== undefined ? articleCount : '-';
-        if (lastSyncTimeEl && lastSyncTime) {
-            const date = new Date(lastSyncTime);
-            lastSyncTimeEl.textContent = date.toLocaleString(); // Format as local date/time
-        } else if (lastSyncTimeEl) {
-            lastSyncTimeEl.textContent = '-';
+        if (lastSyncTimeEl) {
+            lastSyncTimeEl.textContent = lastSyncTime ? new Date(lastSyncTime).toLocaleString() : '-';
         }
     }
 
@@ -975,17 +898,12 @@ class DataCollectionManager extends HTMLElement {
         const config = levelConfig[level] || levelConfig['info'];
 
         // i18n 메시지 가져오기 (fallback으로 키 그대로 사용)
-        let message;
+        let message = messageKey;
         if (window.adminUtils && window.adminUtils.getText) {
             message = window.adminUtils.getText(messageKey);
-            // 파라미터가 있으면 치환
-            if (params.length > 0) {
-                params.forEach((param, index) => {
-                    message = message.replace(`{${index}}`, param);
-                });
-            }
-        } else {
-            message = messageKey; // fallback
+            params.forEach((param, index) => {
+                message = message.replace(`{${index}}`, param);
+            });
         }
 
         const logEntry = document.createElement('div');

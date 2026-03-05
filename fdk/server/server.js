@@ -28,6 +28,20 @@ function normalizeDomain(domain) {
     .trim();
 }
 
+function _mapConversationEntry(c) {
+  const text = toText(c?.body_text || c?.body || '');
+  if (!text) return null;
+  const isAgent = Boolean(c?.user_id);
+  return {
+    id: c?.id ? String(c.id) : null,
+    ts: c?.created_at ?? null,
+    author_role: isAgent ? 'agent' : 'customer',
+    author_id: (c?.user_id || c?.from_email) ? String(c.user_id || c.from_email) : null,
+    channel: 'email',
+    text
+  };
+}
+
 function toStructuredConversation({ domain, ticket, conversations, actor_agent_id }) {
   const freshdesk_domain = normalizeDomain(domain);
   const subject = ticket?.subject ?? null;
@@ -46,18 +60,8 @@ function toStructuredConversation({ domain, ticket, conversations, actor_agent_i
   }
 
   for (const c of conversations || []) {
-    const text = toText(c?.body_text || c?.body || '');
-    if (!text) continue;
-
-    const isAgent = Boolean(c?.user_id);
-    conversation.push({
-      id: c?.id ? String(c.id) : null,
-      ts: c?.created_at ?? null,
-      author_role: isAgent ? 'agent' : 'customer',
-      author_id: (c?.user_id || c?.from_email) ? String(c.user_id || c.from_email) : null,
-      channel: 'email',
-      text
-    });
+    const entry = _mapConversationEntry(c);
+    if (entry) conversation.push(entry);
   }
 
   return {
@@ -217,15 +221,18 @@ function buildTenantHeaders(iparams) {
 }
 
 function resolveBackendBaseUrl() {
-  const env = process.env || {};
-
+  const backendEnvUrl = (typeof process !== 'undefined') && process.env && process.env.BACKEND_BASE_URL;
   // 로컬 개발 환경은 환경변수로만 오버라이드 (ngrok URL 하드코딩 금지)
-  if (env.BACKEND_BASE_URL) {
-    return env.BACKEND_BASE_URL;
-  }
+  return backendEnvUrl || PROD_BACKEND_BASE_URL;
+}
 
-  // 운영 기본값
-  return PROD_BACKEND_BASE_URL;
+async function _parseSyncResponse(response) {
+  const responseText = await response.text();
+  try {
+    return { text: responseText, data: responseText ? JSON.parse(responseText) : {} };
+  } catch (e) {
+    return { text: responseText, data: { raw: responseText } };
+  }
 }
 
 async function callSyncEndpoint(iparams, payload) {
@@ -248,13 +255,7 @@ async function callSyncEndpoint(iparams, payload) {
     body: JSON.stringify(payload)
   });
 
-  const responseText = await response.text();
-  let responseData = responseText;
-  try {
-    responseData = responseText ? JSON.parse(responseText) : {};
-  } catch (error) {
-    responseData = { raw: responseText };
-  }
+  const { text: responseText, data: responseData } = await _parseSyncResponse(response);
 
   if (!response.ok) {
     const detail = responseData?.detail || responseData?.message || responseText;
@@ -292,26 +293,26 @@ function getSecureParams(args) {
   }
 }
 
+function _buildSyncPayload(data) {
+  const payload = {
+    include_tickets: data?.include_tickets !== false,
+    include_articles: data?.include_articles !== false,
+    incremental: data?.incremental === true,
+    batch_size: data?.batch_size || 10,
+    max_concurrency: data?.max_concurrency || 5
+  };
+  if (data?.purge !== undefined) payload.purge = data.purge;
+  if (data?.purge_only !== undefined) payload.purge_only = data.purge_only;
+  return payload;
+}
+
 /**
  * 수동 수집 트리거
  */
 async function triggerSyncJob(args) {
   try {
     const { iparams, data } = args;
-    const payload = {
-      include_tickets: data?.include_tickets !== false,
-      include_articles: data?.include_articles !== false,
-      incremental: data?.incremental === true,
-      batch_size: data?.batch_size || 10,
-      max_concurrency: data?.max_concurrency || 5
-    };
-
-    if (data?.purge !== undefined) {
-      payload.purge = data.purge;
-    }
-    if (data?.purge_only !== undefined) {
-      payload.purge_only = data.purge_only;
-    }
+    const payload = _buildSyncPayload(data);
 
     const result = await callSyncEndpoint(iparams, payload);
     if (!result.ok) {

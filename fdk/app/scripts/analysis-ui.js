@@ -150,6 +150,38 @@
   }
 
   // =============================================================================
+  // Stream Event Handler Helpers
+  // =============================================================================
+
+  function _handleAnalysisStreamEvent(event, partialAnalysis) {
+    if (event.type === 'progress' && event.analysis_id) {
+      const teachEl = document.getElementById('teachAnalysisId');
+      if (teachEl) teachEl.value = event.analysis_id;
+    } else if (event.type === 'field') {
+      partialAnalysis[event.name] = event.data;
+      renderStreamField(event.name, event.data);
+    } else if (event.type === 'complete') {
+      renderGateAndMeta(event.gate, event.analysis_id, event.meta);
+      showFeedbackSection(event.analysis_id);
+      const fullResult = {
+        analysis_id: event.analysis_id,
+        gate: event.gate,
+        analysis: partialAnalysis,
+        meta: event.meta
+      };
+      setAnalysisResult(fullResult);
+      setState(
+        (event.gate === 'DECIDE' || event.gate === 'TEACH')
+          ? AnalysisState.NEEDS_REVIEW
+          : AnalysisState.COMPLETED
+      );
+    } else if (event.type === 'error') {
+      setState(AnalysisState.ERROR);
+      showError(`분석 실패: ${event.message}`);
+    }
+  }
+
+  // =============================================================================
   // Analyze Tab
   // =============================================================================
 
@@ -190,39 +222,28 @@
           updated_at: ticketData.updated_at
         },
         { include_evidence: true, response_tone: 'formal' },
-        (event) => {
-          if (event.type === 'progress' && event.analysis_id) {
-            const teachEl = document.getElementById('teachAnalysisId');
-            if (teachEl) teachEl.value = event.analysis_id;
-          } else if (event.type === 'field') {
-            partialAnalysis[event.name] = event.data;
-            renderStreamField(event.name, event.data);
-          } else if (event.type === 'complete') {
-            renderGateAndMeta(event.gate, event.analysis_id, event.meta);
-            showFeedbackSection(event.analysis_id);
-            const fullResult = {
-              analysis_id: event.analysis_id,
-              gate: event.gate,
-              analysis: partialAnalysis,
-              meta: event.meta
-            };
-            setAnalysisResult(fullResult);
-            setState(
-              (event.gate === 'DECIDE' || event.gate === 'TEACH')
-                ? AnalysisState.NEEDS_REVIEW
-                : AnalysisState.COMPLETED
-            );
-          } else if (event.type === 'error') {
-            setState(AnalysisState.ERROR);
-            showError(`분석 실패: ${event.message}`);
-          }
-        }
+        (event) => _handleAnalysisStreamEvent(event, partialAnalysis)
       );
     } catch (error) {
       console.error('[AnalysisUI] Analysis stream failed:', error);
       setState(AnalysisState.ERROR);
       showError(`분석 실패: ${error.message}`);
     }
+  }
+
+  function _resetResultSections() {
+    const narrativeSkeleton = document.getElementById('narrativeSkeleton');
+    const narrativeText = document.getElementById('narrativeText');
+    const confidenceSkeleton = document.getElementById('confidenceSkeleton');
+    const confidenceBar = document.getElementById('confidenceBar');
+    const confidenceValue = document.getElementById('confidenceValue');
+    const confidenceFill = document.getElementById('confidenceFill');
+    if (narrativeSkeleton) narrativeSkeleton.classList.remove('hidden');
+    if (narrativeText) { narrativeText.classList.add('hidden'); narrativeText.textContent = ''; }
+    if (confidenceSkeleton) confidenceSkeleton.classList.remove('hidden');
+    if (confidenceBar) confidenceBar.classList.add('hidden');
+    if (confidenceValue) confidenceValue.textContent = '-';
+    if (confidenceFill) confidenceFill.style.width = '0%';
   }
 
   function showResultContainer() {
@@ -238,64 +259,45 @@
     if (result) {
       result.classList.remove('hidden');
       // 스켈레톤 표시 상태로 리셋
-      const narrativeSkeleton = document.getElementById('narrativeSkeleton');
-      const narrativeText = document.getElementById('narrativeText');
-      const confidenceSkeleton = document.getElementById('confidenceSkeleton');
-      const confidenceBar = document.getElementById('confidenceBar');
-      const confidenceValue = document.getElementById('confidenceValue');
-      const confidenceFill = document.getElementById('confidenceFill');
-
-      if (narrativeSkeleton) narrativeSkeleton.classList.remove('hidden');
-      if (narrativeText) { narrativeText.classList.add('hidden'); narrativeText.textContent = ''; }
-      if (confidenceSkeleton) confidenceSkeleton.classList.remove('hidden');
-      if (confidenceBar) confidenceBar.classList.add('hidden');
-      if (confidenceValue) confidenceValue.textContent = '-';
-      if (confidenceFill) confidenceFill.style.width = '0%';
+      _resetResultSections();
     }
   }
 
   function showFeedbackSection() { /* 다음 단계에서 구현 */ }
 
-  function renderStreamField(name, data) {
-    if (name === 'narrative') {
-      const skeleton = document.getElementById('narrativeSkeleton');
-      const textEl = document.getElementById('narrativeText');
-      if (skeleton) skeleton.classList.add('hidden');
-      if (textEl) {
-        textEl.classList.remove('hidden');
-        _startTyping(data.summary || '', textEl);
-      }
-    } else if (name === 'confidence') {
-      const skeleton = document.getElementById('confidenceSkeleton');
-      const bar = document.getElementById('confidenceBar');
-      const valueEl = document.getElementById('confidenceValue');
-      const fill = document.getElementById('confidenceFill');
-
-      if (skeleton) skeleton.classList.add('hidden');
-      if (bar) bar.classList.remove('hidden');
-      if (valueEl) valueEl.textContent = Math.round(data * 100) + '%';
-      if (fill) {
-        fill.style.width = (data * 100) + '%';
-        fill.className = 'confidence-fill ' + _confidenceColor(data);
-      }
+  function _renderNarrativeField(data) {
+    const skeleton = document.getElementById('narrativeSkeleton');
+    const textEl = document.getElementById('narrativeText');
+    if (skeleton) skeleton.classList.add('hidden');
+    if (textEl) {
+      textEl.classList.remove('hidden');
+      _startTyping(data.summary || '', textEl);
     }
+  }
+
+  function _renderConfidenceField(data) {
+    const skeleton = document.getElementById('confidenceSkeleton');
+    const bar = document.getElementById('confidenceBar');
+    const valueEl = document.getElementById('confidenceValue');
+    const fill = document.getElementById('confidenceFill');
+    if (skeleton) skeleton.classList.add('hidden');
+    if (bar) bar.classList.remove('hidden');
+    if (valueEl) valueEl.textContent = Math.round(data * 100) + '%';
+    if (fill) {
+      fill.style.width = (data * 100) + '%';
+      fill.className = 'confidence-fill ' + _confidenceColor(data);
+    }
+  }
+
+  function renderStreamField(name, data) {
+    if (name === 'narrative') { _renderNarrativeField(data); }
+    else if (name === 'confidence') { _renderConfidenceField(data); }
     // 그 외 필드: 무시 (다음 단계에서 추가)
   }
 
   function renderGateAndMeta() { /* 다음 단계에서 구현 */ }
 
-  function renderAnalysisResult(result) {
-    const placeholder = document.getElementById('analysisPlaceholder');
-    const errorEl = document.getElementById('analysisError');
-    const resultEl = document.getElementById('analysisResult');
-
-    if (placeholder) placeholder.classList.add('hidden');
-    if (errorEl) errorEl.remove();
-    if (resultEl) resultEl.classList.remove('hidden');
-
-    _stopTyping();
-
-    // narrative — 즉시 표시 (타이핑 없음)
+  function _applyNarrativeResult(result) {
     const narrativeSkeleton = document.getElementById('narrativeSkeleton');
     const narrativeText = document.getElementById('narrativeText');
     if (narrativeSkeleton) narrativeSkeleton.classList.add('hidden');
@@ -303,17 +305,15 @@
       narrativeText.classList.remove('hidden');
       narrativeText.textContent = result?.analysis?.narrative?.summary || '';
     }
+  }
 
-    // confidence — 즉시 채움 (transition 없이)
+  function _applyConfidenceResult(conf) {
     const confidenceSkeleton = document.getElementById('confidenceSkeleton');
     const confidenceBar = document.getElementById('confidenceBar');
     const confidenceValue = document.getElementById('confidenceValue');
     const confidenceFill = document.getElementById('confidenceFill');
-    const conf = result?.analysis?.confidence;
-
     if (confidenceSkeleton) confidenceSkeleton.classList.add('hidden');
     if (confidenceBar) confidenceBar.classList.remove('hidden');
-
     if (conf !== null && conf !== undefined) {
       if (confidenceValue) confidenceValue.textContent = Math.round(conf * 100) + '%';
       if (confidenceFill) {
@@ -327,6 +327,18 @@
     }
   }
 
+  function renderAnalysisResult(result) {
+    const placeholder = document.getElementById('analysisPlaceholder');
+    const errorEl = document.getElementById('analysisError');
+    const resultEl = document.getElementById('analysisResult');
+    if (placeholder) placeholder.classList.add('hidden');
+    if (errorEl) errorEl.remove();
+    if (resultEl) resultEl.classList.remove('hidden');
+    _stopTyping();
+    _applyNarrativeResult(result);
+    _applyConfidenceResult(result?.analysis?.confidence);
+  }
+
   // 재구성 예정
   function setupEvidenceFilters() { /* 재구성 예정 */ }
   async function submitFeedback() { /* 재구성 예정 */ }
@@ -337,6 +349,41 @@
   // Teach Tab
   // =============================================================================
 
+  async function _handleTeachSubmit(e) {
+    e.preventDefault();
+
+    const analysisId = document.getElementById('teachAnalysisId')?.value;
+    if (!analysisId) {
+      showTeachResult('먼저 분석을 실행해주세요.', false);
+      return;
+    }
+
+    const lesson = {
+      mistake_pattern: document.getElementById('teachMistakePattern')?.value || '',
+      wrong_assumption: document.getElementById('teachWrongAssumption')?.value || '',
+      corrective_heuristic: document.getElementById('teachCorrectiveHeuristic')?.value || '',
+      automation_possible: document.getElementById('teachAutomationPossible')?.checked || false
+    };
+
+    if (!lesson.mistake_pattern && !lesson.wrong_assumption && !lesson.corrective_heuristic) {
+      showTeachResult('최소 하나의 필드를 입력해주세요.', false);
+      return;
+    }
+
+    const submitBtn = document.getElementById('teachSubmitBtn');
+    if (submitBtn) submitBtn.disabled = true;
+
+    try {
+      const result = await window.StreamUtils.submitTeachFeedback(analysisId, lesson);
+      showTeachResult(result.message || '교훈이 성공적으로 저장되었습니다!', true);
+      document.getElementById('teachForm')?.reset();
+    } catch (error) {
+      showTeachResult(`제출 실패: ${error.message}`, false);
+    } finally {
+      if (submitBtn) submitBtn.disabled = false;
+    }
+  }
+
   function setupTeachForm() {
     const form = document.getElementById('teachForm');
     const resetBtn = document.getElementById('teachResetBtn');
@@ -344,41 +391,7 @@
 
     if (!form) return;
 
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-
-      const analysisId = document.getElementById('teachAnalysisId')?.value;
-      if (!analysisId) {
-        showTeachResult('먼저 분석을 실행해주세요.', false);
-        return;
-      }
-
-      const lesson = {
-        mistake_pattern: document.getElementById('teachMistakePattern')?.value || '',
-        wrong_assumption: document.getElementById('teachWrongAssumption')?.value || '',
-        corrective_heuristic: document.getElementById('teachCorrectiveHeuristic')?.value || '',
-        automation_possible: document.getElementById('teachAutomationPossible')?.checked || false
-      };
-
-      // 최소 하나의 필드는 입력 필요
-      if (!lesson.mistake_pattern && !lesson.wrong_assumption && !lesson.corrective_heuristic) {
-        showTeachResult('최소 하나의 필드를 입력해주세요.', false);
-        return;
-      }
-
-      const submitBtn = document.getElementById('teachSubmitBtn');
-      if (submitBtn) submitBtn.disabled = true;
-
-      try {
-        const result = await window.StreamUtils.submitTeachFeedback(analysisId, lesson);
-        showTeachResult(result.message || '교훈이 성공적으로 저장되었습니다!', true);
-        form.reset();
-      } catch (error) {
-        showTeachResult(`제출 실패: ${error.message}`, false);
-      } finally {
-        if (submitBtn) submitBtn.disabled = false;
-      }
-    });
+    form.addEventListener('submit', _handleTeachSubmit);
 
     if (resetBtn) {
       resetBtn.addEventListener('click', () => {

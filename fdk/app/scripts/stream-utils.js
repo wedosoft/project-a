@@ -18,9 +18,9 @@
     let buffer = '';
 
     try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      let streamChunk = await reader.read();
+      while (!streamChunk.done) {
+        const { value } = streamChunk;
 
         buffer += decoder.decode(value, { stream: true });
         
@@ -50,6 +50,7 @@
             }
           }
         }
+        streamChunk = await reader.read();
       }
       
       // 남은 버퍼 처리
@@ -90,7 +91,7 @@
       
       // SSE 스트림인 경우
       if (contentType.includes('text/event-stream') || contentType.includes('application/x-ndjson')) {
-        let result = null;
+        const collected = { result: null };
         
         await processStream(response, (data) => {
           // 콜백 호출
@@ -103,21 +104,21 @@
             if (data.data) {
               if (typeof data.data === 'string') {
                 try {
-                  result = JSON.parse(data.data);
+                  collected.result = JSON.parse(data.data);
                 } catch (e) {
-                  result = data.data;
+                  collected.result = data.data;
                 }
               } else {
-                result = data.data;
+                collected.result = data.data;
               }
             } else {
-              result = data;
+              collected.result = data;
             }
-            console.log('[StreamUtils] Final result captured:', result);
+            console.log('[StreamUtils] Final result captured:', collected.result);
           }
         });
         
-        return result;
+        return collected.result;
       }
       
       // 일반 JSON 응답인 경우
@@ -233,6 +234,15 @@
   }
 
   /**
+   * pollAnalyze 상태 체크 헬퍼
+   */
+  async function _pollOnce(statusUrl, headers) {
+    const statusResponse = await fetch(statusUrl, { headers });
+    if (!statusResponse.ok) throw new Error(`Status HTTP ${statusResponse.status}`);
+    return statusResponse.json();
+  }
+
+  /**
    * 분석 API 폴링 모드 (fallback)
    * @param {Object} payload - 요청 본문
    * @param {Function} onProgress - 진행 상황 콜백
@@ -283,13 +293,7 @@
 
       try {
         const statusUrl = window.BACKEND_CONFIG.getUrl(`/api/assist/status/${proposalId}`);
-        const statusResponse = await fetch(statusUrl, { headers });
-        
-        if (!statusResponse.ok) {
-          throw new Error(`Status HTTP ${statusResponse.status}`);
-        }
-
-        const statusData = await statusResponse.json();
+        const statusData = await _pollOnce(statusUrl, headers);
         consecutiveErrors = 0;
 
         if (statusData.status === 'processing') {
@@ -319,6 +323,27 @@
     }
 
     throw new Error('분석 시간 초과');
+  }
+
+  /**
+   * streamChat 내부 이벤트 핸들러
+   */
+  function _handleChatEvent(data, state) {
+    if (data.type === 'answer_chunk' || data.type === 'chunk') {
+      state.fullResponse += data.content || data.text || '';
+    } else if (data.type === 'retrieved_documents' || data.type === 'sources') {
+      state.sources = data.documents || data.sources || [];
+    } else if (data.type === 'filters') {
+      state.filters = data.filters || [];
+      state.filterConfidence = data.filterConfidence;
+      state.knownContext = data.knownContext || {};
+    } else if (data.type === 'complete') {
+      if (data.text) state.fullResponse = data.text;
+      if (data.groundingChunks) state.sources = data.groundingChunks;
+      if (data.filters) state.filters = data.filters;
+      if (data.filterConfidence) state.filterConfidence = data.filterConfidence;
+      if (data.knownContext) state.knownContext = data.knownContext;
+    }
   }
 
   /**
@@ -355,23 +380,9 @@
     // SSE 스트림인 경우
     if (contentType.includes('text/event-stream') || contentType.includes('application/x-ndjson')) {
       await processStream(response, (data) => {
-        if (data.type === 'answer_chunk' || data.type === 'chunk') {
-          streamState.fullResponse += data.content || data.text || '';
-          if (onChunk) {
-            onChunk(streamState.fullResponse, streamState.sources, false);
-          }
-        } else if (data.type === 'retrieved_documents' || data.type === 'sources') {
-          streamState.sources = data.documents || data.sources || [];
-        } else if (data.type === 'filters') {
-          streamState.filters = data.filters || [];
-          streamState.filterConfidence = data.filterConfidence;
-          streamState.knownContext = data.knownContext || {};
-        } else if (data.type === 'complete') {
-          if (data.text) streamState.fullResponse = data.text;
-          if (data.groundingChunks) streamState.sources = data.groundingChunks;
-          if (data.filters) streamState.filters = data.filters;
-          if (data.filterConfidence) streamState.filterConfidence = data.filterConfidence;
-          if (data.knownContext) streamState.knownContext = data.knownContext;
+        _handleChatEvent(data, streamState);
+        if ((data.type === 'answer_chunk' || data.type === 'chunk') && onChunk) {
+          onChunk(streamState.fullResponse, streamState.sources, false);
         }
       });
 
@@ -399,19 +410,10 @@
   }
 
   /**
-   * Ticket Analysis SSE Stream
-   * POST /api/tickets/{ticket_id}/analyze/stream
-   * @param {string} ticketId
-   * @param {Object} ticketData
-   * @param {Object} options
-   * @param {Function} onEvent - called for each SSE event: (event) => void
-   * @returns {Promise<void>}
+   * 분석 API 공통 페이로드 빌더
    */
-  async function fetchAnalysisStream(ticketId, ticketData, options = {}, onEvent) {
-    const url = window.BACKEND_CONFIG.getUrl(`/api/tickets/${ticketId}/analyze/stream`);
-    const headers = window.BACKEND_CONFIG.getHeaders();
-
-    const payload = {
+  function _buildAnalysisPayload(ticketData, options) {
+    return {
       subject: ticketData.subject || null,
       description_text: ticketData.description_text || null,
       priority: ticketData.priority || null,
@@ -424,7 +426,7 @@
       group_id: ticketData.group_id || null,
       custom_fields: ticketData.custom_fields || null,
       conversations: ticketData.conversations || null,
-      ticketFields: ticketData.ticketFields || null,
+      ticketFields: ticketData.ticketFields || ticketData.ticket_fields || null,
       created_at: ticketData.created_at || null,
       updated_at: ticketData.updated_at || null,
       options: {
@@ -435,6 +437,25 @@
         response_tone: options.response_tone || 'formal'
       }
     };
+  }
+
+  /**
+   * Ticket Analysis SSE Stream
+   * POST /api/tickets/{ticket_id}/analyze/stream
+   * @param {string} ticketId
+   * @param {Object} ticketData
+   * @param {Object} options
+   * @param {Function} onEvent - called for each SSE event: (event) => void
+   * @returns {Promise<void>}
+   */
+  async function fetchAnalysisStream(ticketId, ticketData, options = {}, onEvent) {
+    const url = window.BACKEND_CONFIG.getUrl(`/api/tickets/${ticketId}/analyze/stream`);
+    const headers = window.BACKEND_CONFIG.getHeaders();
+
+    const payload = _buildAnalysisPayload(
+      { ...ticketData, ticketFields: ticketData.ticketFields || null },
+      options
+    );
 
     const response = await fetch(url, {
       method: 'POST',
@@ -465,30 +486,7 @@
     const headers = window.BACKEND_CONFIG.getHeaders();
 
     // ticket_normalized_v1 형식으로 페이로드 구성
-    const payload = {
-      subject: ticketData.subject || null,
-      description_text: ticketData.description_text || null,
-      priority: ticketData.priority || null,
-      status: ticketData.status || null,
-      source: ticketData.source || null,
-      type: ticketData.type || null,
-      tags: ticketData.tags || null,
-      requester_id: ticketData.requester_id || null,
-      responder_id: ticketData.responder_id || null,
-      group_id: ticketData.group_id || null,
-      custom_fields: ticketData.custom_fields || null,
-      conversations: ticketData.conversations || null,
-      ticketFields: ticketData.ticketFields || ticketData.ticket_fields || null,
-      created_at: ticketData.created_at || null,
-      updated_at: ticketData.updated_at || null,
-      options: {
-        skip_retrieval: options.skip_retrieval || false,
-        include_evidence: options.include_evidence !== false,
-        confidence_threshold: options.confidence_threshold || 0.7,
-        selected_fields: options.selected_fields || null,
-        response_tone: options.response_tone || 'formal'
-      }
-    };
+    const payload = _buildAnalysisPayload(ticketData, options);
 
     console.log('[StreamUtils] fetchAnalysis request:', { ticketId, payload });
 
@@ -558,6 +556,17 @@
   }
 
   /**
+   * submitTeachFeedback 404 응답 처리 헬퍼
+   */
+  function _handleTeachResponse(response) {
+    if (response.status === 404) {
+      console.warn('[StreamUtils] Teach endpoint not implemented, simulating success');
+      return { success: true, message: '교훈이 저장되었습니다. (임시)', lesson_id: 'temp-' + Date.now() };
+    }
+    return null;
+  }
+
+  /**
    * Submit teaching feedback for an analysis
    * POST /api/analyses/{analysis_id}/teach (임시 - 백엔드 구현 시 경로 조정)
    * @param {string} analysisId - 분석 ID
@@ -588,10 +597,8 @@
 
       if (!response.ok) {
         // 백엔드가 아직 없으면 임시 성공 반환
-        if (response.status === 404) {
-          console.warn('[StreamUtils] Teach endpoint not implemented, simulating success');
-          return { success: true, message: '교훈이 저장되었습니다. (임시)', lesson_id: 'temp-' + Date.now() };
-        }
+        const sim = _handleTeachResponse(response);
+        if (sim) return sim;
         const errorData = await response.json().catch(() => ({ message: response.statusText }));
         throw new Error(errorData.detail?.message || errorData.message || `HTTP ${response.status}`);
       }

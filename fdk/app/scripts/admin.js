@@ -65,6 +65,12 @@ async function init() {
   }
 }
 
+function _validateSecureResponse(responseData) {
+  if (!responseData || !responseData.apiKey || !responseData.domain) {
+    throw new Error('Secure params not configured');
+  }
+}
+
 /**
  * 보안 파라미터 로드 (서버리스 함수 호출)
  * - Freshdesk API key는 secure iparams이므로 프론트에서 iparams.get()로 직접 접근하지 않는다.
@@ -77,9 +83,7 @@ async function loadSecureConfig() {
 
   const data = await client.request.invoke('getSecureParams', {});
   const responseData = data?.response || data;
-  if (!responseData || !responseData.apiKey || !responseData.domain) {
-    throw new Error('Secure params not configured');
-  }
+  _validateSecureResponse(responseData);
 
   window.APP_CONFIG.apiKey = responseData.apiKey;
   window.APP_CONFIG.domain = responseData.domain;
@@ -93,6 +97,17 @@ async function fetchConfig() {
     console.warn('Config not found or error fetching, using defaults', error);
     return null;
   }
+}
+
+function _renderFieldCheckboxes(fields, selectedFields, container) {
+  container.innerHTML = '';
+  fields.forEach(field => {
+    const checkbox = document.createElement('fw-checkbox');
+    checkbox.value = field.name;
+    checkbox.checked = selectedFields.includes(field.name);
+    checkbox.innerText = field.label;
+    container.appendChild(checkbox);
+  });
 }
 
 async function loadTicketFields(selectedFields) {
@@ -125,14 +140,7 @@ async function loadTicketFields(selectedFields) {
 
     if (!Array.isArray(fields)) throw new Error('Unexpected ticket_fields response');
     
-    container.innerHTML = '';
-    fields.forEach(field => {
-      const checkbox = document.createElement('fw-checkbox');
-      checkbox.value = field.name;
-      checkbox.checked = selectedFields.includes(field.name);
-      checkbox.innerText = field.label;
-      container.appendChild(checkbox);
-    });
+    _renderFieldCheckboxes(fields, selectedFields, container);
   } catch (error) {
     console.error('Error loading fields', error);
     const msg = (error && error.message) ? error.message : String(error);

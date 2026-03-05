@@ -325,6 +325,13 @@ class AgentManager extends HTMLElement {
         }
     }
     
+    _applyUsageBar(usageBarEl, total, used) {
+        if (!usageBarEl || !total) return;
+        const percentage = (used / total) * 100;
+        usageBarEl.style.width = `${percentage}%`;
+        usageBarEl.className = `progress-bar ${this.getUsageBarColor(percentage)}`;
+    }
+
     updateLicenseInfo(licenseInfo) {
         if (!licenseInfo) return;
         
@@ -342,11 +349,7 @@ class AgentManager extends HTMLElement {
         if (usedEl) usedEl.textContent = used;
         if (availableEl) availableEl.textContent = available;
         
-        if (usageBarEl && total > 0) {
-            const percentage = (used / total) * 100;
-            usageBarEl.style.width = `${percentage}%`;
-            usageBarEl.className = `progress-bar ${this.getUsageBarColor(percentage)}`;
-        }
+        this._applyUsageBar(usageBarEl, total, used);
     }
     
     async startAgentSync() {
@@ -673,10 +676,10 @@ class AgentManager extends HTMLElement {
         const closeLicenseStats = () => {
             modal.classList.remove('modal-entering');
             modal.classList.add('modal-exiting');
-            let done = false;
+            const guard = { fired: false };
             const onEnd = () => {
-                if (done) return;
-                done = true;
+                if (guard.fired) return;
+                guard.fired = true;
                 modal.remove();
             };
             modal.addEventListener('animationend', onEnd);
