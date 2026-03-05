@@ -585,7 +585,7 @@ function openModal(title, content, uri) {
   }
 
   // 헤더 렌더링
-  let headerHtml = `<span class="truncate" title="${escapeAttr(displayTitle)}">${escapeHtml(displayTitle)}</span>`;
+  let headerHtml = `<span class="modal-accent-dot"></span><span class="truncate" title="${escapeAttr(displayTitle)}">${escapeHtml(displayTitle)}</span>`;
   
   if (displayUri) {
     headerHtml += `
@@ -614,12 +614,29 @@ function openModal(title, content, uri) {
   
   elements.modalContent.innerHTML = html;
   elements.sourceModal.classList.remove('hidden');
+  elements.sourceModal.classList.remove('modal-exiting');
+  elements.sourceModal.classList.add('modal-entering');
+  elements.sourceModal.addEventListener('animationend', function handler(e) {
+    if (e.target === elements.sourceModal) {
+      elements.sourceModal.classList.remove('modal-entering');
+      elements.sourceModal.removeEventListener('animationend', handler);
+    }
+  });
 }
 
 function closeModal() {
-  if (elements.sourceModal) {
+  if (!elements.sourceModal || elements.sourceModal.classList.contains('hidden')) return;
+  elements.sourceModal.classList.add('modal-exiting');
+  let done = false;
+  const onEnd = () => {
+    if (done) return;
+    done = true;
     elements.sourceModal.classList.add('hidden');
-  }
+    elements.sourceModal.classList.remove('modal-exiting');
+    elements.sourceModal.removeEventListener('animationend', onEnd);
+  };
+  elements.sourceModal.addEventListener('animationend', onEnd);
+  setTimeout(onEnd, 300);
 }
 
 function formatMessage(text) {

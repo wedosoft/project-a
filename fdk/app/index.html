@@ -26,6 +26,7 @@
     }
   </script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     /* Light mode (default) */
     :root {
@@ -47,6 +48,173 @@
       --color-app-muted: #94a3b8;
       --color-app-primary: #3b82f6;
       --color-app-primary-hover: #2563eb;
+    }
+
+    /* ===== Glass Terminal Modal System ===== */
+    :root {
+      --color-modal-backdrop: rgba(15, 23, 42, 0.75);
+      --color-modal-surface: rgba(255, 255, 255, 0.95);
+      --color-modal-border: rgba(6, 182, 212, 0.15);
+      --color-modal-glow: rgba(6, 182, 212, 0.08);
+      --color-accent-teal: #06b6d4;
+      --color-accent-teal-hover: #0891b2;
+    }
+    html.dark {
+      --color-modal-surface: rgba(30, 41, 59, 0.92);
+      --color-modal-border: rgba(6, 182, 212, 0.2);
+      --color-modal-glow: rgba(6, 182, 212, 0.12);
+    }
+
+    .modal-backdrop {
+      background:
+        radial-gradient(ellipse at 20% 50%, rgba(6, 182, 212, 0.06) 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 20%, rgba(6, 182, 212, 0.04) 0%, transparent 50%),
+        var(--color-modal-backdrop);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+    }
+
+    .modal-card {
+      background: var(--color-modal-surface);
+      border: 1px solid var(--color-modal-border);
+      border-radius: 16px;
+      box-shadow:
+        0 0 0 1px var(--color-modal-border),
+        0 0 24px var(--color-modal-glow),
+        0 25px 50px -12px rgba(0, 0, 0, 0.25);
+      font-family: 'DM Sans', sans-serif;
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+    }
+
+    .modal-header {
+      position: relative;
+      padding-bottom: 0.75rem;
+    }
+    .modal-header::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 1rem;
+      right: 1rem;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--color-accent-teal), transparent);
+      opacity: 0.3;
+    }
+
+    .modal-accent-dot {
+      display: inline-block;
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: var(--color-accent-teal);
+      box-shadow: 0 0 6px var(--color-accent-teal);
+      margin-right: 8px;
+      flex-shrink: 0;
+      vertical-align: middle;
+    }
+
+    .modal-close-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--color-app-muted);
+      cursor: pointer;
+      transition: all 0.2s ease;
+      flex-shrink: 0;
+    }
+    .modal-close-btn:hover {
+      border-color: var(--color-accent-teal);
+      box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.15);
+      color: var(--color-accent-teal);
+      transform: scale(1.1) rotate(90deg);
+    }
+
+    .modal-body {
+      scrollbar-width: thin;
+      scrollbar-color: rgba(6, 182, 212, 0.25) transparent;
+    }
+    .modal-body::-webkit-scrollbar { width: 6px; }
+    .modal-body::-webkit-scrollbar-track { background: transparent; }
+    .modal-body::-webkit-scrollbar-thumb {
+      background: rgba(6, 182, 212, 0.25);
+      border-radius: 3px;
+    }
+    .modal-body::-webkit-scrollbar-thumb:hover {
+      background: rgba(6, 182, 212, 0.4);
+    }
+
+    .modal-footer .modal-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.5rem 1.25rem;
+      font-size: 0.875rem;
+      font-weight: 500;
+      border-radius: 9999px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      font-family: 'DM Sans', sans-serif;
+    }
+    .modal-footer .modal-btn-primary {
+      background: linear-gradient(135deg, var(--color-accent-teal), var(--color-accent-teal-hover));
+      color: #fff;
+      border: none;
+      box-shadow: 0 2px 8px rgba(6, 182, 212, 0.3);
+    }
+    .modal-footer .modal-btn-primary:hover {
+      box-shadow: 0 4px 16px rgba(6, 182, 212, 0.4);
+      transform: translateY(-1px);
+    }
+    .modal-footer .modal-btn-secondary {
+      background: transparent;
+      color: var(--color-app-muted);
+      border: 1px solid var(--color-modal-border);
+    }
+    .modal-footer .modal-btn-secondary:hover {
+      border-color: var(--color-accent-teal);
+      color: var(--color-accent-teal);
+    }
+
+    /* Modal Animations */
+    @keyframes modalBackdropIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    @keyframes modalCardIn {
+      from { opacity: 0; transform: scale(0.95) translateY(12px); }
+      to { opacity: 1; transform: scale(1) translateY(0); }
+    }
+    @keyframes modalBackdropOut {
+      from { opacity: 1; }
+      to { opacity: 0; }
+    }
+    @keyframes modalCardOut {
+      from { opacity: 1; transform: scale(1) translateY(0); }
+      to { opacity: 0; transform: scale(0.97) translateY(8px); }
+    }
+    @keyframes borderGlow {
+      from { border-color: rgba(6, 182, 212, 0); }
+      to { border-color: var(--color-modal-border); }
+    }
+
+    .modal-entering {
+      animation: modalBackdropIn 250ms ease-out forwards;
+    }
+    .modal-entering .modal-card {
+      animation: modalCardIn 350ms cubic-bezier(0.32, 0.72, 0, 1) forwards,
+                 borderGlow 400ms ease-out forwards;
+    }
+    .modal-exiting {
+      animation: modalBackdropOut 200ms ease-in forwards;
+    }
+    .modal-exiting .modal-card {
+      animation: modalCardOut 200ms ease-in forwards;
     }
 
     html.dark body {
@@ -540,17 +708,19 @@
   </div>
 
   <!-- HITL 수정 모달 -->
-  <div id="editModal" class="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 hidden">
-    <div class="bg-app-card rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden mx-4">
-      <div class="flex items-center justify-between px-4 py-3 border-b border-app-border">
-        <h3 class="font-semibold text-app-text">AI 응답 수정</h3>
-        <button id="closeEditModalBtn" class="p-1 hover:bg-app-border rounded-lg transition-colors">
-          <svg class="w-5 h-5 text-app-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+  <div id="editModal" class="modal-backdrop fixed inset-0 flex items-center justify-center z-50 hidden">
+    <div class="modal-card w-full max-w-2xl max-h-[85vh] overflow-hidden mx-4">
+      <div class="modal-header flex items-center justify-between px-4 py-3">
+        <h3 class="font-semibold text-app-text flex items-center">
+          <span class="modal-accent-dot"></span>AI 응답 수정
+        </h3>
+        <button id="closeEditModalBtn" class="modal-close-btn">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
           </svg>
         </button>
       </div>
-      <div class="p-4 overflow-y-auto max-h-[60vh] space-y-4">
+      <div class="modal-body p-4 overflow-y-auto max-h-[60vh] space-y-4">
         <!-- Summary Edit -->
         <div>
           <label class="block text-sm font-medium text-app-text mb-1">요약 (Summary)</label>
@@ -573,11 +743,11 @@
             placeholder="0.8">
         </div>
       </div>
-      <div class="flex justify-end gap-2 px-4 py-3 border-t border-app-border">
-        <button id="cancelEditBtn" class="px-4 py-2 text-sm font-medium text-app-muted bg-app-bg border border-app-border rounded-lg hover:bg-gray-100 transition-colors">
+      <div class="modal-footer flex justify-end gap-2 px-4 py-3">
+        <button id="cancelEditBtn" class="modal-btn modal-btn-secondary">
           취소
         </button>
-        <button id="saveEditBtn" class="px-4 py-2 text-sm font-medium text-white bg-app-primary rounded-lg hover:bg-app-primary-hover transition-colors">
+        <button id="saveEditBtn" class="modal-btn modal-btn-primary">
           저장
         </button>
       </div>
@@ -585,17 +755,19 @@
   </div>
 
   <!-- 참조 문서 모달 -->
-  <div id="sourceModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 hidden">
-    <div class="bg-app-card rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden mx-4">
-      <div class="flex items-center justify-between px-4 py-3 border-b border-app-border">
-        <h3 class="font-semibold text-app-text" id="modalTitle">참조 문서</h3>
-        <button id="closeModalBtn" class="p-1 hover:bg-app-border rounded-lg transition-colors">
-          <svg class="w-5 h-5 text-app-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+  <div id="sourceModal" class="modal-backdrop fixed inset-0 flex items-center justify-center z-50 hidden">
+    <div class="modal-card w-full max-w-2xl max-h-[80vh] overflow-hidden mx-4">
+      <div class="modal-header flex items-center justify-between px-4 py-3">
+        <h3 class="font-semibold text-app-text" id="modalTitle">
+          <span class="modal-accent-dot"></span>참조 문서
+        </h3>
+        <button id="closeModalBtn" class="modal-close-btn">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
           </svg>
         </button>
       </div>
-      <div class="p-4 overflow-y-auto max-h-[60vh]">
+      <div class="modal-body p-4 overflow-y-auto max-h-[60vh]">
         <div id="modalContent" class="text-sm text-app-text whitespace-pre-wrap"></div>
       </div>
     </div>

@@ -576,101 +576,118 @@ class AgentManager extends HTMLElement {
     }
 
     showLicenseStatsModal(stats) {
-        const modalContent = `
-            <div class="modal-overlay" id="licenseStatsModal" style="display: flex;">
-                <div class="modal-content" style="max-width: 800px; width: 90%;">
-                    <div class="modal-header">
-                        <h4>📊 라이선스 통계</h4>
-                        <button class="modal-close" onclick="document.getElementById('licenseStatsModal').remove()">&times;</button>
-                    </div>
-                    
-                    <div class="modal-body">
-                        <div class="row mb-4">
-                            <div class="col-md-6">
-                                <h6>📈 라이선스 배포 현황</h6>
-                                <div class="table-responsive">
-                                    <table class="table table-sm">
-                                        <tbody>
-                                            ${Object.entries(stats.license_distribution).map(([status, count]) => `
-                                                <tr>
-                                                    <td><span class="badge badge-${this.getLicenseStatusColor(status)}">${status}</span></td>
-                                                    <td>${count}개</td>
-                                                </tr>
-                                            `).join('')}
-                                        </tbody>
-                                    </table>
-                                </div>
+        const statusColors = { active: 'text-emerald-400', expired: 'text-amber-400', revoked: 'text-red-400', none: 'text-slate-400' };
+        const statusIcons = { active: '&#9679;', expired: '&#9888;', revoked: '&#10005;', none: '&#8212;' };
+
+        const distributionCards = Object.entries(stats.license_distribution).map(([status, count]) => `
+            <div class="bg-app-bg rounded-lg p-3 border border-app-border">
+                <div class="flex items-center gap-2 mb-1">
+                    <span class="${statusColors[status] || 'text-slate-400'}">${statusIcons[status] || '&#9679;'}</span>
+                    <span class="text-xs text-app-muted uppercase tracking-wide">${status}</span>
+                </div>
+                <span class="text-2xl font-semibold text-app-text" style="font-family:'JetBrains Mono',monospace">${count}</span>
+            </div>
+        `).join('');
+
+        const expirationRows = stats.expiration_alerts && stats.expiration_alerts.length > 0 ? `
+            <div class="mt-4">
+                <h4 class="text-sm font-semibold text-app-text mb-2 flex items-center gap-2">
+                    <span style="color:var(--color-accent-teal)">&#9888;</span> 만료 예정 라이선스
+                </h4>
+                <div class="divide-y divide-app-border text-sm">
+                    ${stats.expiration_alerts.map(alert => `
+                        <div class="flex items-center justify-between py-2">
+                            <div>
+                                <span class="text-app-text font-medium">${alert.agent_name}</span>
+                                <span class="text-app-muted ml-2">${alert.agent_email}</span>
                             </div>
-                            <div class="col-md-6">
-                                <h6>📊 활동 통계</h6>
-                                <div class="table-responsive">
-                                    <table class="table table-sm">
-                                        <tbody>
-                                            <tr>
-                                                <td>최근 7일 활동</td>
-                                                <td><span class="badge badge-success">${stats.activity_stats.active_last_7_days || 0}</span></td>
-                                            </tr>
-                                            <tr>
-                                                <td>30일 이상 비활성</td>
-                                                <td><span class="badge badge-warning">${stats.activity_stats.inactive_30_days || 0}</span></td>
-                                            </tr>
-                                        </tbody>
-                                    </table>
-                                </div>
+                            <div class="flex items-center gap-3">
+                                <span class="text-app-muted text-xs">${new Date(alert.expires_at).toLocaleDateString()}</span>
+                                <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/15 text-amber-400" style="font-family:'JetBrains Mono',monospace">${alert.days_remaining}일</span>
                             </div>
                         </div>
-                        
-                        ${stats.expiration_alerts && stats.expiration_alerts.length > 0 ? `
-                            <div class="mb-4">
-                                <h6>⚠️ 만료 예정 라이선스</h6>
-                                <div class="table-responsive">
-                                    <table class="table table-sm">
-                                        <thead>
-                                            <tr>
-                                                <th>에이전트</th>
-                                                <th>이메일</th>
-                                                <th>만료일</th>
-                                                <th>남은 일수</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            ${stats.expiration_alerts.map(alert => `
-                                                <tr>
-                                                    <td>${alert.agent_name}</td>
-                                                    <td>${alert.agent_email}</td>
-                                                    <td>${new Date(alert.expires_at).toLocaleDateString()}</td>
-                                                    <td><span class="badge badge-warning">${alert.days_remaining}일</span></td>
-                                                </tr>
-                                            `).join('')}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
-                        ` : ''}
-                        
-                        ${stats.recommendations && stats.recommendations.length > 0 ? `
-                            <div class="mb-4">
-                                <h6>💡 권장사항</h6>
-                                <ul class="list-group">
-                                    ${stats.recommendations.map(rec => `
-                                        <li class="list-group-item">
-                                            <i class="fas fa-lightbulb text-warning"></i> ${rec}
-                                        </li>
-                                    `).join('')}
-                                </ul>
-                            </div>
-                        ` : ''}
+                    `).join('')}
+                </div>
+            </div>
+        ` : '';
+
+        const recommendations = stats.recommendations && stats.recommendations.length > 0 ? `
+            <div class="mt-4">
+                <h4 class="text-sm font-semibold text-app-text mb-2 flex items-center gap-2">
+                    <span style="color:var(--color-accent-teal)">&#10070;</span> 권장사항
+                </h4>
+                <ul class="space-y-1.5">
+                    ${stats.recommendations.map(rec => `
+                        <li class="flex items-start gap-2 text-sm text-app-muted">
+                            <span style="color:var(--color-accent-teal);margin-top:2px">&#8250;</span>
+                            <span>${rec}</span>
+                        </li>
+                    `).join('')}
+                </ul>
+            </div>
+        ` : '';
+
+        const modalContent = `
+            <div class="modal-backdrop fixed inset-0 flex items-center justify-center z-50 modal-entering" id="licenseStatsModal">
+                <div class="modal-card w-full max-w-2xl max-h-[85vh] overflow-hidden mx-4">
+                    <div class="modal-header flex items-center justify-between px-5 py-4">
+                        <h3 class="font-semibold text-app-text text-lg flex items-center">
+                            <span class="modal-accent-dot"></span>라이선스 통계
+                        </h3>
+                        <button class="modal-close-btn" id="closeLicenseStatsBtn">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                            </svg>
+                        </button>
                     </div>
-                    
-                    <div class="modal-actions">
-                        <button class="btn btn-secondary" onclick="document.getElementById('licenseStatsModal').remove()">닫기</button>
+                    <div class="modal-body px-5 py-4 overflow-y-auto max-h-[60vh]">
+                        <h4 class="text-sm font-semibold text-app-text mb-3">배포 현황</h4>
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                            ${distributionCards}
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-3 mt-4">
+                            <div class="bg-app-bg rounded-lg p-3 border border-app-border">
+                                <span class="text-xs text-app-muted">최근 7일 활동</span>
+                                <div class="text-2xl font-semibold text-emerald-400 mt-1" style="font-family:'JetBrains Mono',monospace">${stats.activity_stats.active_last_7_days || 0}</div>
+                            </div>
+                            <div class="bg-app-bg rounded-lg p-3 border border-app-border">
+                                <span class="text-xs text-app-muted">30일+ 비활성</span>
+                                <div class="text-2xl font-semibold text-amber-400 mt-1" style="font-family:'JetBrains Mono',monospace">${stats.activity_stats.inactive_30_days || 0}</div>
+                            </div>
+                        </div>
+
+                        ${expirationRows}
+                        ${recommendations}
+                    </div>
+                    <div class="modal-footer flex justify-end px-5 py-3">
+                        <button class="modal-btn modal-btn-secondary" id="closeLicenseStatsBtn2">닫기</button>
                     </div>
                 </div>
             </div>
         `;
-        
-        // 모달을 body에 추가
+
         document.body.insertAdjacentHTML('beforeend', modalContent);
+
+        const modal = document.getElementById('licenseStatsModal');
+        const closeLicenseStats = () => {
+            modal.classList.remove('modal-entering');
+            modal.classList.add('modal-exiting');
+            let done = false;
+            const onEnd = () => {
+                if (done) return;
+                done = true;
+                modal.remove();
+            };
+            modal.addEventListener('animationend', onEnd);
+            setTimeout(onEnd, 300);
+        };
+
+        document.getElementById('closeLicenseStatsBtn').addEventListener('click', closeLicenseStats);
+        document.getElementById('closeLicenseStatsBtn2').addEventListener('click', closeLicenseStats);
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) closeLicenseStats();
+        });
     }
     
     formatDate(dateString) {
