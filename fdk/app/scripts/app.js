@@ -1720,11 +1720,8 @@ async function handleProposeFieldsOnly() {
   setLoading(true);
   updateStatus('loading', '필드 제안 중...');
 
-  if (elements.analysisPlaceholder) {
-    elements.analysisPlaceholder.classList.add('hidden');
-  }
-
   showTicker('analyzing');
+  resetAnalysisStreamView();
 
   try {
     const payload = {
@@ -1740,6 +1737,7 @@ async function handleProposeFieldsOnly() {
       const eventType = event.type || event;
       const eventData = event.data || {};
       showTicker(eventType, eventData);
+      renderAnalysisStreamEvent(event);
       console.log('[FieldProposals] Progress:', eventType, eventData);
     });
 
@@ -1756,7 +1754,6 @@ async function handleProposeFieldsOnly() {
     };
 
     setAnalysisResult(merged);
-    renderAnalysisResult(merged);
 
   } catch (error) {
     console.error('필드 제안 실패:', error);
@@ -2141,14 +2138,9 @@ async function handleAnalyzeTicket() {
   
   setLoading(true);
   updateStatus('loading', '분석 중...');
-  
-  // 플레이스홀더 숨기기
-  if (elements.analysisPlaceholder) {
-    elements.analysisPlaceholder.classList.add('hidden');
-  }
-  
   // 티커 표시
   showTicker('router_decision');
+  resetAnalysisStreamView();
   
   try {
     // NOTE: 원인/해결 분석은 ticket_fields(거대 스키마)를 보내지 않아도 된다.
@@ -2166,6 +2158,7 @@ async function handleAnalyzeTicket() {
       const eventData = event.data || {};
       
       showTicker(eventType, eventData);
+      renderAnalysisStreamEvent(event);
       console.log('[Analyze] Progress:', eventType, eventData);
 
       // progressive complete가 오면 result로 처리하되,
@@ -2180,16 +2173,7 @@ async function handleAnalyzeTicket() {
     console.log('[Analyze] Final Result:', finalResult);
 
     if (finalResult) {
-      const analysis = finalResult.analysis || null;
-      const proposal = finalResult.proposal || null;
-
-      const merged = {
-        ...(analysis || {}),
-        ...(proposal || {})
-      };
-
-      setAnalysisResult(merged);
-      renderAnalysisResult(merged);
+      setAnalysisResult(finalResult);
     } else {
       renderAnalysisError('분석 결과를 받을 수 없습니다.');
     }
@@ -2211,14 +2195,69 @@ async function handleAnalyzeTicket() {
 // [NEW] 스트리밍 렌더링 — 여기에 새 구현 추가
 // =============================================================================
 
-// TODO: renderAnalysisResult(proposal) — 스트리밍 방식으로 재구현
+function resetAnalysisStreamView() {
+  if (!elements.analysisContent) return;
+  elements.analysisContent.innerHTML = `
+    <div id="analysisStreamRoot" class="space-y-3">
+      <div class="rounded-xl border border-app-border bg-app-card p-4">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <div class="text-xs font-medium uppercase tracking-wide text-app-muted">Streaming Response</div>
+            <div class="mt-1 text-sm text-app-text">SSE 이벤트를 수신하는 즉시 raw payload를 그대로 표시합니다.</div>
+          </div>
+          <div id="analysisStreamCount" class="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">0 events</div>
+        </div>
+      </div>
+      <div id="analysisStreamEvents" class="space-y-3"></div>
+    </div>
+  `;
+}
+
+function renderAnalysisStreamEvent(event) {
+  if (!elements.analysisContent || !event || typeof event !== 'object') return;
+
+  let streamRoot = document.getElementById('analysisStreamRoot');
+  let eventList = document.getElementById('analysisStreamEvents');
+  let eventCount = document.getElementById('analysisStreamCount');
+
+  if (!streamRoot || !eventList || !eventCount) {
+    resetAnalysisStreamView();
+    streamRoot = document.getElementById('analysisStreamRoot');
+    eventList = document.getElementById('analysisStreamEvents');
+    eventCount = document.getElementById('analysisStreamCount');
+  }
+
+  if (!eventList || !eventCount) return;
+
+  const nextCount = eventList.childElementCount + 1;
+  eventCount.textContent = `${nextCount} event${nextCount > 1 ? 's' : ''}`;
+
+  const eventType = escapeHtml(event.type || 'unknown');
+  const rawJson = escapeHtml(JSON.stringify(event, null, 2));
+  const card = document.createElement('div');
+  card.className = 'rounded-xl border border-app-border bg-app-card p-4 shadow-sm';
+  card.innerHTML = `
+    <div class="mb-2 flex items-center justify-between gap-3">
+      <div class="text-sm font-semibold text-app-text">${eventType}</div>
+      <div class="text-xs text-app-muted">#${nextCount}</div>
+    </div>
+    <pre class="overflow-x-auto rounded-lg bg-app-bg p-3 text-xs leading-6 text-app-text whitespace-pre-wrap break-words">${rawJson}</pre>
+  `;
+  eventList.appendChild(card);
+
+  if (elements.analysisContainer) {
+    elements.analysisContainer.scrollTop = elements.analysisContainer.scrollHeight;
+  }
+}
+
 function renderAnalysisResult(proposal) {
   console.log('[Render] renderAnalysisResult called (stub)', proposal);
   if (!elements.analysisContent) return;
+  const rawJson = escapeHtml(JSON.stringify(proposal, null, 2));
   elements.analysisContent.innerHTML = `
-    <div class="flex flex-col items-center justify-center py-12 text-center text-app-muted">
-      <p class="text-sm">렌더링 리팩터 진행 중...</p>
-      <p class="text-xs mt-2">데이터 수신 완료 (콘솔 확인)</p>
+    <div class="py-4">
+      <div class="mb-3 text-xs font-medium uppercase tracking-wide text-app-muted">Raw Analysis Response</div>
+      <pre class="overflow-x-auto rounded-xl border border-app-border bg-app-surface-secondary p-4 text-xs leading-6 text-app-text whitespace-pre-wrap break-words">${rawJson}</pre>
     </div>
   `;
 }
